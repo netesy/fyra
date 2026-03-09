@@ -1,0 +1,22 @@
+function $fibonacci(%n : w) : w {
+@start
+    %t0 = cmp le %n, 1 : w
+    br %t0, @base_case, @recursive_case : w
+
+@base_case
+    ret %n : w
+
+@recursive_case
+    %t1 = sub %n, 1 : w
+    %t2 = call $fibonacci(%t1) : w
+    %t3 = sub %n, 2 : w
+    %t4 = call $fibonacci(%t3) : w
+    %t5 = add %t2, %t4 : w
+    ret %t5 : w
+}
+
+export function $main() : w {
+@start
+    %t0 = call $fibonacci(w 10) : w
+    ret %t0 : w
+}

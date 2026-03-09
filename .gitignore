@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+test.wasm
+*.out
+fyra_compiler
+/test_*
+*.exe
+
+# IDE files
+.idea/
+.vscode/
+
+# Other
+*~
+*.swp
+*.swo
+.DS_Store

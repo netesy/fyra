@@ -1,0 +1,86 @@
+# This file contains a comprehensive set of Fyra syntax features for testing the parser.
+
+# Data section
+data $my_string = { b "hello world", b 0 }
+data $my_array = { w 1, w 2, w 3, w 4 }
+
+# Struct definition
+type :my_struct = { w, l, s, d }
+
+# Union definition
+type :my_union = { { w, l }, { s, d } }
+
+# Function with various parameter types
+function $test_params(%a : w, %b : l, %c : s, %d : d) : w {
+@start
+    ret 0 : w
+}
+
+# Function with variadic arguments
+function $variadic_func(...) : w {
+@start
+    %ap = alloc 16 : l
+    vastart %ap
+    %arg1 = vaarg %ap : w
+    %arg2 = vaarg %ap : l
+    ret %arg1 : w
+}
+
+# Main function with all kinds of instructions
+export function $main() : w {
+@start
+    # Arithmetic
+    %add = add 1, 2 : w
+    %sub = sub 10, 5 : w
+    %mul = mul 3, 4 : w
+    %div = div 100, 10 : w
+    %udiv = udiv 100, 10 : w
+    %rem = rem 10, 3 : w
+    %urem = urem 10, 3 : w
+    %neg = neg 5 : w
+
+    # Floating point arithmetic
+    %fadd = fadd s_1.0, s_2.0 : s
+    %fsub = fsub s_10.0, s_5.0 : s
+    %fmul = fmul d_3.0, d_4.0 : d
+    %fdiv = fdiv d_100.0, d_10.0 : d
+
+    # Bitwise
+    %and = and 0b1100, 0b1010 : w
+    %or = or 0b1100, 0b1010 : w
+    %xor = xor 0b1100, 0b1010 : w
+    %shl = shl 1, 2 : w
+    %shr = shr 8, 2 : w
+    %sar = sar -8, 2 : w
+
+    # Comparisons
+    %eq = eq 1, 1 : w
+    %ne = ne 1, 2 : w
+    %slt = slt -1, 1 : w
+    %sle = sle 1, 1 : w
+    %sgt = sgt 2, 1 : w
+    %sge = sge 2, 2 : w
+    %ult = ult 1, 2 : w
+    %ule = ule 2, 2 : w
+    %ugt = ugt 2, 1 : w
+    %uge = uge 2, 2 : w
+    %lt = lt s_1.0, s_2.0 : s
+    %le = le s_2.0, s_2.0 : s
+    %gt = gt d_2.0, d_1.0 : d
+    %ge = ge d_2.0, d_2.0 : d
+    %co = co s_1.0, s_2.0 : s
+    %cuo = cuo s_1.0, s_2.0 : s
+
+    # Memory
+    %p = alloc 16 : l
+    store 123, %p : w
+    %val = load %p : w
+    blit $my_string, %p, 12
+
+    # Control flow
+    jmp @end
+@end
+    %phi = phi @start %val, @start %add : w
+    hlt
+    ret %val : w
+}

@@ -1,0 +1,13 @@
+export function $main() : w {
+@start
+    %i = copy 0 : w
+    jmp @loop_cond
+@loop_cond
+    %cond = slt %i, 10 : w
+    jnz %cond, @loop_body, @loop_end
+@loop_body
+    %i = add %i, 1 : w
+    jmp @loop_cond
+@loop_end
+    ret %i : w
+}

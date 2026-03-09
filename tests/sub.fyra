@@ -1,0 +1,5 @@
+export function $main() : w {
+@start
+    %t0 = sub 32, 10 : w
+    ret %t0 : w
+}

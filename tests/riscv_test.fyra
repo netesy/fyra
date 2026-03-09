@@ -1,0 +1,18 @@
+function $add_many(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : w, %h : w, %i : w) : w {
+@entry
+    %t0 = add %a, %b : w
+    %t1 = add %t0, %c : w
+    %t2 = add %t1, %d : w
+    %t3 = add %t2, %e : w
+    %t4 = add %t3, %f : w
+    %t5 = add %t4, %g : w
+    %t6 = add %t5, %h : w
+    %t7 = add %t6, %i : w
+    ret %t7 : w
+}
+
+export function $main() : w {
+@entry
+    %t0 = call $add_many(w 1, w 2, w 3, w 4, w 5, w 6, w 7, w 8, w 9) : w
+    ret %t0 : w
+}

@@ -1,0 +1,90 @@
+function $fibonacci_optimized(%n : w) : w {
+@entry
+    %zero = copy 0 : w
+    %one = copy 1 : w
+    
+    %is_small = sle %n, %one : w
+    jnz %is_small, @base_case, @iterative
+
+@base_case
+    ret %n : w
+
+@iterative
+    %a = copy %zero : w
+    %b = copy %one : w
+    %i = copy 2 : w
+    jmp @loop
+
+@loop
+    %done = sgt %i, %n : w
+    jnz %done, @exit, @compute
+
+@compute
+    %temp = add %a, %b : w
+    %a = copy %b : w
+    %b = copy %temp : w
+    %i = add %i, 1 : w
+    jmp @loop
+
+@exit
+    ret %b : w
+}
+
+function $sum_fibonacci_series(%count : w) : w {
+@start
+    %sum = copy 0 : w
+    %i = copy 0 : w
+    jmp @sum_loop
+
+@sum_loop
+    %continue = slt %i, %count : w
+    jnz %continue, @add_fib, @return_sum
+
+@add_fib
+    %fib_i = call $fibonacci_optimized(%i) : w
+    %sum = add %sum, %fib_i : w
+    %i = add %i, 1 : w
+    jmp @sum_loop
+
+@return_sum
+    ret %sum : w
+}
+
+function $factorial(%n : w) : w {
+@start
+    %zero = copy 0 : w
+    %one = copy 1 : w
+    
+    %is_zero = eq %n, %zero : w
+    jnz %is_zero, @return_one, @calc_factorial
+
+@return_one
+    ret %one : w
+
+@calc_factorial
+    %result = copy %one : w
+    %counter = copy %one : w
+    jmp @fact_loop
+
+@fact_loop
+    %done = sgt %counter, %n : w
+    jnz %done, @fact_done, @multiply
+
+@multiply
+    %result = mul %result, %counter : w
+    %counter = add %counter, %one : w
+    jmp @fact_loop
+
+@fact_done
+    ret %result : w
+}
+
+export function $main() : w {
+@start
+    %fib_10 = call $fibonacci_optimized(w 10) : w
+    %sum_first_10 = call $sum_fibonacci_series(w 10) : w
+    %fact_5 = call $factorial(w 5) : w
+    %combined = add %fib_10, %sum_first_10 : w
+    %final = add %combined, %fact_5 : w
+    ret %final : w
+}

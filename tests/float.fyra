@@ -1,0 +1,8 @@
+export function $main() : w {
+@start
+    %t0 = fadd s_1.0, s_2.0 : s
+    %t1 = fsub s_3.0, s_1.5 : s
+    %t2 = fmul s_2.0, s_3.0 : s
+    %t3 = fdiv s_10.0, s_2.0 : s
+    ret 0 : w
+}

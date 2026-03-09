@@ -1,0 +1,26 @@
+function $sum8(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : w, %h : w) : w {
+@entry
+    %t0 = add %a, %b : w
+    %t1 = add %t0, %c : w
+    %t2 = add %t1, %d : w
+    %t3 = add %t2, %e : w
+    %t4 = add %t3, %f : w
+    %t5 = add %t4, %g : w
+    %t6 = add %t5, %h : w
+    ret %t6 : w
+}
+
+export function $main() : w {
+@entry
+    %t0 = call $sum8(w 1, w 2, w 3, w 4, w 5, w 6, w 7, w 8) : w
+    ret %t0 : w
+}
+
+function $mixed_args(%a : w, %b : d, %c : w, %d : d, %e : w, %f : d, %g : w, %h : d, %i : w, %j : d) : w {
+@entry
+    %t0 = add %a, %c : w
+    %t1 = add %t0, %e : w
+    %t2 = add %t1, %g : w
+    %t3 = add %t2, %i : w
+    ret %t3 : w
+}

@@ -1,0 +1,89 @@
+function $fibonacci_tail_recursive(%n : w, %acc1 : w, %acc2 : w) : w {
+@start
+    %zero = copy 0 : w
+    %one = copy 1 : w
+    
+    %is_zero = eq %n, %zero : w
+    jnz %is_zero, @return_acc1, @continue
+
+@return_acc1
+    ret %acc1 : w
+
+@continue
+    %is_one = eq %n, %one : w
+    jnz %is_one, @return_acc2, @recurse
+
+@return_acc2
+    ret %acc2 : w
+
+@recurse
+    %n_minus_1 = sub %n, %one : w
+    %new_acc = add %acc1, %acc2 : w
+    %result = call $fibonacci_tail_recursive(%n_minus_1, %acc2, %new_acc) : w
+    ret %result : w
+}
+
+function $fibonacci_wrapper(%n : w) : w {
+@start
+    %zero = copy 0 : w
+    %one = copy 1 : w
+    %result = call $fibonacci_tail_recursive(%n, %zero, %one) : w
+    ret %result : w
+}
+
+function $power_of_two(%exp : w) : w {
+@start
+    %zero = copy 0 : w
+    %one = copy 1 : w
+    %two = copy 2 : w
+    
+    %is_zero = eq %exp, %zero : w
+    jnz %is_zero, @return_one, @calculate
+
+@return_one
+    ret %one : w
+
+@calculate
+    %result = copy %one : w
+    %counter = copy %zero : w
+    jmp @power_loop
+
+@power_loop
+    %done = sge %counter, %exp : w
+    jnz %done, @power_done, @multiply
+
+@multiply
+    %result = mul %result, %two : w
+    %counter = add %counter, %one : w
+    jmp @power_loop
+
+@power_done
+    ret %result : w
+}
+
+function $gcd(%a : w, %b : w) : w {
+@start
+    %zero = copy 0 : w
+    
+    %b_is_zero = eq %b, %zero : w
+    jnz %b_is_zero, @return_a, @euclidean
+
+@return_a
+    ret %a : w
+
+@euclidean
+    %remainder = rem %a, %b : w
+    %result = call $gcd(%b, %remainder) : w
+    ret %result : w
+}
+
+export function $main() : w {
+@start
+    %fib_10 = call $fibonacci_wrapper(w 10) : w
+    %power_4 = call $power_of_two(w 4) : w
+    %gcd_result = call $gcd(%fib_10, %power_4) : w
+    
+    %temp1 = add %fib_10, %power_4 : w
+    %final = add %temp1, %gcd_result : w
+    ret %final : w
+}

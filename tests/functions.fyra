@@ -1,0 +1,11 @@
+function $my_add(%a : w, %b : w) : w {
+@start
+    %t0 = add %a, %b : w
+    ret %t0 : w
+}
+
+export function $main() : w {
+@start
+    %t0 = call $my_add(w 10, w 20) : w
+    ret %t0 : w
+}

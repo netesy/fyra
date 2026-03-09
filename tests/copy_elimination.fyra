@@ -1,0 +1,7 @@
+export function $main() : w {
+@start
+    %a = copy 10 : w
+    %b = copy %a : w
+    %c = add %b, 5 : w
+    ret %c : w
+}

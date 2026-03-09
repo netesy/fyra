@@ -1,0 +1,15 @@
+export function $main() : w {
+@start
+    %a = copy 10 : w
+    %b = copy 20 : w
+    jnz 1, @then, @else
+@then
+    %c = add %a, %b : w
+    jmp @end
+@else
+    %d = mul %a, %b : w
+    jmp @end
+@end
+    %e = phi @then %c, @else %d : w
+    ret %e : w
+}

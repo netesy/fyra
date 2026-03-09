@@ -1,0 +1,11 @@
+function $sum2(%a : w, %b : w) : w {
+@entry
+    %t0 = add %a, %b : w
+    ret %t0 : w
+}
+
+export function $main() : w {
+@entry
+    %t0 = call $sum2(w 1, w 2) : w
+    ret %t0 : w
+}

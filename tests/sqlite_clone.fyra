@@ -1,0 +1,89 @@
+# Simple SQLite-like Clone in Fyra IR
+# Key-Value Store with Put and Get operations
+
+# Data structure for a node:
+#   [0-7]   : next pointer (long)
+#   [8-11]  : key (word)
+#   [12-15] : value (word)
+#   [16-23] : reserved/padding
+
+# Global head of the linked list
+data $head = { l 0 }
+
+function $put(%key : w, %val : w) : w {
+@p_start
+    # Allocate new node
+    %node = alloc 24 : l
+
+    # Set key and value
+    %val_ptr = add %node, 12 : l
+    store %val, %val_ptr : w
+
+    %key_ptr = add %node, 8 : l
+    store %key, %key_ptr : w
+
+    # Load current head
+    %current_head = load $head : l
+
+    # Set next pointer
+    store %current_head, %node : l
+
+    # Update head
+    store %node, $head : l
+
+    ret 0 : w
+}
+
+function $get(%key : w) : w {
+@g_start
+    %curr_start = load $head : l
+    jmp @g_loop_entry
+
+@g_loop_entry
+    %curr = phi @g_start %curr_start, @g_move_next %curr_next : l
+    %is_null = eq %curr, 0 : l
+    jnz %is_null, @g_not_found, @g_check_key
+
+@g_check_key
+    # Load key from node
+    %key_ptr_c = add %curr, 8 : l
+    %node_key = load %key_ptr_c : w
+
+    %match = eq %node_key, %key : w
+    jnz %match, @g_found, @g_move_next
+
+@g_move_next
+    # Move to next node
+    %curr_next = load %curr : l
+    jmp @g_loop_entry
+
+@g_found
+    # Load and return value
+    %val_ptr_f = add %curr, 12 : l
+    %val = load %val_ptr_f : w
+    ret %val : w
+
+@g_not_found
+    ret -1 : w
+}
+
+export function $main() : w {
+@m_start
+    # Put (1, 10), (2, 20), (3, 30)
+    %t0 = call $put(w 1, w 10) : w
+    %t1 = call $put(w 2, w 20) : w
+    %t2 = call $put(w 3, w 30) : w
+
+    # Get values
+    %v1 = call $get(w 1) : w   # Expect 10
+    %v2 = call $get(w 2) : w   # Expect 20
+    %v3 = call $get(w 3) : w   # Expect 30
+    %v4 = call $get(w 4) : w   # Expect -1
+
+    # sum = 10 + 20 + 30 + (-1) = 59
+    %s1 = add %v1, %v2 : w
+    %s2 = add %s1, %v3 : w
+    %final = add %s2, %v4 : w
+
+    ret %final : w
+}

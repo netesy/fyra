@@ -1,0 +1,70 @@
+function $fibonacci_with_jumps(%n : w) : w {
+@entry
+    %zero = copy 0 : w
+    %one = copy 1 : w
+    %two = copy 2 : w
+    
+    %is_zero = eq %n, %zero : w
+    jnz %is_zero, @return_zero, @check_one
+
+@return_zero
+    ret %zero : w
+
+@check_one
+    %is_one = eq %n, %one : w
+    jnz %is_one, @return_one, @calculate
+
+@return_one
+    ret %one : w
+
+@calculate
+    %prev = copy %zero : w
+    %curr = copy %one : w
+    %counter = copy %two : w
+    jmp @loop_start
+
+@loop_start
+    %continue = sle %counter, %n : w
+    jnz %continue, @loop_body, @done
+
+@loop_body
+    %next = add %prev, %curr : w
+    %prev = copy %curr : w
+    %curr = copy %next : w
+    %counter = add %counter, %one : w
+    jmp @loop_start
+
+@done
+    ret %curr : w
+}
+
+function $test_conditions(%x : w) : w {
+@start
+    %five = copy 5 : w
+    %ten = copy 10 : w
+    
+    %lt_five = slt %x, %five : w
+    jnz %lt_five, @small_case, @check_ten
+
+@small_case
+    %doubled = mul %x, 2 : w
+    ret %doubled : w
+
+@check_ten
+    %eq_ten = eq %x, %ten : w
+    jnz %eq_ten, @ten_case, @large_case
+
+@ten_case
+    ret %ten : w
+
+@large_case
+    %halved = div %x, 2 : w
+    ret %halved : w
+}
+
+export function $main() : w {
+@start
+    %fib_10 = call $fibonacci_with_jumps(w 10) : w
+    %test_result = call $test_conditions(%fib_10) : w
+    ret %test_result : w
+}

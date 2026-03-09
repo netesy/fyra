@@ -1,0 +1,60 @@
+function $leaf_func(%a : w, %b : w) : w {
+@start
+    %sum = add %a, %b : w
+    ret %sum : w
+}
+
+function $fibonacci(%n : w) : w {
+@start
+    %t0 = sle %n, 1 : w
+    jnz %t0, @base_case, @recursive_case
+
+@base_case
+    ret %n : w
+
+@recursive_case
+    %t1 = sub %n, 1 : w
+    %t2 = call $fibonacci(%t1) : w
+    %t3 = sub %n, 2 : w
+    %t4 = call $fibonacci(%t3) : w
+    %t5 = add %t2, %t4 : w
+    ret %t5 : w
+}
+
+function $fibonacci_iterative(%n : w) : w {
+@start
+    %t0 = sle %n, 1 : w
+    jnz %t0, @return_n, @loop_init
+
+@return_n
+    ret %n : w
+
+@loop_init
+    %a = copy 0 : w
+    %b = copy 1 : w
+    %i = copy 2 : w
+    jmp @loop_check
+
+@loop_check
+    %cond = sle %i, %n : w
+    jnz %cond, @loop_body, @loop_end
+
+@loop_body
+    %temp = add %a, %b : w
+    %a = copy %b : w
+    %b = copy %temp : w
+    %i = add %i, 1 : w
+    jmp @loop_check
+
+@loop_end
+    ret %b : w
+}
+
+export function $main() : w {
+@start
+    %leaf = call $leaf_func(w 10, w 20) : w
+    %result = call $fibonacci(w 10) : w
+    %iter_result = call $fibonacci_iterative(w 10) : w
+    %sum = add %result, %iter_result : w
+    ret %sum : w
+}

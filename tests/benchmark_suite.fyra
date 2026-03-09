@@ -1,0 +1,150 @@
+# Fyra Benchmark Suite
+
+# 1. Arithmetic (32-bit integer)
+# (100 + 50 - 20) * 2 / 10 = 13
+function $test_arith_w() : w {
+@start
+    %t1 = add 100, 50 : w
+    %t2 = sub %t1, 20 : w
+    %t3 = mul %t2, 2 : w
+    %res = div %t3, 10 : w
+    ret %res : w
+}
+
+# 2. Arithmetic (32-bit float)
+# (10.0 + 5.0 - 2.0) * 2.0 / 4.0 = 6.5 -> cast to w = 6
+function $test_arith_float() : w {
+@start
+    %f1 = fadd s_10.0, s_5.0 : s
+    %f2 = fsub %f1, s_2.0 : s
+    %f3 = fmul %f2, s_2.0 : s
+    %f4 = fdiv %f3, s_4.0 : s
+    %res = stosi %f4 : w
+    ret %res : w
+}
+
+# 3. Bitwise (64-bit integer)
+# (0xA0A0 & 0xF0F0) | 0x0101 ^ 0x00FF
+# 0xA0A0 & 0xF0F0 = 0xA0A0
+# 0xA0A0 | 0x0101 = 0xA1A1
+# 0xA1A1 ^ 0x00FF = 0xA15E (41310)
+function $test_bitwise() : l {
+@start
+    %t1 = and 41120, 61680 : l
+    %t2 = or %t1, 257 : l
+    %res = xor %t2, 255 : l
+    ret %res : l
+}
+
+# 4. Comparison (32-bit integer)
+# (10 == 10) + (10 != 5) + (5 < 10) + (10 > 5) = 4
+function $test_comp_w() : w {
+@start
+    %c1 = eq 10, 10 : w
+    %c2 = ne 10, 5 : w
+    %c3 = slt 5, 10 : w
+    %c4 = sgt 10, 5 : w
+    %s1 = add %c1, %c2 : w
+    %s2 = add %s1, %c3 : w
+    %res = add %s2, %c4 : w
+    ret %res : w
+}
+
+# 5. Memory Loads/Stores
+function $test_mem() : w {
+@start
+    %p = alloc 4 : l
+    store 42, %p : w
+    %res = load %p : w
+    ret %res : w
+}
+
+# 6. Cast Torture
+# converts w to d and back to l to check sign-extension and precision
+# Using a negative number to test sign-extension
+function $cast_torture() : l {
+@start
+    %w = copy -12345678 : w
+    %d = swtof %w : d
+    %w2 = dtosi %d : w
+    %res = extsw %w2 : l
+    ret %res : l
+}
+
+# 7. Type Casting
+# extsb -1 : w -> -1
+# extsh 0x7FFF : w -> 32767
+# sum = -1 + 32767 = 32766
+function $test_conv() : w {
+@start
+    %b = extsb 255 : w
+    %h = extsh 32767 : w
+    %res = add %b, %h : w
+    ret %res : w
+}
+
+# 8. The Phi-Maze
+# Diamond inside While
+# while (i < 10) { if (i % 2 == 0) x += 1 else x += 2; i++ }
+# returns 15
+function $phi_maze() : w {
+@entry
+    jmp @loop
+@loop
+    %i = phi @entry 0, @merge %i_next : w
+    %x = phi @entry 0, @merge %x_next : w
+    %cond = slt %i, 10 : w
+    jnz %cond, @diamond, @exit
+@diamond
+    %rem = rem %i, 2 : w
+    %is_even = eq %rem, 0 : w
+    jnz %is_even, @then, @else
+@then
+    %x_then = add %x, 1 : w
+    jmp @merge
+@else
+    %x_else = add %x, 2 : w
+    jmp @merge
+@merge
+    %x_next = phi @then %x_then, @else %x_else : w
+    %i_next = add %i, 1 : w
+    jmp @loop
+@exit
+    ret %x : w
+}
+
+# 9. The Infinite-ish Loop
+# sum of (i << 1) for i from 0 to 999
+# sum = 2 * (999 * 1000 / 2) = 999000
+function $loop_1000() : l {
+@entry
+    jmp @loop
+@loop
+    %i = phi @entry 0, @body %i_next : l
+    %sum = phi @entry 0, @body %sum_next : l
+    %cond = slt %i, 1000 : l
+    jnz %cond, @body, @exit
+@body
+    %val = shl %i, 1 : l
+    %sum_next = add %sum, %val : l
+    %i_next = add %i, 1 : l
+    jmp @loop
+@exit
+    ret %sum : l
+}
+
+# 10. Floating point comparisons
+# (1.0 < 2.0) + (2.0 <= 2.0) + (3.0 > 2.0) + (2.0 >= 2.0) + (1.0 co 2.0) = 5
+function $test_fp_comp() : w {
+@start
+    %c1 = lt s_1.0, s_2.0 : s
+    %c2 = le s_2.0, s_2.0 : s
+    %c3 = gt s_3.0, s_2.0 : s
+    %c4 = ge s_2.0, s_2.0 : s
+    %c5 = co s_1.0, s_2.0 : s
+    %s1 = add %c1, %c2 : w
+    %s2 = add %s1, %c3 : w
+    %s3 = add %s2, %c4 : w
+    %res = add %s3, %c5 : w
+    ret %res : w
+}
