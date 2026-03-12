@@ -27,3 +27,5 @@ For production-readiness checks with multiple toy-language programs, run:
 cmake --build build --target test_phpish_frontend
 ./build/tests/test_phpish_frontend
 ```
+
+The `test_phpish_frontend` toy frontend now exercises complex arithmetic, variables, functions, `if/elif/else`, `while`, and `for` loops end-to-end through Fyra IR + in-memory execution.
