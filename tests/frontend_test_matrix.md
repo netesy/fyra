@@ -16,6 +16,10 @@ Boolean literals (`true`/`false`) | Parse as canonical truthy/falsy constants (`
 Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) | Performs read-modify-write update on scalar variable | `x = 10; x += 5; x *= 2; return x;` => `30`
 Increment/decrement (`++`, `--`) | Mutates scalar variable by one | `i = 4; i++; i--; return i;` => `4`
 Mutual recursion | Two functions calling each other produce expected result | `is_even`/`is_odd` recursion pair
+Bitwise and shift ops (`&`, `|`, `^`, `<<`, `>>`) | Preserves integer bit semantics and precedence | `x=6&3; y=1<<4; ...`
+Do-while loop | Executes body at least once and checks condition after body | `do { i++; } while i < 5;`
+Function arity diagnostics | Reject mismatched call arity at frontend/lowering stage | `fn f(a,b)...; f(1);`
+Constant array bounds diagnostics | Reject compile-time constant out-of-bounds array indices | `a=[1,2,3]; return a[5];`
 Functions + variables + arithmetic | Standard expression lowering works across calls | `fn calc(a,b){ ... } fn main(){ return calc(6,5); }`
 If / elif / else | Correct branch selected | `if n<3 ... elif n<4 ... else ...`
 While loop | Repeated execution while condition true | `while i <= 5 { ... }`

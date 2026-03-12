@@ -29,10 +29,11 @@ enum class TokKind {
     Plus, Minus, Star, Slash, Percent,
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
     PlusPlus, MinusMinus,
+    Amp, Pipe, Caret, Shl, Shr,
     Assign, Eq, Ne, Lt, Le, Gt, Ge,
     AndAnd, OrOr, Bang,
     KwFn, KwReturn, KwIf, KwElif, KwElse, KwWhile, KwFor, KwBreak, KwContinue,
-    KwTrue, KwFalse
+    KwTrue, KwFalse, KwDo
 };
 
 struct Token { TokKind kind; std::string text; };
@@ -61,6 +62,7 @@ public:
             if (t == "continue") return {TokKind::KwContinue, t};
             if (t == "true") return {TokKind::KwTrue, t};
             if (t == "false") return {TokKind::KwFalse, t};
+            if (t == "do") return {TokKind::KwDo, t};
             return {TokKind::Ident, t};
         }
         if (std::isdigit(static_cast<unsigned char>(c))) {
@@ -83,6 +85,8 @@ public:
         if (c == '>' && i + 1 < s.size() && s[i + 1] == '=') return two('>', '=', TokKind::Ge);
         if (c == '&' && i + 1 < s.size() && s[i + 1] == '&') return two('&', '&', TokKind::AndAnd);
         if (c == '|' && i + 1 < s.size() && s[i + 1] == '|') return two('|', '|', TokKind::OrOr);
+        if (c == '<' && i + 1 < s.size() && s[i + 1] == '<') return two('<', '<', TokKind::Shl);
+        if (c == '>' && i + 1 < s.size() && s[i + 1] == '>') return two('>', '>', TokKind::Shr);
         if (c == '+' && i + 1 < s.size() && s[i + 1] == '=') return two('+', '=', TokKind::PlusEq);
         if (c == '-' && i + 1 < s.size() && s[i + 1] == '=') return two('-', '=', TokKind::MinusEq);
         if (c == '*' && i + 1 < s.size() && s[i + 1] == '=') return two('*', '=', TokKind::StarEq);
@@ -106,6 +110,9 @@ public:
             case '*': return {TokKind::Star, "*"};
             case '/': return {TokKind::Slash, "/"};
             case '%': return {TokKind::Percent, "%"};
+            case '&': return {TokKind::Amp, "&"};
+            case '|': return {TokKind::Pipe, "|"};
+            case '^': return {TokKind::Caret, "^"};
             case '=': return {TokKind::Assign, "="};
             case '!': return {TokKind::Bang, "!"};
             case '<': return {TokKind::Lt, "<"};
@@ -138,7 +145,7 @@ struct Expr {
 };
 
 struct Stmt {
-    enum Kind { Assign, CompoundAssign, IncDec, Return, If, While, For, ExprStmt, Break, Continue } kind;
+    enum Kind { Assign, CompoundAssign, IncDec, Return, If, While, DoWhile, For, ExprStmt, Break, Continue } kind;
 
     std::string var;
     std::string op; // for compound assign/inc-dec
@@ -276,6 +283,16 @@ private:
             s->body = parseBlock();
             return s;
         }
+        if (tok.kind == TokKind::KwDo) {
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::DoWhile;
+            advance();
+            s->body = parseBlock();
+            expect(TokKind::KwWhile, "Expected while after do-block");
+            s->loopCond = parseExpr();
+            expect(TokKind::Semi, "Expected ; after do-while");
+            return s;
+        }
         if (tok.kind == TokKind::KwFor) {
             auto s = std::make_unique<Stmt>();
             s->kind = Stmt::For;
@@ -385,9 +402,73 @@ private:
     }
 
     std::unique_ptr<Expr> parseCmp() {
-        auto l = parseAddSub();
+        auto l = parseBitOr();
         while (tok.kind == TokKind::Eq || tok.kind == TokKind::Ne || tok.kind == TokKind::Lt ||
                tok.kind == TokKind::Le || tok.kind == TokKind::Gt || tok.kind == TokKind::Ge) {
+            std::string op = tok.text;
+            advance();
+            auto r = parseAddSub();
+            auto n = std::make_unique<Expr>();
+            n->kind = Expr::Bin;
+            n->op = op;
+            n->lhs = std::move(l);
+            n->rhs = std::move(r);
+            l = std::move(n);
+        }
+        return l;
+    }
+
+    std::unique_ptr<Expr> parseBitOr() {
+        auto l = parseBitXor();
+        while (tok.kind == TokKind::Pipe) {
+            std::string op = tok.text;
+            advance();
+            auto r = parseBitXor();
+            auto n = std::make_unique<Expr>();
+            n->kind = Expr::Bin;
+            n->op = op;
+            n->lhs = std::move(l);
+            n->rhs = std::move(r);
+            l = std::move(n);
+        }
+        return l;
+    }
+
+    std::unique_ptr<Expr> parseBitXor() {
+        auto l = parseBitAnd();
+        while (tok.kind == TokKind::Caret) {
+            std::string op = tok.text;
+            advance();
+            auto r = parseBitAnd();
+            auto n = std::make_unique<Expr>();
+            n->kind = Expr::Bin;
+            n->op = op;
+            n->lhs = std::move(l);
+            n->rhs = std::move(r);
+            l = std::move(n);
+        }
+        return l;
+    }
+
+    std::unique_ptr<Expr> parseBitAnd() {
+        auto l = parseShift();
+        while (tok.kind == TokKind::Amp) {
+            std::string op = tok.text;
+            advance();
+            auto r = parseShift();
+            auto n = std::make_unique<Expr>();
+            n->kind = Expr::Bin;
+            n->op = op;
+            n->lhs = std::move(l);
+            n->rhs = std::move(r);
+            l = std::move(n);
+        }
+        return l;
+    }
+
+    std::unique_ptr<Expr> parseShift() {
+        auto l = parseAddSub();
+        while (tok.kind == TokKind::Shl || tok.kind == TokKind::Shr) {
             std::string op = tok.text;
             advance();
             auto r = parseAddSub();
@@ -586,6 +667,12 @@ ir::Value* computeArrayElemPtr(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*
     auto it = vars.find(name);
     if (it == vars.end() || !it->second.isArray) throw std::runtime_error("Unknown array variable: " + name);
 
+    if (idxExpr->kind == Expr::Num) {
+        if (idxExpr->num < 0 || idxExpr->num >= it->second.arrayLen) {
+            throw std::runtime_error("Array index out of bounds for " + name);
+        }
+    }
+
     ir::Value* idx = emitExpr(c, fn, bb, vars, idxExpr, loopStack);
     ir::Value* elemSize = ir::ConstantInt::get(c.i32, 4);
     ir::Value* byteOff32 = c.builder.createMul(idx, elemSize);
@@ -659,6 +746,10 @@ ir::Value* emitExpr(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
         case Expr::Call: {
             auto fit = c.functions.find(e->name);
             if (fit == c.functions.end()) throw std::runtime_error("Unknown function: " + e->name);
+            size_t expected = fit->second->getParameters().size();
+            if (e->args.size() != expected) {
+                throw std::runtime_error("Function arity mismatch for " + e->name);
+            }
             std::vector<ir::Value*> args;
             for (const auto& a : e->args) args.push_back(emitExpr(c, fn, bb, vars, a.get(), loopStack));
             return c.builder.createCall(fit->second, args, c.i32);
@@ -678,6 +769,11 @@ ir::Value* emitExpr(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
             if (e->op == "*") return c.builder.createMul(l, r);
             if (e->op == "/") return c.builder.createDiv(l, r);
             if (e->op == "%") return c.builder.createRem(l, r);
+            if (e->op == "&") return c.builder.createAnd(l, r);
+            if (e->op == "|") return c.builder.createOr(l, r);
+            if (e->op == "^") return c.builder.createXor(l, r);
+            if (e->op == "<<") return c.builder.createShl(l, r);
+            if (e->op == ">>") return c.builder.createShr(l, r);
             if (e->op == "==") return c.builder.createCeq(l, r);
             if (e->op == "!=") return c.builder.createCne(l, r);
             if (e->op == "<") return c.builder.createCslt(l, r);
@@ -810,6 +906,34 @@ void emitWhile(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
     c.builder.setInsertPoint(bb);
 }
 
+void emitDoWhile(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
+                 std::map<std::string, VarInfo>& vars, const Stmt* s,
+                 std::vector<LoopTargets>& loopStack) {
+    auto* bodyBB = c.builder.createBasicBlock(c.freshLabel("do_body"), fn);
+    auto* condBB = c.builder.createBasicBlock(c.freshLabel("do_cond"), fn);
+    auto* endBB = c.builder.createBasicBlock(c.freshLabel("do_end"), fn);
+
+    c.builder.setInsertPoint(bb);
+    c.builder.createJmp(bodyBB);
+
+    loopStack.push_back({endBB, condBB});
+    ir::BasicBlock* bodyCur = bodyBB;
+    emitStmtList(c, fn, bodyCur, vars, s->body, loopStack);
+    loopStack.pop_back();
+
+    if (!isTerminated(bodyCur)) {
+        c.builder.setInsertPoint(bodyCur);
+        c.builder.createJmp(condBB);
+    }
+
+    c.builder.setInsertPoint(condBB);
+    auto* cond = emitExpr(c, fn, condBB, vars, s->loopCond.get(), loopStack);
+    c.builder.createJnz(cond, bodyBB, endBB);
+
+    bb = endBB;
+    c.builder.setInsertPoint(bb);
+}
+
 void emitFor(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
              std::map<std::string, VarInfo>& vars, const Stmt* s,
              std::vector<LoopTargets>& loopStack) {
@@ -879,6 +1003,9 @@ void emitStmtList(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
                 break;
             case Stmt::While:
                 emitWhile(c, fn, bb, vars, s, loopStack);
+                break;
+            case Stmt::DoWhile:
+                emitDoWhile(c, fn, bb, vars, s, loopStack);
                 break;
             case Stmt::For:
                 emitFor(c, fn, bb, vars, s, loopStack);
@@ -1116,6 +1243,30 @@ fn main() {
 }
 )", 11);
 
+    runCase("bitwise_shift", R"(
+fn main() {
+    x = 6 & 3;
+    y = 6 | 3;
+    z = 6 ^ 3;
+    a = 1 << 4;
+    b = 16 >> 2;
+    return x + y + z + a + b;
+}
+)", 34);
+
+    runCase("do_while", R"(
+fn main() {
+    i = 0;
+    s = 0;
+    do {
+        i++;
+        if i == 3 { continue; }
+        s += i;
+    } while i < 5;
+    return s;
+}
+)", 12);
+
     bool failed = false;
     try {
         (void)compileAndRun("fn nope( { return 1; }", "bad");
@@ -1123,6 +1274,30 @@ fn main() {
         failed = true;
     }
     assert(failed && "Frontend should reject malformed programs");
+
+    bool arityFailed = false;
+    try {
+        (void)compileAndRun(R"(
+fn foo(a, b) { return a + b; }
+fn main() { return foo(1); }
+)", "arity_bad");
+    } catch (const std::exception&) {
+        arityFailed = true;
+    }
+    assert(arityFailed && "Frontend should reject function arity mismatch");
+
+    bool boundsFailed = false;
+    try {
+        (void)compileAndRun(R"(
+fn main() {
+    a = [1, 2, 3];
+    return a[5];
+}
+)", "bounds_bad");
+    } catch (const std::exception&) {
+        boundsFailed = true;
+    }
+    assert(boundsFailed && "Frontend should reject compile-time constant array out-of-bounds");
 
     std::cout << "All phpish frontend feature tests passed.\n";
     return 0;
