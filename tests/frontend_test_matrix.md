@@ -12,6 +12,10 @@ Recursion | Function can call itself and return correct result | `fn fact(n){ if
 Array literal | Allocates contiguous array and initializes elements | `a = [3,5,7,11];`
 Array indexing read | Reads element by computed index | `return a[1] + a[3];`
 Array indexing write | Writes element by computed index | `a[2] = 10; return a[2];`
+Boolean literals (`true`/`false`) | Parse as canonical truthy/falsy constants (`1/0`) | `fn main(){ if true { return 5; } return 0; }` => `5`
+Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) | Performs read-modify-write update on scalar variable | `x = 10; x += 5; x *= 2; return x;` => `30`
+Increment/decrement (`++`, `--`) | Mutates scalar variable by one | `i = 4; i++; i--; return i;` => `4`
+Mutual recursion | Two functions calling each other produce expected result | `is_even`/`is_odd` recursion pair
 Functions + variables + arithmetic | Standard expression lowering works across calls | `fn calc(a,b){ ... } fn main(){ return calc(6,5); }`
 If / elif / else | Correct branch selected | `if n<3 ... elif n<4 ... else ...`
 While loop | Repeated execution while condition true | `while i <= 5 { ... }`

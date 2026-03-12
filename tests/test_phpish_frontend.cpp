@@ -27,9 +27,12 @@ enum class TokKind {
     Number,
     LParen, RParen, LBrace, RBrace, LBracket, RBracket, Comma, Semi,
     Plus, Minus, Star, Slash, Percent,
+    PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
+    PlusPlus, MinusMinus,
     Assign, Eq, Ne, Lt, Le, Gt, Ge,
     AndAnd, OrOr, Bang,
-    KwFn, KwReturn, KwIf, KwElif, KwElse, KwWhile, KwFor, KwBreak, KwContinue
+    KwFn, KwReturn, KwIf, KwElif, KwElse, KwWhile, KwFor, KwBreak, KwContinue,
+    KwTrue, KwFalse
 };
 
 struct Token { TokKind kind; std::string text; };
@@ -56,6 +59,8 @@ public:
             if (t == "for") return {TokKind::KwFor, t};
             if (t == "break") return {TokKind::KwBreak, t};
             if (t == "continue") return {TokKind::KwContinue, t};
+            if (t == "true") return {TokKind::KwTrue, t};
+            if (t == "false") return {TokKind::KwFalse, t};
             return {TokKind::Ident, t};
         }
         if (std::isdigit(static_cast<unsigned char>(c))) {
@@ -78,6 +83,13 @@ public:
         if (c == '>' && i + 1 < s.size() && s[i + 1] == '=') return two('>', '=', TokKind::Ge);
         if (c == '&' && i + 1 < s.size() && s[i + 1] == '&') return two('&', '&', TokKind::AndAnd);
         if (c == '|' && i + 1 < s.size() && s[i + 1] == '|') return two('|', '|', TokKind::OrOr);
+        if (c == '+' && i + 1 < s.size() && s[i + 1] == '=') return two('+', '=', TokKind::PlusEq);
+        if (c == '-' && i + 1 < s.size() && s[i + 1] == '=') return two('-', '=', TokKind::MinusEq);
+        if (c == '*' && i + 1 < s.size() && s[i + 1] == '=') return two('*', '=', TokKind::StarEq);
+        if (c == '/' && i + 1 < s.size() && s[i + 1] == '=') return two('/', '=', TokKind::SlashEq);
+        if (c == '%' && i + 1 < s.size() && s[i + 1] == '=') return two('%', '=', TokKind::PercentEq);
+        if (c == '+' && i + 1 < s.size() && s[i + 1] == '+') return two('+', '+', TokKind::PlusPlus);
+        if (c == '-' && i + 1 < s.size() && s[i + 1] == '-') return two('-', '-', TokKind::MinusMinus);
 
         ++i;
         switch (c) {
@@ -126,9 +138,10 @@ struct Expr {
 };
 
 struct Stmt {
-    enum Kind { Assign, Return, If, While, For, ExprStmt, Break, Continue } kind;
+    enum Kind { Assign, CompoundAssign, IncDec, Return, If, While, For, ExprStmt, Break, Continue } kind;
 
     std::string var;
+    std::string op; // for compound assign/inc-dec
     std::unique_ptr<Expr> indexExpr; // for arr[idx] = value
     std::unique_ptr<Expr> expr;
 
@@ -301,6 +314,28 @@ private:
             return s;
         }
 
+        if (tok.kind == TokKind::PlusPlus || tok.kind == TokKind::MinusMinus) {
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::IncDec;
+            s->var = name;
+            s->op = tok.text;
+            advance();
+            expect(TokKind::Semi, "Expected ;");
+            return s;
+        }
+
+        if (tok.kind == TokKind::PlusEq || tok.kind == TokKind::MinusEq || tok.kind == TokKind::StarEq ||
+            tok.kind == TokKind::SlashEq || tok.kind == TokKind::PercentEq) {
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::CompoundAssign;
+            s->var = name;
+            s->op = tok.text;
+            advance();
+            s->expr = parseExpr();
+            expect(TokKind::Semi, "Expected ;");
+            return s;
+        }
+
         auto s = std::make_unique<Stmt>();
         s->kind = Stmt::Assign;
         s->var = name;
@@ -412,6 +447,14 @@ private:
     }
 
     std::unique_ptr<Expr> parsePrimary() {
+        if (tok.kind == TokKind::KwTrue || tok.kind == TokKind::KwFalse) {
+            auto n = std::make_unique<Expr>();
+            n->kind = Expr::Num;
+            n->num = (tok.kind == TokKind::KwTrue) ? 1 : 0;
+            advance();
+            return n;
+        }
+
         if (tok.kind == TokKind::Number) {
             auto n = std::make_unique<Expr>();
             n->kind = Expr::Num;
@@ -670,6 +713,35 @@ void emitAssign(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
     c.builder.createStore(val, ptr);
 }
 
+void emitCompoundAssign(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
+                        std::map<std::string, VarInfo>& vars, const Stmt* s,
+                        std::vector<LoopTargets>& loopStack) {
+    c.builder.setInsertPoint(bb);
+    ir::Value* ptr = getOrCreateScalarVarPtr(c, bb, vars, s->var);
+    ir::Value* cur = c.builder.createLoad(ptr);
+    ir::Value* rhs = emitExpr(c, fn, bb, vars, s->expr.get(), loopStack);
+
+    ir::Value* next = nullptr;
+    if (s->op == "+=") next = c.builder.createAdd(cur, rhs);
+    else if (s->op == "-=") next = c.builder.createSub(cur, rhs);
+    else if (s->op == "*=") next = c.builder.createMul(cur, rhs);
+    else if (s->op == "/=") next = c.builder.createDiv(cur, rhs);
+    else if (s->op == "%=") next = c.builder.createRem(cur, rhs);
+    else throw std::runtime_error("Unsupported compound op: " + s->op);
+
+    c.builder.createStore(next, ptr);
+}
+
+void emitIncDec(CompilerCtx& c, ir::BasicBlock*& bb,
+                std::map<std::string, VarInfo>& vars, const Stmt* s) {
+    c.builder.setInsertPoint(bb);
+    ir::Value* ptr = getOrCreateScalarVarPtr(c, bb, vars, s->var);
+    ir::Value* cur = c.builder.createLoad(ptr);
+    ir::Value* one = ir::ConstantInt::get(c.i32, 1);
+    ir::Value* next = (s->op == "++") ? c.builder.createAdd(cur, one) : c.builder.createSub(cur, one);
+    c.builder.createStore(next, ptr);
+}
+
 void emitIf(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
             std::map<std::string, VarInfo>& vars, const Stmt* s,
             std::vector<LoopTargets>& loopStack) {
@@ -787,6 +859,12 @@ void emitStmtList(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
         switch (s->kind) {
             case Stmt::Assign:
                 emitAssign(c, fn, bb, vars, s, loopStack);
+                break;
+            case Stmt::CompoundAssign:
+                emitCompoundAssign(c, fn, bb, vars, s, loopStack);
+                break;
+            case Stmt::IncDec:
+                emitIncDec(c, bb, vars, s);
                 break;
             case Stmt::ExprStmt:
                 (void)emitExpr(c, fn, bb, vars, s->expr.get(), loopStack);
@@ -994,6 +1072,49 @@ fn main() {
     return a[1] + a[2] + a[3];
 }
 )", 26);
+
+    runCase("bool_literals", R"(
+fn main() {
+    if true && !false { return 5; }
+    return 0;
+}
+)", 5);
+
+    runCase("compound_assign", R"(
+fn main() {
+    x = 20;
+    x += 5;
+    x -= 3;
+    x *= 2;
+    return x;
+}
+)", 44);
+
+    runCase("inc_dec", R"(
+fn main() {
+    i = 4;
+    i++;
+    i++;
+    i--;
+    return i;
+}
+)", 5);
+
+    runCase("mutual_recursion", R"(
+fn is_even(n) {
+    if n == 0 { return 1; }
+    return is_odd(n - 1);
+}
+
+fn is_odd(n) {
+    if n == 0 { return 0; }
+    return is_even(n - 1);
+}
+
+fn main() {
+    return is_even(10) * 10 + is_odd(9);
+}
+)", 11);
 
     bool failed = false;
     try {
