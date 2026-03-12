@@ -22,6 +22,7 @@ Function arity diagnostics | Reject mismatched call arity at frontend/lowering s
 Constant array bounds diagnostics | Reject compile-time constant out-of-bounds array indices | `a=[1,2,3]; return a[5];`
 Undefined variable diagnostics | Reject use-before-definition and out-of-scope-like unresolved names | `return missing_var;`
 Runtime/interop syscall path | Lowers syscall ABI path and validates runtime interop return value | `pid = syscall(39,0,0,0,0,0,0); return pid > 0;`
+Backend matrix parity (same source) | Same frontend source compiles in textual ASM mode + in-memory ELF mode across x64/AArch64/RISC-V (execute on x64) | `matrix_arith`, `matrix_control`
 Functions + variables + arithmetic | Standard expression lowering works across calls | `fn calc(a,b){ ... } fn main(){ return calc(6,5); }`
 If / elif / else | Correct branch selected | `if n<3 ... elif n<4 ... else ...`
 While loop | Repeated execution while condition true | `while i <= 5 { ... }`

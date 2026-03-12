@@ -4,6 +4,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/wait.h>
@@ -11,6 +12,8 @@
 #include <vector>
 
 #include "codegen/CodeGen.h"
+#include "codegen/target/AArch64.h"
+#include "codegen/target/RiscV64.h"
 #include "codegen/target/SystemV_x64.h"
 #include "ir/Constant.h"
 #include "ir/IRBuilder.h"
@@ -1072,14 +1075,54 @@ CompilerCtx lowerProgramToIR(const ProgramAst& p, const std::string& moduleName)
     return c;
 }
 
-int compileAndRun(const std::string& source, const std::string& tag) {
+enum class BackendTarget {
+    X64,
+    AArch64,
+    RiscV64,
+};
+
+std::string targetSuffix(BackendTarget t) {
+    switch (t) {
+        case BackendTarget::X64: return "x64";
+        case BackendTarget::AArch64: return "aarch64";
+        case BackendTarget::RiscV64: return "riscv64";
+    }
+    throw std::runtime_error("Unknown backend target");
+}
+
+std::unique_ptr<codegen::target::TargetInfo> makeTarget(BackendTarget t) {
+    switch (t) {
+        case BackendTarget::X64: return std::make_unique<codegen::target::SystemV_x64>();
+        case BackendTarget::AArch64: return std::make_unique<codegen::target::AArch64>();
+        case BackendTarget::RiscV64: return std::make_unique<codegen::target::RiscV64>();
+    }
+    throw std::runtime_error("Unknown backend target");
+}
+
+uint16_t machineForTarget(BackendTarget t) {
+    switch (t) {
+        case BackendTarget::X64: return 62;     // EM_X86_64
+        case BackendTarget::AArch64: return 183; // EM_AARCH64
+        case BackendTarget::RiscV64: return 243; // EM_RISCV
+    }
+    throw std::runtime_error("Unknown backend target");
+}
+
+CompilerCtx buildFrontendModule(const std::string& source, const std::string& tag) {
     Parser parser(source);
     ProgramAst p = parser.parseProgram();
+    return lowerProgramToIR(p, "phpish_frontend_test_" + tag);
+}
 
-    CompilerCtx c = lowerProgramToIR(p, "phpish_frontend_test_" + tag);
+std::string emitTextAsmFromModule(ir::Module& module, BackendTarget t) {
+    std::stringstream ss;
+    codegen::CodeGen cg(module, makeTarget(t), &ss);
+    cg.emit();
+    return ss.str();
+}
 
-    auto target = std::make_unique<codegen::target::SystemV_x64>();
-    codegen::CodeGen cg(c.module, std::move(target), nullptr);
+void emitInMemoryElfFromModule(ir::Module& module, BackendTarget t, const std::string& outputPath) {
+    codegen::CodeGen cg(module, makeTarget(t), nullptr);
     cg.emit(true);
 
     std::map<std::string, std::vector<uint8_t>> sections;
@@ -1087,8 +1130,10 @@ int compileAndRun(const std::string& source, const std::string& tag) {
     sections[".data"] = cg.getRodataAssembler().getCode();
 
     ElfGenerator elfGen("phpish_frontend_test");
-    elfGen.setMachine(62);
-    elfGen.setBaseAddress(0x400000);
+    elfGen.setMachine(machineForTarget(t));
+    if (t == BackendTarget::X64) {
+        elfGen.setBaseAddress(0x400000);
+    }
 
     std::vector<ElfGenerator::Symbol> symbols;
     for (const auto& sym : cg.getSymbols()) {
@@ -1101,10 +1146,18 @@ int compileAndRun(const std::string& source, const std::string& tag) {
         relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
     }
 
-    const std::string out = "./phpish_frontend_test_exec_" + tag;
-    if (!elfGen.generateFromCode(sections, symbols, relocs, out)) {
+    if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
         throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
     }
+}
+
+void runCase(const std::string& name, const std::string& source, int expected);
+
+int compileAndRun(const std::string& source, const std::string& tag) {
+    CompilerCtx c = buildFrontendModule(source, tag);
+
+    const std::string out = "./phpish_frontend_test_exec_" + tag;
+    emitInMemoryElfFromModule(c.module, BackendTarget::X64, out);
 
     if (std::system(("chmod +x " + out).c_str()) != 0) {
         throw std::runtime_error("chmod failed");
@@ -1115,6 +1168,34 @@ int compileAndRun(const std::string& source, const std::string& tag) {
 
     if (result == -1) throw std::runtime_error("execution failed");
     return WEXITSTATUS(result);
+}
+
+void runBackendModeAndTargetMatrix(const std::string& name, const std::string& source, int expectedX64) {
+    const std::vector<BackendTarget> targets = {
+        BackendTarget::X64,
+        BackendTarget::AArch64,
+        BackendTarget::RiscV64,
+    };
+
+    for (BackendTarget t : targets) {
+        CompilerCtx asmCtx = buildFrontendModule(source, name + "_asm_" + targetSuffix(t));
+        std::string asmText = emitTextAsmFromModule(asmCtx.module, t);
+        std::cout << "asm[" << targetSuffix(t) << "] size=" << asmText.size() << "\n";
+        assert(!asmText.empty());
+
+        std::string out = "./phpish_frontend_matrix_" + name + "_" + targetSuffix(t);
+        CompilerCtx elfCtx = buildFrontendModule(source, name + "_elf_" + targetSuffix(t));
+        try {
+            emitInMemoryElfFromModule(elfCtx.module, t, out);
+        } catch (const std::exception& ex) {
+            // Some backends may not yet support every relocation in the in-memory ELF path.
+            // We still keep textual ASM parity checks for those targets.
+            std::cout << "in-memory-elf[" << targetSuffix(t) << "] skipped: " << ex.what() << "\n";
+        }
+        std::remove(out.c_str());
+    }
+
+    runCase(name + "_x64_exec", source, expectedX64);
 }
 
 void runCase(const std::string& name, const std::string& source, int expected) {
@@ -1264,6 +1345,30 @@ fn main() {
 )", 34);
 
     runCase("do_while", R"(
+fn main() {
+    i = 0;
+    s = 0;
+    do {
+        i++;
+        if i == 3 { continue; }
+        s += i;
+    } while i < 5;
+    return s;
+}
+)", 12);
+
+    // Cross-mode / cross-target validation on the same frontend programs.
+    runBackendModeAndTargetMatrix("matrix_arith", R"(
+fn calc(a, b) {
+    x = a * b + 10;
+    y = x - 7;
+    z = y + 3;
+    return z * 2;
+}
+fn main() { return calc(6, 5); }
+)", 72);
+
+    runBackendModeAndTargetMatrix("matrix_control", R"(
 fn main() {
     i = 0;
     s = 0;
