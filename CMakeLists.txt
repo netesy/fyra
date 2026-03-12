@@ -84,3 +84,6 @@ target_link_libraries(fyra_compiler fyra)
 # --- Testing ---
 enable_testing()
 add_subdirectory(tests)
+
+# --- Examples ---
+add_subdirectory(examples)
