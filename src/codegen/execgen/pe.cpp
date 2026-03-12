@@ -449,12 +449,57 @@ private:
 
     void processRelocations(const std::vector<PEGenerator::Relocation>& relocs,
                             const std::vector<PEGenerator::Symbol>& symbols) {
-        Section* text = findSection(".text");
-        if (!text) return;
-
         std::map<std::string, uint32_t> symbolRva;
-        // In a real compiler, we would use the symbols to resolve addresses.
-        // For this implementation, we'll focus on the structure.
+        for (const auto& sym : symbols) {
+            Section* sec = findSection(sym.sectionName);
+            if (!sec) continue;
+            symbolRva[sym.name] = sec->virtualAddress + static_cast<uint32_t>(sym.value);
+        }
+
+        if (entryPoint_ == 0) {
+            if (auto it = symbolRva.find("_start"); it != symbolRva.end()) {
+                entryPoint_ = it->second;
+            } else if (auto it2 = symbolRva.find("main"); it2 != symbolRva.end()) {
+                entryPoint_ = it2->second;
+            }
+        }
+
+        auto patch32 = [](std::vector<uint8_t>& data, uint64_t off, int32_t value) {
+            if (off + 4 > data.size()) return false;
+            uint32_t u = static_cast<uint32_t>(value);
+            std::memcpy(data.data() + off, &u, sizeof(u));
+            return true;
+        };
+
+        auto patch64 = [](std::vector<uint8_t>& data, uint64_t off, uint64_t value) {
+            if (off + 8 > data.size()) return false;
+            std::memcpy(data.data() + off, &value, sizeof(value));
+            return true;
+        };
+
+        for (const auto& reloc : relocs) {
+            Section* targetSec = findSection(reloc.sectionName);
+            if (!targetSec) continue;
+
+            auto it = symbolRva.find(reloc.symbolName);
+            if (it == symbolRva.end()) continue;
+
+            uint64_t S = static_cast<uint64_t>(it->second);
+            uint64_t P = static_cast<uint64_t>(targetSec->virtualAddress) + reloc.offset;
+            int64_t A = reloc.addend;
+
+            if (reloc.type == "R_X86_64_PC32" || reloc.type == "R_X86_64_PLT32") {
+                int64_t delta = static_cast<int64_t>(S) + A - static_cast<int64_t>(P);
+                if (!patch32(targetSec->data, reloc.offset, static_cast<int32_t>(delta))) {
+                    lastError_ = "PE relocation out of range (32-bit)";
+                }
+            } else if (reloc.type == "R_X86_64_64") {
+                uint64_t val = S + static_cast<uint64_t>(A);
+                if (!patch64(targetSec->data, reloc.offset, val)) {
+                    lastError_ = "PE relocation out of range (64-bit)";
+                }
+            }
+        }
     }
 
     void generateBaseRelocations() {

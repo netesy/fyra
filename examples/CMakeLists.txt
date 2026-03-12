@@ -1,0 +1,2 @@
+add_executable(example_phpish_oop_inmemory phpish_oop_inmemory.cpp)
+target_link_libraries(example_phpish_oop_inmemory PRIVATE fyra)
