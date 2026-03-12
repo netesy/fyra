@@ -20,6 +20,8 @@ Bitwise and shift ops (`&`, `|`, `^`, `<<`, `>>`) | Preserves integer bit semant
 Do-while loop | Executes body at least once and checks condition after body | `do { i++; } while i < 5;`
 Function arity diagnostics | Reject mismatched call arity at frontend/lowering stage | `fn f(a,b)...; f(1);`
 Constant array bounds diagnostics | Reject compile-time constant out-of-bounds array indices | `a=[1,2,3]; return a[5];`
+Undefined variable diagnostics | Reject use-before-definition and out-of-scope-like unresolved names | `return missing_var;`
+Runtime/interop syscall path | Lowers syscall ABI path and validates runtime interop return value | `pid = syscall(39,0,0,0,0,0,0); return pid > 0;`
 Functions + variables + arithmetic | Standard expression lowering works across calls | `fn calc(a,b){ ... } fn main(){ return calc(6,5); }`
 If / elif / else | Correct branch selected | `if n<3 ... elif n<4 ... else ...`
 While loop | Repeated execution while condition true | `while i <= 5 { ... }`
