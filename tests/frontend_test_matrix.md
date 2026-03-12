@@ -1,0 +1,19 @@
+# PHPish Frontend Test Matrix
+
+Feature | Expected behavior | Sample program (toy frontend syntax)
+---|---|---
+Unary negation (`-x`) | Produces arithmetic negation | `fn main(){ x = -5; return x + 9; }` => `4`
+Unary logical not (`!x`) | Converts truthy/falsy to `0/1` inversion | `fn main(){ return !0 + !7; }` => `1`
+Short-circuit `&&` | RHS not evaluated when LHS is false | `fn main(){ if 0 && (1/0) { return 1; } else { return 9; } }` => `9`
+Short-circuit `||` | RHS not evaluated when LHS is true | `fn main(){ if 1 || (1/0) { return 7; } else { return 0; } }` => `7`
+`break` in loop | Exits nearest loop | `for i = 0; i < 10; i = i + 1 { if i == 8 { break; } ... }`
+`continue` in loop | Skips to next iteration | `for ... { if i % 2 == 1 { continue; } ... }`
+Recursion | Function can call itself and return correct result | `fn fact(n){ if n <= 1 { return 1; } return n * fact(n-1); }`
+Array literal | Allocates contiguous array and initializes elements | `a = [3,5,7,11];`
+Array indexing read | Reads element by computed index | `return a[1] + a[3];`
+Array indexing write | Writes element by computed index | `a[2] = 10; return a[2];`
+Functions + variables + arithmetic | Standard expression lowering works across calls | `fn calc(a,b){ ... } fn main(){ return calc(6,5); }`
+If / elif / else | Correct branch selected | `if n<3 ... elif n<4 ... else ...`
+While loop | Repeated execution while condition true | `while i <= 5 { ... }`
+For loop | init/cond/step lowered correctly | `for i = 0; i < 5; i = i + 1 { ... }`
+Malformed input diagnostics | Parser rejects invalid syntax | `fn nope( { return 1; }`
