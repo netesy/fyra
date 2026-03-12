@@ -171,3 +171,9 @@ target_link_libraries(test_phpish_frontend PRIVATE fyra)
 
 add_test(NAME PhpishFrontendTest COMMAND test_phpish_frontend)
 set_tests_properties(PhpishFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_voilet_frontend test_voilet_frontend.cpp)
+target_link_libraries(test_voilet_frontend PRIVATE fyra)
+
+add_test(NAME VoiletFrontendTest COMMAND test_voilet_frontend)
+set_tests_properties(VoiletFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

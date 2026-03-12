@@ -28,3 +28,4 @@ If / elif / else | Correct branch selected | `if n<3 ... elif n<4 ... else ...`
 While loop | Repeated execution while condition true | `while i <= 5 { ... }`
 For loop | init/cond/step lowered correctly | `for i = 0; i < 5; i = i + 1 { ... }`
 Malformed input diagnostics | Parser rejects invalid syntax | `fn nope( { return 1; }`
+Voilet frontend WAT/WASM validity | Same frontend source lowers to valid WAT text and valid WASM binary header | `test_voilet_frontend` (`arith_and_call`, `if_while`)
