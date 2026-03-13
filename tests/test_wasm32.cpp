@@ -38,6 +38,8 @@ int main() {
     assert(generated_asm.find("br") != std::string::npos);
     assert(generated_asm.find("if") != std::string::npos);
     assert(generated_asm.find("end") != std::string::npos);
+    // Generic stackifier should avoid temp-local condition shuttling for branch conditions
+    assert(generated_asm.find("local.set 1\n    local.get 1\n    if") == std::string::npos);
     assert(generated_asm.find("(export \"main\" (func $main))") != std::string::npos || generated_asm.find("(export \"main\" (func $") != std::string::npos);
     // Ensure output remains idiomatic and avoids verbose synthetic prologue/epilogue comments
     assert(generated_asm.find("Enhanced Function prologue") == std::string::npos);

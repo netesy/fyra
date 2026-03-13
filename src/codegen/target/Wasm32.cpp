@@ -65,6 +65,132 @@ std::string getCmpOpString(const ir::Instruction& instr) {
     }
 }
 
+bool canEmitExprFromValue(
+    ir::Value* value,
+    const std::map<ir::Value*, ir::Instruction*>& defs,
+    std::set<const ir::Instruction*>& inProgress) {
+
+    if (auto* instr = dynamic_cast<ir::Instruction*>(value)) {
+        auto it = defs.find(instr);
+        if (it == defs.end()) return false;
+        if (inProgress.count(instr)) return false;
+        inProgress.insert(instr);
+
+        bool ok = true;
+        switch (instr->getOpcode()) {
+            case ir::Instruction::Copy:
+                ok = canEmitExprFromValue(instr->getOperands()[0]->get(), defs, inProgress);
+                break;
+            case ir::Instruction::Add:
+            case ir::Instruction::Sub:
+                ok = canEmitExprFromValue(instr->getOperands()[0]->get(), defs, inProgress) &&
+                     canEmitExprFromValue(instr->getOperands()[1]->get(), defs, inProgress);
+                break;
+            case ir::Instruction::Call:
+                for (size_t i = 1; i < instr->getOperands().size(); ++i) {
+                    if (!canEmitExprFromValue(instr->getOperands()[i]->get(), defs, inProgress)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                break;
+            case ir::Instruction::Ceq:
+            case ir::Instruction::Cne:
+            case ir::Instruction::Cslt:
+            case ir::Instruction::Csle:
+            case ir::Instruction::Csgt:
+            case ir::Instruction::Csge:
+            case ir::Instruction::Cult:
+            case ir::Instruction::Cule:
+            case ir::Instruction::Cugt:
+            case ir::Instruction::Cuge:
+            case ir::Instruction::Ceqf:
+            case ir::Instruction::Cnef:
+            case ir::Instruction::Clt:
+            case ir::Instruction::Cle:
+            case ir::Instruction::Cgt:
+            case ir::Instruction::Cge:
+            case ir::Instruction::Co:
+                ok = !getCmpOpString(*instr).empty() &&
+                     canEmitExprFromValue(instr->getOperands()[0]->get(), defs, inProgress) &&
+                     canEmitExprFromValue(instr->getOperands()[1]->get(), defs, inProgress);
+                break;
+            default:
+                ok = false;
+                break;
+        }
+
+        inProgress.erase(instr);
+        return ok;
+    }
+
+    return true;
+}
+
+bool collectExprInstructions(
+    ir::Value* value,
+    const std::map<ir::Value*, ir::Instruction*>& defs,
+    std::set<const ir::Instruction*>& out,
+    std::set<const ir::Instruction*>& inProgress) {
+
+    if (auto* instr = dynamic_cast<ir::Instruction*>(value)) {
+        auto it = defs.find(instr);
+        if (it == defs.end()) return false;
+        if (inProgress.count(instr)) return false;
+        inProgress.insert(instr);
+
+        bool ok = true;
+        switch (instr->getOpcode()) {
+            case ir::Instruction::Copy:
+                ok = collectExprInstructions(instr->getOperands()[0]->get(), defs, out, inProgress);
+                break;
+            case ir::Instruction::Add:
+            case ir::Instruction::Sub:
+            case ir::Instruction::Ceq:
+            case ir::Instruction::Cne:
+            case ir::Instruction::Cslt:
+            case ir::Instruction::Csle:
+            case ir::Instruction::Csgt:
+            case ir::Instruction::Csge:
+            case ir::Instruction::Cult:
+            case ir::Instruction::Cule:
+            case ir::Instruction::Cugt:
+            case ir::Instruction::Cuge:
+            case ir::Instruction::Ceqf:
+            case ir::Instruction::Cnef:
+            case ir::Instruction::Clt:
+            case ir::Instruction::Cle:
+            case ir::Instruction::Cgt:
+            case ir::Instruction::Cge:
+            case ir::Instruction::Co:
+                ok = collectExprInstructions(instr->getOperands()[0]->get(), defs, out, inProgress) &&
+                     collectExprInstructions(instr->getOperands()[1]->get(), defs, out, inProgress);
+                if (ok && (instr->getOpcode() != ir::Instruction::Add && instr->getOpcode() != ir::Instruction::Sub)
+                    && getCmpOpString(*instr).empty()) {
+                    ok = false;
+                }
+                break;
+            case ir::Instruction::Call:
+                for (size_t i = 1; i < instr->getOperands().size(); ++i) {
+                    if (!collectExprInstructions(instr->getOperands()[i]->get(), defs, out, inProgress)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                break;
+            default:
+                ok = false;
+                break;
+        }
+
+        inProgress.erase(instr);
+        if (!ok) return false;
+        out.insert(instr);
+    }
+
+    return true;
+}
+
 bool emitExprFromValue(
     CodeGen& cg,
     ir::Value* value,
@@ -539,7 +665,136 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
         *os << "    ;; Block: " << bb->getName() << "\n";
         visitedBlocks.insert(bb);
 
+        std::map<ir::Value*, ir::Instruction*> inlineDefs;
+        std::set<const ir::Instruction*> transientInstrs;
+        std::map<ir::Value*, ir::Instruction*> allBlockDefs;
+        std::map<const ir::Instruction*, ir::Value*> inlineConds;
+        std::map<const ir::Instruction*, ir::Value*> inlineRets;
+        std::set<const ir::Instruction*> forceSkipInstrs;
         for (auto& instr : bb->getInstructions()) {
+            if (instr->getOpcode() != ir::Instruction::Phi && !isTerminator(instr.get()) &&
+                instr->getType()->getTypeID() != ir::Type::VoidTyID) {
+                allBlockDefs[instr.get()] = instr.get();
+            }
+        }
+
+        for (auto& instr : bb->getInstructions()) {
+            if (instr->getType()->getTypeID() == ir::Type::VoidTyID || isTerminator(instr.get())) {
+                continue;
+            }
+
+            const auto& uses = instr->getUseList();
+            if (uses.empty()) {
+                continue;
+            }
+
+            bool onlyTerminatorUsesInBlock = true;
+            for (auto* use : uses) {
+                auto* userInstr = dynamic_cast<ir::Instruction*>(use->getUser());
+                if (!userInstr || userInstr->getParent() != bb || !isTerminator(userInstr)) {
+                    onlyTerminatorUsesInBlock = false;
+                    break;
+                }
+            }
+            if (!onlyTerminatorUsesInBlock) {
+                continue;
+            }
+
+            transientInstrs.insert(instr.get());
+            inlineDefs[instr.get()] = instr.get();
+        }
+
+        bool expanded = true;
+        while (expanded) {
+            expanded = false;
+            std::vector<ir::Instruction*> toAdd;
+            for (auto* instr : transientInstrs) {
+                for (auto& op : instr->getOperands()) {
+                    auto* dep = dynamic_cast<ir::Instruction*>(op->get());
+                    if (!dep || dep->getParent() != bb || transientInstrs.count(dep)) {
+                        continue;
+                    }
+
+                    const auto& depUses = dep->getUseList();
+                    if (depUses.size() != 1) {
+                        continue;
+                    }
+
+                    auto* depUser = dynamic_cast<ir::Instruction*>(depUses.front()->getUser());
+                    if (depUser == instr) {
+                        toAdd.push_back(dep);
+                    }
+                }
+            }
+
+            for (auto* dep : toAdd) {
+                if (!transientInstrs.count(dep)) {
+                    transientInstrs.insert(dep);
+                    inlineDefs[dep] = dep;
+                    expanded = true;
+                }
+            }
+        }
+
+        for (auto it = transientInstrs.begin(); it != transientInstrs.end();) {
+            std::set<const ir::Instruction*> inProgress;
+            if (!canEmitExprFromValue(const_cast<ir::Instruction*>(*it), inlineDefs, inProgress)) {
+                inlineDefs.erase(const_cast<ir::Instruction*>(*it));
+                it = transientInstrs.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        for (auto& instr : bb->getInstructions()) {
+            if ((instr->getOpcode() == ir::Instruction::Br || instr->getOpcode() == ir::Instruction::Jnz) && instr->getOperands().size() >= 3) {
+                ir::Value* cond = instr->getOperands()[0]->get();
+                std::set<const ir::Instruction*> deps;
+                std::set<const ir::Instruction*> visiting;
+                if (collectExprInstructions(cond, allBlockDefs, deps, visiting)) {
+                    bool safe = true;
+                    for (auto* dep : deps) {
+                        for (auto* use : dep->getUseList()) {
+                            auto* user = dynamic_cast<ir::Instruction*>(use->getUser());
+                            if (!user) { safe = false; break; }
+                            if (deps.count(user) || user == instr.get()) continue;
+                            safe = false; break;
+                        }
+                        if (!safe) break;
+                    }
+                    if (safe) {
+                        inlineConds[instr.get()] = cond;
+                        forceSkipInstrs.insert(deps.begin(), deps.end());
+                    }
+                }
+            } else if (instr->getOpcode() == ir::Instruction::Ret && !instr->getOperands().empty()) {
+                ir::Value* retVal = instr->getOperands()[0]->get();
+                std::set<const ir::Instruction*> deps;
+                std::set<const ir::Instruction*> visiting;
+                if (collectExprInstructions(retVal, allBlockDefs, deps, visiting)) {
+                    bool safe = true;
+                    for (auto* dep : deps) {
+                        for (auto* use : dep->getUseList()) {
+                            auto* user = dynamic_cast<ir::Instruction*>(use->getUser());
+                            if (!user) { safe = false; break; }
+                            if (deps.count(user) || user == instr.get()) continue;
+                            safe = false; break;
+                        }
+                        if (!safe) break;
+                    }
+                    if (safe) {
+                        inlineRets[instr.get()] = retVal;
+                        forceSkipInstrs.insert(deps.begin(), deps.end());
+                    }
+                }
+            }
+        }
+
+        for (auto& instr : bb->getInstructions()) {
+            if (forceSkipInstrs.count(instr.get()) || transientInstrs.count(instr.get())) {
+                continue;
+            }
+
             if (instr->getOpcode() == ir::Instruction::Br || instr->getOpcode() == ir::Instruction::Jnz) {
                 if (instr->getOperands().size() == 1) {
                     ir::BasicBlock* target = static_cast<ir::BasicBlock*>(instr->getOperands()[0]->get());
@@ -554,8 +809,24 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
                     ir::BasicBlock* trueBB = static_cast<ir::BasicBlock*>(instr->getOperands()[1]->get());
                     ir::BasicBlock* falseBB = static_cast<ir::BasicBlock*>(instr->getOperands()[2]->get());
 
-                    std::string condOp = cg.getValueAsOperand(cond);
-                    if (!condOp.empty()) *os << "    " << condOp << "\n";
+                    bool emittedInlineCond = false;
+                    auto condPlanIt = inlineConds.find(instr.get());
+                    if (condPlanIt != inlineConds.end()) {
+                        std::set<const ir::Instruction*> inProgress;
+                        emittedInlineCond = emitExprFromValue(cg, condPlanIt->second, allBlockDefs, inProgress, "    ");
+                    }
+                    if (!emittedInlineCond) {
+                        if (auto* condInstr = dynamic_cast<ir::Instruction*>(cond)) {
+                            if (transientInstrs.count(condInstr)) {
+                                std::set<const ir::Instruction*> inProgress;
+                                emittedInlineCond = emitExprFromValue(cg, cond, inlineDefs, inProgress, "    ");
+                            }
+                        }
+                    }
+                    if (!emittedInlineCond) {
+                        std::string condOp = cg.getValueAsOperand(cond);
+                        if (!condOp.empty()) *os << "    " << condOp << "\n";
+                    }
 
                     *os << "    if\n";
                     emitPhis(cg, trueBB, bb, "      ");
@@ -580,6 +851,29 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
                     // Indirect jump/call through pointer not yet handled in structured way
                     cg.emitInstruction(*instr);
                 }
+            } else if (instr->getOpcode() == ir::Instruction::Ret) {
+                if (!instr->getOperands().empty()) {
+                    ir::Value* retVal = instr->getOperands()[0]->get();
+                    bool emittedInlineRet = false;
+                    auto retPlanIt = inlineRets.find(instr.get());
+                    if (retPlanIt != inlineRets.end()) {
+                        std::set<const ir::Instruction*> inProgress;
+                        emittedInlineRet = emitExprFromValue(cg, retPlanIt->second, allBlockDefs, inProgress, "  ");
+                    }
+                    if (!emittedInlineRet) {
+                        if (auto* retInstr = dynamic_cast<ir::Instruction*>(retVal)) {
+                            if (transientInstrs.count(retInstr)) {
+                                std::set<const ir::Instruction*> inProgress;
+                                emittedInlineRet = emitExprFromValue(cg, retVal, inlineDefs, inProgress, "  ");
+                            }
+                        }
+                    }
+                    if (emittedInlineRet) {
+                        *os << "  return\n";
+                        continue;
+                    }
+                }
+                cg.emitInstruction(*instr);
             } else if (instr->getOpcode() == ir::Instruction::Phi) {
                 // Handled
             } else {
