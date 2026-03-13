@@ -37,6 +37,192 @@ bool isTerminator(const ir::Instruction* instr) {
     }
 }
 
+std::string getCmpOpString(const ir::Instruction& instr) {
+    ir::Type* type = instr.getOperands()[0]->get()->getType();
+    std::string prefix = (type->isFloatTy() || type->isDoubleTy())
+        ? (type->isFloatTy() ? "f32" : "f64")
+        : (type->isIntegerTy() && static_cast<ir::IntegerType*>(type)->getBitwidth() > 32 ? "i64" : "i32");
+
+    switch(instr.getOpcode()) {
+        case ir::Instruction::Ceq:  return prefix + ".eq";
+        case ir::Instruction::Cne:  return prefix + ".ne";
+        case ir::Instruction::Cslt: return prefix + ".lt_s";
+        case ir::Instruction::Csle: return prefix + ".le_s";
+        case ir::Instruction::Csgt: return prefix + ".gt_s";
+        case ir::Instruction::Csge: return prefix + ".ge_s";
+        case ir::Instruction::Cult: return prefix + ".lt_u";
+        case ir::Instruction::Cule: return prefix + ".le_u";
+        case ir::Instruction::Cugt: return prefix + ".gt_u";
+        case ir::Instruction::Cuge: return prefix + ".ge_u";
+        case ir::Instruction::Ceqf: return prefix + ".eq";
+        case ir::Instruction::Cnef: return prefix + ".ne";
+        case ir::Instruction::Clt:  return prefix + ".lt";
+        case ir::Instruction::Cle:  return prefix + ".le";
+        case ir::Instruction::Cgt:  return prefix + ".gt";
+        case ir::Instruction::Cge:  return prefix + ".ge";
+        case ir::Instruction::Co:   return prefix + ".eq";
+        default: return "";
+    }
+}
+
+bool emitExprFromValue(
+    CodeGen& cg,
+    ir::Value* value,
+    const std::map<ir::Value*, ir::Instruction*>& defs,
+    std::set<const ir::Instruction*>& inProgress,
+    const std::string& indent) {
+
+    if (auto* instr = dynamic_cast<ir::Instruction*>(value)) {
+        auto it = defs.find(instr);
+        if (it == defs.end()) return false;
+        if (inProgress.count(instr)) return false;
+        inProgress.insert(instr);
+
+        switch (instr->getOpcode()) {
+            case ir::Instruction::Copy: {
+                bool ok = emitExprFromValue(cg, instr->getOperands()[0]->get(), defs, inProgress, indent);
+                inProgress.erase(instr);
+                return ok;
+            }
+            case ir::Instruction::Add:
+            case ir::Instruction::Sub: {
+                bool okL = emitExprFromValue(cg, instr->getOperands()[0]->get(), defs, inProgress, indent);
+                bool okR = emitExprFromValue(cg, instr->getOperands()[1]->get(), defs, inProgress, indent);
+                if (!okL || !okR) {
+                    inProgress.erase(instr);
+                    return false;
+                }
+                std::string wasmType = (instr->getType()->isIntegerTy() && static_cast<ir::IntegerType*>(instr->getType())->getBitwidth() > 32) ? "i64" : "i32";
+                *cg.getTextStream() << indent << wasmType << (instr->getOpcode() == ir::Instruction::Add ? ".add" : ".sub") << "\n";
+                inProgress.erase(instr);
+                return true;
+            }
+            case ir::Instruction::Call: {
+                for (size_t i = 1; i < instr->getOperands().size(); ++i) {
+                    if (!emitExprFromValue(cg, instr->getOperands()[i]->get(), defs, inProgress, indent)) {
+                        inProgress.erase(instr);
+                        return false;
+                    }
+                }
+                std::string callee = cg.getValueAsOperand(instr->getOperands()[0]->get());
+                *cg.getTextStream() << indent << "call $" << callee << "\n";
+                inProgress.erase(instr);
+                return true;
+            }
+            case ir::Instruction::Ceq:
+            case ir::Instruction::Cne:
+            case ir::Instruction::Cslt:
+            case ir::Instruction::Csle:
+            case ir::Instruction::Csgt:
+            case ir::Instruction::Csge:
+            case ir::Instruction::Cult:
+            case ir::Instruction::Cule:
+            case ir::Instruction::Cugt:
+            case ir::Instruction::Cuge:
+            case ir::Instruction::Ceqf:
+            case ir::Instruction::Cnef:
+            case ir::Instruction::Clt:
+            case ir::Instruction::Cle:
+            case ir::Instruction::Cgt:
+            case ir::Instruction::Cge:
+            case ir::Instruction::Co: {
+                bool okL = emitExprFromValue(cg, instr->getOperands()[0]->get(), defs, inProgress, indent);
+                bool okR = emitExprFromValue(cg, instr->getOperands()[1]->get(), defs, inProgress, indent);
+                std::string cmp = getCmpOpString(*instr);
+                if (!okL || !okR || cmp.empty()) {
+                    inProgress.erase(instr);
+                    return false;
+                }
+                *cg.getTextStream() << indent << cmp << "\n";
+                inProgress.erase(instr);
+                return true;
+            }
+            default:
+                inProgress.erase(instr);
+                return false;
+        }
+    }
+
+    std::string op = cg.getValueAsOperand(value);
+    if (op.empty()) return false;
+    *cg.getTextStream() << indent << op << "\n";
+    return true;
+}
+
+bool getBlockReturnValue(ir::BasicBlock* bb, ir::Value*& retVal) {
+    if (!bb) return false;
+    auto& instrs = bb->getInstructions();
+    if (instrs.empty()) return false;
+    auto* term = instrs.back().get();
+    if (term->getOpcode() != ir::Instruction::Ret || term->getOperands().empty()) return false;
+    retVal = term->getOperands()[0]->get();
+    return true;
+}
+
+bool tryEmitIdiomaticIfReturn(CodeGen& cg, ir::Function& func) {
+    auto* os = cg.getTextStream();
+    if (!os) return false;
+
+    std::vector<ir::BasicBlock*> blocks;
+    for (auto& bb : func.getBasicBlocks()) blocks.push_back(bb.get());
+
+    auto* fty = dynamic_cast<ir::FunctionType*>(func.getType());
+    if (!fty || fty->getReturnType()->getTypeID() == ir::Type::VoidTyID) return false;
+    std::string resultType = (fty->getReturnType()->isIntegerTy() && static_cast<ir::IntegerType*>(fty->getReturnType())->getBitwidth() > 32) ? "i64" : "i32";
+
+    if (blocks.size() == 1) {
+        ir::Value* retVal = nullptr;
+        if (!getBlockReturnValue(blocks[0], retVal)) return false;
+
+        std::map<ir::Value*, ir::Instruction*> defs;
+        for (auto& ins : blocks[0]->getInstructions()) {
+            if (ins->getOpcode() != ir::Instruction::Ret) defs[ins.get()] = ins.get();
+        }
+        std::set<const ir::Instruction*> inProgress;
+        return emitExprFromValue(cg, retVal, defs, inProgress, "  ");
+    }
+
+    if (blocks.size() != 3) return false;
+
+    auto* entry = blocks[0];
+    if (entry->getInstructions().empty()) return false;
+    auto* term = entry->getInstructions().back().get();
+    if (!((term->getOpcode() == ir::Instruction::Br || term->getOpcode() == ir::Instruction::Jnz) && term->getOperands().size() >= 3)) {
+        return false;
+    }
+
+    auto* trueBB = dynamic_cast<ir::BasicBlock*>(term->getOperands()[1]->get());
+    auto* falseBB = dynamic_cast<ir::BasicBlock*>(term->getOperands()[2]->get());
+    if (!trueBB || !falseBB) return false;
+
+    ir::Value* trueRet = nullptr;
+    ir::Value* falseRet = nullptr;
+    if (!getBlockReturnValue(trueBB, trueRet) || !getBlockReturnValue(falseBB, falseRet)) return false;
+
+    std::map<ir::Value*, ir::Instruction*> defs;
+    for (auto* bb : {entry, trueBB, falseBB}) {
+        for (auto& ins : bb->getInstructions()) {
+            if (ins->getOpcode() != ir::Instruction::Ret && !isTerminator(ins.get())) {
+                defs[ins.get()] = ins.get();
+            }
+        }
+    }
+
+    std::set<const ir::Instruction*> inProgress;
+    if (!emitExprFromValue(cg, term->getOperands()[0]->get(), defs, inProgress, "  ")) return false;
+    *os << "  if (result " << resultType << ")\n";
+
+    inProgress.clear();
+    if (!emitExprFromValue(cg, trueRet, defs, inProgress, "    ")) return false;
+    *os << "  else\n";
+
+    inProgress.clear();
+    if (!emitExprFromValue(cg, falseRet, defs, inProgress, "    ")) return false;
+
+    *os << "  end\n";
+    return true;
+}
+
 // Helper to find the loop header for a given block
 ir::BasicBlock* findLoopHeader(ir::BasicBlock* bb, const std::map<ir::BasicBlock*, ir::BasicBlock*>& loop_headers) {
     auto it = loop_headers.find(bb);
@@ -233,6 +419,12 @@ void Wasm32::emitStructuredBlock(CodeGen& cg, ir::BasicBlock* bb, ir::BasicBlock
 void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
     auto* os = cg.getTextStream();
     if (!os) return;
+
+    if (tryEmitIdiomaticIfReturn(cg, func)) {
+        emitFunctionEpilogue(cg, func);
+        currentDomTree = nullptr;
+        return;
+    }
 
     emitFunctionPrologue(cg, func);
 
@@ -616,22 +808,12 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     }
 
     if (auto* os = cg.getTextStream()) {
-        // Enhanced WASM32 function prologue with comprehensive ABI support
-
-        *os << "  ;; Enhanced Function prologue for " << func.getName() << "\n";
-
-        // Emit local declarations for all instructions in cg.getStackOffsets()
-        // in their numerical order.
         for (auto* val : instr_locals) {
             std::string wasmType = getWasmType(val->getType());
             *os << "  (local $" << cg.getStackOffset(val) << " " << wasmType << ")\n";
         }
 
-        bool leaf = isLeaf(func);
-        bool needsTemp = needsTempLocals(func);
-
-        if (needsTemp) {
-            // Emit temp local declarations for all possible types
+        if (needsTempLocals(func)) {
             *os << "  (local $temp_i32_0 i32)\n";
             *os << "  (local $temp_i32_1 i32)\n";
             *os << "  (local $temp_i64_0 i64)\n";
@@ -641,51 +823,12 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             *os << "  (local $temp_f64_0 f64)\n";
             *os << "  (local $temp_f64_1 f64)\n";
         }
-
-        if (!leaf) {
-            // Initialize stack frame if needed
-            // WASM doesn't have traditional stack frames, but we can simulate with globals
-            *os << "  ;; Initialize virtual stack frame\n";
-        }
-
-        // Add function entry debugging
-        *os << "  ;; Function " << func.getName() << " entry\n";
-        *os << "  ;; Parameters: " << func.getParameters().size() << "\n";
-
-        // Enhanced parameter validation for debugging
-        size_t paramCount = 0;
-        for (auto& param : func.getParameters()) {
-            *os << "  ;; Parameter " << paramCount << ": " << param->getType()->toString() << "\n";
-            paramCount++;
-        }
     }
 }
 
 void Wasm32::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    (void)func;
     if (auto* os = cg.getTextStream()) {
-        // Enhanced WASM32 function epilogue with comprehensive ABI support
-
-        *os << "  ;; Enhanced Function epilogue for " << func.getName() << "\n";
-
-        // Add function exit debugging and validation
-        *os << "  ;; Function " << func.getName() << " exit\n";
-
-        bool leaf = isLeaf(func);
-
-        if (!leaf) {
-            // Cleanup virtual stack frame if needed
-            *os << "  ;; Cleanup virtual stack frame\n";
-
-            // Return type validation for debugging
-            // Simplified version - avoid direct return type access for now
-            *os << "  ;; Return type validation (simplified)\n";
-        }
-        *os << "  ;; Ensuring return value is properly formatted\n";
-
-        // Add performance monitoring hooks (debug builds)
-        *os << "  ;; Function execution completed\n";
-
-        // Final function end
         *os << "  end\n";
     } else {
         cg.getAssembler().emitByte(0x0B); // end opcode for function body

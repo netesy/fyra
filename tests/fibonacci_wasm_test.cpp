@@ -30,6 +30,13 @@ int main() {
         codeGen.emit();
     }
 
+    std::ifstream watIn("fibonacci.wat");
+    assert(watIn.good());
+    std::string wat((std::istreambuf_iterator<char>(watIn)), std::istreambuf_iterator<char>());
+    assert(wat.find("if (result i32)") != std::string::npos);
+    assert(wat.find("block $base_case") == std::string::npos);
+    assert(wat.find("local.set") == std::string::npos);
+
     // Generate .wasm file
     {
         auto targetInfo = std::make_unique<codegen::target::Wasm32>();

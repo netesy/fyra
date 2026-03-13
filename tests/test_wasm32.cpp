@@ -39,6 +39,9 @@ int main() {
     assert(generated_asm.find("if") != std::string::npos);
     assert(generated_asm.find("end") != std::string::npos);
     assert(generated_asm.find("(export \"main\" (func $main))") != std::string::npos || generated_asm.find("(export \"main\" (func $") != std::string::npos);
+    // Ensure output remains idiomatic and avoids verbose synthetic prologue/epilogue comments
+    assert(generated_asm.find("Enhanced Function prologue") == std::string::npos);
+    assert(generated_asm.find("Initialize virtual stack frame") == std::string::npos);
     
     std::cout << "All WebAssembly tests passed!\n";
 
