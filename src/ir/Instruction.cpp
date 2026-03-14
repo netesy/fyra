@@ -118,4 +118,28 @@ void Instruction::print(std::ostream& os) const {
     }
 }
 
+SyscallInstruction::SyscallInstruction(Type* ty, const std::vector<Value*>& operands, SyscallId id, BasicBlock* parent)
+    : Instruction(ty, Syscall, operands, parent), id(id) {}
+
+void SyscallInstruction::print(std::ostream& os) const {
+    if (!getName().empty()) {
+        os << "%" << getName() << " = ";
+    }
+    os << "syscall";
+    os << "(";
+    if (id != SyscallId::None) {
+        os << syscallIdToString(id);
+        if (getOperands().size() > 0) os << ", ";
+    }
+    for (size_t i = 0; i < getOperands().size(); ++i) {
+        if (getOperands()[i]->get()->getName().empty()) {
+            os << "(unnamed)";
+        } else {
+            os << "%" << getOperands()[i]->get()->getName();
+        }
+        if (i < getOperands().size() - 1) os << ", ";
+    }
+    os << ")";
+}
+
 } // namespace ir

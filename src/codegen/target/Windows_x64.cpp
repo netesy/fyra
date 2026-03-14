@@ -1829,23 +1829,48 @@ void Windows_x64::emitCast(CodeGen& cg, ir::Instruction& instr, const ir::Type* 
 void Windows_x64::emitVAStart(CodeGen& cg, ir::Instruction& instr) {}
 void Windows_x64::emitVAArg(CodeGen& cg, ir::Instruction& instr) {}
 
+uint64_t Windows_x64::getSyscallNumber(ir::SyscallId id) const {
+    // Note: Windows syscall numbers change between build versions.
+    // These are from Windows 10/11 x64 and are not guaranteed to work everywhere.
+    // Usually, you'd call through ntdll.dll or Win32 API.
+    switch (id) {
+        case ir::SyscallId::Exit: return 0x002C; // NtTerminateProcess
+        case ir::SyscallId::Read: return 0x0006; // NtReadFile
+        case ir::SyscallId::Write: return 0x0008; // NtWriteFile
+        case ir::SyscallId::Close: return 0x000F; // NtClose
+        default: return 0;
+    }
+}
+
 void Windows_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    auto* syscallInstr = dynamic_cast<ir::SyscallInstruction*>(&instr);
+    ir::SyscallId sid = syscallInstr ? syscallInstr->getSyscallId() : ir::SyscallId::None;
+
     // Windows does not encourage direct syscalls. Usually, one calls the Win32 API.
     // However, if we must map 'syscall' in Fyra, we'll use the Windows x64 syscall ABI:
     // rax: syscall number, arguments in: r10, rdx, r8, r9
     if (auto* os = cg.getTextStream()) {
         *os << "  # Windows x64 Syscall (Direct syscalls are unstable on Windows)\n";
-        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
+        if (sid != ir::SyscallId::None) {
+            *os << "  mov rax, " << getSyscallNumber(sid) << "\n";
+        } else {
+            *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i + 1 : i;
             std::string reg;
-            switch(i) {
+            switch(argIdx) {
                 case 1: reg = "r10"; break;
                 case 2: reg = "rdx"; break;
                 case 3: reg = "r8"; break;
                 case 4: reg = "r9"; break;
                 default: continue;
             }
-            *os << "  mov " << reg << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+            if (!reg.empty()) {
+                *os << "  mov " << reg << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+            }
         }
         *os << "  syscall\n";
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
@@ -1854,10 +1879,19 @@ void Windows_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     } else {
         auto& assembler = cg.getAssembler();
         // Load syscall number into rax
-        emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 0);
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
+        if (sid != ir::SyscallId::None) {
+            uint64_t num = getSyscallNumber(sid);
+            assembler.emitByte(0x48); assembler.emitByte(0xC7); assembler.emitByte(0xC0);
+            assembler.emitDWord(static_cast<uint32_t>(num));
+        } else {
+            emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 0);
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i + 1 : i;
             uint8_t reg;
-            switch(i) {
+            switch(argIdx) {
                 case 1: reg = 10; break; // r10
                 case 2: reg = 2; break; // rdx
                 case 3: reg = 8; break; // r8

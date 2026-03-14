@@ -17,6 +17,7 @@ public:
 
     void emitRem(CodeGen& cg, ir::Instruction& instr) override;
     void emitSyscall(CodeGen& cg, ir::Instruction& instr) override;
+    uint64_t getSyscallNumber(ir::SyscallId id) const override;
 };
 
 } // namespace target

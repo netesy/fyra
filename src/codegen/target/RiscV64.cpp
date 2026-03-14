@@ -1352,12 +1352,58 @@ void RiscV64::emitVAEnd(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
+uint64_t RiscV64::getSyscallNumber(ir::SyscallId id) const {
+    switch (id) {
+        case ir::SyscallId::Exit: return 93;
+        case ir::SyscallId::Read: return 63;
+        case ir::SyscallId::Write: return 64;
+        case ir::SyscallId::OpenAt: return 56;
+        case ir::SyscallId::Close: return 57;
+        case ir::SyscallId::LSeek: return 62;
+        case ir::SyscallId::MMap: return 222;
+        case ir::SyscallId::MUnmap: return 215;
+        case ir::SyscallId::MProtect: return 226;
+        case ir::SyscallId::Brk: return 214;
+        case ir::SyscallId::MkDirAt: return 34;
+        case ir::SyscallId::UnlinkAt: return 35;
+        case ir::SyscallId::RenameAt: return 38;
+        case ir::SyscallId::GetDents64: return 61;
+        case ir::SyscallId::ClockGetTime: return 113;
+        case ir::SyscallId::NanoSleep: return 101;
+        case ir::SyscallId::RtSigAction: return 134;
+        case ir::SyscallId::RtSigProcMask: return 135;
+        case ir::SyscallId::RtSigReturn: return 139;
+        case ir::SyscallId::GetRandom: return 278;
+        case ir::SyscallId::Uname: return 160;
+        case ir::SyscallId::GetPid: return 172;
+        case ir::SyscallId::GetTid: return 178;
+        case ir::SyscallId::Fork: return 1079;
+        case ir::SyscallId::Execve: return 221;
+        case ir::SyscallId::Clone: return 220;
+        case ir::SyscallId::Wait4: return 260;
+        case ir::SyscallId::Kill: return 129;
+        default: return 0;
+    }
+}
+
 void RiscV64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    auto* syscallInstr = dynamic_cast<ir::SyscallInstruction*>(&instr);
+    ir::SyscallId sid = syscallInstr ? syscallInstr->getSyscallId() : ir::SyscallId::None;
+
     if (auto* os = cg.getTextStream()) {
         // RISC-V Syscall ABI: a7 (number), a0-a5 (args)
-        *os << "  li a7, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
-            *os << "  " << getLoadInstr(instr.getOperands()[i]->get()->getType()) << " a" << (i-1) << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+        if (sid != ir::SyscallId::None) {
+            *os << "  li a7, " << getSyscallNumber(sid) << "\n";
+        } else {
+            *os << "  li a7, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i : i - 1;
+            if (argIdx < 6) {
+                *os << "  " << getLoadInstr(instr.getOperands()[i]->get()->getType()) << " a" << argIdx << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+            }
         }
         *os << "  ecall\n";
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
@@ -1366,9 +1412,20 @@ void RiscV64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     } else {
         auto& assembler = cg.getAssembler();
         // Load syscall number into a7 (index 17)
-        emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 17);
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
-            emitLoadValue(cg, assembler, instr.getOperands()[i]->get(), 10 + (i-1)); // a0 is 10
+        if (sid != ir::SyscallId::None) {
+            uint64_t num = getSyscallNumber(sid);
+            // li a7, num (addi x17, x0, num)
+            emitIType(assembler, 0b0010011, 17, 0, 0, static_cast<int16_t>(num));
+        } else {
+            emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 17);
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i : i - 1;
+            if (argIdx < 6) {
+                emitLoadValue(cg, assembler, instr.getOperands()[i]->get(), 10 + argIdx); // a0 is 10
+            }
         }
         // ecall -> 0x00000073
         assembler.emitDWord(0x00000073);

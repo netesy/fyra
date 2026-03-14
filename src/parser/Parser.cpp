@@ -128,7 +128,9 @@ void Parser::parseFunction() {
         ir::BasicBlock* bb = builder.createBasicBlock("entry", func);
         builder.setInsertPoint(bb);
         while (currentToken.type != TokenType::RCurly && currentToken.type != TokenType::Eof) {
-            parseInstruction(bb);
+            if (parseInstruction(bb) == nullptr) {
+                getNextToken();
+            }
         }
     }
 
@@ -159,22 +161,28 @@ void Parser::parseData() {
                     constants.push_back(ir::ConstantString::get(currentToken.value));
                     getNextToken();
                 } else if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(8), std::stoll(currentToken.value)));
+                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(8), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             } else if (typeStr == "w") {
                 if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(32), std::stoll(currentToken.value)));
+                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(32), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             } else if (typeStr == "l") {
                 if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(64), std::stoll(currentToken.value)));
+                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(64), std::stoll(currentToken.value, nullptr, 0)));
+                    getNextToken();
+                }
+            } else if (typeStr == "h") {
+                if (currentToken.type == TokenType::Number) {
+                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(16), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             }
-        }
-        if (currentToken.type == TokenType::Comma) {
+        } else if (currentToken.type == TokenType::Comma) {
+            getNextToken();
+        } else {
             getNextToken();
         }
     }
@@ -200,7 +208,9 @@ void Parser::parseBasicBlock(ir::Function* func) {
     builder.setInsertPoint(bb);
 
     while (currentToken.type != TokenType::Label && currentToken.type != TokenType::RCurly && currentToken.type != TokenType::Eof) {
-        parseInstruction(bb);
+        if (parseInstruction(bb) == nullptr) {
+            getNextToken();
+        }
     }
 }
 
@@ -516,9 +526,18 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
             ir::Value* val = parseValue();
             instr = builder.createVAStart(val);
         } else if (opcodeStr == "syscall") {
+            ir::SyscallId id = ir::SyscallId::None;
             std::vector<ir::Value*> args;
             if (currentToken.type == TokenType::LParen) {
                 getNextToken();
+
+                // Check if the first thing in parens is a syscall name
+                if (currentToken.type == TokenType::Keyword && currentToken.value.find("sys_") == 0) {
+                    id = ir::stringToSyscallId(currentToken.value);
+                    getNextToken();
+                    if (currentToken.type == TokenType::Comma) getNextToken();
+                }
+
                 while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
                     ir::Type* argType = parseIRType();
                     ir::Value* arg = parseValue();
@@ -533,7 +552,11 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
                 getNextToken();
                 retType = parseIRType();
             }
-            instr = builder.createSyscall(args, retType);
+            if (id != ir::SyscallId::None) {
+                instr = builder.createSyscall(id, args, retType);
+            } else {
+                instr = builder.createSyscall(args, retType);
+            }
         } else if (opcodeStr == "call") {
             instr = parseCallInstruction(nullptr);
         }

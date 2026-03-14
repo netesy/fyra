@@ -60,7 +60,15 @@ Instruction* IRBuilder::createRet(Value* val) {
 
 Instruction* IRBuilder::createSyscall(const std::vector<Value*>& args, Type* retType) {
     Type* returnType = retType ? retType : VoidType::get();
-    auto instr = std::unique_ptr<Instruction>(new Instruction(returnType, Instruction::Syscall, args, insertPoint));
+    auto instr = std::make_unique<SyscallInstruction>(returnType, args, SyscallId::None, insertPoint);
+    Instruction* instrPtr = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType) {
+    Type* returnType = retType ? retType : VoidType::get();
+    auto instr = std::make_unique<SyscallInstruction>(returnType, args, id, insertPoint);
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;

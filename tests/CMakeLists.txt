@@ -166,3 +166,20 @@ target_link_libraries(test_http_server PRIVATE fyra)
 
 add_test(NAME HttpServerTest COMMAND test_http_server)
 set_tests_properties(HttpServerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_executable(test_phpish_frontend test_phpish_frontend.cpp)
+target_link_libraries(test_phpish_frontend PRIVATE fyra)
+
+add_test(NAME PhpishFrontendTest COMMAND test_phpish_frontend)
+set_tests_properties(PhpishFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_voilet_frontend test_voilet_frontend.cpp)
+target_link_libraries(test_voilet_frontend PRIVATE fyra)
+
+add_test(NAME VoiletFrontendTest COMMAND test_voilet_frontend)
+set_tests_properties(VoiletFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_pe_generator test_pe_generator.cpp)
+target_link_libraries(test_pe_generator PRIVATE fyra)
+
+add_test(NAME PEGeneratorTest COMMAND test_pe_generator)
+set_tests_properties(PEGeneratorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

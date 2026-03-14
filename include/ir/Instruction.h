@@ -1,6 +1,7 @@
 #pragma once
 
 #include "User.h"
+#include "Syscall.h"
 #include <vector>
 
 namespace ir {
@@ -142,6 +143,7 @@ public:
     };
 
     Instruction(Type* ty, Opcode op, const std::vector<Value*>& operands, BasicBlock* parent = nullptr);
+    virtual ~Instruction() = default;
 
     Opcode getOpcode() const { return opcode; }
     BasicBlock* getParent() const { return parent; }
@@ -151,6 +153,18 @@ public:
 private:
     Opcode opcode;
     BasicBlock* parent;
+};
+
+class SyscallInstruction : public Instruction {
+public:
+    SyscallInstruction(Type* ty, const std::vector<Value*>& operands, SyscallId id, BasicBlock* parent = nullptr);
+
+    SyscallId getSyscallId() const { return id; }
+
+    void print(std::ostream& os) const override;
+
+private:
+    SyscallId id;
 };
 
 } // namespace ir

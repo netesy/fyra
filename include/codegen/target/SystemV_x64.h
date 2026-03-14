@@ -75,6 +75,7 @@ public:
     void emitRem(CodeGen& cg, ir::Instruction& instr) override;
     void emitAnd(CodeGen& cg, ir::Instruction& instr) override;
     void emitSyscall(CodeGen& cg, ir::Instruction& instr) override;
+    uint64_t getSyscallNumber(ir::SyscallId id) const override;
     void emitOr(CodeGen& cg, ir::Instruction& instr) override;
     void emitXor(CodeGen& cg, ir::Instruction& instr) override;
     void emitShl(CodeGen& cg, ir::Instruction& instr) override;

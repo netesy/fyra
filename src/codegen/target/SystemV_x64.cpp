@@ -1533,7 +1533,8 @@ void SystemV_x64::emitStore(CodeGen& cg, ir::Instruction& instr) {
 
 void SystemV_x64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
     int32_t pointerOffset = cg.getStackOffset(&instr);
-    ir::ConstantInt* sizeConst = dynamic_cast<ir::ConstantInt*>(instr.getOperands()[0]->get());
+    ir::Value* sizeVal = instr.getOperands().empty() ? nullptr : instr.getOperands()[0]->get();
+    ir::ConstantInt* sizeConst = (sizeVal) ? dynamic_cast<ir::ConstantInt*>(sizeVal) : nullptr;
     uint64_t size = sizeConst ? sizeConst->getValue() : 8;
     uint64_t alignedSize = (size + 7) & ~7;
 
@@ -1758,19 +1759,62 @@ void SystemV_x64::emitVAEnd(CodeGen& cg, ir::Instruction& instr) {
     (void)cg; (void)instr;
 }
 
+uint64_t SystemV_x64::getSyscallNumber(ir::SyscallId id) const {
+    switch (id) {
+        case ir::SyscallId::Exit: return 60;
+        case ir::SyscallId::Read: return 0;
+        case ir::SyscallId::Write: return 1;
+        case ir::SyscallId::OpenAt: return 257;
+        case ir::SyscallId::Close: return 3;
+        case ir::SyscallId::LSeek: return 8;
+        case ir::SyscallId::MMap: return 9;
+        case ir::SyscallId::MUnmap: return 11;
+        case ir::SyscallId::MProtect: return 10;
+        case ir::SyscallId::Brk: return 12;
+        case ir::SyscallId::MkDirAt: return 258;
+        case ir::SyscallId::UnlinkAt: return 263;
+        case ir::SyscallId::RenameAt: return 264;
+        case ir::SyscallId::GetDents64: return 217;
+        case ir::SyscallId::ClockGetTime: return 228;
+        case ir::SyscallId::NanoSleep: return 35;
+        case ir::SyscallId::RtSigAction: return 13;
+        case ir::SyscallId::RtSigProcMask: return 14;
+        case ir::SyscallId::RtSigReturn: return 15;
+        case ir::SyscallId::GetRandom: return 318;
+        case ir::SyscallId::Uname: return 63;
+        case ir::SyscallId::GetPid: return 39;
+        case ir::SyscallId::GetTid: return 186;
+        case ir::SyscallId::Fork: return 57;
+        case ir::SyscallId::Execve: return 59;
+        case ir::SyscallId::Clone: return 56;
+        case ir::SyscallId::Wait4: return 61;
+        case ir::SyscallId::Kill: return 62;
+        default: return 0;
+    }
+}
+
 void SystemV_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    auto* syscallInstr = dynamic_cast<ir::SyscallInstruction*>(&instr);
+    ir::SyscallId sid = syscallInstr ? syscallInstr->getSyscallId() : ir::SyscallId::None;
+
     if (auto* os = cg.getTextStream()) {
         // Syscall ABI: rax (number), rdi, rsi, rdx, r10, r8, r9
 
         // Move syscall number to rax
-        ir::Value* numVal = instr.getOperands()[0]->get();
-        *os << "  movq " << cg.getValueAsOperand(numVal) << ", %rax\n";
+        if (sid != ir::SyscallId::None) {
+            *os << "  movq $" << getSyscallNumber(sid) << ", %rax\n";
+        } else {
+            ir::Value* numVal = instr.getOperands()[0]->get();
+            *os << "  movq " << cg.getValueAsOperand(numVal) << ", %rax\n";
+        }
 
         // Move arguments
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i + 1 : i;
             ir::Value* arg = instr.getOperands()[i]->get();
             std::string dest_reg;
-            switch(i) {
+            switch(argIdx) {
                 case 1: dest_reg = "%rdi"; break;
                 case 2: dest_reg = "%rsi"; break;
                 case 3: dest_reg = "%rdx"; break;
@@ -1778,7 +1822,9 @@ void SystemV_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
                 case 5: dest_reg = "%r8"; break;
                 case 6: dest_reg = "%r9"; break;
             }
-            *os << "  movq " << cg.getValueAsOperand(arg) << ", " << dest_reg << "\n";
+            if (!dest_reg.empty()) {
+                *os << "  movq " << cg.getValueAsOperand(arg) << ", " << dest_reg << "\n";
+            }
         }
         *os << "  syscall\n";
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
@@ -1787,11 +1833,19 @@ void SystemV_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     } else {
         auto& assembler = cg.getAssembler();
         // Load syscall number into rax
-        emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 0);
+        if (sid != ir::SyscallId::None) {
+            uint64_t num = getSyscallNumber(sid);
+            assembler.emitByte(0x48); assembler.emitByte(0xC7); assembler.emitByte(0xC0);
+            assembler.emitDWord(static_cast<uint32_t>(num));
+        } else {
+            emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 0);
+        }
 
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i + 1 : i;
             uint8_t reg;
-            switch(i) {
+            switch(argIdx) {
                 case 1: reg = 7; break; // rdi
                 case 2: reg = 6; break; // rsi
                 case 3: reg = 2; break; // rdx

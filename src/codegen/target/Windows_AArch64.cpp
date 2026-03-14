@@ -30,15 +30,38 @@ void Windows_AArch64::emitRem(CodeGen& cg, ir::Instruction& instr) {
     AArch64::emitRem(cg, instr);
 }
 
+uint64_t Windows_AArch64::getSyscallNumber(ir::SyscallId id) const {
+    // Windows ARM64 syscall numbers (similarly unstable)
+    switch (id) {
+        case ir::SyscallId::Exit: return 0x002C;
+        case ir::SyscallId::Read: return 0x0006;
+        case ir::SyscallId::Write: return 0x0008;
+        case ir::SyscallId::Close: return 0x000F;
+        default: return 0;
+    }
+}
+
 void Windows_AArch64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    auto* syscallInstr = dynamic_cast<ir::SyscallInstruction*>(&instr);
+    ir::SyscallId sid = syscallInstr ? syscallInstr->getSyscallId() : ir::SyscallId::None;
+
     // Direct syscalls on Windows ARM64 are very rare and discouraged.
     // However, for consistency:
     // x16: syscall number, x0-x7: arguments
     if (auto* os = cg.getTextStream()) {
         *os << "  # Windows ARM64 Syscall (Highly unstable)\n";
-        *os << "  mov x16, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
-            *os << "  mov x" << (i-1) << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+        if (sid != ir::SyscallId::None) {
+            *os << "  mov x16, #" << getSyscallNumber(sid) << "\n";
+        } else {
+            *os << "  mov x16, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i : i - 1;
+            if (argIdx < 8) {
+                *os << "  mov x" << argIdx << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+            }
         }
         *os << "  svc #0\n";
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
@@ -47,9 +70,19 @@ void Windows_AArch64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     } else {
         auto& assembler = cg.getAssembler();
         // mov x16, num
-        emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 16);
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
-            emitLoadValue(cg, assembler, instr.getOperands()[i]->get(), i-1);
+        if (sid != ir::SyscallId::None) {
+            uint64_t num = getSyscallNumber(sid);
+            assembler.emitDWord(0xD2800010 | ((num & 0xFFFF) << 5));
+        } else {
+            emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 16);
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i : i - 1;
+            if (argIdx < 8) {
+                emitLoadValue(cg, assembler, instr.getOperands()[i]->get(), argIdx);
+            }
         }
         assembler.emitDWord(0xD4000001); // svc #0
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {

@@ -7,7 +7,7 @@ namespace parser {
 
 Lexer::Lexer(std::istream& input) : input(input) {}
 
-char Lexer::getChar() {
+int Lexer::getChar() {
     return input.get();
 }
 
@@ -17,7 +17,7 @@ char Lexer::peek() {
 
 Token Lexer::getNextToken() {
     // Skip whitespace
-    while (isspace(lastChar)) {
+    while (lastChar != EOF && isspace(lastChar)) {
         lastChar = getChar();
     }
 
@@ -29,6 +29,10 @@ Token Lexer::getNextToken() {
         if (lastChar != EOF) {
             return getNextToken(); // Recurse to get the next token
         }
+    }
+
+    if (lastChar == EOF) {
+        return {TokenType::Eof, ""};
     }
 
     if ((lastChar == 's' || lastChar == 'd') && input.peek() == '_') {
@@ -105,6 +109,18 @@ Token Lexer::getNextToken() {
             // Floating point operations
             {"fadd", TokenType::Keyword}, {"fsub", TokenType::Keyword}, {"fmul", TokenType::Keyword},
             {"fdiv", TokenType::Keyword},
+            {"syscall", TokenType::Keyword},
+            // Syscalls
+            {"sys_exit", TokenType::Keyword}, {"sys_execve", TokenType::Keyword}, {"sys_fork", TokenType::Keyword},
+            {"sys_clone", TokenType::Keyword}, {"sys_wait4", TokenType::Keyword}, {"sys_kill", TokenType::Keyword},
+            {"sys_read", TokenType::Keyword}, {"sys_write", TokenType::Keyword}, {"sys_openat", TokenType::Keyword},
+            {"sys_close", TokenType::Keyword}, {"sys_lseek", TokenType::Keyword}, {"sys_mmap", TokenType::Keyword},
+            {"sys_munmap", TokenType::Keyword}, {"sys_mprotect", TokenType::Keyword}, {"sys_brk", TokenType::Keyword},
+            {"sys_mkdirat", TokenType::Keyword}, {"sys_unlinkat", TokenType::Keyword}, {"sys_renameat", TokenType::Keyword},
+            {"sys_getdents64", TokenType::Keyword}, {"sys_clock_gettime", TokenType::Keyword}, {"sys_nanosleep", TokenType::Keyword},
+            {"sys_rt_sigaction", TokenType::Keyword}, {"sys_rt_sigprocmask", TokenType::Keyword}, {"sys_rt_sigreturn", TokenType::Keyword},
+            {"sys_getrandom", TokenType::Keyword}, {"sys_uname", TokenType::Keyword}, {"sys_getpid", TokenType::Keyword},
+            {"sys_gettid", TokenType::Keyword}
         };
         if (keywords.count(identifierStr)) {
             return {keywords.at(identifierStr), identifierStr};

@@ -7,6 +7,9 @@ namespace ir {
 
 Function::Function(Type* ty, const std::string& name, Module* parent)
     : Value(ty), name(name), parent(parent) {
+    // Keep the base Value name in sync so call sites that hold Function as Value*
+    // (e.g. relocation emission) still see the function symbol name.
+    setName(name);
 }
 
 void Function::addBasicBlock(std::unique_ptr<BasicBlock> bb) {

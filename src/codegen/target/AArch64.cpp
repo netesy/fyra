@@ -2029,12 +2029,58 @@ void AArch64::emitVAEnd(CodeGen& cg, ir::Instruction& instr) {
     // No-op for AArch64
 }
 
+uint64_t AArch64::getSyscallNumber(ir::SyscallId id) const {
+    switch (id) {
+        case ir::SyscallId::Exit: return 93;
+        case ir::SyscallId::Read: return 63;
+        case ir::SyscallId::Write: return 64;
+        case ir::SyscallId::OpenAt: return 56;
+        case ir::SyscallId::Close: return 57;
+        case ir::SyscallId::LSeek: return 62;
+        case ir::SyscallId::MMap: return 222;
+        case ir::SyscallId::MUnmap: return 215;
+        case ir::SyscallId::MProtect: return 226;
+        case ir::SyscallId::Brk: return 214;
+        case ir::SyscallId::MkDirAt: return 34;
+        case ir::SyscallId::UnlinkAt: return 35;
+        case ir::SyscallId::RenameAt: return 38;
+        case ir::SyscallId::GetDents64: return 61;
+        case ir::SyscallId::ClockGetTime: return 113;
+        case ir::SyscallId::NanoSleep: return 101;
+        case ir::SyscallId::RtSigAction: return 134;
+        case ir::SyscallId::RtSigProcMask: return 135;
+        case ir::SyscallId::RtSigReturn: return 139;
+        case ir::SyscallId::GetRandom: return 278;
+        case ir::SyscallId::Uname: return 160;
+        case ir::SyscallId::GetPid: return 172;
+        case ir::SyscallId::GetTid: return 178;
+        case ir::SyscallId::Fork: return 220; // AArch64 often uses clone instead of fork
+        case ir::SyscallId::Execve: return 221;
+        case ir::SyscallId::Clone: return 220;
+        case ir::SyscallId::Wait4: return 260;
+        case ir::SyscallId::Kill: return 129;
+        default: return 0;
+    }
+}
+
 void AArch64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    auto* syscallInstr = dynamic_cast<ir::SyscallInstruction*>(&instr);
+    ir::SyscallId sid = syscallInstr ? syscallInstr->getSyscallId() : ir::SyscallId::None;
+
     if (auto* os = cg.getTextStream()) {
         // AArch64 Syscall ABI: x8 (number), x0-x5 (args)
-        *os << "  mov x8, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
-            *os << "  mov x" << (i-1) << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+        if (sid != ir::SyscallId::None) {
+            *os << "  mov x8, #" << getSyscallNumber(sid) << "\n";
+        } else {
+            *os << "  mov x8, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i : i - 1;
+            if (argIdx < 6) {
+                *os << "  mov x" << argIdx << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+            }
         }
         *os << "  svc #0\n";
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
@@ -2043,9 +2089,19 @@ void AArch64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     } else {
         auto& assembler = cg.getAssembler();
         // mov x8, num
-        emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 8);
-        for (size_t i = 1; i < instr.getOperands().size(); ++i) {
-            emitLoadValue(cg, assembler, instr.getOperands()[i]->get(), i-1);
+        if (sid != ir::SyscallId::None) {
+            uint64_t num = getSyscallNumber(sid);
+            assembler.emitDWord(0xD2800008 | ((num & 0xFFFF) << 5));
+        } else {
+            emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 8);
+        }
+
+        size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
+        for (size_t i = startArg; i < instr.getOperands().size(); ++i) {
+            size_t argIdx = (sid != ir::SyscallId::None) ? i : i - 1;
+            if (argIdx < 6) {
+                emitLoadValue(cg, assembler, instr.getOperands()[i]->get(), argIdx);
+            }
         }
         // svc #0 -> 0xD4000001
         assembler.emitDWord(0xD4000001);
