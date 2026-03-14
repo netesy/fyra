@@ -130,6 +130,7 @@ public:
     Instruction* createVAStart(Value* val);
     Instruction* createVAArg(Value* val, Type* destTy);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
+    Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     // ... more instruction builder methods to come ...
 
 private:

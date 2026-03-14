@@ -47,9 +47,9 @@ public:
 
 private:
     std::istream& input;
-    char lastChar = ' ';
+    int lastChar = ' ';
 
-    char getChar();
+    int getChar();
 };
 
 } // namespace parser

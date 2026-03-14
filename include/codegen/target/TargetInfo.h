@@ -146,6 +146,11 @@ public:
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& instr) {
         (void)cg; (void)instr;
     }
+
+    virtual uint64_t getSyscallNumber(ir::SyscallId id) const {
+        (void)id;
+        return 0;
+    }
     
     // Control flow
     virtual void emitBr(CodeGen& cg, ir::Instruction& instr) = 0;

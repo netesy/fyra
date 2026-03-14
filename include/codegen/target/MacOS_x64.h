@@ -23,6 +23,8 @@ public:
     // Instruction emission
     void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
     void emitStartFunction(CodeGen& cg) override;
+    void emitSyscall(CodeGen& cg, ir::Instruction& instr) override;
+    uint64_t getSyscallNumber(ir::SyscallId id) const override;
 
 private:
     std::vector<std::string> integerArgRegs;

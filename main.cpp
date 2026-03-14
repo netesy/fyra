@@ -459,6 +459,10 @@ int main(int argc, char** argv) {
             targetInfo = std::make_unique<codegen::target::Wasm32>();
         } else if (target == "riscv64") {
             targetInfo = std::make_unique<codegen::target::RiscV64>();
+        } else if (target == "macos" || target == "macos-x64") {
+            targetInfo = std::make_unique<codegen::target::MacOS_x64>();
+        } else if (target == "macos-aarch64" || target == "macos-arm64") {
+            targetInfo = std::make_unique<codegen::target::MacOS_AArch64>();
         } else {
             // Default to Linux
             targetInfo = std::make_unique<codegen::target::SystemV_x64>();

@@ -76,6 +76,7 @@ public:
     void emitStore(CodeGen& cg, ir::Instruction& instr) override;
     void emitAlloc(CodeGen& cg, ir::Instruction& instr) override;
     void emitSyscall(CodeGen& cg, ir::Instruction& instr) override;
+    uint64_t getSyscallNumber(ir::SyscallId id) const override;
     void emitBr(CodeGen& cg, ir::Instruction& instr) override;
     void emitJmp(CodeGen& cg, ir::Instruction& instr) override;
     
