@@ -17,8 +17,8 @@ public:
     static ConstantInt* get(IntegerType* ty, uint64_t value);
     uint64_t getValue() const { return value; }
 
-private:
     ConstantInt(IntegerType* ty, uint64_t value);
+private:
     uint64_t value;
 };
 
@@ -27,8 +27,8 @@ public:
     static ConstantFP* get(Type* ty, double value);
     double getValue() const { return value; }
 
-private:
     ConstantFP(Type* ty, double value);
+private:
     double value;
 };
 
@@ -47,8 +47,8 @@ public:
     static ConstantString* get(const std::string& value);
     const std::string& getValue() const { return value; }
 
-private:
     ConstantString(const std::string& value);
+private:
     std::string value;
 };
 

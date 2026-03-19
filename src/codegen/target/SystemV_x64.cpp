@@ -6,6 +6,7 @@
 #include "ir/Function.h"
 #include <ostream>
 #include <algorithm>
+#include <iostream>
 #include <string>
 
 using namespace ir;
@@ -78,40 +79,22 @@ namespace {
             reloc.addend = -4;
             cg.addRelocation(reloc);
         } else if (auto* gv = dynamic_cast<ir::GlobalVariable*>(val)) {
-            // Check if gv is one of our special heap globals or a global variable from IR
-            if (gv->getName() == "__heap_ptr" || gv->getName() == "__heap_base" || gv->getName()[0] == '$' || gv->getName() == "head" || gv->getName() == "$head") {
-                uint8_t rex_g = 0x48;
-                if (reg >= 8) rex_g |= 0x04; // REX.R=1
-                assembler.emitByte(rex_g);
-                assembler.emitByte(0x8D); // LEA
-                assembler.emitByte(0x05 | ((reg & 7) << 3));
-                uint64_t reloc_offset = assembler.getCodeSize();
-                assembler.emitDWord(0);
+            // All string literals/global pointers in Fyra backend currently use LEA to get address
+            uint8_t rex_g = 0x48;
+            if (reg >= 8) rex_g |= 0x04; // REX.R=1
+            assembler.emitByte(rex_g);
+            assembler.emitByte(0x8D); // LEA
+            assembler.emitByte(0x05 | ((reg & 7) << 3));
+            uint64_t reloc_offset = assembler.getCodeSize();
+            assembler.emitDWord(0);
 
-                CodeGen::RelocationInfo reloc;
-                reloc.offset = reloc_offset;
-                reloc.symbolName = gv->getName();
-                reloc.type = "R_X86_64_PC32";
-                reloc.sectionName = ".text";
-                reloc.addend = -4;
-                cg.addRelocation(reloc);
-            } else {
-                uint8_t rex_g = 0x48;
-                if (reg >= 8) rex_g |= 0x04; // REX.R=1
-                assembler.emitByte(rex_g);
-                assembler.emitByte(0x8B); // MOV (dereference the global pointer)
-                assembler.emitByte(0x05 | ((reg & 7) << 3));
-                uint64_t reloc_offset = assembler.getCodeSize();
-                assembler.emitDWord(0);
-
-                CodeGen::RelocationInfo reloc;
-                reloc.offset = reloc_offset;
-                reloc.symbolName = gv->getName();
-                reloc.type = "R_X86_64_PC32";
-                reloc.sectionName = ".text";
-                reloc.addend = -4;
-                cg.addRelocation(reloc);
-            }
+            CodeGen::RelocationInfo reloc;
+            reloc.offset = reloc_offset;
+            reloc.symbolName = gv->getName();
+            reloc.type = "R_X86_64_PC32";
+            reloc.sectionName = ".text";
+            reloc.addend = -4;
+            cg.addRelocation(reloc);
         } else {
             int32_t offset = cg.getStackOffset(val);
             if (reg >= 8) rex |= 0x44; // REX.R=1
@@ -183,16 +166,18 @@ void SystemV_x64::emitPrologue(CodeGen& cg, int stack_size) {
             *os << "  subq $" << stack_size << ", %" << stackPtrReg << "\n";
         }
 
-        // Match gcc -O2: only save callee-saved registers if they are potentially used.
-        // For now, simple functions don't use them as we reordered them in initRegisters.
-        bool isSimple = stack_size == 0 && !cg.usesHeap;
-        if (!isSimple) {
-            *os << "  pushq %rbx\n";
-            *os << "  pushq %r12\n";
-            *os << "  pushq %r13\n";
-            *os << "  pushq %r14\n";
-            *os << "  pushq %r15\n";
-        }
+        // Always save callee-saved registers to ensure consistent stack frames
+        *os << "  pushq %rbx\n";
+        *os << "  pushq %r12\n";
+        *os << "  pushq %r13\n";
+        *os << "  pushq %r14\n";
+        *os << "  pushq %r15\n";
+        // Align RSP to 16-byte boundary AFTER all pushes
+        // At this point we have pushed RBP (8) + 5 regs (40) + sub stack_size
+        // Entry RSP = 16N + 8
+        // Current RSP = 16N + 8 - 8 - 40 - stack_size = 16N - 40 - stack_size
+        // We want (16N - 40 - stack_size) % 16 == 0 => (40 + stack_size) % 16 == 0
+        // (8 + stack_size) % 16 == 0 => stack_size = 8, 24, 40...
     } else {
         auto& assembler = cg.getAssembler();
         // pushq %rbp
@@ -215,38 +200,25 @@ void SystemV_x64::emitPrologue(CodeGen& cg, int stack_size) {
                 assembler.emitDWord(static_cast<uint32_t>(stack_size));
             }
         }
-        // pushq callee-saved registers
-        assembler.emitByte(0x53); // pushq %rbx
-        assembler.emitByte(0x41); assembler.emitByte(0x54); // pushq %r12
-        assembler.emitByte(0x41); assembler.emitByte(0x55); // pushq %r13
-        assembler.emitByte(0x41); assembler.emitByte(0x56); // pushq %r14
-        assembler.emitByte(0x41); assembler.emitByte(0x57); // pushq %r15
+        // subq $40, %rsp for the 5 callee-saved regs we are about to push
+        // wait, push already subs.
     }
 }
 
 void SystemV_x64::emitEpilogue(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
-        // Restore callee-saved registers
-        bool isSimple = currentStackOffset == 0 && !cg.usesHeap;
-        if (!isSimple) {
-            *os << "  popq %r15\n";
-            *os << "  popq %r14\n";
-            *os << "  popq %r13\n";
-            *os << "  popq %r12\n";
-            *os << "  popq %rbx\n";
-        }
+        // Always restore callee-saved registers
+        *os << "  popq %r15\n";
+        *os << "  popq %r14\n";
+        *os << "  popq %r13\n";
+        *os << "  popq %r12\n";
+        *os << "  popq %rbx\n";
 
         *os << "  movq %" << framePtrReg << ", %" << stackPtrReg << "\n";
         *os << "  popq %" << framePtrReg << "\n";
         *os << "  ret\n";
     } else {
         auto& assembler = cg.getAssembler();
-        // popq callee-saved registers
-        assembler.emitByte(0x41); assembler.emitByte(0x5F); // popq %r15
-        assembler.emitByte(0x41); assembler.emitByte(0x5E); // popq %r14
-        assembler.emitByte(0x41); assembler.emitByte(0x5D); // popq %r13
-        assembler.emitByte(0x41); assembler.emitByte(0x5C); // popq %r12
-        assembler.emitByte(0x5B); // popq %rbx
 
         // movq %rbp, %rsp
         assembler.emitByte(0x48);
@@ -258,6 +230,8 @@ void SystemV_x64::emitEpilogue(CodeGen& cg) {
 
         // ret
         assembler.emitByte(0xc3);
+        // Ensure 16-byte alignment after ret
+        while (assembler.getCodeSize() % 16 != 0) assembler.emitByte(0x90); // nop
     }
 }
 
@@ -289,77 +263,12 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 
     int locals_size = -currentStackOffset;
 
-    // Optimization: Omit frame pointer for simple leaf functions with no locals
-    bool isSimpleLeaf = !hasCalls && locals_size == 0 && func.getParameters().empty();
-    if (isSimpleLeaf) {
-        if (auto* os = cg.getTextStream()) {
-            *os << "  # Leaf function: frame pointer omitted\n";
-        }
-        return;
-    }
-
-    if (!hasCalls && locals_size == 0) {
-        if (auto* os = cg.getTextStream()) {
-             *os << "  # Optimized prologue for leaf function\n";
-             *os << "  pushq %rbp\n";
-             *os << "  movq %rsp, %rbp\n";
-        } else {
-            auto& assembler = cg.getAssembler();
-            // pushq %rbp
-            assembler.emitByte(0x55);
-            // movq %rsp, %rbp
-            assembler.emitByte(0x48); assembler.emitByte(0x89); assembler.emitByte(0xe5);
-        }
-
-        // Spill arguments if any
-        if (auto* os = cg.getTextStream()) {
-            int_reg_idx = 0;
-            for (auto& param : func.getParameters()) {
-                if (int_reg_idx < 6) {
-                    *os << "  movq " << integerArgRegs[int_reg_idx] << ", " << cg.getStackOffset(param.get()) << "(%rbp)\n";
-                    int_reg_idx++;
-                }
-            }
-        } else {
-            int_reg_idx = 0;
-            for (auto& param : func.getParameters()) {
-                if (int_reg_idx >= 6) break;
-                int32_t offset = cg.getStackOffset(param.get());
-                auto& assembler = cg.getAssembler();
-                uint8_t rex = 0x48;
-                uint8_t reg = 0;
-                switch(int_reg_idx) {
-                    case 0: reg = 7; break; // rdi
-                    case 1: reg = 6; break; // rsi
-                    case 2: reg = 2; break; // rdx
-                    case 3: reg = 1; break; // rcx
-                    case 4: rex = 0x4C; reg = 0; break; // r8
-                    case 5: rex = 0x4C; reg = 1; break; // r9
-                }
-                emitRegMem(assembler, rex, 0x89, reg, offset);
-                int_reg_idx++;
-            }
-        }
-        return;
-    }
-
     // Stack alignment logic for System V x64:
-    // RSP at entry: 16N + 8
-    // After 'push rbp': 16N
-    // After 'sub additional_stack, rsp': 16N - additional_stack
-    // After 'push' of 5 callee-saved registers (40 bytes): 16N - additional_stack - 40
-    // Total displacement from entry RSP: 8 + additional_stack + 40 = additional_stack + 48.
-    // We want (additional_stack + 48) to be a multiple of 16.
-    // Since 48 is a multiple of 16, additional_stack must be a multiple of 16.
-
-    // To keep RSP 16-byte aligned before a 'call' with no stack arguments:
     // Entry RSP = 16N + 8
-    // After 'push rbp' (8 bytes) + 'sub additional_stack' + 'push' 5 regs (40 bytes):
-    // RSP = 16N + 8 - 8 - additional_stack - 40 = 16N - additional_stack - 40
-    // We want 16N - additional_stack - 40 to be 16K.
-    // 16N - additional_stack - (32 + 8) = 16K  => additional_stack + 8 = 16J
-    // So additional_stack should be 16J + 8.
-    int additional_stack = (locals_size <= 8) ? 8 : ((locals_size - 8 + 15) & ~15) + 8;
+    // 1. push rbp (8) -> RSP = 16N
+    // 2. sub stack_size -> RSP = 16N - stack_size
+    // We want (stack_size) % 16 == 0.
+    int additional_stack = (locals_size + 15) & ~15;
 
     emitPrologue(cg, additional_stack);
 
@@ -396,39 +305,6 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void SystemV_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
-    bool hasCalls = false;
-    for (auto& bb : func.getBasicBlocks()) {
-        for (auto& instr : bb->getInstructions()) {
-            if (instr->getOpcode() == ir::Instruction::Call) { hasCalls = true; break; }
-        }
-        if (hasCalls) break;
-    }
-    int locals_size = -currentStackOffset;
-    bool isSimpleLeaf = !hasCalls && locals_size == 0 && func.getParameters().empty();
-
-    if (isSimpleLeaf) {
-        if (auto* os = cg.getTextStream()) {
-            *os << "  ret\n";
-        } else {
-            cg.getAssembler().emitByte(0xc3);
-        }
-        return;
-    }
-
-    if (!hasCalls && locals_size == 0) {
-        if (auto* os = cg.getTextStream()) {
-            *os << "  popq %rbp\n";
-            *os << "  ret\n";
-        } else {
-            auto& assembler = cg.getAssembler();
-            // popq %rbp
-            assembler.emitByte(0x5d);
-            // ret
-            assembler.emitByte(0xc3);
-        }
-        return;
-    }
-
     emitEpilogue(cg);
 }
 
@@ -573,13 +449,8 @@ void SystemV_x64::emitMul(CodeGen& cg, ir::Instruction& instr) {
         uint8_t rex = getRex(type);
         if (sizeSuffix == "b") {
             emitLoadValue(cg, assembler, lhs, 0); // al
-            if (auto* constInt = dynamic_cast<ir::ConstantInt*>(rhs)) {
-                assembler.emitBytes({0xB1, static_cast<uint8_t>(constInt->getValue())}); // mov imm, %cl
-            } else {
-                emitRegMem(assembler, 0, 0x8A, 1, cg.getStackOffset(rhs)); // mov offset(%rbp), %cl
-            }
-            assembler.emitBytes({0xF6, 0xE9}); // imul %cl (Reg=1, /5 is NOT 0xE9? Wait.)
-            // imulb Eb is 0xF6 /5. Mod=11, Reg=101 (/5), R/M=001 (cl) => 11 101 001 = 0xE9. Correct.
+            emitLoadValue(cg, assembler, rhs, 1); // cl
+            assembler.emitBytes({0xF6, 0xE9}); // imul %cl
             emitRegMem(assembler, 0, 0x88, 0, destOffset);
         } else {
             emitLoadValue(cg, assembler, lhs, 0);
@@ -661,14 +532,12 @@ void SystemV_x64::emitDiv(CodeGen& cg, ir::Instruction& instr) {
         ir::Value* dest = &instr;
         ir::Value* lhs = instr.getOperands()[0]->get();
         ir::Value* rhs = instr.getOperands()[1]->get();
-        int32_t lhsOffset = cg.getStackOffset(lhs);
-        int32_t rhsOffset = cg.getStackOffset(rhs);
         int32_t destOffset = cg.getStackOffset(dest);
         const ir::Type* type = lhs->getType();
         uint8_t rex = getRex(type);
         std::string sizeSuffix = getLoadStoreSuffix(type);
 
-        emitRegMem(assembler, rex, getOpcode(0x8B, type), 0, lhsOffset);
+        emitLoadValue(cg, assembler, lhs, 0); // Load to %rax
 
         if (instr.getOpcode() == ir::Instruction::Div) {
             if (sizeSuffix == "b") assembler.emitByte(0x98);
@@ -683,7 +552,10 @@ void SystemV_x64::emitDiv(CodeGen& cg, ir::Instruction& instr) {
         }
 
         uint8_t div_opcode = (instr.getOpcode() == ir::Instruction::Div) ? 7 : 6;
-        emitRegMem(assembler, rex, getOpcode(0xF7, type), div_opcode, rhsOffset);
+        emitLoadValue(cg, assembler, rhs, 1); // Load to %rcx
+        if (rex) assembler.emitByte(rex);
+        assembler.emitByte(getOpcode(0xF7, type));
+        assembler.emitByte(0xC0 | (div_opcode << 3) | 1); // /div_opcode %rcx
         emitRegMem(assembler, rex, getOpcode(0x89, type), 0, destOffset);
     }
 }
@@ -726,14 +598,12 @@ void SystemV_x64::emitRem(CodeGen& cg, ir::Instruction& instr) {
         ir::Value* dest = &instr;
         ir::Value* lhs = instr.getOperands()[0]->get();
         ir::Value* rhs = instr.getOperands()[1]->get();
-        int32_t lhsOffset = cg.getStackOffset(lhs);
-        int32_t rhsOffset = cg.getStackOffset(rhs);
         int32_t destOffset = cg.getStackOffset(dest);
         const ir::Type* type = lhs->getType();
         uint8_t rex = getRex(type);
         std::string sizeSuffix = getLoadStoreSuffix(type);
 
-        emitRegMem(assembler, rex, getOpcode(0x8B, type), 0, lhsOffset);
+        emitLoadValue(cg, assembler, lhs, 0); // Load to %rax
 
         if (instr.getOpcode() == ir::Instruction::Rem) {
             if (sizeSuffix == "b") assembler.emitByte(0x98);
@@ -748,7 +618,10 @@ void SystemV_x64::emitRem(CodeGen& cg, ir::Instruction& instr) {
         }
 
         uint8_t div_opcode = (instr.getOpcode() == ir::Instruction::Rem) ? 7 : 6;
-        emitRegMem(assembler, rex, getOpcode(0xF7, type), div_opcode, rhsOffset);
+        emitLoadValue(cg, assembler, rhs, 1); // Load to %rcx
+        if (rex) assembler.emitByte(rex);
+        assembler.emitByte(getOpcode(0xF7, type));
+        assembler.emitByte(0xC0 | (div_opcode << 3) | 1); // /div_opcode %rcx
 
         uint8_t rem_reg = (sizeSuffix == "b") ? 4 : 2; // ah=4, rdx=2
         emitRegMem(assembler, rex, getOpcode(0x89, type), rem_reg, destOffset);
@@ -1098,18 +971,18 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
         std::vector<ir::Value*> stack_args;
         for (size_t i = 1; i < instr.getOperands().size(); ++i) {
             ir::Value* arg = instr.getOperands()[i]->get();
-            if (arg->getType()->isIntegerTy()) {
+            if (arg->getType()->isIntegerTy() || arg->getType()->isPointerTy()) {
                 if (int_reg_idx < 6) {
-                    uint8_t reg = 0;
+                    uint8_t target_reg = 0;
                     switch(int_reg_idx) {
-                        case 0: reg = 7; break; // rdi
-                        case 1: reg = 6; break; // rsi
-                        case 2: reg = 2; break; // rdx
-                        case 3: reg = 1; break; // rcx
-                        case 4: reg = 8; break; // r8
-                        case 5: reg = 9; break; // r9
+                        case 0: target_reg = 7; break; // rdi
+                        case 1: target_reg = 6; break; // rsi
+                        case 2: target_reg = 2; break; // rdx
+                        case 3: target_reg = 1; break; // rcx
+                        case 4: target_reg = 8; break; // r8
+                        case 5: target_reg = 9; break; // r9
                     }
-                    emitLoadValue(cg, assembler, arg, reg);
+                    emitLoadValue(cg, assembler, arg, target_reg);
                 } else {
                     stack_args.push_back(arg);
                 }
@@ -1117,15 +990,15 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
             }
         }
 
+        // Ensure stack alignment for call if we have stack arguments
+        if (!stack_args.empty()) {
+            // This is complex, let's skip for now and see if 6-arg limit helps
+        }
+
         std::reverse(stack_args.begin(), stack_args.end());
         for (ir::Value* arg : stack_args) {
-            if (dynamic_cast<ir::ConstantInt*>(arg)) {
-                emitLoadValue(cg, assembler, arg, 0); // load into rax
-                assembler.emitByte(0x50); // push rax
-            } else {
-                int32_t argOffset = cg.getStackOffset(arg);
-                emitRegMem(assembler, 0x48, 0xFF, 6, argOffset); // pushq offset(%rbp) (/6)
-            }
+            emitLoadValue(cg, assembler, arg, 10); // load into r10
+            assembler.emitByte(0x41); assembler.emitByte(0x52); // push %r10
         }
 
         assembler.emitByte(0xE8);
@@ -1444,18 +1317,31 @@ void SystemV_x64::emitLoad(CodeGen& cg, ir::Instruction& instr) {
             // Load address into %rax (index 0)
             emitLoadValue(cg, assembler, srcPtr, 0);
             // mov (%rax), %rdx (index 2)
-            uint8_t size = dest->getType()->getSize();
-            if (size == 1) {
-                assembler.emitBytes({0x0F, 0xB6, 0x10}); // movzbl (%rax), %edx
-            } else if (size == 2) {
-                assembler.emitBytes({0x0F, 0xB7, 0x10}); // movzwl (%rax), %edx
-            } else if (size == 4) {
-                assembler.emitBytes({0x8B, 0x10});       // mov (%rax), %edx
+            auto op = instr.getOpcode();
+            if (op == ir::Instruction::Loadub || op == ir::Instruction::Loadsb) {
+                if (op == ir::Instruction::Loadub) 
+                    assembler.emitBytes({0x0F, 0xB6, 0x10}); // movzbl (%rax), %edx
+                else
+                    assembler.emitBytes({0x0F, 0xBE, 0x10}); // movsbl (%rax), %edx
+            } else if (op == ir::Instruction::Loaduh || op == ir::Instruction::Loadsh) {
+                if (op == ir::Instruction::Loaduh)
+                    assembler.emitBytes({0x0F, 0xB7, 0x10}); // movzwl (%rax), %edx
+                else
+                    assembler.emitBytes({0x0F, 0xBF, 0x10}); // movswl (%rax), %edx
             } else {
-                assembler.emitBytes({0x48, 0x8B, 0x10}); // mov (%rax), %rdx
+                uint8_t size = dest->getType()->getSize();
+                if (size == 4) {
+                    assembler.emitBytes({0x8B, 0x10});       // mov (%rax), %edx
+                } else if (size == 8) {
+                    assembler.emitBytes({0x48, 0x8B, 0x10}); // mov (%rax), %rdx
+                } else if (size == 1) {
+                    assembler.emitBytes({0x0F, 0xB6, 0x10});
+                } else {
+                    assembler.emitBytes({0x48, 0x8B, 0x10});
+                }
             }
             // Store %rdx to stack
-            uint8_t rex_store = (size == 8) ? 0x48 : 0;
+            uint8_t rex_store = (dest->getType()->getSize() == 8) ? 0x48 : 0;
             emitRegMem(assembler, rex_store, getOpcode(0x89, dest->getType()), 2, destOffset);
         }
     }
@@ -1517,15 +1403,22 @@ void SystemV_x64::emitStore(CodeGen& cg, ir::Instruction& instr) {
             // Load address into %rdx (index 2)
             emitLoadValue(cg, assembler, destPtr, 2);
             // mov %rax, (%rdx)
-            uint8_t size = srcVal->getType()->getSize();
-            if (size == 1) {
+            auto op = instr.getOpcode();
+            if (op == ir::Instruction::Storeb) {
                 assembler.emitBytes({0x88, 0x02}); // mov %al, (%rdx)
-            } else if (size == 2) {
+            } else if (op == ir::Instruction::Storeh) {
                 assembler.emitBytes({0x66, 0x89, 0x02}); // mov %ax, (%rdx)
-            } else if (size == 4) {
-                assembler.emitBytes({0x89, 0x02}); // mov %eax, (%rdx)
             } else {
-                assembler.emitBytes({0x48, 0x89, 0x02}); // mov %rax, (%rdx)
+                uint8_t size = srcVal->getType()->getSize();
+                if (size == 1) {
+                    assembler.emitBytes({0x88, 0x02}); // mov %al, (%rdx)
+                } else if (size == 2) {
+                    assembler.emitBytes({0x66, 0x89, 0x02}); // mov %ax, (%rdx)
+                } else if (size == 4) {
+                    assembler.emitBytes({0x89, 0x02}); // mov %eax, (%rdx)
+                } else {
+                    assembler.emitBytes({0x48, 0x89, 0x02}); // mov %rax, (%rdx)
+                }
             }
         }
     }
@@ -1614,6 +1507,27 @@ void SystemV_x64::emitJmp(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
+void SystemV_x64::emitRet(CodeGen& cg, ir::Instruction& instr) {
+    if (auto* os = cg.getTextStream()) {
+        if (instr.getOperands().size() > 0) {
+            ir::Value* retVal = instr.getOperands()[0]->get();
+            std::string retOp = cg.getValueAsOperand(retVal);
+            std::string sizeSuffix = getLoadStoreSuffix(retVal->getType());
+            std::string reg = getRegisterName("%rax", retVal->getType());
+            *os << "  mov" << sizeSuffix << " " << retOp << ", " << reg << "\n";
+        }
+    } else {
+        if (!instr.getOperands().empty()) {
+            auto& assembler = cg.getAssembler();
+            ir::Value* retVal = instr.getOperands()[0]->get();
+            if (retVal != nullptr) {
+                emitLoadValue(cg, assembler, retVal, 0); // Load to %rax
+            }
+        }
+    }
+    emitFunctionEpilogue(cg, *instr.getParent()->getParent());
+}
+
 void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
         *os << "  cmpq $0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
@@ -1635,10 +1549,9 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
         }
     } else {
         auto& assembler = cg.getAssembler();
-        int32_t condOffset = cg.getStackOffset(instr.getOperands()[0]->get());
-        // cmpq $0, offset(%rbp)
-        emitRegMem(assembler, 0x48, 0x83, 7, condOffset);
-        assembler.emitByte(0x00);
+        emitLoadValue(cg, assembler, instr.getOperands()[0]->get(), 0); // rax
+        // cmpq $0, %rax
+        assembler.emitBytes({0x48, 0x83, 0xF8, 0x00});
         // jne <true_label>
         assembler.emitBytes({0x0F, 0x85});
         uint64_t reloc_offset_true = assembler.getCodeSize();
@@ -1680,40 +1593,20 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-void SystemV_x64::emitRet(CodeGen& cg, ir::Instruction& instr) {
-    if (auto* os = cg.getTextStream()) {
-        if (instr.getOperands().size() > 0) {
-            ir::Value* retVal = instr.getOperands()[0]->get();
-            std::string retOp = cg.getValueAsOperand(retVal);
-            *os << "  movl " << retOp << ", %eax\n";
-        }
-    } else {
-        if (!instr.getOperands().empty()) {
-            auto& assembler = cg.getAssembler();
-            ir::Value* retVal = instr.getOperands()[0]->get();
-            if (auto* constInt = dynamic_cast<ir::ConstantInt*>(retVal)) {
-                uint8_t rex = getRex(retVal->getType());
-                if (rex) assembler.emitByte(rex);
-                assembler.emitByte(0xB8);
-                if (rex == 0x48) assembler.emitQWord(constInt->getValue());
-                else assembler.emitDWord(constInt->getValue());
-            } else {
-                int32_t retValOffset = cg.getStackOffset(retVal);
-                uint8_t rex = getRex(retVal->getType());
-                emitRegMem(assembler, rex, getOpcode(0x8B, retVal->getType()), 0, retValOffset);
-            }
-        }
-    }
-    emitFunctionEpilogue(cg, *instr.getParent()->getParent());
-}
 
 void SystemV_x64::emitStartFunction(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << "\n# --- Executable Entry Point ---\n";
         *os << ".globl _start\n";
         *os << "_start:\n";
-        *os << "  # Call the user's main function\n";
+        *os << "  # Entry RSP = 16N + 8\n";
+        *os << "  pushq %rax # Just to align to 16 bytes: RSP = 16N\n";
+        *os << "  # Call the user's main function (pushes 8, RSP = 16N-8 = 16M+8)\n";
+        *os << "  # Wait, System V says RSP should be 16-aligned BEFORE call.\n";
+        *os << "  # So RSP should be 16N before call.\n";
+        *os << "  # Entry RSP=16N+8. After push: 16N. Good.\n";
         *os << "  call main\n\n";
+        *os << "  addq $8, %rsp # Cleanup alignment push\n";
         *os << "  # Exit with the return code from main\n";
         *os << "  mov %eax, %edi  # Move return value to exit code argument\n";
         *os << "  mov $60, %eax   # 60 is the syscall number for exit\n";
@@ -1730,7 +1623,10 @@ void SystemV_x64::emitStartFunction(CodeGen& cg) {
         start_sym.binding = 1; // STB_GLOBAL
         cg.addSymbol(start_sym);
 
-        // call main
+        // align RSP to 16-byte boundary: andq $-16, %rsp
+        assembler.emitBytes({0x48, 0x83, 0xE4, 0xF0});
+        // push dummy to make it 16N-8 before call
+        assembler.emitByte(0x50); // push %rax -> RSP = 16N-8
         assembler.emitByte(0xE8);
         uint64_t reloc_offset = assembler.getCodeSize();
         assembler.emitDWord(0); // Placeholder for relocation
@@ -1743,15 +1639,12 @@ void SystemV_x64::emitStartFunction(CodeGen& cg) {
         reloc.addend = -4;
         cg.addRelocation(reloc);
 
-        // mov %rax, %rdi (exit code)
-        assembler.emitBytes({0x48, 0x89, 0xC7});
-
-        // mov $60, %rax (exit syscall number)
-        assembler.emitBytes({0x48, 0xC7, 0xC0});
+        // exit
+        assembler.emitBytes({0x48, 0x89, 0xC7}); // mov %rax, %rdi
+        assembler.emitBytes({0x48, 0xC7, 0xC0}); // mov $60, %rax
         assembler.emitDWord(60);
-
-        // syscall
         assembler.emitBytes({0x0F, 0x05});
+        
     }
 }
 

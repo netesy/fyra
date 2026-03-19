@@ -40,9 +40,11 @@ void BasicBlock::removeInstructions(const std::vector<Instruction*>& to_remove) 
 void BasicBlock::print(std::ostream& os) const {
     os << "@" << getName() << "\n";
     for (const auto& instr : instructions) {
-        os << "  ";
-        instr->print(os);
-        os << "\n";
+        if (instr) {
+            os << "  ";
+            instr->print(os);
+            os << "\n";
+        }
     }
 }
 

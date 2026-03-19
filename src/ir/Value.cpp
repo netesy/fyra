@@ -1,12 +1,15 @@
 #include "ir/Value.h"
 #include "ir/Use.h"
 #include <iostream>
+#include <algorithm>
 
 namespace ir {
 
 Value::~Value() {
-    auto uses = use_list;
-    for (Use* u : uses) {
+    // Break connections to all users before this value is destroyed.
+    // We use a copy of the use_list because u->set(nullptr) will call removeUse on this.
+    auto copy = use_list;
+    for (Use* u : copy) {
         u->set(nullptr);
     }
 }
@@ -20,8 +23,8 @@ void Value::removeUse(Use& u) {
 }
 
 void Value::replaceAllUsesWith(Value* newVal) {
-    auto uses = use_list; // Make a copy to avoid iterator invalidation
-    for (Use* u : uses) {
+    auto copy = use_list;
+    for (Use* u : copy) {
         u->set(newVal);
     }
 }
@@ -30,9 +33,7 @@ void Value::print(std::ostream& os) const {
     if (!name.empty()) {
         os << "%" << name;
     } else {
-        // In a real compiler, we might print the pointer address
-        // or a unique ID for unnamed values.
-        os << "<unnamed>";
+        os << "<unnamed:" << (void*)this << ">";
     }
 }
 

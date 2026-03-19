@@ -349,5 +349,66 @@ void DWARFGenerator::generateVariableDebugInfo(std::ostream& os, const DebugVari
     }
 }
 
+// DebugInfoManager implementation
+DebugInfoManager::DebugInfoManager() : debugEnabled(false), currentLine(0) {
+    dwarfGenerator = std::make_unique<DWARFGenerator>();
+}
+
+void DebugInfoManager::generateDebugInfo(CodeGen& cg, std::ostream& os, ir::Module& module) {
+    if (!debugEnabled) return;
+    
+    os << "\n# === Debug Information ===\n";
+    
+    // Generate debug sections
+    dwarfGenerator->generateDebugInfoSection(os);
+    dwarfGenerator->generateDebugAbbrevSection(os);
+    dwarfGenerator->generateDebugStringSection(os);
+    dwarfGenerator->generateDebugFrameSection(os);
+    dwarfGenerator->generateExceptionTables(os);
+    
+    os << "# === End Debug Information ===\n\n";
+}
+
+void DebugInfoManager::emitFunctionDebugInfo(CodeGen& cg, std::ostream& os,
+                                           const ir::Function& func, uint64_t startAddr) {
+    if (!debugEnabled) return;
+
+    dwarfGenerator->beginFunction(func, startAddr);
+    dwarfGenerator->emitDebugInfoForFunction(cg, os, func, *this);
+}
+
+void DebugInfoManager::emitInstructionDebugInfo(CodeGen& cg, std::ostream& os, 
+                                              const ir::Instruction& instr, uint64_t address) {
+    if (!debugEnabled) return;
+    
+    // Add line information
+    dwarfGenerator->addLineInfo(currentLine, 0, currentFile, address);
+    
+    // Emit .loc directive
+    os << "  .loc 1 " << currentLine << " 0\n";
+}
+
+void DebugInfoManager::beforeFunctionEmission(CodeGen& cg, std::ostream& os, const ir::Function& func) {
+    if (!debugEnabled) return;
+    
+    os << "\n  # Begin debug info for function: " << func.getName() << "\n";
+    dwarfGenerator->emitDebugDirectives(os);
+}
+
+void DebugInfoManager::afterFunctionEmission(CodeGen& cg, std::ostream& os, 
+                                           const ir::Function& func, uint64_t endAddr) {
+    if (!debugEnabled) return;
+    
+    dwarfGenerator->endFunction(endAddr);
+    os << "  # End debug info for function: " << func.getName() << "\n";
+}
+
+void DebugInfoManager::beforeInstructionEmission(CodeGen& cg, std::ostream& os, 
+                                               const ir::Instruction& instr, uint64_t address) {
+    if (!debugEnabled) return;
+    
+    emitInstructionDebugInfo(cg, os, instr, address);
+}
+
 } // namespace debug
 } // namespace codegen

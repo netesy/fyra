@@ -272,6 +272,7 @@ bool ElfGenerator::Impl::generateFromCode(const std::map<std::string, std::vecto
             s.data = sections_data.at(name);
             s.size = s.data.size();
             s.addralign = 0x1000; // Force page alignment for all sections in executable
+            std::memset(&s.header, 0, sizeof(SectionHeader64)); // Zero-initialize section header
             sections_[s.name] = s;
             sectionOrder_.push_back(s.name);
         }
@@ -463,50 +464,55 @@ std::vector<uint8_t> ElfGenerator::Impl::readSectionContents(const std::string& 
 
 // --- Executable Generation ---
 void ElfGenerator::Impl::layoutSectionsForExecutable() {
-    uint64_t fileOffset = sizeof(ElfHeader64) + finalProgramHeaders_.size() * sizeof(ProgramHeader64);
-    uint64_t memOffset = baseAddress_;
+    auto align_func = [&](uint64_t val, uint64_t a) { return a == 0 ? val : (val + a - 1) & ~(a - 1); };
 
-    auto align = [&](uint64_t val, uint64_t a) { return (val + a - 1) & ~(a - 1); };
+    uint64_t fileOffset = align_func(sizeof(ElfHeader64) + finalProgramHeaders_.size() * sizeof(ProgramHeader64), pageSize_);
+    uint64_t memOffset = baseAddress_ + fileOffset;
 
     // Layout SHF_ALLOC sections. These are loaded into memory.
     const std::vector<std::string> alloc_order = {".text", ".rodata", ".data", ".bss"};
     for (const auto& name : alloc_order) {
         Section* s = findSection(name);
         if (!s) continue;
+        if (s->data.empty() && s->name != ".bss") continue;
 
         // Align each segment to page size to ensure correct permission separation on Linux
-        memOffset = align(memOffset, pageSize_);
-        fileOffset = align(fileOffset, pageSize_);
+        memOffset = align_func(memOffset, pageSize_);
+        fileOffset = align_func(fileOffset, pageSize_);
 
         s->header.sh_addr = memOffset;
         s->header.sh_offset = fileOffset;
 
         uint16_t idx = findFinalSectionIndex(s->name);
-        finalSectionHeaders_[idx].sh_addr = memOffset;
-        finalSectionHeaders_[idx].sh_offset = fileOffset;
+        if (idx != SHN_UNDEF) {
+            finalSectionHeaders_[idx].sh_addr = memOffset;
+            finalSectionHeaders_[idx].sh_offset = fileOffset;
+        }
 
         if (s->name != ".bss") {
             fileOffset += s->data.size();
-            memOffset += s->data.size();
+            memOffset += align_func(s->data.size(), 1);
         } else {
-            memOffset += s->size;
+            memOffset += align_func(s->size, 1);
         }
     }
 
-    // After the loadable sections, place the section header table itself.
-    sectionHeadersOffset_ = align(fileOffset, 8);
-    uint64_t data_offset = sectionHeadersOffset_ + (finalSectionHeaders_.size() * sizeof(SectionHeader64));
+    // After the loadable sections, place any non-allocatable sections.
+    uint64_t data_offset = align_func(fileOffset, 8);
 
     // Layout the data for non-allocatable sections (.symtab, .strtab, etc.)
     // These have data in the file but are not loaded into memory.
     // We must update the final section headers directly, as they are the source of truth for writing.
     for (auto& shdr : finalSectionHeaders_) {
         if (!(shdr.sh_flags & SHF_ALLOC) && shdr.sh_type != SHT_NULL && shdr.sh_type != SHT_NOBITS) {
-            data_offset = align(data_offset, shdr.sh_addralign);
+            data_offset = align_func(data_offset, shdr.sh_addralign ? shdr.sh_addralign : 1);
             shdr.sh_offset = data_offset;
             data_offset += shdr.sh_size;
         }
     }
+
+    // Place section header table at the very end
+    sectionHeadersOffset_ = align_func(data_offset, 8);
 }
 
 bool ElfGenerator::Impl::applyRelocations() {
@@ -731,17 +737,19 @@ void ElfGenerator::Impl::updateSymbolValues() {
 void ElfGenerator::Impl::createProgramHeaders() {
     finalProgramHeaders_.clear();
 
-    // Create a segment for executable code (.text)
+    // Create a segment for headers and executable code (.text)
     Section* text_sec = findSection(".text");
     if (text_sec) {
         ProgramHeader64 text_phdr = {};
         text_phdr.p_type = PT_LOAD;
         text_phdr.p_flags = PF_R | PF_X;
-        text_phdr.p_offset = text_sec->header.sh_offset;
-        text_phdr.p_vaddr = text_sec->header.sh_addr;
-        text_phdr.p_paddr = text_sec->header.sh_addr;
-        text_phdr.p_filesz = text_sec->data.size();
-        text_phdr.p_memsz = text_sec->data.size();
+        text_phdr.p_offset = 0; // Include headers
+        text_phdr.p_vaddr = baseAddress_;
+        text_phdr.p_paddr = baseAddress_;
+        // p_filesz should be total size of headers + text section
+        text_phdr.p_filesz = text_sec->header.sh_offset + text_sec->data.size();
+        // p_memsz should be the same for the first segment
+        text_phdr.p_memsz = text_phdr.p_filesz;
         text_phdr.p_align = pageSize_;
         finalProgramHeaders_.push_back(text_phdr);
     }
@@ -777,23 +785,46 @@ void ElfGenerator::Impl::createProgramHeaders() {
         data_phdr.p_paddr = first_writable->header.sh_addr;
 
         uint64_t total_file_size = 0;
-        uint64_t total_mem_size = 0;
+        uint64_t last_vaddr = first_writable->header.sh_addr;
 
         if (data_sec) {
-            total_file_size += data_sec->data.size();
-            total_mem_size += data_sec->data.size();
+            total_file_size = (data_sec->header.sh_offset + data_sec->data.size()) - first_writable->header.sh_offset;
+            last_vaddr = data_sec->header.sh_addr + data_sec->data.size();
         }
         if (bss_sec) {
-            // .bss has no size on disk, but it has size in memory.
-            // The memory size is the end of the bss section minus the start of the first writable section.
-            total_mem_size = (bss_sec->header.sh_addr + bss_sec->size) - first_writable->header.sh_addr;
+            last_vaddr = bss_sec->header.sh_addr + bss_sec->size;
         }
 
         data_phdr.p_filesz = total_file_size;
-        data_phdr.p_memsz = total_mem_size;
+        data_phdr.p_memsz = last_vaddr - first_writable->header.sh_addr;
 
         finalProgramHeaders_.push_back(data_phdr);
     }
+}
+
+void ElfGenerator::Impl::writeSectionData(std::ofstream& file) {
+    for (const auto& name : sectionOrder_) {
+        Section* s = findSection(name);
+        if (s && s->header.sh_type != SHT_NOBITS && !s->data.empty()) {
+            file.seekp(s->header.sh_offset);
+            if (file.fail()) std::cerr << "ELF Error: seekp failed for section " << s->name << " at offset " << s->header.sh_offset << std::endl;
+            file.write(reinterpret_cast<const char*>(s->data.data()), s->data.size());
+            if (file.fail()) std::cerr << "ELF Error: write failed for section " << s->name << " size " << s->data.size() << std::endl;
+            
+        }
+    }
+    // Write meta sections
+    SectionHeader64& shstrtab = finalSectionHeaders_[findFinalSectionIndex(".shstrtab")];
+    file.seekp(shstrtab.sh_offset);
+    file.write(shStringTable_.c_str(), shStringTable_.size());
+
+    SectionHeader64& symtab = finalSectionHeaders_[findFinalSectionIndex(".symtab")];
+    file.seekp(symtab.sh_offset);
+    file.write(reinterpret_cast<const char*>(finalSymbols_.data()), finalSymbols_.size() * sizeof(Symbol64));
+
+    SectionHeader64& strtab = finalSectionHeaders_[findFinalSectionIndex(".strtab")];
+    file.seekp(strtab.sh_offset);
+    file.write(stringTable_.c_str(), stringTable_.size());
 }
 
 bool ElfGenerator::Impl::writeExecutable(const std::string& outputFile) {
@@ -815,6 +846,7 @@ void ElfGenerator::Impl::writeElfHeader(std::ofstream& file) {
     ElfHeader64 h = {};
     memcpy(h.e_ident, "\x7f""ELF", 4);
     h.e_ident[4] = 2; h.e_ident[5] = 1; h.e_ident[6] = 1; // 64, LSB, v1
+    h.e_ident[7] = 0; // System V ABI
     h.e_type = ET_EXEC;
 
     if (machine_ != 0) {
@@ -840,9 +872,9 @@ void ElfGenerator::Impl::writeElfHeader(std::ofstream& file) {
     h.e_flags = 0;
     h.e_ehsize = sizeof(ElfHeader64);
     h.e_phentsize = sizeof(ProgramHeader64);
-    h.e_phnum = finalProgramHeaders_.size();
+    h.e_phnum = static_cast<uint16_t>(finalProgramHeaders_.size());
     h.e_shentsize = sizeof(SectionHeader64);
-    h.e_shnum = finalSectionHeaders_.size();
+    h.e_shnum = static_cast<uint16_t>(finalSectionHeaders_.size());
     h.e_shstrndx = findFinalSectionIndex(".shstrtab");
     file.write(reinterpret_cast<const char*>(&h), sizeof(h));
 }
@@ -852,22 +884,6 @@ void ElfGenerator::Impl::writeProgramHeaders(std::ofstream& file) {
     file.write(reinterpret_cast<const char*>(finalProgramHeaders_.data()), finalProgramHeaders_.size() * sizeof(ProgramHeader64));
 }
 
-void ElfGenerator::Impl::writeSectionData(std::ofstream& file) {
-    for (const auto& name : sectionOrder_) {
-        Section* s = findSection(name);
-        if (s && s->header.sh_type != SHT_NOBITS && !s->data.empty()) {
-            file.seekp(s->header.sh_offset);
-            file.write(reinterpret_cast<const char*>(s->data.data()), s->data.size());
-        }
-    }
-    // Write meta sections
-    file.seekp(finalSectionHeaders_[findFinalSectionIndex(".shstrtab")].sh_offset);
-    file.write(shStringTable_.c_str(), shStringTable_.size());
-    file.seekp(finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_offset);
-    file.write(reinterpret_cast<const char*>(finalSymbols_.data()), finalSymbols_.size() * sizeof(Symbol64));
-    file.seekp(finalSectionHeaders_[findFinalSectionIndex(".strtab")].sh_offset);
-    file.write(stringTable_.c_str(), stringTable_.size());
-}
 
 void ElfGenerator::Impl::writeSectionHeaders(std::ofstream& file) {
     file.seekp(sectionHeadersOffset_);

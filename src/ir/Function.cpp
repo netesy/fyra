@@ -6,9 +6,7 @@
 namespace ir {
 
 Function::Function(Type* ty, const std::string& name, Module* parent)
-    : Value(ty), name(name), parent(parent) {
-    // Keep the base Value name in sync so call sites that hold Function as Value*
-    // (e.g. relocation emission) still see the function symbol name.
+    : Value(ty), parent(parent) {
     setName(name);
 }
 
@@ -21,9 +19,16 @@ void Function::addParameter(std::unique_ptr<Parameter> p) {
 }
 
 void Function::print(std::ostream& os) const {
-    os << "function " << name << "() {\n";
+    os << "function " << getName() << "(";
+    bool first = true;
+    for (const auto& param : parameters) {
+        if (!first) os << ", ";
+        if (param) os << param->getType()->toString();
+        first = false;
+    }
+    os << ") {\n";
     for (const auto& bb : basicBlocks) {
-        bb->print(os);
+        if (bb) bb->print(os);
     }
     os << "}\n";
 }
@@ -32,7 +37,7 @@ int Function::getStackSlotForVreg(const Instruction* vreg) const {
     if (stackSlots.count(vreg)) {
         return stackSlots.at(vreg);
     }
-    return -1; // Not found
+    return -1;
 }
 
 void Function::setStackSlotForVreg(const Instruction* vreg, int slot) {

@@ -6,7 +6,7 @@
 
 namespace ir {
 
-IRBuilder::IRBuilder() {}
+IRBuilder::IRBuilder(std::shared_ptr<IRContext> ctx) : context(ctx) {}
 
 void IRBuilder::setModule(Module* m) {
     currentModule = m;
@@ -23,7 +23,8 @@ void IRBuilder::setInsertPoint(BasicBlock* bb, BasicBlock::instr_iterator it) {
 }
 
 Function* IRBuilder::createFunction(const std::string& name, Type* returnType) {
-    FunctionType* funcType = FunctionType::get(returnType, {}, false);
+    if (auto* existing = currentModule->getFunction(name)) return existing;
+    FunctionType* funcType = context->getFunctionType(returnType, {}, false);
     auto func = std::unique_ptr<Function>(new Function(funcType, name, currentModule));
     Function* funcPtr = func.get();
     currentModule->addFunction(std::move(func));
@@ -31,7 +32,8 @@ Function* IRBuilder::createFunction(const std::string& name, Type* returnType) {
 }
 
 Function* IRBuilder::createFunction(const std::string& name, Type* returnType, const std::vector<Type*>& paramTypes, bool isVariadic) {
-    FunctionType* funcType = FunctionType::get(returnType, paramTypes, isVariadic);
+    if (auto* existing = currentModule->getFunction(name)) return existing;
+    FunctionType* funcType = context->getFunctionType(returnType, paramTypes, isVariadic);
     auto func = std::unique_ptr<Function>(new Function(funcType, name, currentModule));
     Function* funcPtr = func.get();
 
@@ -52,14 +54,14 @@ BasicBlock* IRBuilder::createBasicBlock(const std::string& name, Function* paren
 }
 
 Instruction* IRBuilder::createRet(Value* val) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Ret, {val}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Ret, {val}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createSyscall(const std::vector<Value*>& args, Type* retType) {
-    Type* returnType = retType ? retType : VoidType::get();
+    Type* returnType = retType ? retType : context->getVoidType();
     auto instr = std::make_unique<SyscallInstruction>(returnType, args, SyscallId::None, insertPoint);
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -67,7 +69,7 @@ Instruction* IRBuilder::createSyscall(const std::vector<Value*>& args, Type* ret
 }
 
 Instruction* IRBuilder::createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType) {
-    Type* returnType = retType ? retType : VoidType::get();
+    Type* returnType = retType ? retType : context->getVoidType();
     auto instr = std::make_unique<SyscallInstruction>(returnType, args, id, insertPoint);
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -138,7 +140,7 @@ Instruction* IRBuilder::createSar(Value* lhs, Value* rhs, Type* resultType) {
 }
 
 Instruction* IRBuilder::createBr(Value* cond, Value* targetTrue, Value* targetFalse) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Br, {cond, targetTrue, targetFalse}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Br, {cond, targetTrue, targetFalse}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
@@ -159,7 +161,7 @@ Instruction* IRBuilder::createUltof(Value* val, Type* destTy) {
 }
 
 Instruction* IRBuilder::createHlt() {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Hlt, {}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Hlt, {}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
@@ -188,109 +190,109 @@ Instruction* IRBuilder::createUrem(Value* lhs, Value* rhs) {
 
 // --- Create methods for comparison instructions ---
 Instruction* IRBuilder::createCeq(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Ceq, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Ceq, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCne(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cne, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cne, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCsle(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Csle, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Csle, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCslt(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cslt, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cslt, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCsge(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Csge, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Csge, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCsgt(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Csgt, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Csgt, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCule(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cule, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cule, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCult(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cult, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cult, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCuge(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cuge, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cuge, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCugt(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cugt, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cugt, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCeqf(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Ceqf, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Ceqf, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCnef(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cnef, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cnef, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCle(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cle, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cle, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createClt(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Clt, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Clt, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCge(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cge, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cge, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCgt(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cgt, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cgt, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCo(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Co, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Co, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 Instruction* IRBuilder::createCuo(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Cuo, {lhs, rhs}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Cuo, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
@@ -303,7 +305,6 @@ Instruction* IRBuilder::createAdd(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
-// Overload with explicit type specification for colon syntax support
 Instruction* IRBuilder::createAdd(Value* lhs, Value* rhs, Type* resultType) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Add, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -318,7 +319,6 @@ Instruction* IRBuilder::createSub(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
-// Overload with explicit type specification for colon syntax support
 Instruction* IRBuilder::createSub(Value* lhs, Value* rhs, Type* resultType) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Sub, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -333,7 +333,6 @@ Instruction* IRBuilder::createMul(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
-// Overload with explicit type specification for colon syntax support
 Instruction* IRBuilder::createMul(Value* lhs, Value* rhs, Type* resultType) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Mul, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -348,7 +347,6 @@ Instruction* IRBuilder::createDiv(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
-// Overload with explicit type specification for colon syntax support
 Instruction* IRBuilder::createDiv(Value* lhs, Value* rhs, Type* resultType) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Div, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -356,7 +354,6 @@ Instruction* IRBuilder::createDiv(Value* lhs, Value* rhs, Type* resultType) {
     return instrPtr;
 }
 
-// Floating-point arithmetic operations
 Instruction* IRBuilder::createFAdd(Value* lhs, Value* rhs) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(lhs->getType(), Instruction::FAdd, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -435,22 +432,21 @@ Instruction* IRBuilder::createNeg(Value* op) {
 }
 
 Instruction* IRBuilder::createJmp(Value* target) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Jmp, {target}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Jmp, {target}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createJnz(Value* cond, Value* targetTrue, Value* targetFalse) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Jnz, {cond, targetTrue, targetFalse}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Jnz, {cond, targetTrue, targetFalse}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createAlloc(Value* size, Type* type) {
-    // In QBE, alloc returns a pointer, which we represent as a 64-bit integer 'l'
-    auto instr = std::make_unique<Instruction>(IntegerType::get(64), Instruction::Alloc, std::vector<Value*>{size}, insertPoint);
+    auto instr = std::make_unique<Instruction>(context->getIntegerType(64), Instruction::Alloc, std::vector<Value*>{size}, insertPoint);
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
@@ -471,31 +467,29 @@ Instruction* IRBuilder::createAlloc16(Type* type) {
 }
 
 Instruction* IRBuilder::createStore(Value* value, Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Store, {value, ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Store, {value, ptr}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoad(Value* ptr) {
-    // The type of the load is the type of the value being loaded.
-    // For now, we assume 'w' (32-bit integer) as per the parser's convention.
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Load, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Load, {ptr}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createStoreStack(Value* value, int slot) {
-    ir::Value* slot_val = ir::ConstantInt::get(ir::IntegerType::get(32), slot);
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Store, {value, slot_val}, insertPoint));
+    ir::Value* slot_val = context->getConstantInt(context->getIntegerType(32), slot);
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Store, {value, slot_val}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoadStack(Type* type, int slot) {
-    ir::Value* slot_val = ir::ConstantInt::get(ir::IntegerType::get(32), slot);
+    ir::Value* slot_val = context->getConstantInt(context->getIntegerType(32), slot);
     auto instr = std::unique_ptr<Instruction>(new Instruction(type, Instruction::Load, {slot_val}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -505,18 +499,15 @@ Instruction* IRBuilder::createLoadStack(Type* type, int slot) {
 PhiNode* IRBuilder::createPhi(Type* type, unsigned numOperands, Instruction* alloc) {
     auto instr = std::make_unique<PhiNode>(type, numOperands, alloc, insertPoint);
     PhiNode* instrPtr = instr.get();
-    // Phis must be at the beginning of the block.
     insertPoint->getInstructions().push_front(std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createCall(Value* callee, const std::vector<Value*>& args, Type* retType) {
-    Type* returnType = retType ? retType : VoidType::get();
-
+    Type* returnType = retType ? retType : context->getVoidType();
     std::vector<Value*> all_operands;
     all_operands.push_back(callee);
     all_operands.insert(all_operands.end(), args.begin(), args.end());
-
     auto instr = std::unique_ptr<Instruction>(new Instruction(returnType, Instruction::Call, all_operands, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(std::move(instr));
@@ -530,7 +521,6 @@ Instruction* IRBuilder::createCopy(Value* operand) {
     return instrPtr;
 }
 
-// Overload with explicit type specification for colon syntax support
 Instruction* IRBuilder::createCopy(Value* operand, Type* resultType) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Copy, {operand}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -539,7 +529,7 @@ Instruction* IRBuilder::createCopy(Value* operand, Type* resultType) {
 }
 
 Instruction* IRBuilder::createBlit(Value* dst, Value* src, Value* count) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Blit, {dst, src, count}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Blit, {dst, src, count}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
@@ -651,98 +641,98 @@ Instruction* IRBuilder::createCast(Value* val, Type* destTy) {
 }
 
 Instruction* IRBuilder::createStored(Value* value, Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Stored, {value, ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Stored, {value, ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createStores(Value* value, Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Stores, {value, ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Stores, {value, ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createStorel(Value* value, Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Storel, {value, ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Storel, {value, ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createStoreh(Value* value, Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Storeh, {value, ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Storeh, {value, ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createStoreb(Value* value, Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::Storeb, {value, ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Storeb, {value, ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createVAStart(Value* val) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(VoidType::get(), Instruction::VAStart, {val}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::VAStart, {val}, insertPoint));
     Instruction* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoadd(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(DoubleType::get(), Instruction::Loadd, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getDoubleType(), Instruction::Loadd, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoads(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(FloatType::get(), Instruction::Loads, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getFloatType(), Instruction::Loads, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoadl(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(64), Instruction::Loadl, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(64), Instruction::Loadl, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoaduw(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Loaduw, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Loaduw, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoadsh(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Loadsh, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Loadsh, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoaduh(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Loaduh, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Loaduh, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoadsb(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Loadsb, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Loadsb, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 
 Instruction* IRBuilder::createLoadub(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(IntegerType::get(32), Instruction::Loadub, {ptr}, insertPoint));
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Loadub, {ptr}, insertPoint));
     auto* instrPtr = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;

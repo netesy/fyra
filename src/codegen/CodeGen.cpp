@@ -12,6 +12,7 @@
 #include "codegen/InstructionFusion.h"
 #include "codegen/target/Wasm32.h"
 #include <cstring>
+#include <iostream>
 
 namespace codegen {
 
@@ -147,6 +148,7 @@ void CodeGen::emitDebugInfo() {
 }
 
 void CodeGen::emitFunction(ir::Function& func) {
+    std::cerr << "CodeGen: Emitting function: " << func.getName() << std::endl;
     // Set current function for WASM parameter resolution
     currentFunction = &func;
 
@@ -537,6 +539,7 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
 }
 
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
+    if (!value) return "NULL_VALUE";
     // Check if this is WASM target - use different handling
     if (targetInfo->getName() == "wasm32") {
         return getWasmValueAsOperand(value);
@@ -571,6 +574,8 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
 }
 
 std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
+    if (!value) return "";
+
     // Handle constants
     if (auto* constInt = dynamic_cast<const ir::ConstantInt*>(value)) {
         return targetInfo->formatConstant(constInt);
@@ -583,12 +588,16 @@ std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
             return "f64.const " + std::to_string(constFP->getValue());
         }
     }
+
+    if (auto* constStr = dynamic_cast<const ir::ConstantString*>(value)) {
+        return ";; [string literal]";
+    }
     
     // Handle function parameters
     if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
         // Check if we have a stack offset (local index) assigned
         if (stackOffsets.count(const_cast<ir::Value*>(value))) {
-            return "local.get " + std::to_string(stackOffsets[const_cast<ir::Value*>(value)]);
+            return "local.get " + std::to_string(stackOffsets.at(const_cast<ir::Value*>(value)));
         }
 
         // Fallback: Find parameter index in current function
@@ -604,18 +613,35 @@ std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
     }
     
     // Handle global values (functions)
+    if (auto* func = dynamic_cast<const ir::Function*>(value)) {
+        std::string name = func->getName();
+        if (name.rfind("$", 0) == 0) name = name.substr(1);
+        return "$" + name;
+    }
+
+    if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) {
+        std::string name = gv->getName();
+        if (name.rfind("$", 0) == 0) name = name.substr(1);
+        return "$" + name;
+    }
+
     if (auto* global = dynamic_cast<const ir::GlobalValue*>(value)) {
         std::string name = global->getName();
-        // Remove $ prefix if present for WASM
-        if (name.rfind("$", 0) == 0) {
-            name = name.substr(1);
-        }
-        return name;
+        if (name.rfind("$", 0) == 0) name = name.substr(1);
+        return "$" + name;
+    }
+
+    if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) {
+        // For WASM, global variables are just offsets or actual globals.
+        // For now, let's just return their name as a label.
+        std::string name = gv->getName();
+        if (name.rfind("$", 0) == 0) name = name.substr(1);
+        return "$" + name;
     }
 
     // Is it a temporary stored on the stack (WASM local)?
     if (stackOffsets.count(const_cast<ir::Value*>(value))) {
-        return "local.get " + std::to_string(stackOffsets[const_cast<ir::Value*>(value)]);
+        return "local.get " + std::to_string(stackOffsets.at(const_cast<ir::Value*>(value)));
     }
 
     // Handle BasicBlocks (labels)
@@ -623,8 +649,6 @@ std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
         return "$" + bb->getName();
     }
     
-    // For WASM, intermediate values are handled by the stack
-    // We don't need explicit names for them in most cases
     return "";
 }
 
@@ -894,8 +918,8 @@ void CodeGen::emitDataSection() {
             base_sym.value = rodataAsm.getCodeSize();
             base_sym.type = 1; // STT_OBJECT
             base_sym.binding = 1; // STB_GLOBAL
-            for (int i = 0; i < 1048576; ++i) rodataAsm.emitByte(0); // 1MB heap
-            base_sym.size = 1048576;
+            for (int i = 0; i < 4096; ++i) rodataAsm.emitByte(0); // 4KB heap
+            base_sym.size = 4096;
             symbols.push_back(base_sym);
 
             SymbolInfo ptr_sym;
@@ -921,9 +945,6 @@ void CodeGen::emitDataSection() {
         // Register global symbols
         for (auto& global : module.getGlobalVariables()) {
             // Align globals to 8 bytes
-            (void)getAssembler();
-            // Actually, let's use the rodata assembler but rename the section.
-
             while (rodataAsm.getCodeSize() % 8 != 0) rodataAsm.emitByte(0);
 
             SymbolInfo sym;
@@ -947,6 +968,12 @@ void CodeGen::emitDataSection() {
                             else if (intTy->getBitwidth() == 64) rodataAsm.emitQWord(ci->getValue());
                         }
                     }
+                } else if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
+                    auto* intTy = static_cast<const ir::IntegerType*>(ci->getType());
+                    if (intTy->getBitwidth() == 8) rodataAsm.emitByte(ci->getValue());
+                    else if (intTy->getBitwidth() == 16) rodataAsm.emitWord(ci->getValue());
+                    else if (intTy->getBitwidth() == 32) rodataAsm.emitDWord(ci->getValue());
+                    else if (intTy->getBitwidth() == 64) rodataAsm.emitQWord(ci->getValue());
                 }
             }
             sym.size = rodataAsm.getCodeSize() - sym.value;
@@ -976,6 +1003,10 @@ void CodeGen::emitTextSection() {
     if (!emittedTextSection && os) {
         *os << ".text\n";
         *os << ".globl main\n"; // Entry point
+        emittedTextSection = true;
+    } else if (!emittedTextSection) {
+        // Alignment for .text section in binary mode
+        while (assembler->getCodeSize() % 16 != 0) assembler->emitByte(0x90);
         emittedTextSection = true;
     }
 }

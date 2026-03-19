@@ -1,4 +1,5 @@
 #include "ir/Type.h"
+#include "ir/IRContext.h"
 #include "codegen/target/TargetInfo.h"
 #include "ir/FunctionType.h"
 #include <unordered_map>
@@ -36,37 +37,43 @@ size_t Type::getTargetAlignment(const codegen::target::TargetInfo* target) const
 // For simplicity, we'll leak these singletons. In a real compiler,
 // you would have a context object that owns them.
 IntegerType* IntegerType::get(unsigned bitwidth) {
-    // Use a static map to memoize types
-    static std::unordered_map<unsigned, IntegerType*> intTypes;
-    
-    auto it = intTypes.find(bitwidth);
-    if (it != intTypes.end()) {
-        return it->second;
-    }
-    
-    IntegerType* type = new IntegerType(bitwidth);
-    intTypes[bitwidth] = type;
-    return type;
+    return nullptr; // Legacy
+}
+
+IntegerType* IntegerType::get(IRContext& ctx, unsigned bitwidth) {
+    return ctx.getIntegerType(bitwidth);
 }
 
 FloatType* FloatType::get() {
-    static FloatType S;
-    return &S;
+    return nullptr; // Legacy
+}
+
+FloatType* FloatType::get(IRContext& ctx) {
+    return ctx.getFloatType();
 }
 
 DoubleType* DoubleType::get() {
-    static DoubleType D;
-    return &D;
+    return nullptr; // Legacy
+}
+
+DoubleType* DoubleType::get(IRContext& ctx) {
+    return ctx.getDoubleType();
 }
 
 VoidType* VoidType::get() {
-    static VoidType V;
-    return &V;
+    return nullptr; // Legacy
+}
+
+VoidType* VoidType::get(IRContext& ctx) {
+    return ctx.getVoidType();
 }
 
 LabelType* LabelType::get() {
-    static LabelType L;
-    return &L;
+    return nullptr; // Legacy
+}
+
+LabelType* LabelType::get(IRContext& ctx) {
+    return ctx.getLabelType();
 }
 
 StructType* StructType::create(const std::string& name) {
@@ -83,18 +90,11 @@ UnionType* UnionType::create(const std::string& name, std::vector<Type*> element
 }
 
 PointerType* PointerType::get(Type* elementType, unsigned addressSpace) {
-    // Use a static map to memoize pointer types
-    static std::unordered_map<std::pair<Type*, unsigned>, PointerType*> ptrTypes;
-    
-    auto key = std::make_pair(elementType, addressSpace);
-    auto it = ptrTypes.find(key);
-    if (it != ptrTypes.end()) {
-        return it->second;
-    }
-    
-    PointerType* type = new PointerType(elementType, addressSpace);
-    ptrTypes[key] = type;
-    return type;
+    return nullptr; // Legacy
+}
+
+PointerType* PointerType::get(IRContext& ctx, Type* elementType, unsigned addressSpace) {
+    return ctx.getPointerType(elementType, addressSpace);
 }
 
 ArrayType* ArrayType::get(Type* elementType, uint64_t numElements) {

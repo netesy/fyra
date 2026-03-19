@@ -2,6 +2,7 @@
 #include "ir/BasicBlock.h"
 #include "ir/Value.h"
 #include "ir/Use.h"
+#include "ir/Constant.h"
 #include <iostream>
 
 namespace ir {
@@ -10,6 +11,24 @@ Instruction::Instruction(Type* ty, Opcode op, const std::vector<Value*>& operand
     : User(ty), opcode(op), parent(parent) {
     for (Value* v : operands) {
         addOperand(v);
+    }
+}
+
+static void printValue(std::ostream& os, Value* v) {
+    if (!v) {
+        os << "null";
+        return;
+    }
+    if (auto* ci = dynamic_cast<ConstantInt*>(v)) {
+        os << ci->getValue();
+    } else if (auto* cf = dynamic_cast<ConstantFP*>(v)) {
+        os << cf->getValue();
+    } else if (auto* cs = dynamic_cast<ConstantString*>(v)) {
+        os << "\"" << cs->getValue() << "\"";
+    } else if (v->getName().empty()) {
+        os << "<unnamed>";
+    } else {
+        os << "%" << v->getName();
     }
 }
 
@@ -110,11 +129,8 @@ void Instruction::print(std::ostream& os) const {
 
     for (const auto& operand : getOperands()) {
         os << " ";
-        if (operand->get()->getName().empty()) {
-            os << "(unnamed)";
-        } else {
-            os << "%" << operand->get()->getName();
-        }
+        if (operand) printValue(os, operand->get());
+        else os << "null_use";
     }
 }
 
@@ -132,11 +148,8 @@ void SyscallInstruction::print(std::ostream& os) const {
         if (getOperands().size() > 0) os << ", ";
     }
     for (size_t i = 0; i < getOperands().size(); ++i) {
-        if (getOperands()[i]->get()->getName().empty()) {
-            os << "(unnamed)";
-        } else {
-            os << "%" << getOperands()[i]->get()->getName();
-        }
+        if (getOperands()[i]) printValue(os, getOperands()[i]->get());
+        else os << "null_use";
         if (i < getOperands().size() - 1) os << ", ";
     }
     os << ")";

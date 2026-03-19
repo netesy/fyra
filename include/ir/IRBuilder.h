@@ -8,11 +8,13 @@
 #include "Type.h"
 #include <memory>
 
+#include "IRContext.h"
+
 namespace ir {
 
 class IRBuilder {
 public:
-    IRBuilder();
+    IRBuilder(std::shared_ptr<IRContext> ctx);
 
     void setModule(Module* m);
     void setInsertPoint(BasicBlock* bb);
@@ -134,6 +136,7 @@ public:
     // ... more instruction builder methods to come ...
 
 private:
+    std::shared_ptr<IRContext> context;
     Module* currentModule = nullptr;
     BasicBlock* insertPoint = nullptr;
     BasicBlock::instr_iterator insertIterator;

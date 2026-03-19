@@ -14,6 +14,8 @@ namespace target {
 
 namespace ir {
 
+class IRContext; // Forward declaration
+
 class Type {
 public:
     enum TypeID {
@@ -73,6 +75,7 @@ public:
     IntegerType(unsigned bitwidth) : Type(Type::IntegerTyID), bitwidth(bitwidth) {}
 
     static IntegerType* get(unsigned bitwidth);
+    static IntegerType* get(IRContext& ctx, unsigned bitwidth);
 
     unsigned getBitwidth() const { return bitwidth; }
     bool isSigned() const { return true; } // Default to signed
@@ -98,6 +101,7 @@ class FloatType : public Type {
 public:
     FloatType() : Type(Type::FloatTyID) {}
     static FloatType* get();
+    static FloatType* get(IRContext& ctx);
     
     // Override Type methods
     size_t getSize() const override { return 4; }
@@ -109,6 +113,7 @@ class DoubleType : public Type {
 public:
     DoubleType() : Type(Type::DoubleTyID) {}
     static DoubleType* get();
+    static DoubleType* get(IRContext& ctx);
     
     // Override Type methods
     size_t getSize() const override { return 8; }
@@ -120,6 +125,7 @@ class VoidType : public Type {
 public:
     VoidType() : Type(Type::VoidTyID) {}
     static VoidType* get();
+    static VoidType* get(IRContext& ctx);
     
     // Override Type methods
     size_t getSize() const override { return 0; }
@@ -131,6 +137,7 @@ class LabelType : public Type {
 public:
     LabelType() : Type(Type::LabelTyID) {}
     static LabelType* get();
+    static LabelType* get(IRContext& ctx);
     
     // Override Type methods
     size_t getSize() const override { return 0; }
@@ -144,6 +151,7 @@ public:
         : Type(Type::PointerTyID), elementType(elementType), addressSpace(addressSpace) {}
     
     static PointerType* get(Type* elementType, unsigned addressSpace = 0);
+    static PointerType* get(IRContext& ctx, Type* elementType, unsigned addressSpace = 0);
     
     Type* getElementType() const { return elementType; }
     unsigned getAddressSpace() const { return addressSpace; }

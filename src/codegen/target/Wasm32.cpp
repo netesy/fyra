@@ -15,8 +15,8 @@
 #include <set>
 #include <vector>
 #include <cassert>
+#include <iostream>
 #include <map>
-#include <algorithm>
 
 namespace codegen {
 namespace target {
@@ -237,7 +237,10 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
 
     emitFunctionPrologue(cg, func);
 
-    if (func.getBasicBlocks().empty()) return;
+    if (func.getBasicBlocks().empty()) {
+        emitFunctionEpilogue(cg, func);
+        return;
+    }
 
     // Linearize blocks using Reverse Post-Order (RPO)
     std::vector<ir::BasicBlock*> rpo;
@@ -421,9 +424,15 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
 }
 
 void Wasm32::emitHeader(CodeGen& cg) {
-    auto& assembler = cg.getAssembler();
-    assembler.emitDWord(0x6d736100); // magic
-    assembler.emitDWord(1);          // version
+    if (auto* os = cg.getTextStream()) {
+        *os << "(module\n";
+        *os << "  (memory 1)\n";
+        *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
+    } else {
+        auto& assembler = cg.getAssembler();
+        assembler.emitDWord(0x6d736100); // magic
+        assembler.emitDWord(1);          // version
+    }
 }
 
 void Wasm32::emitTypeSection(CodeGen& cg) {
@@ -949,7 +958,10 @@ void Wasm32::emitRet(CodeGen& cg, ir::Instruction& instr) {
         if (!instr.getOperands().empty()) {
             ir::Value* retVal = instr.getOperands()[0]->get();
             std::string retval = cg.getValueAsOperand(retVal);
-            if (!retval.empty()) {
+            if (retval.rfind("$", 0) == 0) {
+                 // Label
+                 *os << "  i32.const 0 ;; placeholder for " << retval << "\n";
+            } else if (!retval.empty()) {
                 *os << "  " << retval << "\n";
             }
         }
@@ -1245,13 +1257,25 @@ void Wasm32::emitCall(CodeGen& cg, ir::Instruction& instr) {
             ir::Value* arg = instr.getOperands()[i]->get();
             std::string argOperand = cg.getValueAsOperand(arg);
             if (!argOperand.empty()) {
-                *os << "  " << argOperand << "\n";
+                 *os << "  " << argOperand << "\n";
             }
         }
         
         // Emit the call
-        std::string callee = cg.getValueAsOperand(instr.getOperands()[0]->get());
-        *os << "  call $" << callee << "\n";
+        ir::Value* calleeVal = instr.getOperands()[0]->get();
+        std::string callee = cg.getValueAsOperand(calleeVal);
+        
+        if (callee.empty() || callee[0] != '$') {
+            // Indirect call or fallback
+            if (!callee.empty()) {
+                *os << "  " << callee << "\n";
+                *os << "  call_indirect (type $t0)\n"; // Placeholder type
+            } else {
+                *os << "  call $unknown_func\n";
+            }
+        } else {
+            *os << "  call " << callee << "\n";
+        }
 
         if (cg.getStackOffsets().count(&instr)) {
             *os << "  local.set " << cg.getStackOffset(&instr) << "\n";
@@ -1652,53 +1676,42 @@ void Wasm32::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
         ir::Value* size = instr.getOperands()[0]->get();
         std::string sizeOperand = cg.getValueAsOperand(size);
         
+        *os << "  ;; --- Bump Allocation ---\n";
         // Push allocation size to stack
         if (!sizeOperand.empty()) *os << "  " << sizeOperand << "\n";
         
-        // Align to 4 bytes for WASM32
-        *os << "  i32.const 3\n";
+        // Align to 8 bytes
+        *os << "  i32.const 7\n";
         *os << "  i32.add\n";
-        *os << "  i32.const -4\n";
+        *os << "  i32.const -8\n";
         *os << "  i32.and\n";
+        *os << "  local.set $temp_i32_0\n"; // Aligned size
 
-        // Check for reasonable allocation size (safety check)
-        *os << "  local.tee $temp_i32_0\n";   // Store aligned size in temp local
-        *os << "  i32.const 1048576\n";      // 1MB limit
-        *os << "  i32.gt_u\n";
-        *os << "  if\n";
-        *os << "    i32.const 0\n";         // Return null on oversized allocation
-        *os << "    return\n";
-        *os << "  end\n";
+        *os << "  global.get $__heap_ptr\n";
+        *os << "  local.set $temp_i32_1\n"; // Current pointer (result)
 
-        // Get current memory size (in pages)
-        *os << "  memory.size\n";
-        *os << "  i32.const 65536\n";        // Page size in bytes
-        *os << "  i32.mul\n";
-        *os << "  local.tee $temp_i32_1\n";  // Current end of memory
-
-        // Calculate new memory end
+        // Calculate new pointer
+        *os << "  local.get $temp_i32_1\n";
         *os << "  local.get $temp_i32_0\n";
         *os << "  i32.add\n";
-        // New end is now on top of stack
+        *os << "  local.tee $temp_i32_0\n"; // New pointer
 
-        // Check if we need to grow memory
+        // Check against memory size
         *os << "  memory.size\n";
         *os << "  i32.const 65536\n";
         *os << "  i32.mul\n";
-        *os << "  i32.gt_u\n";
+        *os << "  i32.lt_u\n";
         *os << "  if\n";
-        // Memory grow logic (simplified)
+        *os << "    local.get $temp_i32_0\n";
+        *os << "    global.set $__heap_ptr\n";
+        *os << "  else\n";
         *os << "    i32.const 1\n";
         *os << "    memory.grow\n";
-        *os << "    i32.const -1\n";
-        *os << "    i32.eq\n";
-        *os << "    if\n";
-        *os << "      i32.const 0\n";       // Return null on memory grow failure
-        *os << "      return\n";
-        *os << "    end\n";
+        *os << "    drop\n";
+        *os << "    local.get $temp_i32_0\n";
+        *os << "    global.set $__heap_ptr\n";
         *os << "  end\n";
 
-        // Return the allocated pointer
         *os << "  local.get $temp_i32_1\n";
 
         if (cg.getStackOffsets().count(&instr)) {

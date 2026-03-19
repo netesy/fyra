@@ -16,8 +16,6 @@ class Instruction; // Forward declaration
 class Function : public Value {
 public:
     Function(Type* ty, const std::string& name, Module* parent = nullptr);
-
-    const std::string& getName() const { return name; }
     Module* getParent() const { return parent; }
 
     std::list<std::unique_ptr<BasicBlock>>& getBasicBlocks() { return basicBlocks; }
@@ -45,7 +43,6 @@ public:
     void setReturnType(Type* ty) { type = ty; }
 
 private:
-    std::string name;
     bool exported = false;
     bool variadic = false;
     std::list<std::unique_ptr<Parameter>> parameters;
