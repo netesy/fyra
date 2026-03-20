@@ -7,10 +7,8 @@ namespace ir {
 
 Value::~Value() {
     // Break connections to all users before this value is destroyed.
-    // We use a copy of the use_list because u->set(nullptr) will call removeUse on this.
-    auto copy = use_list;
-    for (Use* u : copy) {
-        u->set(nullptr);
+    while (!use_list.empty()) {
+        use_list.front()->set(nullptr);
     }
 }
 

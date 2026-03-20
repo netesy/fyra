@@ -22,8 +22,8 @@ void test_inmemory_aarch64_exec() {
     Module module("test");
 
     // Create a simple function: int main() { return 42; }
-    auto* intTy = IntegerType::get(32);
-    auto* mainFunc = new Function(FunctionType::get(intTy, {}), "main", &module);
+    auto* intTy = module.getContext()->getIntegerType(32);
+    auto* mainFunc = new Function(module.getContext()->getFunctionType(intTy, {}), "main", &module);
     module.addFunction(std::unique_ptr<Function>(mainFunc));
     auto* entryBB = new BasicBlock(mainFunc, "entry");
     mainFunc->addBasicBlock(std::unique_ptr<BasicBlock>(entryBB));

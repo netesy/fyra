@@ -9,11 +9,11 @@
 
 namespace parser {
 
-Parser::Parser(std::istream& input) : lexer(input), fileFormat(FileFormat::FYRA) {
+Parser::Parser(std::istream& input) : lexer(input), context(std::make_shared<ir::IRContext>()), builder(context), fileFormat(FileFormat::FYRA) {
     getNextToken(); // Prime the first token
 }
 
-Parser::Parser(std::istream& input, FileFormat format) : lexer(input), fileFormat(format) {
+Parser::Parser(std::istream& input, FileFormat format) : lexer(input), context(std::make_shared<ir::IRContext>()), builder(context), fileFormat(format) {
     getNextToken(); // Prime the first token
 }
 
@@ -22,7 +22,7 @@ void Parser::getNextToken() {
 }
 
 std::unique_ptr<ir::Module> Parser::parseModule() {
-    module = std::make_unique<ir::Module>("my_module");
+    module = std::make_unique<ir::Module>("my_module", context);
     builder.setModule(module.get());
 
     while (currentToken.type != TokenType::Eof) {
@@ -98,7 +98,7 @@ void Parser::parseFunction() {
     if (currentToken.type != TokenType::RParen) return;
     getNextToken();
 
-    ir::Type* returnType = ir::VoidType::get();
+    ir::Type* returnType = context->getVoidType();
     if (currentToken.type == TokenType::Colon) {
         getNextToken();
         returnType = parseIRType();
@@ -158,25 +158,25 @@ void Parser::parseData() {
             getNextToken();
             if (typeStr == "b") {
                 if (currentToken.type == TokenType::StringLiteral) {
-                    constants.push_back(ir::ConstantString::get(currentToken.value));
+                    constants.push_back(context->getConstantString(currentToken.value));
                     getNextToken();
                 } else if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(8), std::stoll(currentToken.value, nullptr, 0)));
+                    constants.push_back(context->getConstantInt(context->getIntegerType(8), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             } else if (typeStr == "w") {
                 if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(32), std::stoll(currentToken.value, nullptr, 0)));
+                    constants.push_back(context->getConstantInt(context->getIntegerType(32), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             } else if (typeStr == "l") {
                 if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(64), std::stoll(currentToken.value, nullptr, 0)));
+                    constants.push_back(context->getConstantInt(context->getIntegerType(64), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             } else if (typeStr == "h") {
                 if (currentToken.type == TokenType::Number) {
-                    constants.push_back(ir::ConstantInt::get(ir::IntegerType::get(16), std::stoll(currentToken.value, nullptr, 0)));
+                    constants.push_back(context->getConstantInt(context->getIntegerType(16), std::stoll(currentToken.value, nullptr, 0)));
                     getNextToken();
                 }
             }
@@ -189,9 +189,9 @@ void Parser::parseData() {
     getNextToken(); // consume '}'
 
     // This is a simplification. We should create a proper array type.
-    auto* arrayType = ir::ArrayType::get(ir::IntegerType::get(8), 0);
+    auto* arrayType = context->getArrayType(context->getIntegerType(8), 0);
     auto* initializer = ir::ConstantArray::get(arrayType, constants);
-    module->addGlobalVariable(new ir::GlobalVariable(arrayType, name, initializer, false, ""));
+    module->addGlobalVariable(std::make_unique<ir::GlobalVariable>(arrayType, name, initializer, false, ""));
 }
 
 void Parser::parseBasicBlock(ir::Function* func) {
@@ -263,27 +263,27 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
             // Update constant types if explicit type is provided
             if (instrType && instrType->isIntegerTy()) {
                 if (auto* ci = dynamic_cast<ir::ConstantInt*>(lhs)) {
-                    lhs = ir::ConstantInt::get(static_cast<ir::IntegerType*>(instrType), ci->getValue());
+                    lhs = context->getConstantInt(static_cast<ir::IntegerType*>(instrType), ci->getValue());
                 }
                 if (auto* ci = dynamic_cast<ir::ConstantInt*>(rhs)) {
-                    rhs = ir::ConstantInt::get(static_cast<ir::IntegerType*>(instrType), ci->getValue());
+                    rhs = context->getConstantInt(static_cast<ir::IntegerType*>(instrType), ci->getValue());
                 }
             }
             
             // Handle arithmetic and comparison operations
-            if (opcodeStr == "add") instr = builder.createAdd(lhs, rhs, instrType);
-            else if (opcodeStr == "sub") instr = builder.createSub(lhs, rhs, instrType);
-            else if (opcodeStr == "mul") instr = builder.createMul(lhs, rhs, instrType);
-            else if (opcodeStr == "div") instr = builder.createDiv(lhs, rhs, instrType);
-            else if (opcodeStr == "udiv") instr = builder.createUdiv(lhs, rhs, instrType);
-            else if (opcodeStr == "rem") instr = builder.createRem(lhs, rhs, instrType);
-            else if (opcodeStr == "urem") instr = builder.createUrem(lhs, rhs, instrType);
-            else if (opcodeStr == "and") instr = builder.createAnd(lhs, rhs, instrType);
-            else if (opcodeStr == "or") instr = builder.createOr(lhs, rhs, instrType);
-            else if (opcodeStr == "xor") instr = builder.createXor(lhs, rhs, instrType);
-            else if (opcodeStr == "shl") instr = builder.createShl(lhs, rhs, instrType);
-            else if (opcodeStr == "shr") instr = builder.createShr(lhs, rhs, instrType);
-            else if (opcodeStr == "sar") instr = builder.createSar(lhs, rhs, instrType);
+            if (opcodeStr == "add") instr = builder.createAdd(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "sub") instr = builder.createSub(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "mul") instr = builder.createMul(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "div") instr = builder.createDiv(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "udiv") instr = builder.createUdiv(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "rem") instr = builder.createRem(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "urem") instr = builder.createUrem(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "and") instr = builder.createAnd(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "or") instr = builder.createOr(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "xor") instr = builder.createXor(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "shl") instr = builder.createShl(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "shr") instr = builder.createShr(lhs, rhs, instrType ? instrType : lhs->getType());
+            else if (opcodeStr == "sar") instr = builder.createSar(lhs, rhs, instrType ? instrType : lhs->getType());
             else if (opcodeStr == "eq") {
                 if (lhs && (lhs->getType()->isFloatTy() || lhs->getType()->isDoubleTy())) instr = builder.createCeqf(lhs, rhs);
                 else instr = builder.createCeq(lhs, rhs);
@@ -353,7 +353,7 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
                 ir::Value* val = pair.second;
                 if (phiType && phiType->isIntegerTy()) {
                     if (auto* ci = dynamic_cast<ir::ConstantInt*>(val)) {
-                        val = ir::ConstantInt::get(static_cast<ir::IntegerType*>(phiType), ci->getValue());
+                        val = context->getConstantInt(static_cast<ir::IntegerType*>(phiType), ci->getValue());
                     }
                 }
                 phiNode->addIncoming(val, pair.first);
@@ -476,19 +476,19 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
             // Using a default approach for now
             if (!destType) {
                 if (opcodeStr == "extub" || opcodeStr == "extuh" || opcodeStr == "extsb" || opcodeStr == "extsh") {
-                    destType = ir::IntegerType::get(32); // extend to word
+                    destType = context->getIntegerType(32); // extend to word
                 } else if (opcodeStr == "extuw" || opcodeStr == "extsw") {
-                    destType = ir::IntegerType::get(64); // extend to long
+                    destType = context->getIntegerType(64); // extend to long
                 } else if (opcodeStr == "exts") {
-                    destType = ir::DoubleType::get(); // float to double
+                    destType = context->getDoubleType(); // float to double
                 } else if (opcodeStr == "truncd") {
-                    destType = ir::FloatType::get(); // double to float
+                    destType = context->getFloatType(); // double to float
                 } else if (opcodeStr == "swtof" || opcodeStr == "uwtof") {
-                    destType = ir::FloatType::get(); // int to float
+                    destType = context->getFloatType(); // int to float
                 } else if (opcodeStr == "sltof" || opcodeStr == "ultof") {
-                    destType = ir::FloatType::get(); // long to float
+                    destType = context->getFloatType(); // long to float
                 } else if (opcodeStr == "dtosi" || opcodeStr == "dtoui" || opcodeStr == "stosi" || opcodeStr == "stoui") {
-                    destType = ir::IntegerType::get(32); // float/double to int
+                    destType = context->getIntegerType(32); // float/double to int
                 } else {
                     destType = srcType; // for cast, keep same type
                 }
@@ -547,7 +547,7 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
                 }
                 getNextToken();
             }
-            ir::Type* retType = ir::VoidType::get();
+            ir::Type* retType = context->getVoidType();
             if (currentToken.type == TokenType::Colon) {
                 getNextToken();
                 retType = parseIRType();
@@ -777,7 +777,7 @@ ir::Value* Parser::parseValue() {
 
         // Default to word size (32-bit) unless we're in a long-sized operation
         // This is a simplification.
-        return ir::ConstantInt::get(ir::IntegerType::get(32), val);
+        return context->getConstantInt(context->getIntegerType(32), val);
     }
     if (currentToken.type == TokenType::FloatLiteral) {
         std::string valStr = currentToken.value;
@@ -785,9 +785,9 @@ ir::Value* Parser::parseValue() {
         char type = valStr[0];
         double val = std::stod(valStr.substr(2));
         if (type == 's') {
-            return ir::ConstantFP::get(ir::FloatType::get(), val);
+            return context->getConstantFP(context->getFloatType(), val);
         } else {
-            return ir::ConstantFP::get(ir::DoubleType::get(), val);
+            return context->getConstantFP(context->getDoubleType(), val);
         }
     }
     if (currentToken.type == TokenType::Temporary) {
@@ -815,34 +815,34 @@ ir::Value* Parser::parseValue() {
         getNextToken();
         // This is a simplification. We don't have a proper function type, so we
         // just use a void type for now.
-        return new ir::GlobalValue(ir::VoidType::get(), name);
+        return new ir::GlobalValue(context->getVoidType(), name);
     }
     return nullptr;
 }
 
 ir::Type* Parser::parseIRType() {
     if (currentToken.type == TokenType::Keyword) {
-        if (currentToken.value == "w") { getNextToken(); return ir::IntegerType::get(32); }
-        if (currentToken.value == "l") { getNextToken(); return ir::IntegerType::get(64); }
-        if (currentToken.value == "s") { getNextToken(); return ir::FloatType::get(); }
-        if (currentToken.value == "d") { getNextToken(); return ir::DoubleType::get(); }
+        if (currentToken.value == "w") { getNextToken(); return context->getIntegerType(32); }
+        if (currentToken.value == "l") { getNextToken(); return context->getIntegerType(64); }
+        if (currentToken.value == "s") { getNextToken(); return context->getFloatType(); }
+        if (currentToken.value == "d") { getNextToken(); return context->getDoubleType(); }
         // Extended Fyra type support
-        if (currentToken.value == "b") { getNextToken(); return ir::IntegerType::get(8); }
-        if (currentToken.value == "h") { getNextToken(); return ir::IntegerType::get(16); }
-        if (currentToken.value == "void") { getNextToken(); return ir::VoidType::get(); }
+        if (currentToken.value == "b") { getNextToken(); return context->getIntegerType(8); }
+        if (currentToken.value == "h") { getNextToken(); return context->getIntegerType(16); }
+        if (currentToken.value == "void") { getNextToken(); return context->getVoidType(); }
         // Support for custom types with bit widths
         if (currentToken.value.front() == 'i' && currentToken.value.size() > 1) {
             std::string bitStr = currentToken.value.substr(1);
             try {
                 int bits = std::stoi(bitStr);
                 getNextToken();
-                return ir::IntegerType::get(bits);
+                return context->getIntegerType(bits);
             } catch (...) {
                 // Fall through to default
             }
         }
     }
-    return ir::VoidType::get();
+    return context->getVoidType();
 }
 
 std::vector<ir::Type*> Parser::parseStructElements() {

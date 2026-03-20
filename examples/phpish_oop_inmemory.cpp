@@ -13,7 +13,9 @@
 #include "ir/Type.h"
 #include "codegen/CodeGen.h"
 #include "codegen/target/SystemV_x64.h"
+#include "codegen/target/Windows_x64.h"
 #include "../src/codegen/execgen/elf.hh"
+#include "../src/codegen/execgen/pe.hh"
 
 namespace {
 
@@ -64,17 +66,18 @@ MiniProgram parseMiniPhpLike(const std::string& source) {
     return program;
 }
 
-int compileAndRun(const MiniProgram& program) {
+int compileAndRun(const MiniProgram& program, bool isWindows = false) {
     using namespace ir;
     using namespace codegen;
     using namespace codegen::target;
 
-    Module module("phpish_oop_inmemory");
-    IRBuilder builder;
+    auto ctx = std::make_shared<IRContext>();
+    Module module("phpish_oop_inmemory", ctx);
+    IRBuilder builder(ctx);
     builder.setModule(&module);
 
-    auto* i32 = IntegerType::get(32);
-    auto* i64 = IntegerType::get(64);
+    auto* i32 = ctx->getIntegerType(32);
+    auto* i64 = ctx->getIntegerType(64);
 
     // class method lowered to a standalone function: Counter_add(thisPtr, delta)
     const std::string loweredMethodName = program.className + "_" + program.methodName;
@@ -107,7 +110,13 @@ int compileAndRun(const MiniProgram& program) {
     auto* methodResult = builder.createCall(methodFn, {obj, argVal}, i32);
     builder.createRet(methodResult);
 
-    auto target = std::make_unique<SystemV_x64>();
+    std::unique_ptr<TargetInfo> target;
+    if (isWindows) {
+        target = std::make_unique<Windows_x64>();
+    } else {
+        target = std::make_unique<SystemV_x64>();
+    }
+
     CodeGen cg(module, std::move(target), nullptr);
     cg.emit(true);
 
@@ -115,42 +124,62 @@ int compileAndRun(const MiniProgram& program) {
     sections[".text"] = cg.getAssembler().getCode();
     sections[".data"] = cg.getRodataAssembler().getCode();
 
-    ElfGenerator elfGen("phpish_oop_inmemory");
-    elfGen.setMachine(62); // EM_X86_64
-    elfGen.setBaseAddress(0x400000);
+    const std::string outputPath = isWindows ? "./example_phpish.exe" : "./example_phpish";
 
-    std::vector<ElfGenerator::Symbol> symbols;
-    for (const auto& sym : cg.getSymbols()) {
-        symbols.push_back({sym.name, sym.value, sym.size,
-                           static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
+    if (isWindows) {
+        PEGenerator peGen(true); // 64-bit
+        std::vector<PEGenerator::Symbol> symbols;
+        for (const auto& sym : cg.getSymbols()) {
+            symbols.push_back({sym.name, sym.value, sym.size, static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
+        }
+        std::vector<PEGenerator::Relocation> relocs;
+        for (const auto& reloc : cg.getRelocations()) {
+            relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+        }
+        if (!peGen.generateFromCode(sections, symbols, relocs, outputPath)) {
+             throw std::runtime_error("PE generation failed: " + peGen.getLastError());
+        }
+    } else {
+        ElfGenerator elfGen("phpish_oop_inmemory");
+        elfGen.setMachine(62); // EM_X86_64
+        elfGen.setBaseAddress(0x400000);
+
+        std::vector<ElfGenerator::Symbol> symbols;
+        for (const auto& sym : cg.getSymbols()) {
+            symbols.push_back({sym.name, sym.value, sym.size,
+                               static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
+        }
+
+        std::vector<ElfGenerator::Relocation> relocs;
+        for (const auto& reloc : cg.getRelocations()) {
+            relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+        }
+
+        if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
+            throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
+        }
+        std::string chmodCmd = "chmod +x " + outputPath;
+        if (std::system(chmodCmd.c_str()) != 0) {
+            throw std::runtime_error("chmod failed for generated executable.");
+        }
     }
 
-    std::vector<ElfGenerator::Relocation> relocs;
-    for (const auto& reloc : cg.getRelocations()) {
-        relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-    }
-
-    const std::string outputPath = "./example_phpish_oop_inmemory_exec";
-    if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-        throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
-    }
-
-    std::string chmodCmd = "chmod +x " + outputPath;
-    if (std::system(chmodCmd.c_str()) != 0) {
-        throw std::runtime_error("chmod failed for generated executable.");
-    }
-
-    int result = std::system(outputPath.c_str());
+    std::string runCmd = isWindows ? "wine " + outputPath : outputPath;
+    int result = std::system(runCmd.c_str());
     if (result == -1) {
         throw std::runtime_error("Failed to run generated executable.");
     }
 
-    return WEXITSTATUS(result);
+    return isWindows ? (result & 0xFF) : WEXITSTATUS(result);
 }
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    bool testWindows = false;
+    if (argc > 1 && std::string(argv[1]) == "--windows") {
+        testWindows = true;
+    }
     const std::string source = R"(
 class Counter {
     var value;
@@ -169,9 +198,9 @@ main {
 
     try {
         MiniProgram program = parseMiniPhpLike(source);
-        int exitCode = compileAndRun(program);
+        int exitCode = compileAndRun(program, testWindows);
 
-        std::cout << "Tiny program returned: " << exitCode << '\n';
+        std::cout << (testWindows ? "Windows" : "Linux") << " program returned: " << exitCode << '\n';
         std::cout << "Expected: " << (program.initValue + program.methodArg) << '\n';
 
         if (exitCode != program.initValue + program.methodArg) {

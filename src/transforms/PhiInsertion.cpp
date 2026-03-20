@@ -49,7 +49,7 @@ void PhiInsertion::run(ir::Function& func, const DominanceFrontier& df) {
         }
 
         // 4. Insert phi nodes
-        ir::IRBuilder builder;
+        ir::IRBuilder builder(func.getParent()->getContextShared());
         for (ir::BasicBlock* bb : phi_blocks) {
             builder.setInsertPoint(bb);
             unsigned num_preds = bb->getPredecessors().size();

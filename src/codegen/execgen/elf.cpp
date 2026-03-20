@@ -271,7 +271,7 @@ bool ElfGenerator::Impl::generateFromCode(const std::map<std::string, std::vecto
             s.name = name;
             s.data = sections_data.at(name);
             s.size = s.data.size();
-            s.addralign = 0x1000; // Force page alignment for all sections in executable
+            s.addralign = (name == ".bss") ? 8 : 0x1000; // Force page alignment for loadable sections
             std::memset(&s.header, 0, sizeof(SectionHeader64)); // Zero-initialize section header
             sections_[s.name] = s;
             sectionOrder_.push_back(s.name);
@@ -477,8 +477,12 @@ void ElfGenerator::Impl::layoutSectionsForExecutable() {
         if (s->data.empty() && s->name != ".bss") continue;
 
         // Align each segment to page size to ensure correct permission separation on Linux
-        memOffset = align_func(memOffset, pageSize_);
-        fileOffset = align_func(fileOffset, pageSize_);
+        if (s->name != ".bss") {
+            memOffset = align_func(memOffset, pageSize_);
+            fileOffset = align_func(fileOffset, pageSize_);
+        } else {
+            memOffset = align_func(memOffset, 8);
+        }
 
         s->header.sh_addr = memOffset;
         s->header.sh_offset = fileOffset;

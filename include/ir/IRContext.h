@@ -83,6 +83,16 @@ private:
         size_t operator()(const ArrayKey& k) const { return std::hash<void*>{}(k.element) ^ k.size; }
     };
     std::unordered_map<ArrayKey, ArrayType*, ArrayHash> arrayTypes;
+
+    struct VectorKey {
+        Type* element;
+        unsigned size;
+        bool operator==(const VectorKey& o) const { return element == o.element && size == o.size; }
+    };
+    struct VectorHash {
+        size_t operator()(const VectorKey& k) const { return std::hash<void*>{}(k.element) ^ k.size; }
+    };
+    std::unordered_map<VectorKey, VectorType*, VectorHash> vectorTypes;
 };
 
 } // namespace ir

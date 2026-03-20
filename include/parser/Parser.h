@@ -37,6 +37,7 @@ private:
     ir::Type* parseIRType();
 
     Lexer lexer;
+    std::shared_ptr<ir::IRContext> context;
     ir::IRBuilder builder;
     Token currentToken;
     std::unique_ptr<ir::Module> module;

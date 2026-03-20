@@ -148,7 +148,7 @@ void CodeGen::emitDebugInfo() {
 }
 
 void CodeGen::emitFunction(ir::Function& func) {
-    std::cerr << "CodeGen: Emitting function: " << func.getName() << std::endl;
+
     // Set current function for WASM parameter resolution
     currentFunction = &func;
 
@@ -614,6 +614,12 @@ std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
     
     // Handle global values (functions)
     if (auto* func = dynamic_cast<const ir::Function*>(value)) {
+        if (!os) {
+            auto it = wasmFunctionIndices.find(func);
+            if (it != wasmFunctionIndices.end()) {
+                return std::to_string(it->second);
+            }
+        }
         std::string name = func->getName();
         if (name.rfind("$", 0) == 0) name = name.substr(1);
         return "$" + name;
@@ -626,6 +632,14 @@ std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
     }
 
     if (auto* global = dynamic_cast<const ir::GlobalValue*>(value)) {
+        if (auto* gFunc = module.getFunction(global->getName())) {
+             if (!os) {
+                auto it = wasmFunctionIndices.find(gFunc);
+                if (it != wasmFunctionIndices.end()) {
+                    return std::to_string(it->second);
+                }
+            }
+        }
         std::string name = global->getName();
         if (name.rfind("$", 0) == 0) name = name.substr(1);
         return "$" + name;

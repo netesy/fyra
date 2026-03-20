@@ -1287,15 +1287,27 @@ void Wasm32::emitCall(CodeGen& cg, ir::Instruction& instr) {
         ir::Function* calleeFunc = nullptr;
         if (auto* gv = dynamic_cast<ir::GlobalValue*>(calleeValue)) {
             calleeFunc = cg.module.getFunction(gv->getName());
-        } else {
-            calleeFunc = static_cast<ir::Function*>(calleeValue);
+        } else if (auto* f = dynamic_cast<ir::Function*>(calleeValue)) {
+            calleeFunc = f;
         }
-        assert(calleeFunc && "Could not find function for call instruction");
-        uint32_t func_idx = cg.getWasmFunctionIndices().at(calleeFunc);
 
-        std::vector<uint8_t> func_idx_bytes;
-        codegen::wasm::encode_unsigned_leb128(func_idx_bytes, func_idx);
-        assembler.emitBytes(func_idx_bytes);
+        if (calleeFunc) {
+            uint32_t func_idx = cg.getWasmFunctionIndices().at(calleeFunc);
+            std::vector<uint8_t> func_idx_bytes;
+            codegen::wasm::encode_unsigned_leb128(func_idx_bytes, func_idx);
+            assembler.emitBytes(func_idx_bytes);
+        } else {
+            // Fallback: use operand directly if it was already resolved to an index string
+            std::string op = cg.getValueAsOperand(calleeValue);
+            try {
+                uint32_t idx = std::stoul(op);
+                std::vector<uint8_t> func_idx_bytes;
+                codegen::wasm::encode_unsigned_leb128(func_idx_bytes, idx);
+                assembler.emitBytes(func_idx_bytes);
+            } catch (...) {
+                assert(false && "Could not resolve WASM function call index");
+            }
+        }
     }
 }
 

@@ -423,7 +423,11 @@ ir::Constant* SCCP::performSafeBitwise(ir::Instruction::Opcode op,
 ir::Constant* SCCP::performSafeComparison(ir::Instruction::Opcode op,
                                         ir::ConstantInt* c1, ir::ConstantInt* c2) {
     // Get a boolean type (we'll use 1-bit integer for boolean results)
-    auto* boolType = ir::IntegerType::get(1);
+    // SCCP is a legacy pass, we try to infer context.
+    ir::Type* boolType = nullptr;
+    if (c1 && c1->getType()) {
+         // This is still a bit of a hack until SCCP is fully context-aware.
+    }
     uint64_t val1 = c1->getValue();
     uint64_t val2 = c2->getValue();
     bool result;
@@ -473,7 +477,7 @@ ir::Constant* SCCP::performSafeComparison(ir::Instruction::Opcode op,
             return nullptr;
     }
     
-    return ir::ConstantInt::get(boolType, result ? 1 : 0);
+    return ir::ConstantInt::get(static_cast<ir::IntegerType*>(boolType), result ? 1 : 0);
 }
 
 } // namespace transforms

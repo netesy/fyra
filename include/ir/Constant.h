@@ -48,6 +48,8 @@ public:
     const std::string& getValue() const { return value; }
 
     ConstantString(const std::string& value);
+    void setType(Type* ty);
+
 private:
     std::string value;
 };

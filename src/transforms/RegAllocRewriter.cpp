@@ -30,7 +30,7 @@ bool RegAllocRewriter::run(ir::Function& func) {
     func.setStackFrameSize(stack_frame_size);
 
     // 3. Rewrite the IR
-    ir::IRBuilder builder;
+    ir::IRBuilder builder(func.getParent()->getContextShared());
     builder.setModule(func.getParent());
 
     for (auto& bb : func.getBasicBlocks()) {

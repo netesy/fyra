@@ -1,5 +1,7 @@
 #include "ir/BasicBlock.h"
 #include "ir/Function.h"
+#include "ir/Module.h"
+#include "ir/IRContext.h"
 #include "ir/Type.h"
 #include <algorithm>
 #include <iostream>
@@ -7,7 +9,7 @@
 namespace ir {
 
 BasicBlock::BasicBlock(Function* parent, const std::string& name)
-    : Value(LabelType::get()), parent(parent) {
+    : Value(parent->getParent()->getContext()->getLabelType()), parent(parent) {
     setName(name);
 }
 

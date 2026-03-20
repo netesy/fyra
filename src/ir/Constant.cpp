@@ -24,7 +24,11 @@ ConstantArray* ConstantArray::get(ArrayType* ty, const std::vector<Constant*>& v
     return new ConstantArray(ty, values);
 }
 
-ConstantString::ConstantString(const std::string& value) : Constant(ArrayType::get(IntegerType::get(8), value.length() + 1)), value(value) {}
+ConstantString::ConstantString(const std::string& value) : Constant(nullptr), value(value) {}
+
+void ConstantString::setType(Type* ty) {
+    type = ty;
+}
 
 ConstantString* ConstantString::get(const std::string& value) {
     return new ConstantString(value);

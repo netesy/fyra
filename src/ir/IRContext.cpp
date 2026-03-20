@@ -79,9 +79,12 @@ ArrayType* IRContext::getArrayType(Type* elementType, uint64_t numElements) {
 }
 
 VectorType* IRContext::getVectorType(Type* elementType, unsigned numElements) {
+    VectorKey key{elementType, numElements};
+    if (vectorTypes.count(key)) return vectorTypes[key];
     auto ty = std::make_unique<VectorType>(elementType, numElements);
     VectorType* ptr = ty.get();
     ownedTypes.push_back(std::move(ty));
+    vectorTypes[key] = ptr;
     return ptr;
 }
 
@@ -120,6 +123,7 @@ ConstantFP* IRContext::getConstantFP(Type* ty, double value) {
 ConstantString* IRContext::getConstantString(const std::string& value) {
     auto c = std::unique_ptr<ConstantString>(new ConstantString(value));
     ConstantString* ptr = c.get();
+    ptr->setType(getArrayType(getIntegerType(8), value.length() + 1));
     ownedConstants.push_back(std::move(c));
     return ptr;
 }

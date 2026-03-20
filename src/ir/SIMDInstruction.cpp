@@ -1,4 +1,8 @@
 #include "ir/SIMDInstruction.h"
+#include "ir/BasicBlock.h"
+#include "ir/Function.h"
+#include "ir/Module.h"
+#include "ir/IRContext.h"
 #include "ir/Type.h"
 #include "ir/Use.h"
 #include <iostream>
@@ -250,7 +254,7 @@ VectorInstruction* SIMDBuilder::createVectorLoad(VectorType* type, Value* ptr) {
 
 VectorInstruction* SIMDBuilder::createVectorStore(Value* vec, Value* ptr) {
     std::vector<Value*> operands = {vec, ptr};
-    return new VectorInstruction(VoidType::get(), Instruction::VStore, operands);
+    return new VectorInstruction(nullptr, Instruction::VStore, operands);
 }
 
 VectorInstruction* SIMDBuilder::createBroadcast(VectorType* type, Value* scalar) {
@@ -289,7 +293,10 @@ std::vector<VectorInstruction*> SIMDBuilder::vectorizeScalarLoop(
         // Create vector equivalent
         Type* scalarType = inst->getType();
         unsigned numElements = vectorWidth / (scalarType->getSize() * 8);
-        VectorType* vectorType = VectorType::get(scalarType, numElements);
+        // SIMDBuilder is a legacy class and needs a context.
+        // For now, we take it from the instruction's parent function's module.
+        auto* ctx = inst->getParent()->getParent()->getParent()->getContext();
+        VectorType* vectorType = ctx->getVectorType(scalarType, numElements);
         
         // Map scalar opcode to vector opcode
         Instruction::Opcode vectorOp;

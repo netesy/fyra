@@ -266,9 +266,14 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     // Stack alignment logic for System V x64:
     // Entry RSP = 16N + 8
     // 1. push rbp (8) -> RSP = 16N
-    // 2. sub stack_size -> RSP = 16N - stack_size
-    // We want (stack_size) % 16 == 0.
-    int additional_stack = (locals_size + 15) & ~15;
+    // 2. sub locals_size -> RSP = 16N - locals_size
+    // 3. push 5 callee-saved registers (40) -> RSP = 16N - locals_size - 40
+    // We want (locals_size + 40) % 16 == 0.
+    // 40 % 16 = 8. So we want locals_size % 16 == 8.
+    int additional_stack = locals_size;
+    if ((additional_stack + 40) % 16 != 0) {
+        additional_stack += 16 - ((additional_stack + 40) % 16);
+    }
 
     emitPrologue(cg, additional_stack);
 
@@ -540,15 +545,15 @@ void SystemV_x64::emitDiv(CodeGen& cg, ir::Instruction& instr) {
         emitLoadValue(cg, assembler, lhs, 0); // Load to %rax
 
         if (instr.getOpcode() == ir::Instruction::Div) {
-            if (sizeSuffix == "b") assembler.emitByte(0x98);
-            else if (sizeSuffix == "w") { assembler.emitByte(0x66); assembler.emitByte(0x99); }
-            else if (sizeSuffix == "l") assembler.emitByte(0x99);
-            else { assembler.emitByte(0x48); assembler.emitByte(0x99); }
+            if (sizeSuffix == "b") assembler.emitByte(0x98); // cbw
+            else if (sizeSuffix == "w") { assembler.emitByte(0x66); assembler.emitByte(0x99); } // cwd
+            else if (sizeSuffix == "l") assembler.emitByte(0x99); // cdq
+            else { assembler.emitByte(0x48); assembler.emitByte(0x99); } // cqo
         } else {
             if (sizeSuffix == "b") { assembler.emitByte(0xB4); assembler.emitByte(0x00); } // mov $0, %ah
-            else {
-                emitLoadValue(cg, assembler, ir::ConstantInt::get(ir::IntegerType::get(32), 0), 2); // rdx=0
-            }
+            else if (sizeSuffix == "w") { assembler.emitBytes({0x66, 0x31, 0xD2}); } // xor %dx, %dx
+            else if (sizeSuffix == "l") { assembler.emitBytes({0x31, 0xD2}); } // xor %edx, %edx
+            else { assembler.emitBytes({0x48, 0x31, 0xD2}); } // xor %rdx, %rdx
         }
 
         uint8_t div_opcode = (instr.getOpcode() == ir::Instruction::Div) ? 7 : 6;
@@ -612,9 +617,9 @@ void SystemV_x64::emitRem(CodeGen& cg, ir::Instruction& instr) {
             else { assembler.emitByte(0x48); assembler.emitByte(0x99); }
         } else {
             if (sizeSuffix == "b") { assembler.emitByte(0xB4); assembler.emitByte(0x00); }
-            else {
-                emitLoadValue(cg, assembler, ir::ConstantInt::get(ir::IntegerType::get(32), 0), 2);
-            }
+            else if (sizeSuffix == "w") { assembler.emitBytes({0x66, 0x31, 0xD2}); }
+            else if (sizeSuffix == "l") { assembler.emitBytes({0x31, 0xD2}); }
+            else { assembler.emitBytes({0x48, 0x31, 0xD2}); }
         }
 
         uint8_t div_opcode = (instr.getOpcode() == ir::Instruction::Rem) ? 7 : 6;
