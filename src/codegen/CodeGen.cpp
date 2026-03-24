@@ -24,6 +24,21 @@
 #include <sstream>
 
 namespace codegen {
+namespace {
+std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& targetName) {
+    std::string n = targetName;
+    std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+    if (n == "linux" || n == "systemv" || n == "x86_64") return std::make_unique<target::SystemV_x64>();
+    if (n == "windows" || n == "win64" || n == "windows-amd64" || n == "windows-x64") return std::make_unique<target::Windows_x64>();
+    if (n == "windows-arm64") return std::make_unique<target::Windows_AArch64>();
+    if (n == "macos" || n == "darwin" || n == "macos-x64") return std::make_unique<target::MacOS_x64>();
+    if (n == "macos-aarch64" || n == "macos-arm64") return std::make_unique<target::MacOS_AArch64>();
+    if (n == "wasm32") return std::make_unique<target::Wasm32>();
+    if (n == "aarch64") return std::make_unique<target::AArch64>();
+    if (n == "riscv64") return std::make_unique<target::RiscV64>();
+    return nullptr;
+}
+}
 
 CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std::ostream* os)
     : module(module), targetInfo(std::move(ti)),
@@ -197,24 +212,6 @@ std::vector<std::string> CodeGen::CompilationResult::getAllErrors() const {
 void CodeGen::setValidationLevel(validation::ValidationLevel level) { if (validator_) validator_->setValidationLevel(level); }
 void CodeGen::enableVerboseOutput(bool enable) { verboseOutput_ = enable; if (validator_) validator_->enableDetailedReporting(enable); }
 
-std::unique_ptr<CodeGen> CodeGenFactory::create(ir::Module& module, const std::string& targetName) {
-    auto ti = createTargetInfo(targetName); if (!ti) return nullptr;
-    return std::make_unique<CodeGen>(module, std::move(ti));
-}
-
-std::unique_ptr<target::TargetInfo> CodeGenFactory::createTargetInfo(const std::string& targetName) {
-    std::string n = targetName; std::transform(n.begin(), n.end(), n.begin(), ::tolower);
-    if (n == "linux" || n == "systemv" || n == "x86_64") return std::make_unique<target::SystemV_x64>();
-    if (n == "windows" || n == "win64" || n == "windows-amd64") return std::make_unique<target::Windows_x64>();
-    if (n == "windows-arm64") return std::make_unique<target::Windows_AArch64>();
-    if (n == "macos" || n == "darwin") return std::make_unique<target::MacOS_x64>();
-    if (n == "macos-aarch64") return std::make_unique<target::MacOS_AArch64>();
-    if (n == "wasm32") return std::make_unique<target::Wasm32>();
-    if (n == "aarch64") return std::make_unique<target::AArch64>();
-    if (n == "riscv64") return std::make_unique<target::RiscV64>();
-    return nullptr;
-}
-
 void CodeGen::initializeInstructionPatterns() {}
 void CodeGen::performTargetOptimizations(ir::Function&) {}
 std::string CodeGen::allocateRegister(ir::Value*) { return ""; }
@@ -324,9 +321,33 @@ void CodeGen::selectMemoryInstruction(ir::Instruction&) {}
 void CodeGen::selectComparisonInstruction(ir::Instruction&) {}
 void CodeGen::selectControlFlowInstruction(ir::Instruction&) {}
 void CodeGen::emitBasicBlockContent(ir::BasicBlock& bb) { for (auto& instr : bb.getInstructions()) emitInstruction(*instr); }
-bool CodeGen::isImmediateValue(ir::Value*, int64_t&) { return false; }
-bool CodeGen::canFoldIntoMemoryOperand(ir::Value*) { return false; }
-std::string CodeGen::getOptimizedOperand(ir::Value* v) { return getValueAsOperand(v); }
+bool CodeGen::isImmediateValue(ir::Value* value, int64_t& imm) {
+    if (auto* ci = dynamic_cast<ir::ConstantInt*>(value)) {
+        imm = static_cast<int64_t>(ci->getValue());
+        return true;
+    }
+    return false;
+}
+
+bool CodeGen::canFoldIntoMemoryOperand(ir::Value* value) {
+    if (!value) return false;
+    if (auto* gv = dynamic_cast<ir::GlobalValue*>(value)) return true;
+    if (auto* gvar = dynamic_cast<ir::GlobalVariable*>(value)) return true;
+
+    if (stackOffsets.count(value)) {
+        const int32_t off = stackOffsets[value];
+        return off >= -2048 && off <= 2047;
+    }
+    return false;
+}
+
+std::string CodeGen::getOptimizedOperand(ir::Value* value) {
+    int64_t imm = 0;
+    if (isImmediateValue(value, imm)) {
+        return targetInfo->getImmediatePrefix() + std::to_string(imm);
+    }
+    return getValueAsOperand(value);
+}
 void CodeGen::emitWasmFunctionSignature(ir::Function&) {}
 std::string CodeGen::getWasmValueAsOperand(const ir::Value*) { return ""; }
 
@@ -348,8 +369,9 @@ CodeGenPipeline::PipelineResult CodeGenPipeline::execute(ir::Module& module, con
 
 CodeGenPipeline::PipelineResult CodeGenPipeline::executeForTarget(ir::Module& module, const std::string& t, const PipelineConfig& config) {
     PipelineResult result;
-    auto cg = CodeGenFactory::create(module, t);
-    if (!cg) { result.success = false; return result; }
+    auto targetInfo = createTargetInfoForName(t);
+    if (!targetInfo) { result.success = false; return result; }
+    auto cg = std::make_unique<CodeGen>(module, std::move(targetInfo));
     result.targetResults[t] = cg->compileToObject(config.outputPrefix + "_" + t, config.enableValidation, config.enableObjectGeneration);
     result.success = result.targetResults[t].success;
     return result;

@@ -16,6 +16,10 @@ using namespace codegen;
 using namespace codegen::target;
 
 namespace {
+    std::string getEpilogueLabel(const ir::Function* func) {
+        return func ? func->getName() + "_epilogue" : ".L_epilogue";
+    }
+
     void emitRegMem(execgen::Assembler& assembler, uint8_t rex, const std::vector<uint8_t>& opcodes, uint8_t reg, int32_t offset) {
         if (rex) assembler.emitByte(rex);
         for (uint8_t op : opcodes) assembler.emitByte(op);
@@ -54,6 +58,28 @@ namespace {
             }
         }
         return baseOpcode;
+    }
+
+    std::string getLoadStoreSuffix(const ir::Type* type) {
+        if (type->isPointerTy()) return "q";
+        if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
+            switch (intTy->getBitwidth()) {
+                case 8: return "b";
+                case 16: return "w";
+                case 32: return "l";
+                case 64: return "q";
+                default: return "q";
+            }
+        }
+        if (type->isFloatTy()) return "ss";
+        if (type->isDoubleTy()) return "sd";
+        return "q";
+    }
+
+    std::string getMoveInstruction(const ir::Type* type) {
+        if (type->isFloatTy()) return "movss";
+        if (type->isDoubleTy()) return "movsd";
+        return "mov" + getLoadStoreSuffix(type);
     }
 
     void emitLoadValue(CodeGen& cg, execgen::Assembler& assembler, ir::Value* val, uint8_t reg) {
@@ -322,10 +348,19 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 
     if (auto* os = cg.getTextStream()) {
         int_reg_idx = 0;
+        int float_reg_idx = 0;
         for (auto& param : func.getParameters()) {
-            if (int_reg_idx < 6) {
-                *os << "  movq " << integerArgRegs[int_reg_idx] << ", " << cg.getStackOffset(param.get()) << "(%rbp)\n";
-                int_reg_idx++;
+            const ir::Type* paramType = param->getType();
+            if (paramType->isFloatingPoint()) {
+                if (float_reg_idx < static_cast<int>(floatArgRegs.size())) {
+                    std::string instr = paramType->isFloatTy() ? "movss" : "movsd";
+                    *os << "  " << instr << " " << floatArgRegs[float_reg_idx++] << ", "
+                        << cg.getStackOffset(param.get()) << "(%rbp)\n";
+                }
+            } else if (int_reg_idx < 6) {
+                std::string suffix = getLoadStoreSuffix(paramType);
+                std::string srcReg = getRegisterName(integerArgRegs[int_reg_idx++], paramType);
+                *os << "  mov" << suffix << " " << srcReg << ", " << cg.getStackOffset(param.get()) << "(%rbp)\n";
             }
         }
     } else {
@@ -353,6 +388,9 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void SystemV_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    if (auto* os = cg.getTextStream()) {
+        *os << getEpilogueLabel(&func) << ":\n";
+    }
     emitEpilogue(cg);
 }
 
@@ -989,7 +1027,9 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
             if (dynamic_cast<ir::IntegerType*>(arg->getType())) {
                 if (int_reg_idx < int_regs.size()) {
                     std::string argOperand = cg.getValueAsOperand(arg);
-                    *os << "  movq " << argOperand << ", " << int_regs[int_reg_idx++] << "\n";
+                    std::string suffix = getLoadStoreSuffix(arg->getType());
+                    std::string dstReg = getRegisterName(int_regs[int_reg_idx++], arg->getType());
+                    *os << "  mov" << suffix << " " << argOperand << ", " << dstReg << "\n";
                 } else {
                     stack_args.push_back(arg);
                 }
@@ -1011,7 +1051,9 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
 
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
             std::string destOperand = cg.getValueAsOperand(&instr);
-            *os << "  movq " << getIntegerReturnRegister() << ", " << destOperand << "\n";
+            std::string suffix = getLoadStoreSuffix(instr.getType());
+            std::string srcReg = getRegisterName(getIntegerReturnRegister(), instr.getType());
+            *os << "  mov" << suffix << " " << srcReg << ", " << destOperand << "\n";
         }
     } else {
         auto& assembler = cg.getAssembler();
@@ -1080,28 +1122,10 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-const std::vector<std::string>& SystemV_x64::getIntegerArgumentRegisters() const {
-    return this->integerArgRegs;
-}
-
-const std::vector<std::string>& SystemV_x64::getFloatArgumentRegisters() const {
-    return this->floatArgRegs;
-}
-
-const std::string& SystemV_x64::getIntegerReturnRegister() const {
-    return this->intReturnReg;
-}
-
-const std::string& SystemV_x64::getFloatReturnRegister() const {
-    return this->floatReturnReg;
-}
-
 const std::vector<std::string>& SystemV_x64::getRegisters(RegisterClass regClass) const {
     if (regClass == RegisterClass::Float) return floatRegs;
     return integerRegs;
 }
-
-size_t SystemV_x64::getMaxRegistersForArgs() const { return 6; }
 
 void SystemV_x64::emitPassArgument(CodeGen& cg, size_t argIndex,
                                   const std::string& value, const ir::Type* type) {
@@ -1601,10 +1625,17 @@ void SystemV_x64::emitRet(CodeGen& cg, ir::Instruction& instr) {
         if (instr.getOperands().size() > 0) {
             ir::Value* retVal = instr.getOperands()[0]->get();
             std::string retOp = cg.getValueAsOperand(retVal);
-            std::string sizeSuffix = getLoadStoreSuffix(retVal->getType());
-            std::string reg = getRegisterName("%rax", retVal->getType());
-            *os << "  mov" << sizeSuffix << " " << retOp << ", " << reg << "\n";
+            if (retVal->getType()->isFloatingPoint()) {
+                std::string movInstr = retVal->getType()->isFloatTy() ? "movss" : "movsd";
+                *os << "  " << movInstr << " " << retOp << ", %xmm0\n";
+            } else {
+                std::string sizeSuffix = getLoadStoreSuffix(retVal->getType());
+                std::string reg = getRegisterName("%rax", retVal->getType());
+                *os << "  mov" << sizeSuffix << " " << retOp << ", " << reg << "\n";
+            }
         }
+        *os << "  jmp " << getEpilogueLabel(instr.getParent()->getParent()) << "\n";
+        return;
     } else {
         if (!instr.getOperands().empty()) {
             auto& assembler = cg.getAssembler();
@@ -1623,7 +1654,14 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
     ir::BasicBlock* currentBB = instr.getParent();
 
     if (auto* os = cg.getTextStream()) {
-        *os << "  cmpq $0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        ir::Value* cond = instr.getOperands()[0]->get();
+        std::string condOp = cg.getValueAsOperand(cond);
+        std::string suffix = getLoadStoreSuffix(cond->getType());
+        if (suffix == "ss" || suffix == "sd") {
+            *os << "  # unsupported floating-point branch condition, treating as integer compare\n";
+            suffix = "q";
+        }
+        *os << "  cmp" << suffix << " $0, " << condOp << "\n";
 
         // We can't easily lower PHIs on conditional branches if both targets have PHIs
         // because we might clobber the condition or values needed for the other branch.

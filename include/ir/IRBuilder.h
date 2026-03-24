@@ -14,6 +14,7 @@ namespace ir {
 
 class IRBuilder {
 public:
+    IRBuilder();
     IRBuilder(std::shared_ptr<IRContext> ctx);
 
     void setModule(Module* m);

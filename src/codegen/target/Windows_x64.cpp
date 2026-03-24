@@ -22,6 +22,10 @@ namespace {
         }
         return "qword";
     }
+
+    std::string getEpilogueLabel(const ir::Function* func) {
+        return func ? func->getName() + "_epilogue" : "L_epilogue";
+    }
 }
 
 namespace codegen {
@@ -59,6 +63,7 @@ void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         if (!isLeaf) break;
     }
     if (!isLeaf) total_stack += 32;
+    if (total_stack % 16 != 0) total_stack += 16 - (total_stack % 16);
 
     emitPrologue(cg, total_stack);
     
@@ -71,7 +76,12 @@ void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     }
 }
 
-void Windows_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function&) { }
+void Windows_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    if (auto* os = cg.getTextStream()) {
+        *os << getEpilogueLabel(&func) << ":\n";
+    }
+    emitEpilogue(cg);
+}
 
 void Windows_x64::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type*) {
     if (auto* os = cg.getTextStream()) {
@@ -226,8 +236,10 @@ void Windows_x64::emitRet(CodeGen& cg, ir::Instruction& i) {
             std::string src = cg.getValueAsOperand(i.getOperands()[0]->get());
             if (src != "rax") *os << "  mov rax, " << src << "\n";
         }
-        emitEpilogue(cg);
+        *os << "  jmp " << getEpilogueLabel(i.getParent()->getParent()) << "\n";
+        return;
     }
+    emitEpilogue(cg);
 }
 void Windows_x64::emitAlloc(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {

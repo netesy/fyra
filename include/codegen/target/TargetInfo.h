@@ -119,6 +119,9 @@ public:
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
     virtual int32_t getStackOffset(const CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
+    virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const {
+        return func.getName() + "_epilogue";
+    }
 protected:
     int32_t currentStackOffset = 0;
 };

@@ -15,6 +15,9 @@ namespace codegen {
 namespace target {
 
 namespace {
+std::string getEpilogueLabel(const ir::Function* func) {
+    return func ? func->getName() + "_epilogue" : ".L_epilogue";
+}
 
 std::string getLoadInstr(const ir::Type* type) {
     if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
@@ -333,6 +336,9 @@ void AArch64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void AArch64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    if (auto* os = cg.getTextStream()) {
+        *os << getEpilogueLabel(&func) << ":\n";
+    }
     bool hasCalls = false;
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
@@ -877,6 +883,10 @@ void AArch64::emitRet(CodeGen& cg, ir::Instruction& instr) {
             auto& assembler = cg.getAssembler();
             emitLoadValue(cg, assembler, retVal, 0);
         }
+    }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  b " << getEpilogueLabel(instr.getParent()->getParent()) << "\n";
+        return;
     }
     emitFunctionEpilogue(cg, *instr.getParent()->getParent());
 }

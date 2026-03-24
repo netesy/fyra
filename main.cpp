@@ -75,10 +75,10 @@ int main(int argc, char** argv) {
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
-        std::cerr << "  --enhanced                                       Use enhanced CodeGen with validation and object generation" << std::endl;
+        std::cerr << "  --enhanced                                       (Deprecated) Uses standard CodeGen path" << std::endl;
         std::cerr << "  --verbose                                        Enable verbose output" << std::endl;
         std::cerr << "  --pipeline                                       Run full compilation pipeline for all targets" << std::endl;
-        std::cerr << "  --gen-exec                                       Generate an executable file (requires --enhanced)" << std::endl;
+        std::cerr << "  --gen-exec                                       Generate an executable file" << std::endl;
         std::cerr << "Supported input formats:" << std::endl;
         std::cerr << "  .fyra  - Fyra Intermediate Language format" << std::endl;
         std::cerr << "  .fy    - Fyra Intermediate Language format (alternative extension)" << std::endl;
@@ -294,15 +294,7 @@ int main(int argc, char** argv) {
         
     } else if (useEnhanced) {
         // Use enhanced CodeGen with validation and object generation
-        std::cout << "--- Using Enhanced CodeGen with Validation ---\n" << std::flush;
-        
-        auto enhancedCodeGen = codegen::CodeGenFactory::create(*module, targetName);
-        if (!enhancedCodeGen) {
-            std::cerr << "Error: Failed to create enhanced code generator for target: " << targetName << std::endl;
-            return 1;
-        }
-        
-        enhancedCodeGen->enableVerboseOutput(verboseOutput);
+        std::cout << "--- Using CodeGen with Validation ---\n" << std::flush;
         
         std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
         if (generateExecutable) {
@@ -414,19 +406,33 @@ int main(int argc, char** argv) {
                 }
             }
         } else {
-            auto enhancedCodeGen = codegen::CodeGenFactory::create(*module, targetName);
-            if (!enhancedCodeGen) {
-                std::cerr << "Error: Failed to create enhanced code generator for target: " << targetName << std::endl;
-                return 1;
+            std::unique_ptr<codegen::target::TargetInfo> targetInfo;
+            if (target == "windows" || target == "windows-amd64" || target == "windows-x64") {
+                targetInfo = std::make_unique<codegen::target::Windows_x64>();
+            } else if (target == "windows-arm64") {
+                targetInfo = std::make_unique<codegen::target::Windows_AArch64>();
+            } else if (target == "aarch64") {
+                targetInfo = std::make_unique<codegen::target::AArch64>();
+            } else if (target == "wasm32") {
+                targetInfo = std::make_unique<codegen::target::Wasm32>();
+            } else if (target == "riscv64") {
+                targetInfo = std::make_unique<codegen::target::RiscV64>();
+            } else if (target == "macos" || target == "macos-x64") {
+                targetInfo = std::make_unique<codegen::target::MacOS_x64>();
+            } else if (target == "macos-aarch64" || target == "macos-arm64") {
+                targetInfo = std::make_unique<codegen::target::MacOS_AArch64>();
+            } else {
+                targetInfo = std::make_unique<codegen::target::SystemV_x64>();
             }
-            
-            enhancedCodeGen->enableVerboseOutput(verboseOutput);
+
+            codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
+            codeGen.enableVerboseOutput(verboseOutput);
 
             std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
-            auto result = enhancedCodeGen->compileToObject(outputPrefix, enableValidation, generateObject, false);
+            auto result = codeGen.compileToObject(outputPrefix, enableValidation, generateObject, false);
 
             if (result.success) {
-                std::cout << "Enhanced compilation successful in " << result.totalTimeMs << "ms" << std::endl;
+                std::cout << "Compilation successful in " << result.totalTimeMs << "ms" << std::endl;
                 std::cout << "Assembly: " << result.assemblyPath << std::endl;
                 if (generateObject && !result.objectPath.empty()) {
                     std::cout << "Object: " << result.objectPath << std::endl;
@@ -445,7 +451,7 @@ int main(int argc, char** argv) {
                     }
                 }
             } else {
-                std::cerr << "Enhanced compilation failed" << std::endl;
+                std::cerr << "Compilation failed" << std::endl;
                 auto errors = result.getAllErrors();
                 for (const auto& error : errors) {
                     std::cerr << "Error: " << error << std::endl;
