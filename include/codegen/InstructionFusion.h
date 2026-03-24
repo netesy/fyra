@@ -4,7 +4,8 @@
 #include "ir/SIMDInstruction.h"
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
-#include "codegen/CodeGen.h"
+namespace codegen { class CodeGen; }
+
 #include <vector>
 #include <map>
 #include <functional>

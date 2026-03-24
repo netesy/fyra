@@ -27,7 +27,6 @@ set(LIB_SOURCES
     src/parser/Lexer.cpp
     src/parser/Parser.cpp
     src/codegen/CodeGen.cpp
-    src/codegen/EnhancedCodeGen.cpp
     src/codegen/validation/TargetABIRegistry.cpp
     src/codegen/validation/ASMValidator.cpp
     src/codegen/validation/Validators.cpp

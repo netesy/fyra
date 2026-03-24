@@ -147,12 +147,19 @@ public:
 
     Opcode getOpcode() const { return opcode; }
     BasicBlock* getParent() const { return parent; }
+    void setParent(BasicBlock* p) { parent = p; }
 
     void print(std::ostream& os) const override;
+
+    // Register allocation support
+    int getPhysicalRegister() const { return physicalReg; }
+    void setPhysicalRegister(int reg) { physicalReg = reg; }
+    bool hasPhysicalRegister() const { return physicalReg != -1; }
 
 private:
     Opcode opcode;
     BasicBlock* parent;
+    int physicalReg = -1;
 };
 
 class SyscallInstruction : public Instruction {

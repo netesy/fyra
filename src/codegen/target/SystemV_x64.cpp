@@ -1,6 +1,8 @@
 #include "codegen/target/SystemV_x64.h"
 #include "codegen/CodeGen.h"
 #include "ir/Instruction.h"
+#include "ir/PhiNode.h"
+#include "ir/BasicBlock.h"
 #include "ir/Use.h"
 #include "ir/Type.h"
 #include "ir/Function.h"
@@ -56,6 +58,30 @@ namespace {
 
     void emitLoadValue(CodeGen& cg, execgen::Assembler& assembler, ir::Value* val, uint8_t reg) {
         uint8_t rex = getRex(val->getType());
+        
+        // Handle physical registers if already assigned
+        if (auto* instr = dynamic_cast<ir::Instruction*>(val)) {
+            if (instr->hasPhysicalRegister()) {
+                uint8_t phys = static_cast<uint8_t>(instr->getPhysicalRegister());
+                // Mapping from allocator index to x64 register index
+                // allocator regs: rax, rcx, rdx, rsi, rdi, r8, r9, r10, rbx, r12, r13, r14, r15
+                static const uint8_t x64_map[] = {0, 1, 2, 6, 7, 8, 9, 10, 3, 12, 13, 14, 15};
+                if (phys >= sizeof(x64_map)) return; // Should not happen
+                uint8_t src_reg = x64_map[phys];
+
+                if (src_reg == reg) return; // Already in target register
+                
+                // mov reg, src_reg
+                uint8_t local_rex = getRex(val->getType());
+                if (reg >= 8) local_rex |= 0x44; // REX.R for destination 'reg'
+                if (src_reg >= 8) local_rex |= 0x41; // REX.B for source 'src_reg'
+                if (local_rex) assembler.emitByte(local_rex);
+                assembler.emitByte(0x8B); // mov r, rm
+                assembler.emitByte(0xC0 | ((reg & 7) << 3) | (src_reg & 7));
+                return;
+            }
+        }
+
         if (auto* constInt = dynamic_cast<ir::ConstantInt*>(val)) {
             if (reg >= 8) rex |= 0x41; // REX.B=1
             if (rex) assembler.emitByte(rex);
@@ -109,7 +135,8 @@ namespace target {
 void SystemV_x64::initRegisters() {
     // Integer registers - reordered to put caller-saved registers first
     // This allows simple functions to avoid saving callee-saved registers.
-    integerRegs = {"%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11",
+    // %r11 is reserved as a scratch register for global loads and PHIs.
+    integerRegs = {"%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10",
                   "%rbx", "%r12", "%r13", "%r14", "%r15"};
     
     // Floating-point registers
@@ -172,12 +199,6 @@ void SystemV_x64::emitPrologue(CodeGen& cg, int stack_size) {
         *os << "  pushq %r13\n";
         *os << "  pushq %r14\n";
         *os << "  pushq %r15\n";
-        // Align RSP to 16-byte boundary AFTER all pushes
-        // At this point we have pushed RBP (8) + 5 regs (40) + sub stack_size
-        // Entry RSP = 16N + 8
-        // Current RSP = 16N + 8 - 8 - 40 - stack_size = 16N - 40 - stack_size
-        // We want (16N - 40 - stack_size) % 16 == 0 => (40 + stack_size) % 16 == 0
-        // (8 + stack_size) % 16 == 0 => stack_size = 8, 24, 40...
     } else {
         auto& assembler = cg.getAssembler();
         // pushq %rbp
@@ -200,8 +221,12 @@ void SystemV_x64::emitPrologue(CodeGen& cg, int stack_size) {
                 assembler.emitDWord(static_cast<uint32_t>(stack_size));
             }
         }
-        // subq $40, %rsp for the 5 callee-saved regs we are about to push
-        // wait, push already subs.
+        // push rbx, r12-r15
+        assembler.emitByte(0x53); // push rbx
+        assembler.emitBytes({0x41, 0x54}); // push r12
+        assembler.emitBytes({0x41, 0x55}); // push r13
+        assembler.emitBytes({0x41, 0x56}); // push r14
+        assembler.emitBytes({0x41, 0x57}); // push r15
     }
 }
 
@@ -220,6 +245,13 @@ void SystemV_x64::emitEpilogue(CodeGen& cg) {
     } else {
         auto& assembler = cg.getAssembler();
 
+        // pop r15-r12, rbx
+        assembler.emitBytes({0x41, 0x5F}); // pop r15
+        assembler.emitBytes({0x41, 0x5E}); // pop r14
+        assembler.emitBytes({0x41, 0x5D}); // pop r13
+        assembler.emitBytes({0x41, 0x5C}); // pop r12
+        assembler.emitByte(0x5B); // pop rbx
+
         // movq %rbp, %rsp
         assembler.emitByte(0x48);
         assembler.emitByte(0x89);
@@ -236,6 +268,17 @@ void SystemV_x64::emitEpilogue(CodeGen& cg) {
 }
 
 void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
+    // Add function symbol for binary emission
+    if (!cg.getTextStream()) {
+        CodeGen::SymbolInfo func_sym;
+        func_sym.name = func.getName();
+        func_sym.sectionName = ".text";
+        func_sym.value = cg.getAssembler().getCodeSize();
+        func_sym.type = 2; // STT_FUNC
+        func_sym.binding = 1; // STB_GLOBAL
+        cg.addSymbol(func_sym);
+    }
+
     resetStackOffset();
     int int_reg_idx = 0;
 
@@ -1268,12 +1311,12 @@ void SystemV_x64::emitLoad(CodeGen& cg, ir::Instruction& instr) {
         std::string mov_instr = getMoveInstruction(instr.getType());
 
         if (dynamic_cast<ir::GlobalValue*>(srcPtr) || dynamic_cast<ir::GlobalVariable*>(srcPtr)) {
-            std::string ptr_reg = getRegisterName("%rax", instr.getType());
+            std::string ptr_reg = getRegisterName("%r11", instr.getType());
             *os << "  " << mov_instr << " " << srcPtr->getName() << "(%rip), " << ptr_reg << "\n";
             *os << "  " << getMoveInstruction(dest->getType()) << " " << ptr_reg << ", " << destOp << "\n";
         } else {
-            std::string ptr_reg = "%rax";
-            std::string val_reg = getRegisterName("%r10", instr.getType());
+            std::string ptr_reg = "%r11";
+            std::string val_reg = getRegisterName("%r11", instr.getType());
             *os << "  movq " << srcOp << ", " << ptr_reg << "\n";
             *os << "  " << mov_instr << " (" << ptr_reg << "), " << val_reg << "\n";
             *os << "  " << getMoveInstruction(dest->getType()) << " " << val_reg << ", " << destOp << "\n";
@@ -1281,14 +1324,14 @@ void SystemV_x64::emitLoad(CodeGen& cg, ir::Instruction& instr) {
     } else {
         auto& assembler = cg.getAssembler();
         int32_t destOffset = cg.getStackOffset(dest);
-        uint8_t rex = getRex(dest->getType());
+        uint8_t rex_base = getRex(dest->getType());
 
         if (auto* global = dynamic_cast<ir::GlobalValue*>(srcPtr)) {
-            // Load the VALUE at the global address into %rax
-            // movq global(%rip), %rax
-            assembler.emitByte(0x48);
+            // Load the VALUE at the global address into %r11
+            // movq global(%rip), %r11
+            assembler.emitByte(0x4C); // REX.W=1, REX.R=1 (for r11)
             assembler.emitByte(0x8B);
-            assembler.emitByte(0x05);
+            assembler.emitByte(0x1D); // ModRM: Mod=00, Reg=011, RM=101 (rip-relative)
             uint64_t reloc_offset = assembler.getCodeSize();
             assembler.emitDWord(0);
 
@@ -1300,12 +1343,12 @@ void SystemV_x64::emitLoad(CodeGen& cg, ir::Instruction& instr) {
             reloc.addend = -4;
             cg.addRelocation(reloc);
 
-            emitRegMem(assembler, rex, getOpcode(0x89, dest->getType()), 0, destOffset);
+            emitRegMem(assembler, rex_base | 0x44, getOpcode(0x89, dest->getType()), 3, destOffset); // r11 is reg 3 with REX.R
         } else if (auto* gv = dynamic_cast<ir::GlobalVariable*>(srcPtr)) {
-            // Load the VALUE at the global variable address into %rax
-            assembler.emitByte(0x48);
+            // Load the VALUE at the global variable address into %r11
+            assembler.emitByte(0x4C);
             assembler.emitByte(0x8B);
-            assembler.emitByte(0x05);
+            assembler.emitByte(0x1D);
             uint64_t reloc_offset = assembler.getCodeSize();
             assembler.emitDWord(0);
 
@@ -1317,37 +1360,37 @@ void SystemV_x64::emitLoad(CodeGen& cg, ir::Instruction& instr) {
             reloc.addend = -4;
             cg.addRelocation(reloc);
 
-            emitRegMem(assembler, rex, getOpcode(0x89, dest->getType()), 0, destOffset);
+            emitRegMem(assembler, rex_base | 0x44, getOpcode(0x89, dest->getType()), 3, destOffset);
         } else {
-            // Load address into %rax (index 0)
-            emitLoadValue(cg, assembler, srcPtr, 0);
-            // mov (%rax), %rdx (index 2)
+            // Load address into %r11 (index 11)
+            emitLoadValue(cg, assembler, srcPtr, 11);
+            // mov (%r11), %r11
             auto op = instr.getOpcode();
+            uint8_t rex = 0x4D; // W=1, R=1, B=1 for r11 to r11
             if (op == ir::Instruction::Loadub || op == ir::Instruction::Loadsb) {
-                if (op == ir::Instruction::Loadub) 
-                    assembler.emitBytes({0x0F, 0xB6, 0x10}); // movzbl (%rax), %edx
-                else
-                    assembler.emitBytes({0x0F, 0xBE, 0x10}); // movsbl (%rax), %edx
+                assembler.emitByte(0x45); // R=1, B=1
+                assembler.emitByte(0x0F);
+                assembler.emitByte(op == ir::Instruction::Loadub ? 0xB6 : 0xBE);
+                assembler.emitByte(0x1B); // Mod=00, Reg=011, RM=011
             } else if (op == ir::Instruction::Loaduh || op == ir::Instruction::Loadsh) {
-                if (op == ir::Instruction::Loaduh)
-                    assembler.emitBytes({0x0F, 0xB7, 0x10}); // movzwl (%rax), %edx
-                else
-                    assembler.emitBytes({0x0F, 0xBF, 0x10}); // movswl (%rax), %edx
+                assembler.emitByte(0x45);
+                assembler.emitByte(0x0F);
+                assembler.emitByte(op == ir::Instruction::Loaduh ? 0xB7 : 0xBF);
+                assembler.emitByte(0x1B);
             } else {
                 uint8_t size = dest->getType()->getSize();
-                if (size == 4) {
-                    assembler.emitBytes({0x8B, 0x10});       // mov (%rax), %edx
-                } else if (size == 8) {
-                    assembler.emitBytes({0x48, 0x8B, 0x10}); // mov (%rax), %rdx
-                } else if (size == 1) {
-                    assembler.emitBytes({0x0F, 0xB6, 0x10});
+                if (size == 1) {
+                    assembler.emitBytes({0x45, 0x0F, 0xB6, 0x1B});
                 } else {
-                    assembler.emitBytes({0x48, 0x8B, 0x10});
+                    if (size == 4) assembler.emitByte(0x45);
+                    else assembler.emitByte(0x4D);
+                    assembler.emitByte(0x8B);
+                    assembler.emitByte(0x1B);
                 }
             }
-            // Store %rdx to stack
-            uint8_t rex_store = (dest->getType()->getSize() == 8) ? 0x48 : 0;
-            emitRegMem(assembler, rex_store, getOpcode(0x89, dest->getType()), 2, destOffset);
+            // Store %r11 to stack
+            uint8_t rex_store = (dest->getType()->getSize() == 8) ? 0x4C : 0x44;
+            emitRegMem(assembler, rex_store, getOpcode(0x89, dest->getType()), 3, destOffset);
         }
     }
 }
@@ -1359,26 +1402,27 @@ void SystemV_x64::emitStore(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
         std::string srcOp = cg.getValueAsOperand(srcVal);
         std::string mov_instr = getMoveInstruction(srcVal->getType());
-        std::string val_reg = getRegisterName("%rax", srcVal->getType());
+        std::string val_reg = getRegisterName("%r11", srcVal->getType());
 
         *os << "  " << mov_instr << " " << srcOp << ", " << val_reg << "\n";
         if (dynamic_cast<ir::GlobalValue*>(destPtr) || dynamic_cast<ir::GlobalVariable*>(destPtr)) {
             *os << "  " << mov_instr << " " << val_reg << ", " << destPtr->getName() << "(%rip)\n";
         } else {
-            std::string ptr_reg = "%r10";
+            std::string ptr_reg = "%r11";
             std::string destOp = cg.getValueAsOperand(destPtr);
             *os << "  movq " << destOp << ", " << ptr_reg << "\n";
             *os << "  " << mov_instr << " " << val_reg << ", (" << ptr_reg << ")\n";
         }
     } else {
         auto& assembler = cg.getAssembler();
-        emitLoadValue(cg, assembler, srcVal, 0); // rax = val
+        emitLoadValue(cg, assembler, srcVal, 11); // r11 = val
 
         if (auto* global = dynamic_cast<ir::GlobalValue*>(destPtr)) {
             uint8_t size = srcVal->getType()->getSize();
-            if (size == 8) assembler.emitByte(0x48);
+            uint8_t rex = (size == 8 ? 0x4C : 0x44); // REX.W if 64-bit, REX.R for r11
+            assembler.emitByte(rex);
             assembler.emitByte(getOpcode(0x89, srcVal->getType()));
-            assembler.emitByte(0x05);
+            assembler.emitByte(0x1D); // ModRM for RIP-relative
             uint64_t reloc_offset = assembler.getCodeSize();
             assembler.emitDWord(0);
 
@@ -1391,9 +1435,10 @@ void SystemV_x64::emitStore(CodeGen& cg, ir::Instruction& instr) {
             cg.addRelocation(reloc);
         } else if (auto* gv = dynamic_cast<ir::GlobalVariable*>(destPtr)) {
             uint8_t size = srcVal->getType()->getSize();
-            if (size == 8) assembler.emitByte(0x48);
+            uint8_t rex = (size == 8 ? 0x4C : 0x44);
+            assembler.emitByte(rex);
             assembler.emitByte(getOpcode(0x89, srcVal->getType()));
-            assembler.emitByte(0x05);
+            assembler.emitByte(0x1D);
             uint64_t reloc_offset = assembler.getCodeSize();
             assembler.emitDWord(0);
 
@@ -1405,25 +1450,20 @@ void SystemV_x64::emitStore(CodeGen& cg, ir::Instruction& instr) {
             reloc.addend = -4;
             cg.addRelocation(reloc);
         } else {
-            // Load address into %rdx (index 2)
-            emitLoadValue(cg, assembler, destPtr, 2);
-            // mov %rax, (%rdx)
+            // Load address into %r10 (index 10)
+            emitLoadValue(cg, assembler, destPtr, 10);
+            // mov %r11, (%r10)
             auto op = instr.getOpcode();
-            if (op == ir::Instruction::Storeb) {
-                assembler.emitBytes({0x88, 0x02}); // mov %al, (%rdx)
-            } else if (op == ir::Instruction::Storeh) {
-                assembler.emitBytes({0x66, 0x89, 0x02}); // mov %ax, (%rdx)
+            uint8_t size = srcVal->getType()->getSize();
+            if (op == ir::Instruction::Storeb || size == 1) {
+                assembler.emitBytes({0x45, 0x88, 0x1A}); // R=1, B=1, mov r11b, (r10)
+            } else if (op == ir::Instruction::Storeh || size == 2) {
+                assembler.emitByte(0x66);
+                assembler.emitBytes({0x45, 0x89, 0x1A});
+            } else if (size == 4) {
+                assembler.emitBytes({0x45, 0x89, 0x1A});
             } else {
-                uint8_t size = srcVal->getType()->getSize();
-                if (size == 1) {
-                    assembler.emitBytes({0x88, 0x02}); // mov %al, (%rdx)
-                } else if (size == 2) {
-                    assembler.emitBytes({0x66, 0x89, 0x02}); // mov %ax, (%rdx)
-                } else if (size == 4) {
-                    assembler.emitBytes({0x89, 0x02}); // mov %eax, (%rdx)
-                } else {
-                    assembler.emitBytes({0x48, 0x89, 0x02}); // mov %rax, (%rdx)
-                }
+                assembler.emitBytes({0x4D, 0x89, 0x1A});
             }
         }
     }
@@ -1438,14 +1478,14 @@ void SystemV_x64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
 
     if (auto* os = cg.getTextStream()) {
         *os << "  # Bump Allocation: " << size << " bytes\n";
-        *os << "  movq __heap_ptr(%rip), %rax\n";
-        *os << "  movq %rax, " << pointerOffset << "(%rbp)\n";
-        *os << "  addq $" << alignedSize << ", %rax\n";
-        *os << "  movq %rax, __heap_ptr(%rip)\n";
+        *os << "  movq __heap_ptr(%rip), %r11\n";
+        *os << "  movq %r11, " << pointerOffset << "(%rbp)\n";
+        *os << "  addq $" << alignedSize << ", %r11\n";
+        *os << "  movq %r11, __heap_ptr(%rip)\n";
     } else {
         auto& assembler = cg.getAssembler();
-        // Load __heap_ptr into %rax
-        assembler.emitBytes({0x48, 0x8B, 0x05});
+        // Load __heap_ptr into %r11
+        assembler.emitBytes({0x4C, 0x8B, 0x1D});
         uint64_t reloc_offset_load = assembler.getCodeSize();
         assembler.emitDWord(0);
 
@@ -1457,19 +1497,19 @@ void SystemV_x64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
         reloc_load.addend = -4;
         cg.addRelocation(reloc_load);
 
-        // movq %rax, pointerOffset(%rbp)
-        emitRegMem(assembler, 0x48, 0x89, 0, pointerOffset);
+        // movq %r11, pointerOffset(%rbp)
+        emitRegMem(assembler, 0x4C, 0x89, 3, pointerOffset);
 
-        // addq $alignedSize, %rax
+        // addq $alignedSize, %r11
         if (alignedSize <= 127) {
-            assembler.emitBytes({0x48, 0x83, 0xC0, static_cast<uint8_t>(alignedSize)});
+            assembler.emitBytes({0x49, 0x83, 0xC3, static_cast<uint8_t>(alignedSize)});
         } else {
-            assembler.emitBytes({0x48, 0x05});
+            assembler.emitBytes({0x49, 0x81, 0xC3});
             assembler.emitDWord(static_cast<uint32_t>(alignedSize));
         }
 
-        // Store %rax back to __heap_ptr
-        assembler.emitBytes({0x48, 0x89, 0x05});
+        // Store %r11 back to __heap_ptr
+        assembler.emitBytes({0x4C, 0x89, 0x1D});
         uint64_t reloc_offset_store = assembler.getCodeSize();
         assembler.emitDWord(0);
 
@@ -1484,10 +1524,55 @@ void SystemV_x64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
 }
 
 void SystemV_x64::emitJmp(CodeGen& cg, ir::Instruction& instr) {
+    ir::Value* target = instr.getOperands()[0]->get();
+    ir::BasicBlock* targetBB = dynamic_cast<ir::BasicBlock*>(target);
+    ir::BasicBlock* currentBB = instr.getParent();
+
+    // PHI lowering
+    if (targetBB) {
+        for (auto& t_instr : targetBB->getInstructions()) {
+            if (auto* phi = dynamic_cast<ir::PhiNode*>(t_instr.get())) {
+                ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                if (incoming) {
+                    if (auto* os = cg.getTextStream()) {
+                        std::string src = cg.getValueAsOperand(incoming);
+                        std::string dst = cg.getValueAsOperand(phi);
+                        if (src != dst) {
+                             std::string suffix = getLoadStoreSuffix(phi->getType());
+                             std::string reg = getRegisterName("%rax", phi->getType());
+                             *os << "  mov" << suffix << " " << src << ", " << reg << "\n";
+                             *os << "  mov" << suffix << " " << reg << ", " << dst << "\n";
+                        }
+                    } else {
+                        // Binary mode PHI lowering
+                        auto& assembler = cg.getAssembler();
+                        emitLoadValue(cg, assembler, incoming, 11); // R11
+                        
+                        if (phi->hasPhysicalRegister()) {
+                            uint8_t phys = static_cast<uint8_t>(phi->getPhysicalRegister());
+                            static const uint8_t x64_map[] = {0, 1, 2, 6, 7, 8, 9, 10, 3, 12, 13, 14, 15};
+                            uint8_t dst_reg = x64_map[phys];
+                            
+                            // mov dst_reg, r11
+                            uint8_t rex = getRex(phi->getType()) | 0x41; // REX.B for r11 source
+                            if (dst_reg >= 8) rex |= 0x44; // REX.R for destination
+                            assembler.emitByte(rex);
+                            assembler.emitByte(0x8B); // mov r, rm
+                            assembler.emitByte(0xC0 | ((dst_reg & 7) << 3) | (11 & 7));
+                        } else {
+                            int32_t dstOffset = cg.getStackOffset(phi);
+                            uint8_t rex = getRex(phi->getType()) | 0x44; // REX.R for R11
+                            emitRegMem(assembler, rex, getOpcode(0x89, phi->getType()), 11 & 7, dstOffset);
+                        }
+                    }
+                }
+            } else break;
+        }
+    }
+
     if (auto* os = cg.getTextStream()) {
-        ir::Value* target = instr.getOperands()[0]->get();
-        if (auto* bb = dynamic_cast<ir::BasicBlock*>(target)) {
-            *os << "  jmp " << bb->getParent()->getName() << "_" << bb->getName() << "\n";
+        if (targetBB) {
+            *os << "  jmp " << targetBB->getParent()->getName() << "_" << targetBB->getName() << "\n";
         } else {
             *os << "  jmp " << target->getName() << "\n";
         }
@@ -1499,9 +1584,8 @@ void SystemV_x64::emitJmp(CodeGen& cg, ir::Instruction& instr) {
 
         CodeGen::RelocationInfo reloc;
         reloc.offset = reloc_offset;
-        ir::Value* target = instr.getOperands()[0]->get();
-        if (auto* bb = dynamic_cast<ir::BasicBlock*>(target)) {
-            reloc.symbolName = bb->getParent()->getName() + "_" + bb->getName();
+        if (targetBB) {
+            reloc.symbolName = targetBB->getParent()->getName() + "_" + targetBB->getName();
         } else {
             reloc.symbolName = target->getName();
         }
@@ -1534,20 +1618,49 @@ void SystemV_x64::emitRet(CodeGen& cg, ir::Instruction& instr) {
 }
 
 void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
+    ir::Value* trueTarget = instr.getOperands()[1]->get();
+    ir::BasicBlock* trueBB = dynamic_cast<ir::BasicBlock*>(trueTarget);
+    ir::BasicBlock* currentBB = instr.getParent();
+
     if (auto* os = cg.getTextStream()) {
         *os << "  cmpq $0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
 
-        ir::Value* trueTarget = instr.getOperands()[1]->get();
-        if (auto* bb = dynamic_cast<ir::BasicBlock*>(trueTarget)) {
-            *os << "  jne " << bb->getParent()->getName() << "_" << bb->getName() << "\n";
+        // We can't easily lower PHIs on conditional branches if both targets have PHIs
+        // because we might clobber the condition or values needed for the other branch.
+        // However, most SSA-to-machine lowering does this by inserting blocks.
+        // For now, we assume simple CFGs or handle PHIs before the branch.
+        
+        // This is a hack: lower PHIs for true branch if condition is true, false branch otherwise?
+        // No, that's not how it works. PHIs are conceptually simultaneous.
+        // Real compilers insert "split blocks" for this.
+        
+        if (trueBB) {
+            *os << "  jne " << trueBB->getParent()->getName() << "_" << trueBB->getName() << "\n";
         } else {
             *os << "  jne " << trueTarget->getName() << "\n";
         }
 
         if (instr.getOperands().size() > 2) {
             ir::Value* falseTarget = instr.getOperands()[2]->get();
-            if (auto* bb = dynamic_cast<ir::BasicBlock*>(falseTarget)) {
-                *os << "  jmp " << bb->getParent()->getName() << "_" << bb->getName() << "\n";
+            ir::BasicBlock* falseBB = dynamic_cast<ir::BasicBlock*>(falseTarget);
+            if (falseBB) {
+                // Lower PHIs for false branch since it's a fallthrough/jmp
+                for (auto& f_instr : falseBB->getInstructions()) {
+                    if (auto* phi = dynamic_cast<ir::PhiNode*>(f_instr.get())) {
+                        ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                        if (incoming) {
+                             std::string src = cg.getValueAsOperand(incoming);
+                             std::string dst = cg.getValueAsOperand(phi);
+                             if (src != dst) {
+                                 std::string suffix = getLoadStoreSuffix(phi->getType());
+                                 std::string reg = getRegisterName("%rax", phi->getType());
+                                 *os << "  mov" << suffix << " " << src << ", " << reg << "\n";
+                                 *os << "  mov" << suffix << " " << reg << ", " << dst << "\n";
+                             }
+                        }
+                    } else break;
+                }
+                *os << "  jmp " << falseBB->getParent()->getName() << "_" << falseBB->getName() << "\n";
             } else {
                 *os << "  jmp " << falseTarget->getName() << "\n";
             }
@@ -1564,10 +1677,8 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
 
         CodeGen::RelocationInfo reloc_true;
         reloc_true.offset = reloc_offset_true;
-        // Check if target is a BasicBlock
-        ir::Value* trueTarget = instr.getOperands()[1]->get();
-        if (auto* bb = dynamic_cast<ir::BasicBlock*>(trueTarget)) {
-            reloc_true.symbolName = bb->getParent()->getName() + "_" + bb->getName();
+        if (trueBB) {
+            reloc_true.symbolName = trueBB->getParent()->getName() + "_" + trueBB->getName();
         } else {
             reloc_true.symbolName = trueTarget->getName();
         }
@@ -1577,6 +1688,33 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
         cg.addRelocation(reloc_true);
 
         if (instr.getOperands().size() > 2) {
+            ir::Value* falseTarget = instr.getOperands()[2]->get();
+            ir::BasicBlock* falseBB = dynamic_cast<ir::BasicBlock*>(falseTarget);
+            if (falseBB) {
+                // Lower PHIs for false path
+                for (auto& f_instr : falseBB->getInstructions()) {
+                    if (auto* phi = dynamic_cast<ir::PhiNode*>(f_instr.get())) {
+                        ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                        if (incoming) {
+                            emitLoadValue(cg, assembler, incoming, 11); // R11
+                            if (phi->hasPhysicalRegister()) {
+                                uint8_t phys = static_cast<uint8_t>(phi->getPhysicalRegister());
+                                static const uint8_t x64_map[] = {0, 1, 2, 6, 7, 8, 9, 10, 3, 12, 13, 14, 15};
+                                uint8_t dst_reg = x64_map[phys];
+                                uint8_t rex = getRex(phi->getType()) | 0x41;
+                                if (dst_reg >= 8) rex |= 0x44;
+                                assembler.emitByte(rex);
+                                assembler.emitByte(0x8B);
+                                assembler.emitByte(0xC0 | ((dst_reg & 7) << 3) | (11 & 7));
+                            } else {
+                                int32_t dstOffset = cg.getStackOffset(phi);
+                                uint8_t rex = getRex(phi->getType()) | 0x44;
+                                emitRegMem(assembler, rex, getOpcode(0x89, phi->getType()), 11 & 7, dstOffset);
+                            }
+                        }
+                    } else break;
+                }
+            }
             // jmp <false_label>
             assembler.emitByte(0xE9);
             uint64_t reloc_offset_false = assembler.getCodeSize();
@@ -1584,9 +1722,8 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
 
             CodeGen::RelocationInfo reloc_false;
             reloc_false.offset = reloc_offset_false;
-            ir::Value* falseTarget = instr.getOperands()[2]->get();
-            if (auto* bb = dynamic_cast<ir::BasicBlock*>(falseTarget)) {
-                reloc_false.symbolName = bb->getParent()->getName() + "_" + bb->getName();
+            if (falseBB) {
+                reloc_false.symbolName = falseBB->getParent()->getName() + "_" + falseBB->getName();
             } else {
                 reloc_false.symbolName = falseTarget->getName();
             }

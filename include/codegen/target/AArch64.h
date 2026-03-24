@@ -96,12 +96,12 @@ public:
     void emitVectorBroadcast(CodeGen& cg, ir::VectorInstruction& instr) override;
     void emitVectorExtract(CodeGen& cg, ir::VectorInstruction& instr) override;
     void emitVectorInsert(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitVectorNot(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& instr) override;
     
     // Advanced NEON operations
-    void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& instr) override;
     void emitVectorNeg(CodeGen& cg, ir::VectorInstruction& instr) override;
-    void emitVectorNot(CodeGen& cg, ir::VectorInstruction& instr) override;
-    void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& instr) override;
     
     // Fused instruction support
     bool supportsFusedPattern(FusedPattern pattern) const override;
@@ -110,7 +110,6 @@ public:
     // Register classification
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
-    std::string getDataRelocationType() const override { return "R_AARCH64_ABS64"; }
     
 private:
     void emitAddBinary(CodeGen& cg, ir::Instruction& instr);

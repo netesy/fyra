@@ -1,6 +1,8 @@
 #include "codegen/target/RiscV64.h"
 #include "codegen/CodeGen.h"
 #include "ir/Instruction.h"
+#include "ir/PhiNode.h"
+#include "ir/BasicBlock.h"
 #include "ir/Use.h"
 #include "ir/SIMDInstruction.h"
 #include "codegen/execgen/Assembler.h"
@@ -9,6 +11,11 @@
 
 namespace codegen {
 namespace target {
+
+RiscV64::RiscV64() {}
+RiscV64::~RiscV64() {}
+
+size_t RiscV64::getPointerSize() const { return 64; }
 
 namespace {
 
@@ -81,6 +88,16 @@ uint8_t getArithOpcode(uint8_t base, const ir::Type* type) {
 void emitIType(execgen::Assembler& assembler, uint8_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int16_t imm);
 
 void emitLoadValue(CodeGen& cg, execgen::Assembler& assembler, ir::Value* val, uint8_t reg) {
+    if (auto* instr = dynamic_cast<ir::Instruction*>(val)) {
+        if (instr->hasPhysicalRegister()) {
+            uint8_t src_reg = static_cast<uint8_t>(instr->getPhysicalRegister());
+            if (src_reg == reg) return;
+            // mv rd, rs1 (addi rd, rs1, 0)
+            emitIType(assembler, 0b0010011, reg, 0, src_reg, 0);
+            return;
+        }
+    }
+
     if (auto* constInt = dynamic_cast<ir::ConstantInt*>(val)) {
         int64_t value = constInt->getValue();
         if (value >= -2048 && value <= 2047) {
@@ -1063,7 +1080,7 @@ void RiscV64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     int local_area_size = -currentStackOffset;
 
     // Optimization: leaf function with no locals and no parameters
-    bool isSimpleLeaf = !hasCalls && local_area_size == 0 && func.getParameters().empty();
+    bool isSimpleLeaf = !hasCalls && (local_area_size <= 16);
     if (isSimpleLeaf) {
         if (auto* os = cg.getTextStream()) {
             *os << "  # Simple leaf function: frame pointer and stack adjustment omitted\n";
@@ -1527,10 +1544,12 @@ void RiscV64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
 void RiscV64::emitBr(CodeGen& cg, ir::Instruction& instr) {
     ir::Value* condition = instr.getOperands()[0]->get();
     const ir::Type* type = condition->getType();
+    ir::BasicBlock* currentBB = instr.getParent();
 
     if (auto* os = cg.getTextStream()) {
         // Conditional branch - we expect a condition value and a target label
         ir::Value* target = instr.getOperands()[1]->get();
+        ir::BasicBlock* trueBB = dynamic_cast<ir::BasicBlock*>(target);
 
         std::string conditionOperand = cg.getValueAsOperand(condition);
         std::string targetOperand = cg.getValueAsOperand(target);
@@ -1540,6 +1559,27 @@ void RiscV64::emitBr(CodeGen& cg, ir::Instruction& instr) {
 
         // Branch if condition is non-zero
         *os << "  bnez t0, " << targetOperand << "\n";
+
+        if (instr.getOperands().size() > 2) {
+            ir::Value* falseTarget = instr.getOperands()[2]->get();
+            ir::BasicBlock* falseBB = dynamic_cast<ir::BasicBlock*>(falseTarget);
+            if (falseBB) {
+                for (auto& f_instr : falseBB->getInstructions()) {
+                    if (auto* phi = dynamic_cast<ir::PhiNode*>(f_instr.get())) {
+                        ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                        if (incoming) {
+                            std::string src = cg.getValueAsOperand(incoming);
+                            std::string dst = cg.getValueAsOperand(phi);
+                            if (src != dst) {
+                                *os << "  ld t1, " << src << "\n";
+                                *os << "  sd t1, " << dst << "\n";
+                            }
+                        }
+                    } else break;
+                }
+            }
+            *os << "  j " << cg.getValueAsOperand(falseTarget) << "\n";
+        }
     } else {
         auto& assembler = cg.getAssembler();
         int32_t condOffset = cg.getStackOffset(condition);
@@ -1557,6 +1597,32 @@ void RiscV64::emitBr(CodeGen& cg, ir::Instruction& instr) {
         reloc.sectionName = ".text";
         reloc.addend = 0;
         cg.addRelocation(reloc);
+
+        if (instr.getOperands().size() > 2) {
+            ir::Value* falseTarget = instr.getOperands()[2]->get();
+            ir::BasicBlock* falseBB = dynamic_cast<ir::BasicBlock*>(falseTarget);
+            if (falseBB) {
+                for (auto& f_instr : falseBB->getInstructions()) {
+                    if (auto* phi = dynamic_cast<ir::PhiNode*>(f_instr.get())) {
+                        ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                        if (incoming) {
+                            emitLoadValue(cg, assembler, incoming, 6); // t1
+                            int32_t dstOffset = cg.getStackOffset(phi);
+                            emitSType(assembler, 0b0100011, 3, 8, 6, dstOffset);
+                        }
+                    } else break;
+                }
+            }
+            // jal x0, <false_label>
+            emitJType(assembler, 0b1101111, 0, 0);
+            CodeGen::RelocationInfo reloc_f;
+            reloc_f.offset = assembler.getCodeSize() - 4;
+            reloc_f.symbolName = falseTarget->getName();
+            reloc_f.type = "R_RISCV_JAL";
+            reloc_f.sectionName = ".text";
+            reloc_f.addend = 0;
+            cg.addRelocation(reloc_f);
+        }
     }
 }
 
@@ -1606,11 +1672,43 @@ void RiscV64::emitStartFunction(CodeGen& cg) {
 }
 
 void RiscV64::emitJmp(CodeGen& cg, ir::Instruction& instr) {
+    ir::Value* targetVal = instr.getOperands()[0]->get();
+    ir::BasicBlock* targetBB = dynamic_cast<ir::BasicBlock*>(targetVal);
+    ir::BasicBlock* currentBB = instr.getParent();
+
+    if (targetBB) {
+        if (auto* os = cg.getTextStream()) {
+            for (auto& t_instr : targetBB->getInstructions()) {
+                if (auto* phi = dynamic_cast<ir::PhiNode*>(t_instr.get())) {
+                    ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                    if (incoming) {
+                        std::string src = cg.getValueAsOperand(incoming);
+                        std::string dst = cg.getValueAsOperand(phi);
+                        if (src != dst) {
+                            *os << "  ld t1, " << src << "\n";
+                            *os << "  sd t1, " << dst << "\n";
+                        }
+                    }
+                } else break;
+            }
+        } else {
+            auto& assembler = cg.getAssembler();
+            for (auto& t_instr : targetBB->getInstructions()) {
+                if (auto* phi = dynamic_cast<ir::PhiNode*>(t_instr.get())) {
+                    ir::Value* incoming = phi->getIncomingValueForBlock(currentBB);
+                    if (incoming) {
+                        emitLoadValue(cg, assembler, incoming, 6); // t1
+                        int32_t dstOffset = cg.getStackOffset(phi);
+                        emitSType(assembler, 0b0100011, 3, 8, 6, dstOffset);
+                    }
+                } else break;
+            }
+        }
+    }
+
     if (auto* os = cg.getTextStream()) {
         // Unconditional jump to target
-        ir::Value* target = instr.getOperands()[0]->get();
-        std::string targetOperand = cg.getValueAsOperand(target);
-
+        std::string targetOperand = cg.getValueAsOperand(targetVal);
         *os << "  j " << targetOperand << "\n";
     } else {
         auto& assembler = cg.getAssembler();

@@ -38,4 +38,14 @@ void PhiNode::addIncoming(Value* value, BasicBlock* bb) {
     setIncomingValueForBlock(bb, value);
 }
 
+void PhiNode::removeIncomingValue(BasicBlock* bb) {
+    auto& ops = getOperands();
+    for (size_t i = 0; i < ops.size(); i += 2) {
+        if (ops[i]->get() == bb) {
+            ops.erase(ops.begin() + i, ops.begin() + i + 2);
+            return;
+        }
+    }
+}
+
 } // namespace ir

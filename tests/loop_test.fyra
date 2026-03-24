@@ -1,0 +1,20 @@
+export function $main() : w {
+@start
+    %i = copy 0 : w
+    jmp @loop
+@loop
+    %i2 = phi [@start, %i], [@body, %i3]
+    %cond = cslt %i2, 10 : w
+    jnz %cond, @body, @end
+@body
+    %i3 = add %i2, 1 : w
+    %res_call = call $external_func(%i3) : w
+    jmp @loop
+@end
+    ret %i2 : w
+}
+
+function $external_func(%n : w) : w {
+@start
+    ret %n : w
+}

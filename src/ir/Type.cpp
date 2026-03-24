@@ -36,8 +36,14 @@ size_t Type::getTargetAlignment(const codegen::target::TargetInfo* target) const
 
 // For simplicity, we'll leak these singletons. In a real compiler,
 // you would have a context object that owns them.
+static std::unique_ptr<IRContext> globalCtx;
+static IRContext& getGlobalCtx() {
+    if (!globalCtx) globalCtx = std::make_unique<IRContext>();
+    return *globalCtx;
+}
+
 IntegerType* IntegerType::get(unsigned bitwidth) {
-    throw std::runtime_error("IntegerType::get(bitwidth) is deprecated.");
+    return get(getGlobalCtx(), bitwidth);
 }
 
 IntegerType* IntegerType::get(IRContext& ctx, unsigned bitwidth) {
@@ -45,7 +51,7 @@ IntegerType* IntegerType::get(IRContext& ctx, unsigned bitwidth) {
 }
 
 FloatType* FloatType::get() {
-    throw std::runtime_error("FloatType::get() is deprecated.");
+    return get(getGlobalCtx());
 }
 
 FloatType* FloatType::get(IRContext& ctx) {
@@ -53,7 +59,7 @@ FloatType* FloatType::get(IRContext& ctx) {
 }
 
 DoubleType* DoubleType::get() {
-    throw std::runtime_error("DoubleType::get() is deprecated.");
+    return get(getGlobalCtx());
 }
 
 DoubleType* DoubleType::get(IRContext& ctx) {
@@ -61,7 +67,7 @@ DoubleType* DoubleType::get(IRContext& ctx) {
 }
 
 VoidType* VoidType::get() {
-    throw std::runtime_error("VoidType::get() is deprecated.");
+    return get(getGlobalCtx());
 }
 
 VoidType* VoidType::get(IRContext& ctx) {
@@ -69,7 +75,7 @@ VoidType* VoidType::get(IRContext& ctx) {
 }
 
 LabelType* LabelType::get() {
-    throw std::runtime_error("LabelType::get() is deprecated.");
+    return get(getGlobalCtx());
 }
 
 LabelType* LabelType::get(IRContext& ctx) {

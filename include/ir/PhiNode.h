@@ -14,6 +14,7 @@ public:
     Value* getIncomingValueForBlock(BasicBlock* bb);
     void setIncomingValueForBlock(BasicBlock* bb, Value* value);
     void addIncoming(Value* value, BasicBlock* bb);
+    void removeIncomingValue(BasicBlock* bb);
 
 private:
     Instruction* variable; // The alloc instruction this phi is for

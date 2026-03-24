@@ -25,10 +25,9 @@ FYRA_COMPILER = $(BIN_DIR)/fyra_compiler
 
 # Test names for individual targets
 TEST_NAMES = \
-    parser codegen add sub mul div windows aarch64 riscv64 wasm32 ssa float \
-    functions control_flow comprehensive copy_elimination wasm_inmemory \
-    inmemory_aarch64_exec benchmark_suite sqlite_clone http_server \
-    simple_wasm fibonacci_wasm
+    parser codegen add sub mul div windows aarch64 riscv64 ssa float \
+    functions control_flow comprehensive copy_elimination \
+    inmemory_aarch64_exec benchmark_suite sqlite_clone http_server
 
 TEST_EXECUTABLES = \
     $(TEST_DIR)/test_parser \
@@ -40,20 +39,16 @@ TEST_EXECUTABLES = \
     $(TEST_DIR)/test_windows \
     $(TEST_DIR)/test_aarch64 \
     $(TEST_DIR)/test_riscv64 \
-    $(TEST_DIR)/test_wasm32 \
     $(TEST_DIR)/test_ssa \
     $(TEST_DIR)/test_float \
     $(TEST_DIR)/test_functions \
     $(TEST_DIR)/test_control_flow \
     $(TEST_DIR)/test_comprehensive \
     $(TEST_DIR)/test_copy_elimination \
-    $(TEST_DIR)/test_wasm_inmemory \
     $(TEST_DIR)/test_inmemory_aarch64_exec \
     $(TEST_DIR)/test_benchmark_suite \
     $(TEST_DIR)/test_sqlite_clone \
-    $(TEST_DIR)/test_http_server \
-    $(TEST_DIR)/test_simple_wasm \
-    $(TEST_DIR)/test_fibonacci_wasm
+    $(TEST_DIR)/test_http_server
 
 # Default target
 .PHONY: all

@@ -8,7 +8,9 @@
 namespace transforms {
 
 // Define the number of available physical registers for our target
-const unsigned int NUM_PHYSICAL_REGISTERS = 3; // Use a small number to force spilling
+// For x86_64 System V, we have 14 general purpose registers, 
+// but we'll reserve some for ABI and scratch purposes.
+const unsigned int NUM_PHYSICAL_REGISTERS = 8; 
 
 void LinearScanAllocator::run(ir::Function& func) {
     linearScan(func);

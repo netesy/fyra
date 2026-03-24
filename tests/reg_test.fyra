@@ -1,0 +1,7 @@
+export function $main(%x : w) : w {
+@start
+    %a = add %x, 10 : w
+    %b = mul %a, 2 : w
+    %c = sub %b, %x : w
+    ret %c : w
+}

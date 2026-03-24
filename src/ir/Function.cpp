@@ -44,4 +44,8 @@ void Function::setStackSlotForVreg(const Instruction* vreg, int slot) {
     stackSlots[vreg] = slot;
 }
 
+bool Function::hasStackSlot(const Instruction* vreg) const {
+    return stackSlots.find(vreg) != stackSlots.end();
+}
+
 } // namespace ir

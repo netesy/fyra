@@ -106,7 +106,6 @@ public:
 
     // File Extensions
     std::string getAssemblyFileExtension() const override { return ".wat"; }
-    std::string getObjectFileExtension() const override { return ".wasm"; }
 
     // Wasm binary emission
     void emitHeader(CodeGen& cg);

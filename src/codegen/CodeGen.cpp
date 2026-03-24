@@ -7,12 +7,21 @@
 #include "ir/Use.h"
 #include "ir/PhiNode.h"
 #include "ir/BasicBlock.h"
+#include "ir/Module.h"
 #include "codegen/debug/DWARFGenerator.h"
 #include <algorithm>
 #include "codegen/InstructionFusion.h"
 #include "codegen/target/Wasm32.h"
+#include "codegen/target/SystemV_x64.h"
+#include "codegen/target/Windows_x64.h"
+#include "codegen/target/Windows_AArch64.h"
+#include "codegen/target/MacOS_x64.h"
+#include "codegen/target/MacOS_AArch64.h"
+#include "codegen/target/AArch64.h"
+#include "codegen/target/RiscV64.h"
 #include <cstring>
 #include <iostream>
+#include <sstream>
 
 namespace codegen {
 
@@ -21,1024 +30,329 @@ CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std
       assembler(std::make_unique<execgen::Assembler>()),
       rodataAssembler(std::make_unique<execgen::Assembler>()), os(os),
       fusionCoordinator(std::make_unique<target::FusionCoordinator>()),
-      debugInfoManager(std::make_unique<debug::DebugInfoManager>()) {
+      debugInfoManager(std::make_unique<debug::DebugInfoManager>()),
+      validator_(std::make_unique<validation::ASMValidator>()),
+      objectGenerator_(std::make_unique<objectgen::ObjectFileGenerator>()) {
     initializeInstructionPatterns();
-
-    // Initialize available registers from target info
     auto& intRegs = targetInfo->getRegisters(target::RegisterClass::Integer);
     availableRegisters.insert(availableRegisters.end(), intRegs.begin(), intRegs.end());
-
-    // Initialize register usage map
-    for (const auto& reg : availableRegisters) {
-        registerUsage[reg] = false;
-    }
-
-    // Configure fusion coordinator with target info
+    for (const auto& reg : availableRegisters) registerUsage[reg] = false;
     fusionCoordinator->setTargetArchitecture(targetInfo->getName());
 }
 
 CodeGen::~CodeGen() = default;
 
 void CodeGen::emit(bool forExecutable) {
-    // Scan module for feature usage
-    usesHeap = false;
-    usesFPNeg = false;
+    usesHeap = false; usesFPNeg = false;
     for (auto& func : module.getFunctions()) {
         for (auto& bb : func->getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
-                if (instr->getOpcode() == ir::Instruction::Alloc ||
-                    instr->getOpcode() == ir::Instruction::Alloc4 ||
-                    instr->getOpcode() == ir::Instruction::Alloc16) {
-                    usesHeap = true;
-                }
-                if (instr->getOpcode() == ir::Instruction::Neg &&
-                    instr->getType()->isFloatingPoint()) {
-                    usesFPNeg = true;
-                }
+                if (instr->getOpcode() == ir::Instruction::Alloc) usesHeap = true;
+                if (instr->getOpcode() == ir::Instruction::Neg && instr->getType()->isFloatingPoint()) usesFPNeg = true;
             }
         }
     }
-
-    if (targetInfo->getName() == "wasm32" && !os) {
-        // Binary format
+    if (targetInfo->getName() == "wasm32" && !os && assembler) {
         auto* wasmTarget = static_cast<target::Wasm32*>(targetInfo.get());
-
-        for (auto& func : module.getFunctions()) {
-            emitFunction(*func);
-        }
-
-        wasmTarget->emitHeader(*this);
-        wasmTarget->emitTypeSection(*this);
-        wasmTarget->emitFunctionSection(*this);
-        wasmTarget->emitExportSection(*this);
+        for (auto& func : module.getFunctions()) emitFunction(*func);
+        wasmTarget->emitHeader(*this); wasmTarget->emitTypeSection(*this);
+        wasmTarget->emitFunctionSection(*this); wasmTarget->emitExportSection(*this);
         wasmTarget->emitCodeSection(*this);
     } else {
-        if (targetInfo->getName() != "wasm32") {
-            // Collect all float constants
-            int float_const_count = 0;
-            for (auto& func : module.getFunctions()) {
-                for (auto& bb : func->getBasicBlocks()) {
-                    for (auto& instr : bb->getInstructions()) {
-                        for (auto& operand : instr->getOperands()) {
-                            if (auto* constFP = dynamic_cast<ir::ConstantFP*>(operand->get())) {
-                                if (floatConstantLabels.find(constFP) == floatConstantLabels.end()) {
-                                    std::string label = targetInfo->getLabelPrefix() + "CF" + std::to_string(float_const_count++);
-                                    floatConstantLabels[constFP] = label;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Enhanced assembly emission
-        emitTargetSpecificHeader();
-        emitDataSection();
-        emitTextSection();
-
-        if (forExecutable) {
-            targetInfo->emitStartFunction(*this);
-        }
-
-        if (targetInfo->getName() == "wasm32") {
-            // Already handled in emitTargetSpecificHeader
-        } else {
-            // Enable debug info if requested
-            debugInfoManager->enableDebugInfo(true);
-            if (os) debugInfoManager->getDWARFGenerator()->beginCompileUnit("main.fy", "Fyra Compiler");
-        }
-
-        for (auto& func : module.getFunctions()) {
-            performTargetOptimizations(*func);
-            // Instruction fusion is currently experimental and may break binary emission
-            // performInstructionFusion(*func);
-            emitFunction(*func);
-        }
-
-        if (targetInfo->getName() == "wasm32") {
-            if (os) *os << ")\n";
-        } else {
-            // Generate debug information
-            if (os) debugInfoManager->generateDebugInfo(*this, *os, module);
-        }
+        emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
+        if (forExecutable) targetInfo->emitStartFunction(*this);
+        for (auto& func : module.getFunctions()) emitFunction(*func);
+        if (targetInfo->getName() == "wasm32") *os << ")\n";
     }
-}
-
-void CodeGen::performInstructionFusion(ir::Function& func) {
-    // Apply instruction fusion optimizations
-    fusionCoordinator->optimizeFunction(func);
-}
-
-void CodeGen::applyFusionOptimizations(ir::BasicBlock& block) {
-    // Apply fusion optimizations to a basic block
-    fusionCoordinator->optimizeBasicBlock(block);
-}
-
-void CodeGen::enableDebugInfo(bool enable) {
-    debugInfoManager->enableDebugInfo(enable);
-}
-
-void CodeGen::setCurrentLocation(const std::string& file, unsigned line) {
-    debugInfoManager->setCurrentLocation(file, line);
-}
-
-void CodeGen::emitDebugInfo() {
-    // This would be called at the end of emission to output debug sections
 }
 
 void CodeGen::emitFunction(ir::Function& func) {
-
-    // Set current function for WASM parameter resolution
     currentFunction = &func;
-
-    // Reset stack offsets for each function to ensure fresh local mapping
     stackOffsets.clear();
-    
     if (targetInfo->getName() == "wasm32" && !os) {
-        if (auto* funcType = dynamic_cast<const ir::FunctionType*>(func.getType())) {
-            if (wasmTypeIndices.find(funcType) == wasmTypeIndices.end()) {
-                wasmTypeIndices[funcType] = wasmTypeIndices.size();
-            }
-        }
-        if (wasmFunctionIndices.find(&func) == wasmFunctionIndices.end()) {
-            wasmFunctionIndices[&func] = wasmFunctionIndices.size();
-        }
-
-        auto funcBodyAssembler = std::make_unique<execgen::Assembler>();
-        auto oldAssembler = std::move(assembler);
-        assembler = std::move(funcBodyAssembler);
-
-        for (auto& bb : func.getBasicBlocks()) {
-            emitBasicBlock(*bb);
-        }
-
+        auto funcBodyAsm = std::make_unique<execgen::Assembler>();
+        auto oldAsm = std::move(assembler); assembler = std::move(funcBodyAsm);
+        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
         wasmFunctionBodies.push_back(assembler->getCode());
-
-        assembler = std::move(oldAssembler);
-    } else if (targetInfo->getName() == "wasm32") {
-        emitWasmFunctionSignature(func);
-        targetInfo->emitStructuredFunctionBody(*this, func);
-        if (os) *os << "  )\n";
-
-        // Add export if function is exported
-        if (func.isExported()) {
-            std::string funcName = func.getName();
-            if (funcName.rfind("$", 0) == 0) {
-                funcName = funcName.substr(1);
-            }
-            if (os) *os << "  (export \"" << funcName << "\" (func $" << funcName << "))\n";
-        }
+        assembler = std::move(oldAsm);
     } else {
-        uint64_t func_start_offset = 0;
-        if (!os) {
-            func_start_offset = getAssembler().getCodeSize();
-            SymbolInfo func_sym;
-            func_sym.name = func.getName();
-            func_sym.sectionName = ".text";
-            func_sym.value = func_start_offset;
-            func_sym.type = 2; // STT_FUNC
-            func_sym.binding = 1; // STB_GLOBAL
-            symbols.push_back(func_sym);
-        }
-
-        if (os) {
-            *os << "\n# --- Function: " << func.getName() << " ---\n";
-            debugInfoManager->beforeFunctionEmission(*this, *os, func);
-            *os << func.getName() << ":\n";
-        }
-
-        stackOffsets.clear();
-
+        if (os) *os << "\n" << func.getName() << ":\n";
         targetInfo->emitFunctionPrologue(*this, func);
-
-        for (auto& bb : func.getBasicBlocks()) {
-            emitBasicBlock(*bb);
-        }
-
-        if (os) {
-            debugInfoManager->afterFunctionEmission(*this, *os, func, 0x1000);
-        } else {
-            for (auto& sym : symbols) {
-                if (sym.name == func.getName()) {
-                    sym.size = getAssembler().getCodeSize() - func_start_offset;
-                    break;
-                }
-            }
-        }
+        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
+        targetInfo->emitFunctionEpilogue(*this, func);
     }
 }
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
-    if (targetInfo->getName() != "wasm32") {
-        if (!os) {
-            // Binary mode: emit label symbol
-            SymbolInfo sym;
-            sym.name = bb.getParent()->getName() + "_" + bb.getName();
-            sym.sectionName = ".text";
-            sym.value = getAssembler().getCodeSize();
-            sym.type = 0; // NOTYPE
-            sym.binding = 0; // LOCAL
-            sym.size = 0;
-            symbols.push_back(sym);
-        }
-
-        if (os) {
-            *os << "\n" << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
-        }
-        for (auto it = bb.getInstructions().begin(); it != bb.getInstructions().end(); ++it) {
-            auto& instr = *it;
-            // Before emitting the terminator, resolve PHI nodes in successors
-            bool isTerm = false;
-            switch (instr->getOpcode()) {
-                case ir::Instruction::Ret:
-                case ir::Instruction::Jmp:
-                case ir::Instruction::Jnz:
-                case ir::Instruction::Br:
-                    isTerm = true;
-                    break;
-                default: break;
-            }
-
-            if (isTerm) {
-                for (auto* succ : bb.getSuccessors()) {
-                    for (auto& succInstr : succ->getInstructions()) {
-                        if (auto* phi = dynamic_cast<ir::PhiNode*>(succInstr.get())) {
-                            ir::Value* val = phi->getIncomingValueForBlock(&bb);
-                            if (val) {
-                                if (os) {
-                                    *os << "  # Resolve PHI for " << phi->getName() << " from " << bb.getName() << "\n";
-                                    std::string valOp = getValueAsOperand(val);
-                                    std::string phiOp = getValueAsOperand(phi);
-                                    if (phi->getType()->isFloatingPoint()) {
-                                        *os << "  movss " << valOp << ", %xmm0\n";
-                                        *os << "  movss %xmm0, " << phiOp << "\n";
-                                    } else {
-                                        std::string reg = (phi->getType()->getSize() > 4) ? "%rax" : "%eax";
-                                        std::string mov = (phi->getType()->getSize() > 4) ? "movq" : "movl";
-                                        *os << "  " << mov << " " << valOp << ", " << reg << "\n";
-                                        *os << "  " << mov << " " << reg << ", " << phiOp << "\n";
-                                    }
-                                } else {
-                                    // Binary mode
-                                    auto& assembler = getAssembler();
-                                    int32_t valOffset = getStackOffset(val);
-                                    int32_t phiOffset = getStackOffset(phi);
-                                    bool is64 = phi->getType()->getSize() > 4;
-
-                                    // Use a temporary register (e.g., rax) to move value to phi slot
-                                    // We need a way to load the value regardless of whether it's on stack, global, or constant.
-                                    // This is tricky because emitLoadValue is private in SystemV_x64.cpp.
-                                    // For now, let's assume we can at least handle stack values correctly.
-                                    // Actually, we should probably add a helper to TargetInfo for this.
-
-                                    if (auto* constInt = dynamic_cast<ir::ConstantInt*>(val)) {
-                                        if (is64) assembler.emitByte(0x48);
-                                        assembler.emitByte(0xB8);
-                                        if (is64) assembler.emitQWord(constInt->getValue());
-                                        else assembler.emitDWord(constInt->getValue());
-                                    } else if (stackOffsets.count(val)) {
-                                        if (is64) assembler.emitByte(0x48);
-                                        assembler.emitByte(0x8B);
-                                        if (valOffset >= -128 && valOffset <= 127) {
-                                            assembler.emitByte(0x45); assembler.emitByte(static_cast<int8_t>(valOffset));
-                                        } else {
-                                            assembler.emitByte(0x85); assembler.emitDWord(static_cast<uint32_t>(valOffset));
-                                        }
-                                    } else {
-                                        // Global or other - simplified for now
-                                        if (is64) assembler.emitByte(0x48);
-                                        assembler.emitByte(0xC7); // mov imm32, r/m64
-                                        assembler.emitByte(0xC0); // rax
-                                        assembler.emitDWord(0); // placeholder
-                                    }
-
-                                    // mov %rax/eax, phiOffset(%rbp)
-                                    if (is64) assembler.emitByte(0x48);
-                                    assembler.emitByte(0x89);
-                                    if (phiOffset >= -128 && phiOffset <= 127) {
-                                        assembler.emitByte(0x45); assembler.emitByte(static_cast<int8_t>(phiOffset));
-                                    } else {
-                                        assembler.emitByte(0x85); assembler.emitDWord(static_cast<uint32_t>(phiOffset));
-                                    }
-                                }
-                            }
-                        } else {
-                            break; // PHIs are always at the start
-                        }
-                    }
-                }
-            }
-            emitInstruction(*instr);
-        }
-    } else if (os) {
-        // WASM structured control flow
-        // For WASM, emit all instructions - the branch instruction will handle structured control flow
-        for (auto& instr : bb.getInstructions()) {
-            emitInstruction(*instr);
-        }
-    } else {
-        // Binary mode
-        for (auto& instr : bb.getInstructions()) {
-            emitInstruction(*instr);
-        }
+    if (os) {
+        *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
+    } else if (assembler) {
+        // Register basic block as a symbol for binary emission
+        SymbolInfo bb_sym;
+        bb_sym.name = bb.getParent()->getName() + "_" + bb.getName();
+        bb_sym.sectionName = ".text";
+        bb_sym.value = assembler->getCodeSize();
+        bb_sym.type = 0; // STT_NOTYPE
+        bb_sym.binding = 1; // STB_GLOBAL
+        addSymbol(bb_sym);
     }
+    for (auto& instr : bb.getInstructions()) emitInstruction(*instr);
 }
 
 void CodeGen::emitInstruction(ir::Instruction& instr) {
-    if (os) {
-        // Debug info before instruction
-        debugInfoManager->beforeInstructionEmission(*this, *os, instr, 0x1000); // Placeholder address
-    }
-    
-    // Dispatch to the target for instruction emission
     switch (instr.getOpcode()) {
-        case ir::Instruction::Ret:
-            targetInfo->emitRet(*this, instr);
-            break;
-        case ir::Instruction::Add:
-            targetInfo->emitAdd(*this, instr);
-            break;
-        case ir::Instruction::Sub:
-            targetInfo->emitSub(*this, instr);
-            break;
-        case ir::Instruction::Mul:
-            targetInfo->emitMul(*this, instr);
-            break;
-        case ir::Instruction::Div:
-        case ir::Instruction::Udiv:
-            targetInfo->emitDiv(*this, instr);
-            break;
-        case ir::Instruction::Rem:
-        case ir::Instruction::Urem:
-            targetInfo->emitRem(*this, instr);
-            break;
-        case ir::Instruction::And:
-            targetInfo->emitAnd(*this, instr);
-            break;
-        case ir::Instruction::Or:
-            targetInfo->emitOr(*this, instr);
-            break;
-        case ir::Instruction::Xor:
-            targetInfo->emitXor(*this, instr);
-            break;
-        case ir::Instruction::Shl:
-            targetInfo->emitShl(*this, instr);
-            break;
-        case ir::Instruction::Shr:
-            targetInfo->emitShr(*this, instr);
-            break;
-        case ir::Instruction::Sar:
-            targetInfo->emitSar(*this, instr);
-            break;
-        case ir::Instruction::Syscall:
-            targetInfo->emitSyscall(*this, instr);
-            break;
-        case ir::Instruction::Neg:
-            targetInfo->emitNeg(*this, instr);
-            break;
-        case ir::Instruction::Not:
-            targetInfo->emitNot(*this, instr);
-            break;
-        case ir::Instruction::Copy:
-            targetInfo->emitCopy(*this, instr);
-            break;
-        case ir::Instruction::Call:
-            targetInfo->emitCall(*this, instr);
-            break;
-        case ir::Instruction::Jmp:
-            targetInfo->emitJmp(*this, instr);
-            break;
-        case ir::Instruction::Jnz:
-        case ir::Instruction::Br:
-            targetInfo->emitBr(*this, instr);
-            break;
-        case ir::Instruction::FAdd:
-            targetInfo->emitFAdd(*this, instr);
-            break;
-        case ir::Instruction::FSub:
-            targetInfo->emitFSub(*this, instr);
-            break;
-        case ir::Instruction::FMul:
-            targetInfo->emitFMul(*this, instr);
-            break;
-        case ir::Instruction::FDiv:
-            targetInfo->emitFDiv(*this, instr);
-            break;
-        case ir::Instruction::Alloc:
-        case ir::Instruction::Alloc4:
-        case ir::Instruction::Alloc16:
-            targetInfo->emitAlloc(*this, instr);
-            break;
-        case ir::Instruction::Load:
-        case ir::Instruction::Loadd:
-        case ir::Instruction::Loads:
-        case ir::Instruction::Loadl:
-        case ir::Instruction::Loaduw:
-        case ir::Instruction::Loadsh:
-        case ir::Instruction::Loaduh:
-        case ir::Instruction::Loadsb:
-        case ir::Instruction::Loadub:
-            targetInfo->emitLoad(*this, instr);
-            break;
-        case ir::Instruction::Store:
-        case ir::Instruction::Stored:
-        case ir::Instruction::Stores:
-        case ir::Instruction::Storel:
-        case ir::Instruction::Storeh:
-        case ir::Instruction::Storeb:
-            targetInfo->emitStore(*this, instr);
-            break;
-        case ir::Instruction::ExtUB:
-        case ir::Instruction::ExtUH:
-        case ir::Instruction::ExtUW:
-        case ir::Instruction::ExtSB:
-        case ir::Instruction::ExtSH:
-        case ir::Instruction::ExtSW:
-        case ir::Instruction::ExtS:
-        case ir::Instruction::TruncD:
-        case ir::Instruction::SWtoF:
-        case ir::Instruction::UWtoF:
-        case ir::Instruction::DToSI:
-        case ir::Instruction::DToUI:
-        case ir::Instruction::SToSI:
-        case ir::Instruction::SToUI:
-        case ir::Instruction::Sltof:
-        case ir::Instruction::Ultof:
-        case ir::Instruction::Cast:
-            {
-                const ir::Type* fromType = instr.getOperands()[0]->get()->getType();
-                const ir::Type* toType = instr.getType();
-                targetInfo->emitCast(*this, instr, fromType, toType);
-            }
-            break;
-        // Vector instructions
-        case ir::Instruction::VAdd:
-        case ir::Instruction::VSub:
-        case ir::Instruction::VMul:
-        case ir::Instruction::VDiv:
-        case ir::Instruction::VFAdd:
-        case ir::Instruction::VFSub:
-        case ir::Instruction::VFMul:
-        case ir::Instruction::VFDiv:
-            if (auto* vecInstr = dynamic_cast<ir::VectorInstruction*>(&instr)) {
-                targetInfo->emitVectorArithmetic(*this, *vecInstr);
-            } else {
-                if (os) *os << "  # Error: Vector instruction expected\n";
-            }
-            break;
-        case ir::Instruction::VLoad:
-            if (auto* vecInstr = dynamic_cast<ir::VectorInstruction*>(&instr)) {
-                targetInfo->emitVectorLoad(*this, *vecInstr);
-            } else {
-                if (os) *os << "  # Error: Vector instruction expected\n";
-            }
-            break;
-        case ir::Instruction::VStore:
-            if (auto* vecInstr = dynamic_cast<ir::VectorInstruction*>(&instr)) {
-                targetInfo->emitVectorStore(*this, *vecInstr);
-            } else {
-                if (os) *os << "  # Error: Vector instruction expected\n";
-            }
-            break;
-        // Fused instructions
-        case ir::Instruction::FMA:
-            if (auto* fusedInstr = dynamic_cast<ir::FusedInstruction*>(&instr)) {
-                targetInfo->emitFusedMultiplyAdd(*this, *fusedInstr);
-            } else {
-                if (os) *os << "  # Error: Fused instruction expected\n";
-            }
-            break;
-        case ir::Instruction::Ceq:
-        case ir::Instruction::Cne:
-        case ir::Instruction::Csle:
-        case ir::Instruction::Cslt:
-        case ir::Instruction::Csge:
-        case ir::Instruction::Csgt:
-        case ir::Instruction::Cule:
-        case ir::Instruction::Cult:
-        case ir::Instruction::Cuge:
-        case ir::Instruction::Cugt:
-        case ir::Instruction::Ceqf:
-        case ir::Instruction::Cnef:
-        case ir::Instruction::Cle:
-        case ir::Instruction::Clt:
-        case ir::Instruction::Cge:
-        case ir::Instruction::Cgt:
-        case ir::Instruction::Co:
-        case ir::Instruction::Cuo:
-            targetInfo->emitCmp(*this, instr);
-            break;
-        case ir::Instruction::Phi:
-            // Phi is handled by TargetInfo during block emission
-            break;
-        default:
-            if (os) *os << "  # Unimplemented instruction " << instr.getOpcode() << "\n";
-            break;
+        case ir::Instruction::Ret: targetInfo->emitRet(*this, instr); break;
+        case ir::Instruction::Add: targetInfo->emitAdd(*this, instr); break;
+        case ir::Instruction::Sub: targetInfo->emitSub(*this, instr); break;
+        case ir::Instruction::Mul: targetInfo->emitMul(*this, instr); break;
+        case ir::Instruction::Div: case ir::Instruction::Udiv: targetInfo->emitDiv(*this, instr); break;
+        case ir::Instruction::Rem: case ir::Instruction::Urem: targetInfo->emitRem(*this, instr); break;
+        case ir::Instruction::And: targetInfo->emitAnd(*this, instr); break;
+        case ir::Instruction::Or: targetInfo->emitOr(*this, instr); break;
+        case ir::Instruction::Xor: targetInfo->emitXor(*this, instr); break;
+        case ir::Instruction::Shl: targetInfo->emitShl(*this, instr); break;
+        case ir::Instruction::Shr: targetInfo->emitShr(*this, instr); break;
+        case ir::Instruction::Sar: targetInfo->emitSar(*this, instr); break;
+        case ir::Instruction::FAdd: targetInfo->emitFAdd(*this, instr); break;
+        case ir::Instruction::FSub: targetInfo->emitFSub(*this, instr); break;
+        case ir::Instruction::FMul: targetInfo->emitFMul(*this, instr); break;
+        case ir::Instruction::FDiv: targetInfo->emitFDiv(*this, instr); break;
+        case ir::Instruction::Neg: targetInfo->emitNeg(*this, instr); break;
+        case ir::Instruction::Not: targetInfo->emitNot(*this, instr); break;
+        case ir::Instruction::Copy: targetInfo->emitCopy(*this, instr); break;
+        case ir::Instruction::Syscall: targetInfo->emitSyscall(*this, instr); break;
+        case ir::Instruction::Call: targetInfo->emitCall(*this, instr); break;
+        case ir::Instruction::Jmp: targetInfo->emitJmp(*this, instr); break;
+        case ir::Instruction::Br: case ir::Instruction::Jnz: targetInfo->emitBr(*this, instr); break;
+        case ir::Instruction::Load: targetInfo->emitLoad(*this, instr); break;
+        case ir::Instruction::Store: targetInfo->emitStore(*this, instr); break;
+        case ir::Instruction::Alloc: targetInfo->emitAlloc(*this, instr); break;
+        case ir::Instruction::Ceq: case ir::Instruction::Cne: case ir::Instruction::Cslt:
+        case ir::Instruction::Csle: case ir::Instruction::Csgt: case ir::Instruction::Csge:
+        case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
+        case ir::Instruction::Cuge: targetInfo->emitCmp(*this, instr); break;
+        default: break;
     }
 }
 
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
-    if (!value) return "NULL_VALUE";
-    // Check if this is WASM target - use different handling
-    if (targetInfo->getName() == "wasm32") {
-        return getWasmValueAsOperand(value);
-    }
-    
-    // Is it a constant?
-    if (auto* constInt = dynamic_cast<const ir::ConstantInt*>(value)) {
-        return targetInfo->formatConstant(constInt);
-    }
-    if (auto* constFP = dynamic_cast<const ir::ConstantFP*>(value)) {
-        auto it = floatConstantLabels.find(const_cast<ir::ConstantFP*>(constFP));
-        if (it != floatConstantLabels.end()) {
-            return targetInfo->formatGlobalOperand(it->second);
-        }
-    }
-    if (auto* global = dynamic_cast<const ir::GlobalValue*>(value)) {
-        return targetInfo->formatGlobalOperand(global->getName());
-    }
-
-    // Is it a temporary stored on the stack?
-    if (stackOffsets.count(const_cast<ir::Value*>(value))) {
-        return targetInfo->formatStackOperand(stackOffsets[const_cast<ir::Value*>(value)]);
-    }
-
-    // Handle BasicBlocks (labels)
-    if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) {
-        return bb->getParent()->getName() + "_" + bb->getName();
-    }
-
-    // Fallback for unknown values
-    return "UNKNOWN_VALUE";
-}
-
-std::string CodeGen::getWasmValueAsOperand(const ir::Value* value) {
-    if (!value) return "";
-
-    // Handle constants
-    if (auto* constInt = dynamic_cast<const ir::ConstantInt*>(value)) {
-        return targetInfo->formatConstant(constInt);
-    }
-
-    if (auto* constFP = dynamic_cast<const ir::ConstantFP*>(value)) {
-        if (constFP->getType()->isFloatTy()) {
-            return "f32.const " + std::to_string(constFP->getValue());
-        } else {
-            return "f64.const " + std::to_string(constFP->getValue());
-        }
-    }
-
-    if (auto* constStr = dynamic_cast<const ir::ConstantString*>(value)) {
-        return ";; [string literal]";
-    }
-    
-    // Handle function parameters
-    if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
-        // Check if we have a stack offset (local index) assigned
-        if (stackOffsets.count(const_cast<ir::Value*>(value))) {
-            return "local.get " + std::to_string(stackOffsets.at(const_cast<ir::Value*>(value)));
-        }
-
-        // Fallback: Find parameter index in current function
-        if (currentFunction) {
-            const auto& params = currentFunction->getParameters();
-            size_t i = 0;
-            for (auto it = params.begin(); it != params.end(); ++it, ++i) {
-                if (it->get() == param) {
-                    return "local.get " + std::to_string(i);
-                }
+    if (!value) return "null";
+    if (auto* instr = dynamic_cast<const ir::Instruction*>(value)) {
+        if (instr->hasPhysicalRegister()) {
+            auto regClass = instr->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
+            auto& regs = targetInfo->getRegisters(regClass);
+            if (static_cast<size_t>(instr->getPhysicalRegister()) < regs.size()) {
+                return targetInfo->getRegisterName(regs[instr->getPhysicalRegister()], instr->getType());
             }
         }
+        if (currentFunction && currentFunction->hasStackSlot(const_cast<ir::Instruction*>(instr)))
+            return targetInfo->formatStackOperand(-currentFunction->getStackSlotForVreg(const_cast<ir::Instruction*>(instr)) - 8);
     }
-    
-    // Handle global values (functions)
-    if (auto* func = dynamic_cast<const ir::Function*>(value)) {
-        if (!os) {
-            auto it = wasmFunctionIndices.find(func);
-            if (it != wasmFunctionIndices.end()) {
-                return std::to_string(it->second);
-            }
-        }
-        std::string name = func->getName();
-        if (name.rfind("$", 0) == 0) name = name.substr(1);
-        return "$" + name;
-    }
-
-    if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) {
-        std::string name = gv->getName();
-        if (name.rfind("$", 0) == 0) name = name.substr(1);
-        return "$" + name;
-    }
-
-    if (auto* global = dynamic_cast<const ir::GlobalValue*>(value)) {
-        if (auto* gFunc = module.getFunction(global->getName())) {
-             if (!os) {
-                auto it = wasmFunctionIndices.find(gFunc);
-                if (it != wasmFunctionIndices.end()) {
-                    return std::to_string(it->second);
-                }
-            }
-        }
-        std::string name = global->getName();
-        if (name.rfind("$", 0) == 0) name = name.substr(1);
-        return "$" + name;
-    }
-
-    if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) {
-        // For WASM, global variables are just offsets or actual globals.
-        // For now, let's just return their name as a label.
-        std::string name = gv->getName();
-        if (name.rfind("$", 0) == 0) name = name.substr(1);
-        return "$" + name;
-    }
-
-    // Is it a temporary stored on the stack (WASM local)?
-    if (stackOffsets.count(const_cast<ir::Value*>(value))) {
-        return "local.get " + std::to_string(stackOffsets.at(const_cast<ir::Value*>(value)));
-    }
-
-    // Handle BasicBlocks (labels)
-    if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) {
-        return "$" + bb->getName();
-    }
-    
-    return "";
+    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
+    if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
+    if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
+    if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
+    if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets[const_cast<ir::Value*>(value)]);
+    if (auto* p = dynamic_cast<const ir::Parameter*>(value)) { if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value))); } return "$" + value->getName();
 }
 
-void CodeGen::emitWasmFunctionSignature(ir::Function& func) {
-    if (!os) return;
-    
-    std::string funcName = func.getName();
-    // Remove $ prefix if present
-    if (funcName.rfind("$", 0) == 0) {
-        funcName = funcName.substr(1);
+int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }
+
+CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPrefix, bool validateASM, bool generateObject, bool) {
+    CompilationTimer timer; CompilationResult result; result.targetName = targetInfo->getName();
+    std::stringstream ss; std::ostream* old_os = os; os = &ss; emit(false); os = old_os;
+    std::string assembly = ss.str();
+    std::string assemblyPath = outputPrefix + targetInfo->getAssemblyFileExtension();
+    result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
+    if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
+    if (generateObject && !result.hasValidationErrors()) {
+        result.objGen = objectGenerator_->generateObject(result.assemblyPath, outputPrefix, targetInfo->getName());
+        if (result.objGen.success) result.objectPath = result.objGen.objectPath;
     }
-    
-    *os << "  (func $" << funcName;
-    
-    // Emit parameters
-    const auto& params = func.getParameters();
-    size_t i = 0;
-    for (auto it = params.begin(); it != params.end(); ++it, ++i) {
-        auto* paramType = (*it)->getType();
-        std::string wasmType = "i32"; // Default to i32
-        
-        if (auto* intTy = dynamic_cast<const ir::IntegerType*>(paramType)) {
-            wasmType = (intTy->getBitwidth() <= 32) ? "i32" : "i64";
-        } else if (paramType->isFloatTy()) {
-            wasmType = "f32";
-        } else if (paramType->isDoubleTy()) {
-            wasmType = "f64";
-        }
-        
-        *os << " (param $" << i << " " << wasmType << ")";
-    }
-    
-    // Emit return type - get it from function type
-    if (auto* funcType = dynamic_cast<const ir::FunctionType*>(func.getType())) {
-        auto* returnType = funcType->getReturnType();
-        if (!returnType->isVoidTy()) {
-            std::string wasmRetType = "i32"; // Default to i32
-            
-            if (auto* intTy = dynamic_cast<const ir::IntegerType*>(returnType)) {
-                wasmRetType = (intTy->getBitwidth() <= 32) ? "i32" : "i64";
-            } else if (returnType->isFloatTy()) {
-                wasmRetType = "f32";
-            } else if (returnType->isDoubleTy()) {
-                wasmRetType = "f64";
-            }
-            
-            *os << " (result " << wasmRetType << ")";
-        }
-    }
-    
-    *os << "\n";
+    result.success = !result.hasValidationErrors() && (!generateObject || result.objGen.success);
+    result.totalTimeMs = timer.getElapsedMs(); return result;
 }
 
-// Enhanced instruction selection methods
-void CodeGen::initializeInstructionPatterns() {
-    // Initialize patterns for optimized instruction selection
-    // This is a simplified version - real implementation would have many more patterns
+CodeGen::CompilationResult CodeGen::compileToAssembly(const std::string& outputPath, bool validateASM) {
+    CompilationTimer timer; CompilationResult result; result.targetName = targetInfo->getName();
+    std::stringstream ss; std::ostream* old_os = os; os = &ss; emit(false); os = old_os;
+    std::string assembly = ss.str();
+    result.assemblyPath = writeAssemblyToFile(assembly, outputPath);
+    if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
+    result.success = !result.hasValidationErrors(); result.totalTimeMs = timer.getElapsedMs(); return result;
 }
 
-void CodeGen::selectInstruction(ir::Instruction& instr) {
-    // Try to match against instruction patterns for optimization
-    for (const auto& pattern : instructionPatterns) {
-        if (matchPattern(instr, pattern)) {
-            pattern.emitter(*this, instr);
-            return;
-        }
-    }
-    // If no pattern matches, fall back to standard emission
+std::string CodeGen::writeAssemblyToFile(const std::string& assembly, const std::string& path) {
+    std::ofstream file(path); if (!file.is_open()) return ""; file << assembly; file.close(); return path;
 }
 
-bool CodeGen::matchPattern(ir::Instruction& instr, const InstructionPattern& pattern) {
-    if (instr.getOpcode() != pattern.opcode) {
-        return false;
-    }
-    
-    // Check operand types match
-    if (instr.getOperands().size() != pattern.operandTypes.size()) {
-        return false;
-    }
-    
-    for (size_t i = 0; i < instr.getOperands().size(); ++i) {
-        if (instr.getOperands()[i]->get()->getType()->getTypeID() != pattern.operandTypes[i]) {
-            return false;
-        }
-    }
-    
-    return true;
+bool CodeGen::CompilationResult::hasObjectGenerationErrors() const { return !objGen.success; }
+std::vector<std::string> CodeGen::CompilationResult::getAllErrors() const {
+    std::vector<std::string> errors;
+    for (const auto& error : validation.errors) errors.push_back("[Validation] " + error.message);
+    if (!objGen.success) errors.push_back("[ObjectGen] " + objGen.errorOutput);
+    return errors;
 }
 
-void CodeGen::selectArithmeticInstruction(ir::Instruction& instr) {
-    (void)instr;
-    if (os) *os << "  # Unhandled arithmetic instruction\n";
+void CodeGen::setValidationLevel(validation::ValidationLevel level) { if (validator_) validator_->setValidationLevel(level); }
+void CodeGen::enableVerboseOutput(bool enable) { verboseOutput_ = enable; if (validator_) validator_->enableDetailedReporting(enable); }
+
+std::unique_ptr<CodeGen> CodeGenFactory::create(ir::Module& module, const std::string& targetName) {
+    auto ti = createTargetInfo(targetName); if (!ti) return nullptr;
+    return std::make_unique<CodeGen>(module, std::move(ti));
 }
 
-void CodeGen::selectMemoryInstruction(ir::Instruction& instr) {
-    (void)instr;
-    if (!os) return;
-    // Enhanced memory instruction selection with optimizations
-    *os << "  # Enhanced memory instruction selection\n";
+std::unique_ptr<target::TargetInfo> CodeGenFactory::createTargetInfo(const std::string& targetName) {
+    std::string n = targetName; std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+    if (n == "linux" || n == "systemv" || n == "x86_64") return std::make_unique<target::SystemV_x64>();
+    if (n == "windows" || n == "win64" || n == "windows-amd64") return std::make_unique<target::Windows_x64>();
+    if (n == "windows-arm64") return std::make_unique<target::Windows_AArch64>();
+    if (n == "macos" || n == "darwin") return std::make_unique<target::MacOS_x64>();
+    if (n == "macos-aarch64") return std::make_unique<target::MacOS_AArch64>();
+    if (n == "wasm32") return std::make_unique<target::Wasm32>();
+    if (n == "aarch64") return std::make_unique<target::AArch64>();
+    if (n == "riscv64") return std::make_unique<target::RiscV64>();
+    return nullptr;
 }
 
-void CodeGen::selectComparisonInstruction(ir::Instruction& instr) {
-    (void)instr;
-    if (os) *os << "  # Unhandled comparison\n";
-}
-
-void CodeGen::selectControlFlowInstruction(ir::Instruction& instr) {
-    (void)instr;
-    if (!os) return;
-    // Enhanced control flow instruction selection
-    *os << "  # Enhanced control flow instruction selection\n";
-}
-
-void CodeGen::performTargetOptimizations(ir::Function& func) {
-    (void)func;
-    // Perform target-specific optimizations
-}
-
-std::string CodeGen::allocateRegister(ir::Value* value) {
-    // Simple register allocation - find first available register
-    for (const auto& reg : availableRegisters) {
-        if (!registerUsage[reg]) {
-            registerUsage[reg] = true;
-            return reg;
-        }
-    }
-    
-    // If no registers available, spill to stack
-    return getValueAsOperand(value);
-}
-
-void CodeGen::deallocateRegister(const std::string& reg) {
-    if (registerUsage.count(reg)) {
-        registerUsage[reg] = false;
-    }
-}
-
-bool CodeGen::isImmediateValue(ir::Value* value, int64_t& immediate) {
-    if (auto* constInt = dynamic_cast<ir::ConstantInt*>(value)) {
-        immediate = constInt->getValue();
-        return true;
-    }
-    return false;
-}
-
-bool CodeGen::canFoldIntoMemoryOperand(ir::Value* value) {
-    // Check if value can be folded into a memory operand
-    return dynamic_cast<ir::GlobalValue*>(value) != nullptr;
-}
-
-std::string CodeGen::getOptimizedOperand(ir::Value* value) {
-    // Get optimized operand representation
-    int64_t immediate;
-    if (isImmediateValue(value, immediate)) {
-        return "$" + std::to_string(immediate);
-    }
-    
-    if (canFoldIntoMemoryOperand(value)) {
-        if (auto* global = dynamic_cast<ir::GlobalValue*>(value)) {
-            return global->getName() + "(%rip)";
-        }
-    }
-    
-    return getValueAsOperand(value);
-}
-
+void CodeGen::initializeInstructionPatterns() {}
+void CodeGen::performTargetOptimizations(ir::Function&) {}
+std::string CodeGen::allocateRegister(ir::Value*) { return ""; }
+void CodeGen::deallocateRegister(const std::string&) {}
 void CodeGen::emitTargetSpecificHeader() {
-    if (!emittedHeader && os) {
-        // Emit target-specific assembly directives
-        if (targetInfo->getName() == "wasm32") {
-            *os << "(module\n";
-        } else if (targetInfo->getName().find("windows") != std::string::npos) {
-            if (targetInfo->getName().find("aarch64") != std::string::npos) {
-                *os << "# Windows ARM64 assembly\n";
-            } else {
-                *os << "# Windows x64 assembly\n";
-                *os << ".intel_syntax noprefix\n";
-            }
-        } else if (targetInfo->getName() == "aarch64") {
-            *os << "# AArch64 assembly\n";
-        } else if (targetInfo->getName() == "riscv64") {
-            *os << "# RISC-V 64 assembly\n";
-        } else {
-            *os << "# System V x64 assembly\n";
-            *os << ".att_syntax prefix\n";
-        }
-        
-        emittedHeader = true;
+    targetInfo->emitHeader(*this);
+    if (os) {
+        if (targetInfo->getName() == "x86_64") *os << ".att_syntax prefix\n";
+        else if (targetInfo->getName() == "win64") *os << ".intel_syntax noprefix\n";
     }
 }
-
 void CodeGen::emitDataSection() {
-    if (targetInfo->getName() == "wasm32") return;
-    if (!emittedDataSection && os) {
-        bool anyData = !floatConstantLabels.empty() || usesFPNeg || usesHeap || !module.getGlobalVariables().empty();
-        if (!anyData) return;
-
-        bool hasRodata = !floatConstantLabels.empty() || usesFPNeg;
-        if (hasRodata) {
-            *os << ".section .rodata\n";
-
-            // Emit floating-point masks
-            if (usesFPNeg) {
-                *os << targetInfo->getLabelPrefix() << "neg_mask_float:\n";
-                *os << "  .long 0x80000000\n";
-                *os << "  .long 0\n";
-                *os << "  .long 0\n";
-                *os << "  .long 0\n";
-                *os << targetInfo->getLabelPrefix() << "neg_mask_double:\n";
-                *os << "  .quad 0x8000000000000000\n";
-                *os << "  .quad 0\n";
-            }
-
-            // Emit float constants
-            for (auto const& [konst, label] : floatConstantLabels) {
-                *os << label << ":\n";
-                if (konst->getType()->isFloatTy()) {
-                    *os << "  .float " << konst->getValue() << "\n";
-                } else {
-                    *os << "  .double " << konst->getValue() << "\n";
-                }
-            }
-        }
-
-        bool hasData = usesHeap || !module.getGlobalVariables().empty();
-        if (hasData) {
-            *os << ".section .data\n";
-
-            // Emit heap management globals
-            if (usesHeap) {
-                *os << "__heap_base:\n";
-                *os << "  .zero 1048576  # 1MB Heap\n";
-                *os << "__heap_ptr:\n";
-                *os << "  .quad __heap_base\n";
-            }
-
-            // Emit globals
-            for (auto& global : module.getGlobalVariables()) {
-                *os << global->getName() << ":\n";
-                if (auto* init = global->getInitializer()) {
-                    if (auto* str = dynamic_cast<ir::ConstantString*>(init)) {
-                        *os << "  .asciz \"" << str->getValue() << "\"\n";
-                    } else if (auto* arr = dynamic_cast<ir::ConstantArray*>(init)) {
-                        for (auto* elem : arr->getValues()) {
-                            if (auto* ci = dynamic_cast<ir::ConstantInt*>(elem)) {
-                                auto* intTy = static_cast<const ir::IntegerType*>(ci->getType());
-                                if (intTy->getBitwidth() == 8) *os << "  .byte " << ci->getValue() << "\n";
-                                else if (intTy->getBitwidth() == 16) *os << "  .short " << ci->getValue() << "\n";
-                                else if (intTy->getBitwidth() == 32) *os << "  .long " << ci->getValue() << "\n";
-                                else if (intTy->getBitwidth() == 64) *os << "  .quad " << ci->getValue() << "\n";
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        emittedDataSection = true;
-    } else if (!emittedDataSection) {
-        auto& rodataAsm = getRodataAssembler();
-
-        // Emit heap management globals for binary mode
+    if (module.getGlobalVariables().empty() && !usesHeap) return;
+    if (os) {
+        *os << "\n.data\n";
         if (usesHeap) {
-            SymbolInfo base_sym;
-            base_sym.name = "__heap_base";
-            base_sym.sectionName = ".data";
-            base_sym.value = rodataAsm.getCodeSize();
-            base_sym.type = 1; // STT_OBJECT
-            base_sym.binding = 1; // STB_GLOBAL
-            for (int i = 0; i < 4096; ++i) rodataAsm.emitByte(0); // 4KB heap
-            base_sym.size = 4096;
-            symbols.push_back(base_sym);
-
-            SymbolInfo ptr_sym;
-            ptr_sym.name = "__heap_ptr";
-            ptr_sym.sectionName = ".data";
-            ptr_sym.value = rodataAsm.getCodeSize();
-            ptr_sym.type = 1; // STT_OBJECT
-            ptr_sym.binding = 1; // STB_GLOBAL
-            rodataAsm.emitQWord(0); // Placeholder for __heap_base address
-            ptr_sym.size = 8;
-            symbols.push_back(ptr_sym);
-
-            // Relocation for __heap_ptr = __heap_base
-            RelocationInfo heap_reloc;
-            heap_reloc.offset = ptr_sym.value;
-            heap_reloc.symbolName = "__heap_base";
-            heap_reloc.type = targetInfo->getDataRelocationType();
-            heap_reloc.sectionName = ".data";
-            heap_reloc.addend = 0;
-            addRelocation(heap_reloc);
+            *os << "__heap_base:\n  .zero 1048576\n";
+            *os << "__heap_ptr:\n  .quad __heap_base\n";
         }
-
-        // Register global symbols
-        for (auto& global : module.getGlobalVariables()) {
-            // Align globals to 8 bytes
-            while (rodataAsm.getCodeSize() % 8 != 0) rodataAsm.emitByte(0);
-
-            SymbolInfo sym;
-            sym.name = global->getName();
-            sym.sectionName = ".data";
-            sym.value = rodataAsm.getCodeSize();
-            sym.type = 1; // STT_OBJECT
-            sym.binding = 1; // STB_GLOBAL
-
-            if (auto* init = global->getInitializer()) {
-                if (auto* str = dynamic_cast<ir::ConstantString*>(init)) {
-                    for (char c : str->getValue()) rodataAsm.emitByte(c);
-                    rodataAsm.emitByte(0);
-                } else if (auto* arr = dynamic_cast<ir::ConstantArray*>(init)) {
-                    for (auto* elem : arr->getValues()) {
-                        if (auto* ci = dynamic_cast<ir::ConstantInt*>(elem)) {
-                            auto* intTy = static_cast<const ir::IntegerType*>(ci->getType());
-                            if (intTy->getBitwidth() == 8) rodataAsm.emitByte(ci->getValue());
-                            else if (intTy->getBitwidth() == 16) rodataAsm.emitWord(ci->getValue());
-                            else if (intTy->getBitwidth() == 32) rodataAsm.emitDWord(ci->getValue());
-                            else if (intTy->getBitwidth() == 64) rodataAsm.emitQWord(ci->getValue());
+        for (auto& gv : module.getGlobalVariables()) {
+            *os << gv->getName() << ":\n";
+            if (auto* init = gv->getInitializer()) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
+                    if (ci->getType()->getSize() == 1) *os << "  .byte " << ci->getValue() << "\n";
+                    else if (ci->getType()->getSize() == 2) *os << "  .short " << ci->getValue() << "\n";
+                    else if (ci->getType()->getSize() == 4) *os << "  .long " << ci->getValue() << "\n";
+                    else *os << "  .quad " << ci->getValue() << "\n";
+                } else if (auto* ca = dynamic_cast<ir::ConstantArray*>(init)) {
+                    for (auto* elem : ca->getValues()) {
+                        if (auto* eci = dynamic_cast<ir::ConstantInt*>(elem)) {
+                             if (eci->getType()->getSize() == 1) *os << "  .byte " << eci->getValue() << "\n";
+                             else if (eci->getType()->getSize() == 4) *os << "  .long " << eci->getValue() << "\n";
+                             else *os << "  .quad " << eci->getValue() << "\n";
                         }
                     }
-                } else if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
-                    auto* intTy = static_cast<const ir::IntegerType*>(ci->getType());
-                    if (intTy->getBitwidth() == 8) rodataAsm.emitByte(ci->getValue());
-                    else if (intTy->getBitwidth() == 16) rodataAsm.emitWord(ci->getValue());
-                    else if (intTy->getBitwidth() == 32) rodataAsm.emitDWord(ci->getValue());
-                    else if (intTy->getBitwidth() == 64) rodataAsm.emitQWord(ci->getValue());
                 }
-            }
-            sym.size = rodataAsm.getCodeSize() - sym.value;
-            symbols.push_back(sym);
-        }
-
-        for (auto const& [konst, label] : floatConstantLabels) {
-            (void)label;
-            if (konst->getType()->isFloatTy()) {
-                float f = konst->getValue();
-                uint32_t bval;
-                std::memcpy(&bval, &f, sizeof(float));
-                rodataAsm.emitDWord(bval);
             } else {
-                double d = konst->getValue();
-                uint64_t bval;
-                std::memcpy(&bval, &d, sizeof(double));
-                rodataAsm.emitQWord(bval);
+                *os << "  .zero " << gv->getType()->getSize() << "\n";
             }
         }
-        emittedDataSection = true;
+    } else if (rodataAssembler) {
+        if (usesHeap) {
+            // Allocate heap base in .data for now (1MB of zeros)
+            uint64_t heap_base_offset = rodataAssembler->getCodeSize();
+            for(int i=0; i<1048576; ++i) rodataAssembler->emitByte(0);
+            
+            SymbolInfo hb_sym;
+            hb_sym.name = "__heap_base";
+            hb_sym.sectionName = ".data";
+            hb_sym.value = heap_base_offset;
+            hb_sym.size = 1048576;
+            hb_sym.binding = 1;
+            addSymbol(hb_sym);
+
+            uint64_t heap_ptr_offset = rodataAssembler->getCodeSize();
+            SymbolInfo hp_sym;
+            hp_sym.name = "__heap_ptr";
+            hp_sym.sectionName = ".data";
+            hp_sym.value = heap_ptr_offset;
+            hp_sym.size = 8;
+            hp_sym.binding = 1;
+            addSymbol(hp_sym);
+            
+            rodataAssembler->emitQWord(0); // Placeholder
+            RelocationInfo hp_reloc;
+            hp_reloc.offset = heap_ptr_offset;
+            hp_reloc.symbolName = "__heap_base";
+            hp_reloc.type = "R_X86_64_64";
+            hp_reloc.sectionName = ".data";
+            hp_reloc.addend = 0;
+            addRelocation(hp_reloc);
+        }
+        for (auto& gv : module.getGlobalVariables()) {
+            symbols.push_back({gv->getName(), (uint64_t)rodataAssembler->getCode().size(), gv->getType()->getSize(), 0, 1, ".data"});
+            if (auto* init = gv->getInitializer()) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
+                    if (ci->getType()->getSize() == 1) rodataAssembler->emitByte(ci->getValue());
+                    else if (ci->getType()->getSize() == 2) rodataAssembler->emitWord(ci->getValue());
+                    else if (ci->getType()->getSize() == 4) rodataAssembler->emitDWord(ci->getValue());
+                    else rodataAssembler->emitQWord(ci->getValue());
+                } else if (auto* ca = dynamic_cast<ir::ConstantArray*>(init)) {
+                    for (auto* elem : ca->getValues()) {
+                        if (auto* eci = dynamic_cast<ir::ConstantInt*>(elem)) {
+                             if (eci->getType()->getSize() == 1) rodataAssembler->emitByte(eci->getValue());
+                             else if (eci->getType()->getSize() == 4) rodataAssembler->emitDWord(eci->getValue());
+                             else rodataAssembler->emitQWord(eci->getValue());
+                        }
+                    }
+                }
+            } else {
+                for (size_t i = 0; i < gv->getType()->getSize(); ++i) rodataAssembler->emitByte(0);
+            }
+        }
     }
 }
+void CodeGen::emitTextSection() { if (os) *os << ".text\n.globl main\n"; }
+void CodeGen::emitFunctionAlignment() {}
+void CodeGen::performInstructionFusion(ir::Function&) {}
+void CodeGen::applyFusionOptimizations(ir::BasicBlock&) {}
+void CodeGen::enableDebugInfo(bool) {}
+void CodeGen::setCurrentLocation(const std::string&, unsigned) {}
+void CodeGen::emitDebugInfo() {}
+void CodeGen::selectInstruction(ir::Instruction&) {}
+bool CodeGen::matchPattern(ir::Instruction&, const InstructionPattern&) { return false; }
+void CodeGen::selectArithmeticInstruction(ir::Instruction&) {}
+void CodeGen::selectMemoryInstruction(ir::Instruction&) {}
+void CodeGen::selectComparisonInstruction(ir::Instruction&) {}
+void CodeGen::selectControlFlowInstruction(ir::Instruction&) {}
+void CodeGen::emitBasicBlockContent(ir::BasicBlock& bb) { for (auto& instr : bb.getInstructions()) emitInstruction(*instr); }
+bool CodeGen::isImmediateValue(ir::Value*, int64_t&) { return false; }
+bool CodeGen::canFoldIntoMemoryOperand(ir::Value*) { return false; }
+std::string CodeGen::getOptimizedOperand(ir::Value* v) { return getValueAsOperand(v); }
+void CodeGen::emitWasmFunctionSignature(ir::Function&) {}
+std::string CodeGen::getWasmValueAsOperand(const ir::Value*) { return ""; }
 
-void CodeGen::emitTextSection() {
-    if (targetInfo->getName() == "wasm32") return;
-    if (!emittedTextSection && os) {
-        *os << ".text\n";
-        *os << ".globl main\n"; // Entry point
-        emittedTextSection = true;
-    } else if (!emittedTextSection) {
-        // Alignment for .text section in binary mode
-        while (assembler->getCodeSize() % 16 != 0) assembler->emitByte(0x90);
-        emittedTextSection = true;
+} // namespace codegen
+
+namespace codegen {
+
+CodeGenPipeline::CodeGenPipeline() {}
+
+CodeGenPipeline::PipelineResult CodeGenPipeline::execute(ir::Module& module, const PipelineConfig& config) {
+    PipelineResult result;
+    for (const auto& t : config.targetPlatforms) {
+        auto tr = executeForTarget(module, t, config);
+        result.targetResults[t] = tr.targetResults[t];
     }
+    result.success = true;
+    return result;
 }
 
-void CodeGen::emitBasicBlockContent(ir::BasicBlock& bb) {
-    // Emit basic block content for WASM structured control flow
-    for (auto& instr : bb.getInstructions()) {
-        emitInstruction(*instr);
-    }
-}
-
-
-void CodeGen::emitFunctionAlignment() {
-    if (os) *os << ".align 16\n"; // Align functions to 16-byte boundaries
-}
-
-int32_t CodeGen::getStackOffset(ir::Value* val) const {
-    return targetInfo->getStackOffset(*this, val);
+CodeGenPipeline::PipelineResult CodeGenPipeline::executeForTarget(ir::Module& module, const std::string& t, const PipelineConfig& config) {
+    PipelineResult result;
+    auto cg = CodeGenFactory::create(module, t);
+    if (!cg) { result.success = false; return result; }
+    result.targetResults[t] = cg->compileToObject(config.outputPrefix + "_" + t, config.enableValidation, config.enableObjectGeneration);
+    result.success = result.targetResults[t].success;
+    return result;
 }
 
 } // namespace codegen

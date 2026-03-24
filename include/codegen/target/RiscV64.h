@@ -7,10 +7,12 @@ namespace target {
 
 class RiscV64 : public TargetInfo {
 public:
+    RiscV64();
+    ~RiscV64();
     // Target properties
     std::string getName() const override { return "riscv64"; }
     std::string getImmediatePrefix() const override { return ""; }
-    size_t getPointerSize() const override { return 8; }
+    size_t getPointerSize() const override;
     std::string formatStackOperand(int offset) const override;
     std::string formatGlobalOperand(const std::string& name) const override;
 
@@ -106,15 +108,10 @@ public:
     void emitVectorBroadcast(CodeGen& cg, ir::VectorInstruction& instr) override;
     void emitVectorExtract(CodeGen& cg, ir::VectorInstruction& instr) override;
     void emitVectorInsert(CodeGen& cg, ir::VectorInstruction& instr) override;
-    void emitVectorGather(CodeGen& cg, ir::VectorInstruction& instr) override;
-    void emitVectorScatter(CodeGen& cg, ir::VectorInstruction& instr) override;
-    void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& instr) override;
-    void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& instr) override;
 
     // === Fused Instruction Support ===
     bool supportsFusedPattern(FusedPattern pattern) const override;
     void emitFusedMultiplyAdd(CodeGen& cg, const ir::FusedInstruction& instr) override;
-    void emitFusedMultiplySubtract(CodeGen& cg, const ir::FusedInstruction& instr) override;
     void emitComplexAddressing(CodeGen& cg, ir::Instruction& instr) override;
     void emitLoadAndOperate(CodeGen& cg, ir::Instruction& load, ir::Instruction& op) override;
 
@@ -125,14 +122,18 @@ public:
     void emitStackUnwindInfo(CodeGen& cg, const ir::Function& func) override;
 
     // SIMD instruction helpers
-    SIMDContext createSIMDContext(const ir::VectorType* type) const override;
-    std::string getVectorRegister(const std::string& baseReg, unsigned width) const override;
-    std::string getVectorInstruction(const std::string& baseInstr, const SIMDContext& ctx) const override;
+    SIMDContext createSIMDContext(const ir::VectorType* type) const;
+    std::string getVectorRegister(const std::string& baseReg, unsigned width) const;
+    std::string getVectorInstruction(const std::string& baseInstr, const SIMDContext& ctx) const;
+    void emitVectorGather(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitVectorScatter(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& instr) override;
+    void emitFusedMultiplySubtract(CodeGen& cg, const ir::FusedInstruction& instr) override;
 
     // Helper functions for register allocation
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
-    std::string getDataRelocationType() const override { return "R_RISCV_64"; }
 };
 
 } // namespace target

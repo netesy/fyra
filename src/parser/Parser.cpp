@@ -706,7 +706,7 @@ void Parser::parseType() {
         }
         getNextToken(); // consume '}'
 
-        auto* unionType = ir::UnionType::create(typeName, unionElements);
+        auto* unionType = new ir::UnionType(typeName, unionElements);
         // This is a simplification. We should probably add the union type to the module with a different method.
         module->addType(typeName, unionType);
     } else if (currentToken.type == TokenType::Number) {
@@ -718,13 +718,13 @@ void Parser::parseType() {
             return;
         }
         getNextToken(); // consume '}'
-        auto* structType = ir::StructType::create(typeName);
+        auto* structType = context->createStructType(typeName);
         structType->setBody({}, true);
         module->addType(typeName, structType);
 
     } else {
         std::vector<ir::Type*> elements = parseStructElements();
-        auto* structType = ir::StructType::create(typeName);
+        auto* structType = context->createStructType(typeName);
         structType->setBody(elements);
         module->addType(typeName, structType);
     }

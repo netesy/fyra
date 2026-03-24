@@ -27,6 +27,7 @@ public:
     int getStackFrameSize() const { return stackFrameSize; }
     void setStackFrameSize(int size) { stackFrameSize = size; }
     int getStackSlotForVreg(const Instruction* vreg) const;
+    bool hasStackSlot(const Instruction* vreg) const;
     void setStackSlotForVreg(const Instruction* vreg, int slot);
 
     void print(std::ostream& os) const override;

@@ -1,6 +1,5 @@
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
-#include "codegen/EnhancedCodeGen.h"
 #include "codegen/execgen/elf.hh"
 #include "codegen/execgen/pe.hh"
 #include "codegen/execgen/macho.hh"
@@ -89,7 +88,8 @@ int main(int argc, char** argv) {
     std::string inputFile = argv[1];
     std::string outputFile = get_arg(argc, argv, "-o");
     std::string target = get_arg(argc, argv, "--target");
-    
+    bool optDisabled = false;
+
     // Parse command line options
     bool enableValidation = true;
     bool generateObject = false;
@@ -119,6 +119,7 @@ int main(int argc, char** argv) {
             useEnhanced = true; // Executable generation requires enhanced CodeGen
         } else if (arg == "-O0") {
             disableOptimizations = true;
+            optDisabled = true;
         }
     }
     
@@ -188,37 +189,47 @@ int main(int argc, char** argv) {
         transforms::SCCP enhanced_sccp(error_reporter);
         transforms::ControlFlowSimplification cfg_simplifier(error_reporter);
         transforms::DeadInstructionElimination enhanced_dce(error_reporter);
+        transforms::CopyElimination copy_elim;
+        transforms::GVN gvn;
+        transforms::LoopInvariantCodeMotion licm(error_reporter);
         
         // Run optimization passes in optimal order
         bool optimization_changed = true;
         int iteration = 1;
         
-        while (optimization_changed && iteration <= 3) { // Limit iterations to prevent infinite loops
-            optimization_changed = false;
-            
-            if (verboseOutput) {
-                std::cout << "  Optimization iteration " << iteration << " on function: " << func->getName() << std::endl;
-            }
-            
-            // Constant propagation and folding (should run first)
-            if (verboseOutput) std::cout << "  Running SCCP..." << std::endl;
-            if (enhanced_sccp.run(*func)) {
-                optimization_changed = true;
-            }
+        if (target != "wasm32" && !optDisabled) {
+            while (optimization_changed && iteration <= 5) { // Limit iterations to prevent infinite loops
+                optimization_changed = false;
+                
+                if (verboseOutput) {
+                    std::cout << "  Optimization iteration " << iteration << " on function: " << func->getName() << std::endl;
+                }
+                
+                // Constant propagation and folding (should run first)
+                if (verboseOutput) std::cout << "  Running SCCP..." << std::endl;
+                if (enhanced_sccp.run(*func)) {
+                    optimization_changed = true;
+                }
 
-            // Control flow simplification (after constant propagation)
-            if (verboseOutput) std::cout << "  Running CFG Simplifier..." << std::endl;
-            if (cfg_simplifier.run(*func)) {
-                optimization_changed = true;
-            }
+                if (copy_elim.run(*func)) optimization_changed = true;
+                if (gvn.run(*func)) optimization_changed = true;
 
-            // Dead code elimination (should run last to clean up)
-            if (verboseOutput) std::cout << "  Running DCE..." << std::endl;
-            if (enhanced_dce.run(*func)) {
-                optimization_changed = true;
+                // Control flow simplification (after constant propagation)
+                if (verboseOutput) std::cout << "  Running CFG Simplifier..." << std::endl;
+                if (cfg_simplifier.run(*func)) {
+                    optimization_changed = true;
+                }
+
+                if (licm.run(*func)) optimization_changed = true;
+
+                // Dead code elimination (should run last to clean up)
+                if (verboseOutput) std::cout << "  Running DCE..." << std::endl;
+                if (enhanced_dce.run(*func)) {
+                    optimization_changed = true;
+                }
+                
+                iteration++;
             }
-            
-            iteration++;
         }
     }
     
@@ -285,7 +296,7 @@ int main(int argc, char** argv) {
         // Use enhanced CodeGen with validation and object generation
         std::cout << "--- Using Enhanced CodeGen with Validation ---\n" << std::flush;
         
-        auto enhancedCodeGen = codegen::EnhancedCodeGenFactory::create(*module, targetName);
+        auto enhancedCodeGen = codegen::CodeGenFactory::create(*module, targetName);
         if (!enhancedCodeGen) {
             std::cerr << "Error: Failed to create enhanced code generator for target: " << targetName << std::endl;
             return 1;
@@ -403,7 +414,7 @@ int main(int argc, char** argv) {
                 }
             }
         } else {
-            auto enhancedCodeGen = codegen::EnhancedCodeGenFactory::create(*module, targetName);
+            auto enhancedCodeGen = codegen::CodeGenFactory::create(*module, targetName);
             if (!enhancedCodeGen) {
                 std::cerr << "Error: Failed to create enhanced code generator for target: " << targetName << std::endl;
                 return 1;

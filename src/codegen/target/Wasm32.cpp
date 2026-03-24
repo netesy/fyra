@@ -428,6 +428,10 @@ void Wasm32::emitHeader(CodeGen& cg) {
         *os << "(module\n";
         *os << "  (memory 1)\n";
         *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
+        *os << "  (func $unknown_func (result i32) i32.const 0 return)\n";
+        for (auto& func : cg.module.getFunctions()) {
+            *os << "  (export \"" << func->getName() << "\" (func $" << func->getName() << "))\n";
+        }
     } else {
         auto& assembler = cg.getAssembler();
         assembler.emitDWord(0x6d736100); // magic
@@ -659,6 +663,17 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
 
         // Add function entry debugging
+        *os << "  (func $" << func.getName();
+        for (auto& param : func.getParameters()) {
+            *os << " (param " << getWasmType(param->getType()) << ")";
+        }
+        if (auto* ft = dynamic_cast<const ir::FunctionType*>(func.getType())) {
+            if (!ft->getReturnType()->isVoidTy()) {
+                *os << " (result " << getWasmType(ft->getReturnType()) << ")";
+            }
+        }
+        *os << "\n";
+        
         *os << "  ;; Function " << func.getName() << " entry\n";
         *os << "  ;; Parameters: " << func.getParameters().size() << "\n";
 
@@ -696,7 +711,7 @@ void Wasm32::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
         *os << "  ;; Function execution completed\n";
 
         // Final function end
-        *os << "  end\n";
+        *os << "  )\n";
     } else {
         cg.getAssembler().emitByte(0x0B); // end opcode for function body
     }
@@ -1265,7 +1280,7 @@ void Wasm32::emitCall(CodeGen& cg, ir::Instruction& instr) {
         ir::Value* calleeVal = instr.getOperands()[0]->get();
         std::string callee = cg.getValueAsOperand(calleeVal);
         
-        if (callee.empty() || callee[0] != '$') {
+        if (callee.empty() || (callee[0] != '$' && callee.find("unknown_func") == std::string::npos)) {
             // Indirect call or fallback
             if (!callee.empty()) {
                 *os << "  " << callee << "\n";
@@ -1274,7 +1289,10 @@ void Wasm32::emitCall(CodeGen& cg, ir::Instruction& instr) {
                 *os << "  call $unknown_func\n";
             }
         } else {
-            *os << "  call " << callee << "\n";
+        if (callee[0] != '$') {
+            if (callee.find("unknown_func") != std::string::npos) *os << "  call $" << callee << "\n";
+            else *os << "  call $" << callee << "\n";
+        } else *os << "  call " << callee << "\n";
         }
 
         if (cg.getStackOffsets().count(&instr)) {
