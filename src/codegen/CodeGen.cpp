@@ -193,8 +193,23 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Call: targetInfo->emitCall(*this, instr); break;
         case ir::Instruction::Jmp: targetInfo->emitJmp(*this, instr); break;
         case ir::Instruction::Br: case ir::Instruction::Jnz: targetInfo->emitBr(*this, instr); break;
-        case ir::Instruction::Load: targetInfo->emitLoad(*this, instr); break;
-        case ir::Instruction::Store: targetInfo->emitStore(*this, instr); break;
+        case ir::Instruction::Load:
+        case ir::Instruction::Loadd:
+        case ir::Instruction::Loads:
+        case ir::Instruction::Loadl:
+        case ir::Instruction::Loaduw:
+        case ir::Instruction::Loadsh:
+        case ir::Instruction::Loaduh:
+        case ir::Instruction::Loadsb:
+        case ir::Instruction::Loadub:
+            targetInfo->emitLoad(*this, instr); break;
+        case ir::Instruction::Store:
+        case ir::Instruction::Stored:
+        case ir::Instruction::Stores:
+        case ir::Instruction::Storel:
+        case ir::Instruction::Storeh:
+        case ir::Instruction::Storeb:
+            targetInfo->emitStore(*this, instr); break;
         case ir::Instruction::Alloc:
         case ir::Instruction::Alloc4:
         case ir::Instruction::Alloc16:
