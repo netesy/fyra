@@ -39,6 +39,40 @@ bool isTerminator(const ir::Instruction* instr) {
     }
 }
 
+bool isCompareOpcode(ir::Instruction::Opcode opcode) {
+    switch (opcode) {
+        case ir::Instruction::Ceq:
+        case ir::Instruction::Cne:
+        case ir::Instruction::Cslt:
+        case ir::Instruction::Csle:
+        case ir::Instruction::Csgt:
+        case ir::Instruction::Csge:
+        case ir::Instruction::Cult:
+        case ir::Instruction::Cule:
+        case ir::Instruction::Cugt:
+        case ir::Instruction::Cuge:
+            return true;
+        default:
+            return false;
+    }
+}
+
+const char* wasmCompareOp(ir::Instruction::Opcode opcode) {
+    switch (opcode) {
+        case ir::Instruction::Ceq:  return "i32.eq";
+        case ir::Instruction::Cne:  return "i32.ne";
+        case ir::Instruction::Cslt: return "i32.lt_s";
+        case ir::Instruction::Csle: return "i32.le_s";
+        case ir::Instruction::Csgt: return "i32.gt_s";
+        case ir::Instruction::Csge: return "i32.ge_s";
+        case ir::Instruction::Cult: return "i32.lt_u";
+        case ir::Instruction::Cule: return "i32.le_u";
+        case ir::Instruction::Cugt: return "i32.gt_u";
+        case ir::Instruction::Cuge: return "i32.ge_u";
+        default: return nullptr;
+    }
+}
+
 // Helper to find the loop header for a given block
 ir::BasicBlock* findLoopHeader(ir::BasicBlock* bb, const std::map<ir::BasicBlock*, ir::BasicBlock*>& loop_headers) {
     auto it = loop_headers.find(bb);
@@ -241,6 +275,71 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
     if (func.getBasicBlocks().empty()) {
         emitFunctionEpilogue(cg, func);
         return;
+    }
+
+    // Canonical while-loop lowering:
+    // entry(init) -> cond(br true=body, false=exit), body -> cond
+    // lowers to:
+    // (block $exit (loop $cond_loop cond i32.eqz br_if $exit body br $cond_loop))
+    auto emitNonTerminating = [&](ir::BasicBlock* block, const std::string& indent) {
+        for (auto& instr : block->getInstructions()) {
+            if (!isTerminator(instr.get()) && instr->getOpcode() != ir::Instruction::Phi) {
+                *os << indent;
+                cg.emitInstruction(*instr);
+            }
+        }
+    };
+
+    auto* entry = func.getBasicBlocks().front().get();
+    auto* entryTerm = entry->getInstructions().empty() ? nullptr : entry->getInstructions().back().get();
+    if (entryTerm && (entryTerm->getOpcode() == ir::Instruction::Jmp || (entryTerm->getOpcode() == ir::Instruction::Br && entryTerm->getOperands().size() == 1))) {
+        auto* condBB = dynamic_cast<ir::BasicBlock*>(entryTerm->getOperands()[0]->get());
+        if (condBB && !condBB->getInstructions().empty()) {
+            auto* condTerm = condBB->getInstructions().back().get();
+            if (condTerm && (condTerm->getOpcode() == ir::Instruction::Br || condTerm->getOpcode() == ir::Instruction::Jnz) && condTerm->getOperands().size() >= 3) {
+                auto* bodyBB = dynamic_cast<ir::BasicBlock*>(condTerm->getOperands()[1]->get());
+                auto* exitBB = dynamic_cast<ir::BasicBlock*>(condTerm->getOperands()[2]->get());
+                auto* bodyTerm = (bodyBB && !bodyBB->getInstructions().empty()) ? bodyBB->getInstructions().back().get() : nullptr;
+                bool bodyBackToCond = bodyTerm &&
+                    (bodyTerm->getOpcode() == ir::Instruction::Jmp || (bodyTerm->getOpcode() == ir::Instruction::Br && bodyTerm->getOperands().size() == 1)) &&
+                    bodyTerm->getOperands()[0]->get() == condBB;
+                if (bodyBB && exitBB && bodyBackToCond) {
+                    emitNonTerminating(entry, "  ");
+                    *os << "  (block $" << exitBB->getName() << "_exit\n";
+                    *os << "    (loop $" << condBB->getName() << "_loop\n";
+
+                    ir::Value* condVal = condTerm->getOperands()[0]->get();
+                    if (auto* condInst = dynamic_cast<ir::Instruction*>(condVal);
+                        condInst && condInst->getParent() == condBB && isCompareOpcode(condInst->getOpcode())) {
+                        const char* cmpOp = wasmCompareOp(condInst->getOpcode());
+                        *os << "      " << cg.getValueAsOperand(condInst->getOperands()[0]->get()) << "\n";
+                        *os << "      " << cg.getValueAsOperand(condInst->getOperands()[1]->get()) << "\n";
+                        *os << "      " << cmpOp << "\n";
+                    } else {
+                        *os << "      " << cg.getValueAsOperand(condVal) << "\n";
+                    }
+                    *os << "      i32.eqz\n";
+                    *os << "      br_if $" << exitBB->getName() << "_exit\n";
+
+                    emitNonTerminating(bodyBB, "      ");
+                    *os << "      br $" << condBB->getName() << "_loop\n";
+                    *os << "    )\n";
+                    *os << "  )\n";
+
+                    emitNonTerminating(exitBB, "  ");
+                    if (!exitBB->getInstructions().empty()) {
+                        auto* exitTerm = exitBB->getInstructions().back().get();
+                        if (isTerminator(exitTerm) && exitTerm->getOpcode() != ir::Instruction::Jmp &&
+                            !(exitTerm->getOpcode() == ir::Instruction::Br && exitTerm->getOperands().size() == 1)) {
+                            *os << "  ";
+                            cg.emitInstruction(*exitTerm);
+                        }
+                    }
+                    emitFunctionEpilogue(cg, func);
+                    return;
+                }
+            }
+        }
     }
 
     // Linearize blocks using Reverse Post-Order (RPO)
@@ -625,7 +724,18 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     std::vector<ir::Value*> instr_locals;
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
-            if (instr->getType()->getTypeID() != ir::Type::VoidTyID && !instr->use_empty()) {
+            bool usedByNonBranch = false;
+            for (auto* use : instr->getUseList()) {
+                auto* user = dynamic_cast<ir::Instruction*>(use->getUser());
+                if (!user) { usedByNonBranch = true; break; }
+                if (!(user->getOpcode() == ir::Instruction::Br || user->getOpcode() == ir::Instruction::Jnz)) {
+                    usedByNonBranch = true;
+                    break;
+                }
+            }
+            bool branchOnlyCmp = isCompareOpcode(instr->getOpcode()) && !instr->use_empty() && !usedByNonBranch;
+
+            if (instr->getType()->getTypeID() != ir::Type::VoidTyID && !instr->use_empty() && !branchOnlyCmp) {
                 cg.getStackOffsets()[instr.get()] = local_idx++;
                 instr_locals.push_back(instr.get());
             }
