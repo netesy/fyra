@@ -96,9 +96,7 @@ void CodeGen::emitFunction(ir::Function& func) {
         wasmFunctionBodies.push_back(assembler->getCode());
         assembler = std::move(oldAsm);
     } else if (targetInfo->getName() == "wasm32" && os) {
-        targetInfo->emitFunctionPrologue(*this, func);
-        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
-        targetInfo->emitFunctionEpilogue(*this, func);
+        targetInfo->emitStructuredFunctionBody(*this, func);
     } else {
         if (os) *os << "\n" << func.getName() << ":\n";
         targetInfo->emitFunctionPrologue(*this, func);
@@ -203,6 +201,12 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
         case ir::Instruction::Cuge: targetInfo->emitCmp(*this, instr); break;
         default: break;
+    }
+    if (targetInfo->getName() == "wasm32" && os &&
+        !instr.getType()->isVoidTy() &&
+        stackOffsets.count(&instr) == 0 &&
+        instr.use_empty()) {
+        *os << "  drop\n";
     }
 }
 

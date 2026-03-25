@@ -41,3 +41,4 @@ into:
 
 - Wasm32 textual output now stays in WAT/module form and avoids non-Wasm directives such as `.text`, `.globl`, and assembly-style block labels.
 - The Wasm path is emitted through the Wasm target flow directly, so generated `.wat` files remain Wasm-oriented.
+- Conditional loop/control-flow lowering uses explicit branch form (`i32.eqz` + `br_if` + `br`) so patterns like `while (cond) body` map to structured `block/loop` control.

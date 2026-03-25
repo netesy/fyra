@@ -17,6 +17,7 @@
 #include <cassert>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 
 namespace codegen {
 namespace target {
@@ -368,16 +369,18 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
 
                     std::string condOp = cg.getValueAsOperand(cond);
                     if (!condOp.empty()) *os << "    " << condOp << "\n";
-
-                    *os << "    if\n";
-                    emitPhis(cg, trueBB, bb, "      ");
-                    if (posMap.count(trueBB) && posMap[trueBB] <= i) *os << "      br $" << trueBB->getName() << "_loop\n";
-                    else *os << "      br $" << trueBB->getName() << "\n";
-                    *os << "    else\n";
-                    emitPhis(cg, falseBB, bb, "      ");
-                    if (posMap.count(falseBB) && posMap[falseBB] <= i) *os << "      br $" << falseBB->getName() << "_loop\n";
-                    else *os << "      br $" << falseBB->getName() << "\n";
-                    *os << "    end\n";
+                    // while/conditional lowering with explicit branch-on-false:
+                    //   cond
+                    //   i32.eqz
+                    //   br_if <false/exit>
+                    //   br <true/body>
+                    *os << "    i32.eqz\n";
+                    emitPhis(cg, falseBB, bb, "    ");
+                    if (posMap.count(falseBB) && posMap[falseBB] <= i) *os << "    br_if $" << falseBB->getName() << "_loop\n";
+                    else *os << "    br_if $" << falseBB->getName() << "\n";
+                    emitPhis(cg, trueBB, bb, "    ");
+                    if (posMap.count(trueBB) && posMap[trueBB] <= i) *os << "    br $" << trueBB->getName() << "_loop\n";
+                    else *os << "    br $" << trueBB->getName() << "\n";
                 }
             } else if (instr->getOpcode() == ir::Instruction::Jmp) {
                 ir::Value* targetVal = instr->getOperands()[0]->get();
@@ -622,7 +625,7 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     std::vector<ir::Value*> instr_locals;
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
-            if (instr->getType()->getTypeID() != ir::Type::VoidTyID) {
+            if (instr->getType()->getTypeID() != ir::Type::VoidTyID && !instr->use_empty()) {
                 cg.getStackOffsets()[instr.get()] = local_idx++;
                 instr_locals.push_back(instr.get());
             }
@@ -1735,7 +1738,8 @@ void Wasm32::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
 
 void Wasm32::emitBr(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ;; Branch handled by structured control flow\n";
+        (void)instr;
+        throw std::runtime_error("Wasm32 emitBr reached without structured lowering");
     }
 }
 
@@ -1753,7 +1757,8 @@ void Wasm32::emitBasicBlockInstructions(CodeGen& cg, ir::BasicBlock& bb, const s
 
 void Wasm32::emitJmp(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ;; Jump handled by structured control flow\n";
+        (void)instr;
+        throw std::runtime_error("Wasm32 emitJmp reached without structured lowering");
     }
 }
 
