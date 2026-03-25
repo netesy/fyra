@@ -2,6 +2,7 @@
 
 #include "TargetInfo.h"
 #include <set>
+#include <unordered_map>
 
 namespace transforms { class DominatorTree; }
 
@@ -56,6 +57,7 @@ public:
     void emitNeg(CodeGen& cg, ir::Instruction& instr) override;
     void emitCopy(CodeGen& cg, ir::Instruction& instr) override;
     void emitCall(CodeGen& cg, ir::Instruction& instr) override;
+    void emitSyscall(CodeGen& cg, ir::Instruction& instr) override;
     
     // New instruction emission methods
     void emitNot(CodeGen& cg, ir::Instruction& instr) override;
@@ -117,6 +119,8 @@ public:
     
 private:
     std::set<ir::BasicBlock*> visitedBlocks;
+    mutable std::unordered_map<std::string, uint32_t> globalOffsets;
+    mutable uint32_t nextGlobalOffset = 0;
     transforms::DominatorTree* currentDomTree = nullptr;
     transforms::DominatorTree* currentPostDomTree = nullptr;
     ir::BasicBlock* currentEndBlock = nullptr;

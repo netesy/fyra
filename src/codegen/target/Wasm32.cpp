@@ -17,6 +17,7 @@
 #include <cassert>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 
 namespace codegen {
 namespace target {
@@ -35,6 +36,79 @@ bool isTerminator(const ir::Instruction* instr) {
             return true;
         default:
             return false;
+    }
+}
+
+bool isCompareOpcode(ir::Instruction::Opcode opcode) {
+    switch (opcode) {
+        case ir::Instruction::Ceq:
+        case ir::Instruction::Cne:
+        case ir::Instruction::Cslt:
+        case ir::Instruction::Csle:
+        case ir::Instruction::Csgt:
+        case ir::Instruction::Csge:
+        case ir::Instruction::Cult:
+        case ir::Instruction::Cule:
+        case ir::Instruction::Cugt:
+        case ir::Instruction::Cuge:
+            return true;
+        default:
+            return false;
+    }
+}
+
+const char* wasmCompareOp(ir::Instruction::Opcode opcode) {
+    switch (opcode) {
+        case ir::Instruction::Ceq:  return "i32.eq";
+        case ir::Instruction::Cne:  return "i32.ne";
+        case ir::Instruction::Cslt: return "i32.lt_s";
+        case ir::Instruction::Csle: return "i32.le_s";
+        case ir::Instruction::Csgt: return "i32.gt_s";
+        case ir::Instruction::Csge: return "i32.ge_s";
+        case ir::Instruction::Cult: return "i32.lt_u";
+        case ir::Instruction::Cule: return "i32.le_u";
+        case ir::Instruction::Cugt: return "i32.gt_u";
+        case ir::Instruction::Cuge: return "i32.ge_u";
+        default: return nullptr;
+    }
+}
+
+const char* wasmInverseCompareOp(ir::Instruction::Opcode opcode) {
+    switch (opcode) {
+        case ir::Instruction::Ceq:  return "i32.ne";
+        case ir::Instruction::Cne:  return "i32.eq";
+        case ir::Instruction::Cslt: return "i32.ge_s";
+        case ir::Instruction::Csle: return "i32.gt_s";
+        case ir::Instruction::Csgt: return "i32.le_s";
+        case ir::Instruction::Csge: return "i32.lt_s";
+        case ir::Instruction::Cult: return "i32.ge_u";
+        case ir::Instruction::Cule: return "i32.gt_u";
+        case ir::Instruction::Cugt: return "i32.le_u";
+        case ir::Instruction::Cuge: return "i32.lt_u";
+        default: return nullptr;
+    }
+}
+
+std::string wasmTypedCompareOp(ir::Instruction::Opcode opcode, const ir::Type* lhsType, bool inverse) {
+    std::string prefix = "i32";
+    if (lhsType) {
+        if (lhsType->isDoubleTy()) prefix = "f64";
+        else if (lhsType->isFloatTy()) prefix = "f32";
+        else if (lhsType->isIntegerTy()) prefix = "i32";
+    }
+    auto op = [&](const char* n, const char* i) { return prefix + (inverse ? i : n); };
+    switch (opcode) {
+        case ir::Instruction::Ceq:  return op(".eq", ".ne");
+        case ir::Instruction::Cne:  return op(".ne", ".eq");
+        case ir::Instruction::Cslt: return op(".lt_s", ".ge_s");
+        case ir::Instruction::Csle: return op(".le_s", ".gt_s");
+        case ir::Instruction::Csgt: return op(".gt_s", ".le_s");
+        case ir::Instruction::Csge: return op(".ge_s", ".lt_s");
+        case ir::Instruction::Cult: return op(".lt_u", ".ge_u");
+        case ir::Instruction::Cule: return op(".le_u", ".gt_u");
+        case ir::Instruction::Cugt: return op(".gt_u", ".le_u");
+        case ir::Instruction::Cuge: return op(".ge_u", ".lt_u");
+        default: return "";
     }
 }
 
@@ -242,6 +316,170 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
         return;
     }
 
+    // Canonical if/else lowering for simple two-branch return shape:
+    // entry: cond br trueBB/falseBB
+    // trueBB and falseBB both end with ret
+    // -> if (result i32) then <true-value> else <false-value> end
+    auto* entryBB = func.getBasicBlocks().front().get();
+    auto* entryTerminator = entryBB->getInstructions().empty() ? nullptr : entryBB->getInstructions().back().get();
+    if (entryTerminator &&
+        (entryTerminator->getOpcode() == ir::Instruction::Br || entryTerminator->getOpcode() == ir::Instruction::Jnz) &&
+        entryTerminator->getOperands().size() >= 3) {
+        auto* trueBB = dynamic_cast<ir::BasicBlock*>(entryTerminator->getOperands()[1]->get());
+        auto* falseBB = dynamic_cast<ir::BasicBlock*>(entryTerminator->getOperands()[2]->get());
+        auto* trueTerm = (trueBB && !trueBB->getInstructions().empty()) ? trueBB->getInstructions().back().get() : nullptr;
+        auto* falseTerm = (falseBB && !falseBB->getInstructions().empty()) ? falseBB->getInstructions().back().get() : nullptr;
+        const bool bothReturn = trueTerm && falseTerm &&
+            trueTerm->getOpcode() == ir::Instruction::Ret &&
+            falseTerm->getOpcode() == ir::Instruction::Ret;
+        if (bothReturn) {
+            // Emit entry non-terminators except a compare directly feeding the branch.
+            ir::Value* cond = entryTerminator->getOperands()[0]->get();
+            auto* condInst = dynamic_cast<ir::Instruction*>(cond);
+            for (auto& instr : entryBB->getInstructions()) {
+                if (isTerminator(instr.get()) || instr->getOpcode() == ir::Instruction::Phi) continue;
+                if (condInst && instr.get() == condInst) continue;
+                *os << "  ";
+                cg.emitInstruction(*instr);
+            }
+
+            // Emit branch condition.
+            if (condInst && condInst->getParent() == entryBB && isCompareOpcode(condInst->getOpcode())) {
+                *os << "  " << cg.getValueAsOperand(condInst->getOperands()[0]->get()) << "\n";
+                *os << "  " << cg.getValueAsOperand(condInst->getOperands()[1]->get()) << "\n";
+                const std::string cmpOp = wasmTypedCompareOp(condInst->getOpcode(), condInst->getOperands()[0]->get()->getType(), false);
+                if (!cmpOp.empty()) {
+                    *os << "  " << cmpOp << "\n";
+                }
+            } else {
+                *os << "  " << cg.getValueAsOperand(cond) << "\n";
+            }
+
+            auto emitReturnBlockValue = [&](ir::BasicBlock* bb, ir::Instruction* retTerm) {
+                for (auto& instr : bb->getInstructions()) {
+                    if (isTerminator(instr.get()) || instr->getOpcode() == ir::Instruction::Phi) continue;
+                    *os << "    ";
+                    cg.emitInstruction(*instr);
+                }
+                if (!retTerm->getOperands().empty()) {
+                    *os << "    " << cg.getValueAsOperand(retTerm->getOperands()[0]->get()) << "\n";
+                } else {
+                    *os << "    i32.const 0\n";
+                }
+            };
+
+            *os << "  if (result i32)\n";
+            emitReturnBlockValue(trueBB, trueTerm);
+            *os << "  else\n";
+            emitReturnBlockValue(falseBB, falseTerm);
+            *os << "  end\n";
+
+            emitFunctionEpilogue(cg, func);
+            return;
+        }
+    }
+
+    // Canonical while-loop lowering:
+    // entry(init) -> cond(br true=body, false=exit), body -> cond
+    // lowers to:
+    // (block $exit (loop $cond_loop cond i32.eqz br_if $exit body br $cond_loop))
+    auto emitNonTerminating = [&](ir::BasicBlock* block, const std::string& indent) {
+        for (auto& instr : block->getInstructions()) {
+            if (!isTerminator(instr.get()) && instr->getOpcode() != ir::Instruction::Phi) {
+                *os << indent;
+                cg.emitInstruction(*instr);
+            }
+        }
+    };
+
+    auto* entry = func.getBasicBlocks().front().get();
+    auto* entryTerm = entry->getInstructions().empty() ? nullptr : entry->getInstructions().back().get();
+    if (entryTerm && (entryTerm->getOpcode() == ir::Instruction::Jmp || (entryTerm->getOpcode() == ir::Instruction::Br && entryTerm->getOperands().size() == 1))) {
+        auto* condBB = dynamic_cast<ir::BasicBlock*>(entryTerm->getOperands()[0]->get());
+        if (condBB && !condBB->getInstructions().empty()) {
+            auto* condTerm = condBB->getInstructions().back().get();
+            if (condTerm && (condTerm->getOpcode() == ir::Instruction::Br || condTerm->getOpcode() == ir::Instruction::Jnz) && condTerm->getOperands().size() >= 3) {
+                auto* bodyBB = dynamic_cast<ir::BasicBlock*>(condTerm->getOperands()[1]->get());
+                auto* exitBB = dynamic_cast<ir::BasicBlock*>(condTerm->getOperands()[2]->get());
+                auto* bodyTerm = (bodyBB && !bodyBB->getInstructions().empty()) ? bodyBB->getInstructions().back().get() : nullptr;
+                bool bodyBackToCond = bodyTerm &&
+                    (bodyTerm->getOpcode() == ir::Instruction::Jmp || (bodyTerm->getOpcode() == ir::Instruction::Br && bodyTerm->getOperands().size() == 1)) &&
+                    bodyTerm->getOperands()[0]->get() == condBB;
+                if (bodyBB && exitBB && bodyBackToCond) {
+                    ir::Instruction* canonicalIncrement = nullptr;
+                    ir::Value* canonicalLoopVar = nullptr;
+                    emitNonTerminating(entry, "  ");
+                    *os << "  (block $" << exitBB->getName() << "_exit\n";
+                    *os << "    (loop $" << condBB->getName() << "_loop\n";
+
+                    ir::Value* condVal = condTerm->getOperands()[0]->get();
+                    bool emittedDirectExitCondition = false;
+                    if (auto* condInst = dynamic_cast<ir::Instruction*>(condVal);
+                        condInst && condInst->getParent() == condBB && isCompareOpcode(condInst->getOpcode())) {
+                        const std::string cmpOp = wasmTypedCompareOp(condInst->getOpcode(), condInst->getOperands()[0]->get()->getType(), false);
+                        const std::string invCmpOp = wasmTypedCompareOp(condInst->getOpcode(), condInst->getOperands()[0]->get()->getType(), true);
+                        canonicalLoopVar = condInst->getOperands()[0]->get();
+                        *os << "      " << cg.getValueAsOperand(condInst->getOperands()[0]->get()) << "\n";
+                        *os << "      " << cg.getValueAsOperand(condInst->getOperands()[1]->get()) << "\n";
+                        if (!invCmpOp.empty()) {
+                            *os << "      " << invCmpOp << "\n";
+                            emittedDirectExitCondition = true;
+                        } else {
+                            *os << "      " << cmpOp << "\n";
+                        }
+                    } else {
+                        *os << "      " << cg.getValueAsOperand(condVal) << "\n";
+                    }
+                    if (!emittedDirectExitCondition) {
+                        *os << "      i32.eqz\n";
+                    }
+                    *os << "      br_if $" << exitBB->getName() << "_exit\n";
+
+                    for (auto& instr : bodyBB->getInstructions()) {
+                        if (isTerminator(instr.get()) || instr->getOpcode() == ir::Instruction::Phi) continue;
+                        if (canonicalLoopVar &&
+                            instr->getOpcode() == ir::Instruction::Add &&
+                            instr->getOperands().size() == 2 &&
+                            instr->getOperands()[0]->get() == canonicalLoopVar) {
+                            if (auto* one = dynamic_cast<ir::ConstantInt*>(instr->getOperands()[1]->get()); one && one->getValue() == 1) {
+                                *os << "      " << cg.getValueAsOperand(canonicalLoopVar) << "\n";
+                                *os << "      i32.const 1\n";
+                                *os << "      i32.add\n";
+                                if (cg.getStackOffsets().count(canonicalLoopVar)) {
+                                    *os << "      local.set " << cg.getStackOffset(canonicalLoopVar) << "\n";
+                                    canonicalIncrement = instr.get();
+                                    continue;
+                                }
+                            }
+                        }
+                        *os << "      ";
+                        cg.emitInstruction(*instr);
+                    }
+                    *os << "      br $" << condBB->getName() << "_loop\n";
+                    *os << "    )\n";
+                    *os << "  )\n";
+
+                    emitNonTerminating(exitBB, "  ");
+                    if (!exitBB->getInstructions().empty()) {
+                        auto* exitTerm = exitBB->getInstructions().back().get();
+                        if (exitTerm->getOpcode() == ir::Instruction::Ret && canonicalIncrement &&
+                            !exitTerm->getOperands().empty() &&
+                            exitTerm->getOperands()[0]->get() == canonicalIncrement &&
+                            canonicalLoopVar && cg.getStackOffsets().count(canonicalLoopVar)) {
+                            *os << "  local.get " << cg.getStackOffset(canonicalLoopVar) << "\n";
+                        } else if (isTerminator(exitTerm) && exitTerm->getOpcode() != ir::Instruction::Jmp &&
+                            !(exitTerm->getOpcode() == ir::Instruction::Br && exitTerm->getOperands().size() == 1)) {
+                            *os << "  ";
+                            cg.emitInstruction(*exitTerm);
+                        }
+                    }
+                    emitFunctionEpilogue(cg, func);
+                    return;
+                }
+            }
+        }
+    }
+
     // Linearize blocks using Reverse Post-Order (RPO)
     std::vector<ir::BasicBlock*> rpo;
     std::set<ir::BasicBlock*> visited;
@@ -287,7 +525,26 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
 
     for (size_t i = 0; i < rpo.size(); ++i) {
         ir::BasicBlock* bb = rpo[i];
-        for (auto* succ : bb->getSuccessors()) {
+        std::vector<ir::BasicBlock*> successors = bb->getSuccessors();
+        if (successors.empty() && !bb->getInstructions().empty()) {
+            auto* term = bb->getInstructions().back().get();
+            if ((term->getOpcode() == ir::Instruction::Jmp || term->getOpcode() == ir::Instruction::Br) &&
+                term->getOperands().size() == 1) {
+                if (auto* t = dynamic_cast<ir::BasicBlock*>(term->getOperands()[0]->get())) {
+                    successors.push_back(t);
+                }
+            } else if ((term->getOpcode() == ir::Instruction::Jnz || term->getOpcode() == ir::Instruction::Br) &&
+                       term->getOperands().size() >= 3) {
+                if (auto* t = dynamic_cast<ir::BasicBlock*>(term->getOperands()[1]->get())) {
+                    successors.push_back(t);
+                }
+                if (auto* f = dynamic_cast<ir::BasicBlock*>(term->getOperands()[2]->get())) {
+                    successors.push_back(f);
+                }
+            }
+        }
+
+        for (auto* succ : successors) {
             if (posMap.find(succ) == posMap.end()) continue;
             if (posMap[succ] > i) {
                 // Forward branch: needs a 'block' ending at succ
@@ -348,10 +605,37 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
             }
         }
 
+        bool selfLoopWrapper = false;
+        if (!bb->getInstructions().empty()) {
+            for (auto& ins : bb->getInstructions()) {
+                auto op = ins->getOpcode();
+                if ((op == ir::Instruction::Jmp || op == ir::Instruction::Br) &&
+                    ins->getOperands().size() == 1 &&
+                    ins->getOperands()[0]->get() == bb) {
+                    *os << "  loop $" << bb->getName() << "_loop\n";
+                    selfLoopWrapper = true;
+                    break;
+                }
+            }
+        }
+
         *os << "    ;; Block: " << bb->getName() << "\n";
         visitedBlocks.insert(bb);
 
+        ir::Instruction* branchCondInst = nullptr;
+        if (!bb->getInstructions().empty()) {
+            auto* term = bb->getInstructions().back().get();
+            if ((term->getOpcode() == ir::Instruction::Br || term->getOpcode() == ir::Instruction::Jnz) &&
+                term->getOperands().size() >= 3) {
+                if (auto* condInst = dynamic_cast<ir::Instruction*>(term->getOperands()[0]->get());
+                    condInst && condInst->getParent() == bb && isCompareOpcode(condInst->getOpcode())) {
+                    branchCondInst = condInst;
+                }
+            }
+        }
+
         for (auto& instr : bb->getInstructions()) {
+            if (branchCondInst && instr.get() == branchCondInst) continue;
             if (instr->getOpcode() == ir::Instruction::Br || instr->getOpcode() == ir::Instruction::Jnz) {
                 if (instr->getOperands().size() == 1) {
                     ir::BasicBlock* target = static_cast<ir::BasicBlock*>(instr->getOperands()[0]->get());
@@ -366,19 +650,38 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
                     ir::BasicBlock* trueBB = static_cast<ir::BasicBlock*>(instr->getOperands()[1]->get());
                     ir::BasicBlock* falseBB = static_cast<ir::BasicBlock*>(instr->getOperands()[2]->get());
 
-                    std::string condOp = cg.getValueAsOperand(cond);
-                    if (!condOp.empty()) *os << "    " << condOp << "\n";
-
-                    *os << "    if\n";
-                    emitPhis(cg, trueBB, bb, "      ");
-                    if (posMap.count(trueBB) && posMap[trueBB] <= i) *os << "      br $" << trueBB->getName() << "_loop\n";
-                    else *os << "      br $" << trueBB->getName() << "\n";
-                    *os << "    else\n";
-                    emitPhis(cg, falseBB, bb, "      ");
-                    if (posMap.count(falseBB) && posMap[falseBB] <= i) *os << "      br $" << falseBB->getName() << "_loop\n";
-                    else *os << "      br $" << falseBB->getName() << "\n";
-                    *os << "    end\n";
+                    bool emittedDirectExitCondition = false;
+                    if (auto* condInst = dynamic_cast<ir::Instruction*>(cond);
+                        condInst && condInst->getParent() == bb && isCompareOpcode(condInst->getOpcode())) {
+                        const std::string invCmpOp = wasmTypedCompareOp(condInst->getOpcode(), condInst->getOperands()[0]->get()->getType(), true);
+                        *os << "    " << cg.getValueAsOperand(condInst->getOperands()[0]->get()) << "\n";
+                        *os << "    " << cg.getValueAsOperand(condInst->getOperands()[1]->get()) << "\n";
+                        if (!invCmpOp.empty()) {
+                            *os << "    " << invCmpOp << "\n";
+                            emittedDirectExitCondition = true;
+                        } else if (const std::string cmpOp = wasmTypedCompareOp(condInst->getOpcode(), condInst->getOperands()[0]->get()->getType(), false); !cmpOp.empty()) {
+                            *os << "    " << cmpOp << "\n";
+                        }
+                    } else {
+                        std::string condOp = cg.getValueAsOperand(cond);
+                        if (!condOp.empty()) *os << "    " << condOp << "\n";
+                    }
+                    // while/conditional lowering with explicit branch-on-false:
+                    //   cond
+                    //   i32.eqz
+                    //   br_if <false/exit>
+                    //   br <true/body>
+                    if (!emittedDirectExitCondition) {
+                        *os << "    i32.eqz\n";
+                    }
+                    emitPhis(cg, falseBB, bb, "    ");
+                    if (posMap.count(falseBB) && posMap[falseBB] <= i) *os << "    br_if $" << falseBB->getName() << "_loop\n";
+                    else *os << "    br_if $" << falseBB->getName() << "\n";
+                    emitPhis(cg, trueBB, bb, "    ");
+                    if (posMap.count(trueBB) && posMap[trueBB] <= i) *os << "    br $" << trueBB->getName() << "_loop\n";
+                    else *os << "    br $" << trueBB->getName() << "\n";
                 }
+                break;
             } else if (instr->getOpcode() == ir::Instruction::Jmp) {
                 ir::Value* targetVal = instr->getOperands()[0]->get();
                 if (auto* target = dynamic_cast<ir::BasicBlock*>(targetVal)) {
@@ -392,11 +695,19 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
                     // Indirect jump/call through pointer not yet handled in structured way
                     cg.emitInstruction(*instr);
                 }
+                break;
             } else if (instr->getOpcode() == ir::Instruction::Phi) {
                 // Handled
             } else {
                 cg.emitInstruction(*instr);
+                if (instr->getOpcode() == ir::Instruction::Ret || instr->getOpcode() == ir::Instruction::Hlt) {
+                    break;
+                }
             }
+        }
+
+        if (selfLoopWrapper) {
+            *os << "  end ;; $" << bb->getName() << "_loop\n";
         }
 
         // Emit 'end' markers
@@ -426,9 +737,17 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
 void Wasm32::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << "(module\n";
+        *os << "  (import \"env\" \"syscall\" (func $syscall (param i32 i32 i32 i32 i32 i32 i32) (result i32)))\n";
         *os << "  (memory 1)\n";
-        *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
-        *os << "  (func $unknown_func (result i32) i32.const 0 return)\n";
+        globalOffsets.clear();
+        nextGlobalOffset = 0;
+        for (auto& gv : cg.module.getGlobalVariables()) {
+            globalOffsets[gv->getName()] = nextGlobalOffset;
+            nextGlobalOffset += 8;
+        }
+        if (cg.usesHeap) {
+            *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
+        }
         for (auto& func : cg.module.getFunctions()) {
             *os << "  (export \"" << func->getName() << "\" (func $" << func->getName() << "))\n";
         }
@@ -543,7 +862,9 @@ std::string Wasm32::formatStackOperand(int offset) const {
 }
 
 std::string Wasm32::formatGlobalOperand(const std::string& name) const {
-    return name;
+    auto it = globalOffsets.find(name);
+    if (it == globalOffsets.end()) return "i32.const 0";
+    return "i32.const " + std::to_string(it->second);
 }
 
 size_t Wasm32::getPointerSize() const {
@@ -622,7 +943,26 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     std::vector<ir::Value*> instr_locals;
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
-            if (instr->getType()->getTypeID() != ir::Type::VoidTyID) {
+            bool usedByNonBranch = false;
+            bool usedOnlyByRet = !instr->use_empty();
+            for (auto* use : instr->getUseList()) {
+                auto* user = dynamic_cast<ir::Instruction*>(use->getUser());
+                if (!user) { usedByNonBranch = true; usedOnlyByRet = false; break; }
+                if (user->getOpcode() != ir::Instruction::Ret) usedOnlyByRet = false;
+                if (!(user->getOpcode() == ir::Instruction::Br || user->getOpcode() == ir::Instruction::Jnz)) {
+                    usedByNonBranch = true;
+                }
+            }
+            bool branchOnlyCmp = isCompareOpcode(instr->getOpcode()) && !instr->use_empty() && !usedByNonBranch;
+            bool inductionRetOnly = false;
+            if (usedOnlyByRet && instr->getOpcode() == ir::Instruction::Add && instr->getOperands().size() == 2) {
+                if (dynamic_cast<ir::ConstantInt*>(instr->getOperands()[0]->get()) ||
+                    dynamic_cast<ir::ConstantInt*>(instr->getOperands()[1]->get())) {
+                    inductionRetOnly = true;
+                }
+            }
+
+            if (instr->getType()->getTypeID() != ir::Type::VoidTyID && !instr->use_empty() && !branchOnlyCmp && !inductionRetOnly) {
                 cg.getStackOffsets()[instr.get()] = local_idx++;
                 instr_locals.push_back(instr.get());
             }
@@ -630,39 +970,6 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     }
 
     if (auto* os = cg.getTextStream()) {
-        // Enhanced WASM32 function prologue with comprehensive ABI support
-
-        *os << "  ;; Enhanced Function prologue for " << func.getName() << "\n";
-
-        // Emit local declarations for all instructions in cg.getStackOffsets()
-        // in their numerical order.
-        for (auto* val : instr_locals) {
-            std::string wasmType = getWasmType(val->getType());
-            *os << "  (local $" << cg.getStackOffset(val) << " " << wasmType << ")\n";
-        }
-
-        bool leaf = isLeaf(func);
-        bool needsTemp = needsTempLocals(func);
-
-        if (needsTemp) {
-            // Emit temp local declarations for all possible types
-            *os << "  (local $temp_i32_0 i32)\n";
-            *os << "  (local $temp_i32_1 i32)\n";
-            *os << "  (local $temp_i64_0 i64)\n";
-            *os << "  (local $temp_i64_1 i64)\n";
-            *os << "  (local $temp_f32_0 f32)\n";
-            *os << "  (local $temp_f32_1 f32)\n";
-            *os << "  (local $temp_f64_0 f64)\n";
-            *os << "  (local $temp_f64_1 f64)\n";
-        }
-
-        if (!leaf) {
-            // Initialize stack frame if needed
-            // WASM doesn't have traditional stack frames, but we can simulate with globals
-            *os << "  ;; Initialize virtual stack frame\n";
-        }
-
-        // Add function entry debugging
         *os << "  (func $" << func.getName();
         for (auto& param : func.getParameters()) {
             *os << " (param " << getWasmType(param->getType()) << ")";
@@ -673,15 +980,31 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
         *os << "\n";
-        
+
+        // Local declarations must be inside function body (after signature).
+        for (auto* val : instr_locals) {
+            std::string wasmType = getWasmType(val->getType());
+            *os << "    (local $" << cg.getStackOffset(val) << " " << wasmType << ")\n";
+        }
+
+        bool leaf = isLeaf(func);
+        bool needsTemp = needsTempLocals(func);
+        if (needsTemp) {
+            *os << "    (local $temp_i32_0 i32)\n";
+            *os << "    (local $temp_i32_1 i32)\n";
+            *os << "    (local $temp_i64_0 i64)\n";
+            *os << "    (local $temp_i64_1 i64)\n";
+            *os << "    (local $temp_f32_0 f32)\n";
+            *os << "    (local $temp_f32_1 f32)\n";
+            *os << "    (local $temp_f64_0 f64)\n";
+            *os << "    (local $temp_f64_1 f64)\n";
+        }
+
         *os << "  ;; Function " << func.getName() << " entry\n";
         *os << "  ;; Parameters: " << func.getParameters().size() << "\n";
 
-        // Enhanced parameter validation for debugging
-        size_t paramCount = 0;
-        for (auto& param : func.getParameters()) {
-            *os << "  ;; Parameter " << paramCount << ": " << param->getType()->toString() << "\n";
-            paramCount++;
+        if (!leaf) {
+            *os << "  ;; Initialize virtual stack frame\n";
         }
     }
 }
@@ -866,23 +1189,25 @@ bool Wasm32::isCalleeSaved(const std::string& reg) const {
 
 std::string Wasm32::formatConstant(const ir::ConstantInt* C) const {
     auto* type = C->getType();
+    auto asSigned = [&](uint64_t value, uint64_t bits) -> int64_t {
+        if (bits == 0 || bits >= 64) return static_cast<int64_t>(value);
+        uint64_t mask = (1ULL << bits) - 1ULL;
+        uint64_t truncated = value & mask;
+        uint64_t signBit = 1ULL << (bits - 1);
+        if (truncated & signBit) return static_cast<int64_t>(truncated | ~mask);
+        return static_cast<int64_t>(truncated);
+    };
     if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
-        if (intTy->getBitwidth() <= 32) {
-            return "i32.const " + std::to_string(C->getValue());
-        } else {
-            return "i64.const " + std::to_string(C->getValue());
-        }
+        uint64_t bits = std::min<uint64_t>(intTy->getBitwidth(), 32);
+        return "i32.const " + std::to_string(asSigned(C->getValue(), bits));
     }
-    return "i32.const " + std::to_string(C->getValue());
+    return "i32.const " + std::to_string(static_cast<int64_t>(C->getValue()));
 }
 
 std::string Wasm32::getWasmType(const ir::Type* type) {
     if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
-        if (intTy->getBitwidth() <= 32) {
-            return "i32";
-        } else {
-            return "i64";
-        }
+        (void)intTy;
+        return "i32";
     } else if (type->isFloatTy()) {
         return "f32";
     } else if (type->isDoubleTy()) {
@@ -1329,6 +1654,35 @@ void Wasm32::emitCall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
+void Wasm32::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    if (auto* os = cg.getTextStream()) {
+        // Lower to imported env.syscall(number, a1..a6) -> i32
+        auto emitI32Arg = [&](ir::Value* v) {
+            if (!v) {
+                *os << "  i32.const 0\n";
+                return;
+            }
+            std::string op = cg.getValueAsOperand(v);
+            if (op.empty() || op.rfind("$", 0) == 0) {
+                *os << "  i32.const 0\n";
+            } else {
+                *os << "  " << op << "\n";
+            }
+        };
+
+        if (!instr.getOperands().empty()) emitI32Arg(instr.getOperands()[0]->get());
+        else *os << "  i32.const 0\n";
+        for (size_t i = 1; i <= 6; ++i) {
+            if (i < instr.getOperands().size()) emitI32Arg(instr.getOperands()[i]->get());
+            else *os << "  i32.const 0\n";
+        }
+        *os << "  call $syscall\n";
+        if (!instr.getType()->isVoidTy() && cg.getStackOffsets().count(&instr)) {
+            *os << "  local.set " << cg.getStackOffset(&instr) << "\n";
+        }
+    }
+}
+
 // New instruction emission methods
 void Wasm32::emitNot(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
@@ -1364,7 +1718,7 @@ void Wasm32::emitCmp(CodeGen& cg, ir::Instruction& instr) {
         
         std::string op_str;
         ir::Type* type = lhs->getType();
-        std::string prefix = (type->isFloatTy() || type->isDoubleTy()) ? (type->isFloatTy() ? "f32" : "f64") : (type->isIntegerTy() && static_cast<ir::IntegerType*>(type)->getBitwidth() > 32 ? "i64" : "i32");
+        std::string prefix = (type->isFloatTy() || type->isDoubleTy()) ? (type->isFloatTy() ? "f32" : "f64") : "i32";
 
         switch(instr.getOpcode()) {
             case ir::Instruction::Ceq:  op_str = prefix + ".eq"; break;
@@ -1752,7 +2106,8 @@ void Wasm32::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
 
 void Wasm32::emitBr(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ;; Branch handled by structured control flow\n";
+        (void)instr;
+        throw std::runtime_error("Wasm32 emitBr reached without structured lowering");
     }
 }
 
@@ -1770,7 +2125,8 @@ void Wasm32::emitBasicBlockInstructions(CodeGen& cg, ir::BasicBlock& bb, const s
 
 void Wasm32::emitJmp(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ;; Jump handled by structured control flow\n";
+        (void)instr;
+        throw std::runtime_error("Wasm32 emitJmp reached without structured lowering");
     }
 }
 

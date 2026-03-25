@@ -14,6 +14,10 @@ class Module {
 public:
     Module(const std::string& name, std::shared_ptr<IRContext> ctx = nullptr);
     ~Module();
+    Module(const Module&) = delete;
+    Module& operator=(const Module&) = delete;
+    Module(Module&&) noexcept = default;
+    Module& operator=(Module&&) noexcept = default;
 
     const std::string& getName() const { return name; }
     IRContext* getContext() const { return context.get(); }

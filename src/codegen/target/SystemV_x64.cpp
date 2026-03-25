@@ -16,6 +16,10 @@ using namespace codegen;
 using namespace codegen::target;
 
 namespace {
+    std::string getEpilogueLabel(const ir::Function* func) {
+        return func ? func->getName() + "_epilogue" : ".L_epilogue";
+    }
+
     void emitRegMem(execgen::Assembler& assembler, uint8_t rex, const std::vector<uint8_t>& opcodes, uint8_t reg, int32_t offset) {
         if (rex) assembler.emitByte(rex);
         for (uint8_t op : opcodes) assembler.emitByte(op);
@@ -54,6 +58,28 @@ namespace {
             }
         }
         return baseOpcode;
+    }
+
+    std::string getLoadStoreSuffix(const ir::Type* type) {
+        if (type->isPointerTy()) return "q";
+        if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
+            switch (intTy->getBitwidth()) {
+                case 8: return "b";
+                case 16: return "w";
+                case 32: return "l";
+                case 64: return "q";
+                default: return "q";
+            }
+        }
+        if (type->isFloatTy()) return "ss";
+        if (type->isDoubleTy()) return "sd";
+        return "q";
+    }
+
+    std::string getMoveInstruction(const ir::Type* type) {
+        if (type->isFloatTy()) return "movss";
+        if (type->isDoubleTy()) return "movsd";
+        return "mov" + getLoadStoreSuffix(type);
     }
 
     void emitLoadValue(CodeGen& cg, execgen::Assembler& assembler, ir::Value* val, uint8_t reg) {
@@ -322,10 +348,19 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 
     if (auto* os = cg.getTextStream()) {
         int_reg_idx = 0;
+        int float_reg_idx = 0;
         for (auto& param : func.getParameters()) {
-            if (int_reg_idx < 6) {
-                *os << "  movq " << integerArgRegs[int_reg_idx] << ", " << cg.getStackOffset(param.get()) << "(%rbp)\n";
-                int_reg_idx++;
+            const ir::Type* paramType = param->getType();
+            if (paramType->isFloatingPoint()) {
+                if (float_reg_idx < static_cast<int>(floatArgRegs.size())) {
+                    std::string instr = paramType->isFloatTy() ? "movss" : "movsd";
+                    *os << "  " << instr << " " << floatArgRegs[float_reg_idx++] << ", "
+                        << cg.getStackOffset(param.get()) << "(%rbp)\n";
+                }
+            } else if (int_reg_idx < 6) {
+                std::string suffix = getLoadStoreSuffix(paramType);
+                std::string srcReg = getRegisterName(integerArgRegs[int_reg_idx++], paramType);
+                *os << "  mov" << suffix << " " << srcReg << ", " << cg.getStackOffset(param.get()) << "(%rbp)\n";
             }
         }
     } else {
@@ -353,6 +388,9 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void SystemV_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    if (auto* os = cg.getTextStream()) {
+        *os << getEpilogueLabel(&func) << ":\n";
+    }
     emitEpilogue(cg);
 }
 
@@ -989,7 +1027,9 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
             if (dynamic_cast<ir::IntegerType*>(arg->getType())) {
                 if (int_reg_idx < int_regs.size()) {
                     std::string argOperand = cg.getValueAsOperand(arg);
-                    *os << "  movq " << argOperand << ", " << int_regs[int_reg_idx++] << "\n";
+                    std::string suffix = getLoadStoreSuffix(arg->getType());
+                    std::string dstReg = getRegisterName(int_regs[int_reg_idx++], arg->getType());
+                    *os << "  mov" << suffix << " " << argOperand << ", " << dstReg << "\n";
                 } else {
                     stack_args.push_back(arg);
                 }
@@ -1011,7 +1051,9 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
 
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
             std::string destOperand = cg.getValueAsOperand(&instr);
-            *os << "  movq " << getIntegerReturnRegister() << ", " << destOperand << "\n";
+            std::string suffix = getLoadStoreSuffix(instr.getType());
+            std::string srcReg = getRegisterName(getIntegerReturnRegister(), instr.getType());
+            *os << "  mov" << suffix << " " << srcReg << ", " << destOperand << "\n";
         }
     } else {
         auto& assembler = cg.getAssembler();
@@ -1080,28 +1122,10 @@ void SystemV_x64::emitCall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-const std::vector<std::string>& SystemV_x64::getIntegerArgumentRegisters() const {
-    return this->integerArgRegs;
-}
-
-const std::vector<std::string>& SystemV_x64::getFloatArgumentRegisters() const {
-    return this->floatArgRegs;
-}
-
-const std::string& SystemV_x64::getIntegerReturnRegister() const {
-    return this->intReturnReg;
-}
-
-const std::string& SystemV_x64::getFloatReturnRegister() const {
-    return this->floatReturnReg;
-}
-
 const std::vector<std::string>& SystemV_x64::getRegisters(RegisterClass regClass) const {
     if (regClass == RegisterClass::Float) return floatRegs;
     return integerRegs;
 }
-
-size_t SystemV_x64::getMaxRegistersForArgs() const { return 6; }
 
 void SystemV_x64::emitPassArgument(CodeGen& cg, size_t argIndex,
                                   const std::string& value, const ir::Type* type) {
@@ -1601,10 +1625,17 @@ void SystemV_x64::emitRet(CodeGen& cg, ir::Instruction& instr) {
         if (instr.getOperands().size() > 0) {
             ir::Value* retVal = instr.getOperands()[0]->get();
             std::string retOp = cg.getValueAsOperand(retVal);
-            std::string sizeSuffix = getLoadStoreSuffix(retVal->getType());
-            std::string reg = getRegisterName("%rax", retVal->getType());
-            *os << "  mov" << sizeSuffix << " " << retOp << ", " << reg << "\n";
+            if (retVal->getType()->isFloatingPoint()) {
+                std::string movInstr = retVal->getType()->isFloatTy() ? "movss" : "movsd";
+                *os << "  " << movInstr << " " << retOp << ", %xmm0\n";
+            } else {
+                std::string sizeSuffix = getLoadStoreSuffix(retVal->getType());
+                std::string reg = getRegisterName("%rax", retVal->getType());
+                *os << "  mov" << sizeSuffix << " " << retOp << ", " << reg << "\n";
+            }
         }
+        *os << "  jmp " << getEpilogueLabel(instr.getParent()->getParent()) << "\n";
+        return;
     } else {
         if (!instr.getOperands().empty()) {
             auto& assembler = cg.getAssembler();
@@ -1623,7 +1654,14 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
     ir::BasicBlock* currentBB = instr.getParent();
 
     if (auto* os = cg.getTextStream()) {
-        *os << "  cmpq $0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        ir::Value* cond = instr.getOperands()[0]->get();
+        std::string condOp = cg.getValueAsOperand(cond);
+        std::string suffix = getLoadStoreSuffix(cond->getType());
+        if (suffix == "ss" || suffix == "sd") {
+            *os << "  # unsupported floating-point branch condition, treating as integer compare\n";
+            suffix = "q";
+        }
+        *os << "  cmp" << suffix << " $0, " << condOp << "\n";
 
         // We can't easily lower PHIs on conditional branches if both targets have PHIs
         // because we might clobber the condition or values needed for the other branch.
@@ -1733,6 +1771,87 @@ void SystemV_x64::emitBr(CodeGen& cg, ir::Instruction& instr) {
             cg.addRelocation(reloc_false);
         }
     }
+}
+
+bool SystemV_x64::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) {
+    auto* os = cg.getTextStream();
+    if (br.getOperands().size() < 2) return false;
+
+    std::string jcc;
+    uint8_t jccOpcode = 0;
+    switch (cmp.getOpcode()) {
+        case ir::Instruction::Ceq:  jcc = "je";  jccOpcode = 0x84; break;
+        case ir::Instruction::Cne:  jcc = "jne"; jccOpcode = 0x85; break;
+        case ir::Instruction::Cslt: jcc = "jl";  jccOpcode = 0x8C; break;
+        case ir::Instruction::Csle: jcc = "jle"; jccOpcode = 0x8E; break;
+        case ir::Instruction::Csgt: jcc = "jg";  jccOpcode = 0x8F; break;
+        case ir::Instruction::Csge: jcc = "jge"; jccOpcode = 0x8D; break;
+        case ir::Instruction::Cult: jcc = "jb";  jccOpcode = 0x82; break;
+        case ir::Instruction::Cule: jcc = "jbe"; jccOpcode = 0x86; break;
+        case ir::Instruction::Cugt: jcc = "ja";  jccOpcode = 0x87; break;
+        case ir::Instruction::Cuge: jcc = "jae"; jccOpcode = 0x83; break;
+        default: return false;
+    }
+
+    ir::Value* lhs = cmp.getOperands()[0]->get();
+    ir::Value* rhs = cmp.getOperands()[1]->get();
+    if (lhs->getType()->isFloatTy() || lhs->getType()->isDoubleTy()) return false;
+
+    if (os) {
+        const std::string lhsOp = cg.getValueAsOperand(lhs);
+        const std::string rhsOp = cg.getValueAsOperand(rhs);
+        const std::string trueLabel = cg.getValueAsOperand(br.getOperands()[1]->get());
+
+        *os << "  cmpq " << rhsOp << ", " << lhsOp << "\n";
+        *os << "  " << jcc << " " << trueLabel << "\n";
+        if (br.getOperands().size() > 2) {
+            const std::string falseLabel = cg.getValueAsOperand(br.getOperands()[2]->get());
+            *os << "  jmp " << falseLabel << "\n";
+        }
+        return true;
+    }
+
+    // Binary emission path (Linux/SystemV x64):
+    auto& assembler = cg.getAssembler();
+    emitLoadValue(cg, assembler, lhs, 0);   // %rax
+    emitLoadValue(cg, assembler, rhs, 11);  // %r11
+    // cmp %r11, %rax
+    assembler.emitBytes({0x4C, 0x39, 0xD8});
+
+    // jcc <true_label>
+    assembler.emitBytes({0x0F, jccOpcode});
+    uint64_t trueRelocOffset = assembler.getCodeSize();
+    assembler.emitDWord(0);
+    CodeGen::RelocationInfo trueReloc;
+    trueReloc.offset = trueRelocOffset;
+    if (auto* trueBB = dynamic_cast<ir::BasicBlock*>(br.getOperands()[1]->get())) {
+        trueReloc.symbolName = trueBB->getParent()->getName() + "_" + trueBB->getName();
+    } else {
+        trueReloc.symbolName = br.getOperands()[1]->get()->getName();
+    }
+    trueReloc.type = "R_X86_64_PC32";
+    trueReloc.sectionName = ".text";
+    trueReloc.addend = -4;
+    cg.addRelocation(trueReloc);
+
+    if (br.getOperands().size() > 2) {
+        assembler.emitByte(0xE9); // jmp <false_label>
+        uint64_t falseRelocOffset = assembler.getCodeSize();
+        assembler.emitDWord(0);
+        CodeGen::RelocationInfo falseReloc;
+        falseReloc.offset = falseRelocOffset;
+        if (auto* falseBB = dynamic_cast<ir::BasicBlock*>(br.getOperands()[2]->get())) {
+            falseReloc.symbolName = falseBB->getParent()->getName() + "_" + falseBB->getName();
+        } else {
+            falseReloc.symbolName = br.getOperands()[2]->get()->getName();
+        }
+        falseReloc.type = "R_X86_64_PC32";
+        falseReloc.sectionName = ".text";
+        falseReloc.addend = -4;
+        cg.addRelocation(falseReloc);
+    }
+
+    return true;
 }
 
 

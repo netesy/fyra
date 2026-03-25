@@ -72,13 +72,16 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0] << " <input.fyra|input.fy> -o <output.s> [options]" << std::endl;
         std::cerr << "Options:" << std::endl;
         std::cerr << "  --target <linux|windows|windows-amd64|windows-arm64|aarch64|wasm32|riscv64>  Target platform (default: linux)" << std::endl;
+        std::cerr << "  -O0                                              Disable optimizations" << std::endl;
+        std::cerr << "  -O1                                              Enable conservative optimizations" << std::endl;
+        std::cerr << "  -O2                                              Enable full optimization pipeline (default)" << std::endl;
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
-        std::cerr << "  --enhanced                                       Use enhanced CodeGen with validation and object generation" << std::endl;
+        std::cerr << "  --enhanced                                       (Deprecated) Uses standard CodeGen path" << std::endl;
         std::cerr << "  --verbose                                        Enable verbose output" << std::endl;
         std::cerr << "  --pipeline                                       Run full compilation pipeline for all targets" << std::endl;
-        std::cerr << "  --gen-exec                                       Generate an executable file (requires --enhanced)" << std::endl;
+        std::cerr << "  --gen-exec                                       Generate an executable file" << std::endl;
         std::cerr << "Supported input formats:" << std::endl;
         std::cerr << "  .fyra  - Fyra Intermediate Language format" << std::endl;
         std::cerr << "  .fy    - Fyra Intermediate Language format (alternative extension)" << std::endl;
@@ -88,7 +91,7 @@ int main(int argc, char** argv) {
     std::string inputFile = argv[1];
     std::string outputFile = get_arg(argc, argv, "-o");
     std::string target = get_arg(argc, argv, "--target");
-    bool optDisabled = false;
+    int optimizationLevel = 2;
 
     // Parse command line options
     bool enableValidation = true;
@@ -97,7 +100,6 @@ int main(int argc, char** argv) {
     bool verboseOutput = false;
     bool runPipeline = false;
     bool generateExecutable = false;
-    bool disableOptimizations = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -118,8 +120,11 @@ int main(int argc, char** argv) {
             generateExecutable = true;
             useEnhanced = true; // Executable generation requires enhanced CodeGen
         } else if (arg == "-O0") {
-            disableOptimizations = true;
-            optDisabled = true;
+            optimizationLevel = 0;
+        } else if (arg == "-O1") {
+            optimizationLevel = 1;
+        } else if (arg == "-O2") {
+            optimizationLevel = 2;
         }
     }
     
@@ -154,7 +159,7 @@ int main(int argc, char** argv) {
     std::cout << "--- Parsing complete. ---\n" << std::flush;
 
     // 2. Run Enhanced SSA and Optimization Pipeline
-    std::cout << "--- Running Enhanced Optimization Pipeline... ---\n" << std::flush;
+    std::cout << "--- Running Optimization Pipeline (-O" << optimizationLevel << ") ---\n" << std::flush;
     
     // Create shared error reporter for all passes
     auto error_reporter = std::make_shared<transforms::ErrorReporter>(std::cerr, false);
@@ -182,7 +187,7 @@ int main(int argc, char** argv) {
             mem2reg.run(*func);
         }
 
-        if (disableOptimizations) continue;
+        if (optimizationLevel == 0) continue;
 
         // Phase 2: Enhanced Optimization Passes
         // Create enhanced passes with shared error reporter
@@ -196,9 +201,14 @@ int main(int argc, char** argv) {
         // Run optimization passes in optimal order
         bool optimization_changed = true;
         int iteration = 1;
-        
-        if (target != "wasm32" && !optDisabled) {
-            while (optimization_changed && iteration <= 5) { // Limit iterations to prevent infinite loops
+        const int maxIterations = (optimizationLevel >= 2) ? 5 : 2;
+        const bool isWindowsTarget =
+            (target == "windows" || target == "windows-amd64" || target == "windows-x64" ||
+             target == "win64" || target == "windows-arm64");
+        const bool runAggressiveLoopPasses = (optimizationLevel >= 2 && target != "wasm32" && !isWindowsTarget);
+
+        if (target != "wasm32") {
+            while (optimization_changed && iteration <= maxIterations) { // Limit iterations to prevent infinite loops
                 optimization_changed = false;
                 
                 if (verboseOutput) {
@@ -220,7 +230,7 @@ int main(int argc, char** argv) {
                     optimization_changed = true;
                 }
 
-                if (licm.run(*func)) optimization_changed = true;
+                if (runAggressiveLoopPasses && licm.run(*func)) optimization_changed = true;
 
                 // Dead code elimination (should run last to clean up)
                 if (verboseOutput) std::cout << "  Running DCE..." << std::endl;
@@ -240,7 +250,7 @@ int main(int argc, char** argv) {
     } else if (error_reporter->hasWarnings()) {
         std::cout << "--- Optimization completed with warnings ---\n" << std::flush;
     } else {
-        std::cout << "--- Enhanced Optimization Pipeline complete ---\n" << std::flush;
+        std::cout << "--- Optimization Pipeline complete ---\n" << std::flush;
     }
     
     // Continue with register allocation if no critical errors
@@ -294,15 +304,7 @@ int main(int argc, char** argv) {
         
     } else if (useEnhanced) {
         // Use enhanced CodeGen with validation and object generation
-        std::cout << "--- Using Enhanced CodeGen with Validation ---\n" << std::flush;
-        
-        auto enhancedCodeGen = codegen::CodeGenFactory::create(*module, targetName);
-        if (!enhancedCodeGen) {
-            std::cerr << "Error: Failed to create enhanced code generator for target: " << targetName << std::endl;
-            return 1;
-        }
-        
-        enhancedCodeGen->enableVerboseOutput(verboseOutput);
+        std::cout << "--- Using CodeGen with Validation ---\n" << std::flush;
         
         std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
         if (generateExecutable) {
@@ -414,19 +416,33 @@ int main(int argc, char** argv) {
                 }
             }
         } else {
-            auto enhancedCodeGen = codegen::CodeGenFactory::create(*module, targetName);
-            if (!enhancedCodeGen) {
-                std::cerr << "Error: Failed to create enhanced code generator for target: " << targetName << std::endl;
-                return 1;
+            std::unique_ptr<codegen::target::TargetInfo> targetInfo;
+            if (target == "windows" || target == "windows-amd64" || target == "windows-x64") {
+                targetInfo = std::make_unique<codegen::target::Windows_x64>();
+            } else if (target == "windows-arm64") {
+                targetInfo = std::make_unique<codegen::target::Windows_AArch64>();
+            } else if (target == "aarch64") {
+                targetInfo = std::make_unique<codegen::target::AArch64>();
+            } else if (target == "wasm32") {
+                targetInfo = std::make_unique<codegen::target::Wasm32>();
+            } else if (target == "riscv64") {
+                targetInfo = std::make_unique<codegen::target::RiscV64>();
+            } else if (target == "macos" || target == "macos-x64") {
+                targetInfo = std::make_unique<codegen::target::MacOS_x64>();
+            } else if (target == "macos-aarch64" || target == "macos-arm64") {
+                targetInfo = std::make_unique<codegen::target::MacOS_AArch64>();
+            } else {
+                targetInfo = std::make_unique<codegen::target::SystemV_x64>();
             }
-            
-            enhancedCodeGen->enableVerboseOutput(verboseOutput);
+
+            codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
+            codeGen.enableVerboseOutput(verboseOutput);
 
             std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
-            auto result = enhancedCodeGen->compileToObject(outputPrefix, enableValidation, generateObject, false);
+            auto result = codeGen.compileToObject(outputPrefix, enableValidation, generateObject, false);
 
             if (result.success) {
-                std::cout << "Enhanced compilation successful in " << result.totalTimeMs << "ms" << std::endl;
+                std::cout << "Compilation successful in " << result.totalTimeMs << "ms" << std::endl;
                 std::cout << "Assembly: " << result.assemblyPath << std::endl;
                 if (generateObject && !result.objectPath.empty()) {
                     std::cout << "Object: " << result.objectPath << std::endl;
@@ -445,7 +461,7 @@ int main(int argc, char** argv) {
                     }
                 }
             } else {
-                std::cerr << "Enhanced compilation failed" << std::endl;
+                std::cerr << "Compilation failed" << std::endl;
                 auto errors = result.getAllErrors();
                 for (const auto& error : errors) {
                     std::cerr << "Error: " << error << std::endl;

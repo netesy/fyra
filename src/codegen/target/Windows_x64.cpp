@@ -22,6 +22,10 @@ namespace {
         }
         return "qword";
     }
+
+    std::string getEpilogueLabel(const ir::Function* func) {
+        return func ? func->getName() + "_epilogue" : "L_epilogue";
+    }
 }
 
 namespace codegen {
@@ -59,6 +63,7 @@ void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         if (!isLeaf) break;
     }
     if (!isLeaf) total_stack += 32;
+    if (total_stack % 16 != 0) total_stack += 16 - (total_stack % 16);
 
     emitPrologue(cg, total_stack);
     
@@ -71,7 +76,12 @@ void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     }
 }
 
-void Windows_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function&) { }
+void Windows_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    if (auto* os = cg.getTextStream()) {
+        *os << getEpilogueLabel(&func) << ":\n";
+    }
+    emitEpilogue(cg);
+}
 
 void Windows_x64::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type*) {
     if (auto* os = cg.getTextStream()) {
@@ -226,8 +236,10 @@ void Windows_x64::emitRet(CodeGen& cg, ir::Instruction& i) {
             std::string src = cg.getValueAsOperand(i.getOperands()[0]->get());
             if (src != "rax") *os << "  mov rax, " << src << "\n";
         }
-        emitEpilogue(cg);
+        *os << "  jmp " << getEpilogueLabel(i.getParent()->getParent()) << "\n";
+        return;
     }
+    emitEpilogue(cg);
 }
 void Windows_x64::emitAlloc(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
@@ -252,6 +264,35 @@ void Windows_x64::emitCall(CodeGen& cg, ir::Instruction& i) {
 
 void Windows_x64::emitVAStart(CodeGen&, ir::Instruction&) {}
 void Windows_x64::emitVAArg(CodeGen&, ir::Instruction&) {}
+
+bool Windows_x64::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) {
+    auto* os = cg.getTextStream();
+    if (!os) return false; // keep binary path unchanged for now
+    if (br.getOperands().size() < 2) return false;
+
+    std::string jcc;
+    switch (cmp.getOpcode()) {
+        case ir::Instruction::Ceq:  jcc = "je"; break;
+        case ir::Instruction::Cne:  jcc = "jne"; break;
+        case ir::Instruction::Cslt: jcc = "jl"; break;
+        case ir::Instruction::Csle: jcc = "jle"; break;
+        case ir::Instruction::Csgt: jcc = "jg"; break;
+        case ir::Instruction::Csge: jcc = "jge"; break;
+        default: return false;
+    }
+
+    const std::string lhs = cg.getValueAsOperand(cmp.getOperands()[0]->get());
+    const std::string rhs = cg.getValueAsOperand(cmp.getOperands()[1]->get());
+    const std::string trueLabel = cg.getValueAsOperand(br.getOperands()[1]->get());
+    *os << "  mov rax, " << lhs << "\n";
+    *os << "  cmp rax, " << rhs << "\n";
+    *os << "  " << jcc << " " << trueLabel << "\n";
+    if (br.getOperands().size() > 2) {
+        const std::string falseLabel = cg.getValueAsOperand(br.getOperands()[2]->get());
+        *os << "  jmp " << falseLabel << "\n";
+    }
+    return true;
+}
 void Windows_x64::emitFAdd(CodeGen&, ir::Instruction&) {}
 void Windows_x64::emitFSub(CodeGen&, ir::Instruction&) {}
 void Windows_x64::emitFMul(CodeGen&, ir::Instruction&) {}

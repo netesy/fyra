@@ -6,6 +6,7 @@
 #include "ir/Use.h"
 #include <vector>
 #include <set>
+#include <unordered_set>
 #include <iostream>
 #include <algorithm>
 
@@ -96,9 +97,75 @@ bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) 
 }
 
 bool DeadInstructionElimination::eliminateDeadStores(ir::Function& func) {
-    // Basic dead store elimination could be implemented here
     (void)func;
+    // Conservative fallback: store elimination is currently too aggressive for
+    // memory-backed IR patterns lowered to wasm32 (e.g. linked-list / KV tests).
+    // Keep stores until alias/model-aware analysis is implemented.
     return false;
+
+    /*
+    bool changed = false;
+
+    for (auto& bb_ptr : func.getBasicBlocks()) {
+        ir::BasicBlock* bb = bb_ptr.get();
+        if (!bb) continue;
+
+        std::unordered_set<ir::Value*> loaded_since_store;
+        std::unordered_set<ir::Value*> overwritten_since_store;
+        std::vector<ir::Instruction*> to_remove;
+
+        for (auto it = bb->getInstructions().rbegin(); it != bb->getInstructions().rend(); ++it) {
+            ir::Instruction* instr = it->get();
+            if (!instr) continue;
+
+            if (isLoadInstruction(instr)) {
+                if (!instr->getOperands().empty() && instr->getOperands()[0]) {
+                    ir::Value* ptr = instr->getOperands()[0]->get();
+                    if (ptr) {
+                        loaded_since_store.insert(ptr);
+                        overwritten_since_store.erase(ptr);
+                    }
+                }
+                continue;
+            }
+
+            if (isStoreInstruction(instr)) {
+                if (instr->getOperands().size() < 2 || !instr->getOperands()[1]) {
+                    continue;
+                }
+
+                ir::Value* ptr = instr->getOperands()[1]->get();
+                if (!ptr) continue;
+
+                const bool has_read_since = loaded_since_store.find(ptr) != loaded_since_store.end();
+                const bool overwritten_later = overwritten_since_store.find(ptr) != overwritten_since_store.end();
+
+                if (overwritten_later && !has_read_since) {
+                    to_remove.push_back(instr);
+                    dead_stores_removed_++;
+                    changed = true;
+                    continue;
+                }
+
+                overwritten_since_store.insert(ptr);
+                loaded_since_store.erase(ptr);
+                continue;
+            }
+
+            if (instr->getOpcode() == ir::Instruction::Call ||
+                instr->getOpcode() == ir::Instruction::Syscall) {
+                loaded_since_store.clear();
+                overwritten_since_store.clear();
+            }
+        }
+
+        if (!to_remove.empty()) {
+            bb->removeInstructions(to_remove);
+        }
+    }
+
+    return changed;
+    */
 }
 
 bool DeadInstructionElimination::hasSideEffects(const ir::Instruction* instr) const {
@@ -106,7 +173,11 @@ bool DeadInstructionElimination::hasSideEffects(const ir::Instruction* instr) co
     ir::Instruction::Opcode op = instr->getOpcode();
     return op == ir::Instruction::Call || 
            op == ir::Instruction::Syscall || 
-           op == ir::Instruction::Store ||
+           op == ir::Instruction::Alloc ||
+           op == ir::Instruction::Alloc4 ||
+           op == ir::Instruction::Alloc16 ||
+           isLoadInstruction(instr) ||
+           isStoreInstruction(instr) ||
            op == ir::Instruction::Ret;
 }
 
@@ -177,11 +248,48 @@ void DeadInstructionElimination::propagateLiveness(std::set<ir::Instruction*>& l
     }
 }
 
-// Stub implementations for other methods in header
-bool DeadInstructionElimination::isAllocaInstruction(const ir::Instruction* instr) const { (void)instr; return false; }
-bool DeadInstructionElimination::isStoreInstruction(const ir::Instruction* instr) const { (void)instr; return false; }
-bool DeadInstructionElimination::isLoadInstruction(const ir::Instruction* instr) const { (void)instr; return false; }
-bool DeadInstructionElimination::mayAlias(ir::Value* ptr1, ir::Value* ptr2) const { (void)ptr1; (void)ptr2; return true; }
-std::vector<ir::Instruction*> DeadInstructionElimination::findInterveningStores(ir::Instruction* load, ir::Instruction* store) const { (void)load; (void)store; return {}; }
+bool DeadInstructionElimination::isStoreInstruction(const ir::Instruction* instr) const {
+    if (!instr) return false;
+
+    switch (instr->getOpcode()) {
+        case ir::Instruction::Store:
+        case ir::Instruction::Stored:
+        case ir::Instruction::Stores:
+        case ir::Instruction::Storel:
+        case ir::Instruction::Storeh:
+        case ir::Instruction::Storeb:
+        case ir::Instruction::VStore:
+        case ir::Instruction::VScatter:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool DeadInstructionElimination::isLoadInstruction(const ir::Instruction* instr) const {
+    if (!instr) return false;
+
+    switch (instr->getOpcode()) {
+        case ir::Instruction::Load:
+        case ir::Instruction::Loadd:
+        case ir::Instruction::Loads:
+        case ir::Instruction::Loadl:
+        case ir::Instruction::Loaduw:
+        case ir::Instruction::Loadsh:
+        case ir::Instruction::Loaduh:
+        case ir::Instruction::Loadsb:
+        case ir::Instruction::Loadub:
+        case ir::Instruction::VLoad:
+        case ir::Instruction::VGather:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool DeadInstructionElimination::mayAlias(ir::Value* ptr1, ir::Value* ptr2) const {
+    if (!ptr1 || !ptr2) return true;
+    return ptr1 == ptr2;
+}
 
 } // namespace transforms

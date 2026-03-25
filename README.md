@@ -392,6 +392,7 @@ Comprehensive documentation is available in the `doc/` directory:
 *   **[Fyra IL Specification](doc/fyra_il.md)** - Complete language reference
 *   **[IRBuilder Guide](doc/ir_builder.md)** - Programmatic IR construction
 *   **[Architecture Guide](doc/architecture.md)** - System design and components
+*   **[Codegen Optimizations](doc/codegen_optimizations.md)** - Optimization levels and instruction fusion behavior
 *   **[API Reference](doc/api_reference.md)** - Complete API documentation
 *   **[AI Agent Guide](doc/AI.md)** - Cobuilding with AI agents
 *   **[QBE Comparison](doc/reference.md)** - QBE to Fyra migration guide
