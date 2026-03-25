@@ -36,3 +36,8 @@ into:
 
 - Binary fusion is enabled for `SystemV_x64` integer compare-and-branch patterns.
 - Other targets keep binary emission on the non-fused path for safety until dedicated encoders are added.
+
+## Wasm32 textual output
+
+- Wasm32 textual output now stays in WAT/module form and avoids non-Wasm directives such as `.text`, `.globl`, and assembly-style block labels.
+- The Wasm path is emitted through the Wasm target flow directly, so generated `.wat` files remain Wasm-oriented.

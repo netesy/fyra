@@ -630,39 +630,6 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     }
 
     if (auto* os = cg.getTextStream()) {
-        // Enhanced WASM32 function prologue with comprehensive ABI support
-
-        *os << "  ;; Enhanced Function prologue for " << func.getName() << "\n";
-
-        // Emit local declarations for all instructions in cg.getStackOffsets()
-        // in their numerical order.
-        for (auto* val : instr_locals) {
-            std::string wasmType = getWasmType(val->getType());
-            *os << "  (local $" << cg.getStackOffset(val) << " " << wasmType << ")\n";
-        }
-
-        bool leaf = isLeaf(func);
-        bool needsTemp = needsTempLocals(func);
-
-        if (needsTemp) {
-            // Emit temp local declarations for all possible types
-            *os << "  (local $temp_i32_0 i32)\n";
-            *os << "  (local $temp_i32_1 i32)\n";
-            *os << "  (local $temp_i64_0 i64)\n";
-            *os << "  (local $temp_i64_1 i64)\n";
-            *os << "  (local $temp_f32_0 f32)\n";
-            *os << "  (local $temp_f32_1 f32)\n";
-            *os << "  (local $temp_f64_0 f64)\n";
-            *os << "  (local $temp_f64_1 f64)\n";
-        }
-
-        if (!leaf) {
-            // Initialize stack frame if needed
-            // WASM doesn't have traditional stack frames, but we can simulate with globals
-            *os << "  ;; Initialize virtual stack frame\n";
-        }
-
-        // Add function entry debugging
         *os << "  (func $" << func.getName();
         for (auto& param : func.getParameters()) {
             *os << " (param " << getWasmType(param->getType()) << ")";
@@ -673,15 +640,31 @@ void Wasm32::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
         *os << "\n";
-        
+
+        // Local declarations must be inside function body (after signature).
+        for (auto* val : instr_locals) {
+            std::string wasmType = getWasmType(val->getType());
+            *os << "    (local $" << cg.getStackOffset(val) << " " << wasmType << ")\n";
+        }
+
+        bool leaf = isLeaf(func);
+        bool needsTemp = needsTempLocals(func);
+        if (needsTemp) {
+            *os << "    (local $temp_i32_0 i32)\n";
+            *os << "    (local $temp_i32_1 i32)\n";
+            *os << "    (local $temp_i64_0 i64)\n";
+            *os << "    (local $temp_i64_1 i64)\n";
+            *os << "    (local $temp_f32_0 f32)\n";
+            *os << "    (local $temp_f32_1 f32)\n";
+            *os << "    (local $temp_f64_0 f64)\n";
+            *os << "    (local $temp_f64_1 f64)\n";
+        }
+
         *os << "  ;; Function " << func.getName() << " entry\n";
         *os << "  ;; Parameters: " << func.getParameters().size() << "\n";
 
-        // Enhanced parameter validation for debugging
-        size_t paramCount = 0;
-        for (auto& param : func.getParameters()) {
-            *os << "  ;; Parameter " << paramCount << ": " << param->getType()->toString() << "\n";
-            paramCount++;
+        if (!leaf) {
+            *os << "  ;; Initialize virtual stack frame\n";
         }
     }
 }

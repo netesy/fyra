@@ -67,17 +67,22 @@ void CodeGen::emit(bool forExecutable) {
             }
         }
     }
-    if (targetInfo->getName() == "wasm32" && !os && assembler) {
+    if (targetInfo->getName() == "wasm32") {
         auto* wasmTarget = static_cast<target::Wasm32*>(targetInfo.get());
-        for (auto& func : module.getFunctions()) emitFunction(*func);
-        wasmTarget->emitHeader(*this); wasmTarget->emitTypeSection(*this);
-        wasmTarget->emitFunctionSection(*this); wasmTarget->emitExportSection(*this);
-        wasmTarget->emitCodeSection(*this);
+        if (os) {
+            wasmTarget->emitHeader(*this);
+            for (auto& func : module.getFunctions()) emitFunction(*func);
+            *os << ")\n";
+        } else if (assembler) {
+            for (auto& func : module.getFunctions()) emitFunction(*func);
+            wasmTarget->emitHeader(*this); wasmTarget->emitTypeSection(*this);
+            wasmTarget->emitFunctionSection(*this); wasmTarget->emitExportSection(*this);
+            wasmTarget->emitCodeSection(*this);
+        }
     } else {
         emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
         if (forExecutable) targetInfo->emitStartFunction(*this);
         for (auto& func : module.getFunctions()) emitFunction(*func);
-        if (targetInfo->getName() == "wasm32") *os << ")\n";
     }
 }
 
@@ -90,6 +95,10 @@ void CodeGen::emitFunction(ir::Function& func) {
         for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
         wasmFunctionBodies.push_back(assembler->getCode());
         assembler = std::move(oldAsm);
+    } else if (targetInfo->getName() == "wasm32" && os) {
+        targetInfo->emitFunctionPrologue(*this, func);
+        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
+        targetInfo->emitFunctionEpilogue(*this, func);
     } else {
         if (os) *os << "\n" << func.getName() << ":\n";
         targetInfo->emitFunctionPrologue(*this, func);
@@ -99,7 +108,7 @@ void CodeGen::emitFunction(ir::Function& func) {
 }
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
-    if (os) {
+    if (os && targetInfo->getName() != "wasm32") {
         *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
     } else if (assembler) {
         // Register basic block as a symbol for binary emission
