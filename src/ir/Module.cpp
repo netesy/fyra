@@ -3,7 +3,8 @@
 
 namespace ir {
 
-Module::Module(const std::string& name, std::shared_ptr<IRContext> ctx) : context(ctx), name(name) {}
+Module::Module(const std::string& name, std::shared_ptr<IRContext> ctx)
+    : context(ctx ? std::move(ctx) : std::make_shared<IRContext>()), name(name) {}
 
 Module::~Module() {
     // Explicitly clear functions to trigger destruction in a controlled order

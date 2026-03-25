@@ -22,6 +22,7 @@ set(LIB_SOURCES
     src/ir/BasicBlock.cpp
     src/ir/Function.cpp
     src/ir/Module.cpp
+    src/ir/IRContext.cpp
     src/ir/FunctionType.cpp
     src/ir/IRBuilder.cpp
     src/parser/Lexer.cpp

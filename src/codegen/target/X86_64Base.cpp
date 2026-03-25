@@ -12,6 +12,15 @@ namespace target {
 
 X86_64Base::X86_64Base() {}
 
+int X86_64Base::alignStackForCallBoundary(int stack_size, int pushed_bytes) const {
+    int aligned = stack_size;
+    const int total = pushed_bytes + aligned;
+    if (total % 16 != 0) {
+        aligned += 16 - (total % 16);
+    }
+    return aligned;
+}
+
 TypeInfo X86_64Base::getTypeInfo(const ir::Type* type) const {
     TypeInfo info;
     info.size = type->getSize() * 8;
@@ -60,9 +69,8 @@ void X86_64Base::emitPrologue(CodeGen& cg, int stack_size) {
             }
             
             if (stack_size > 0) {
-                int adjusted_stack = stack_size;
-                int pushed = 1 + usedCalleeSaved.size(); // rbp + callee-saved
-                if ((pushed * 8 + adjusted_stack) % 16 != 0) adjusted_stack += 8;
+                int pushed = static_cast<int>(1 + usedCalleeSaved.size()) * 8; // rbp + callee-saved bytes
+                int adjusted_stack = alignStackForCallBoundary(stack_size, pushed);
                 if (p == "%") {
                     *os << "  subq $" << adjusted_stack << ", %" << stackPtrReg << "\n";
                 } else {

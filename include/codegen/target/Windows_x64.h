@@ -59,6 +59,7 @@ public:
 
     void emitVAStart(CodeGen& cg, ir::Instruction& instr) override;
     void emitVAArg(CodeGen& cg, ir::Instruction& instr) override;
+    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
 };
 
 }

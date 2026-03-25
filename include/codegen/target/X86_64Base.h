@@ -29,6 +29,7 @@ public:
     
     void emitPrologue(CodeGen& cg, int stack_size) override;
     void emitEpilogue(CodeGen& cg) override;
+    int alignStackForCallBoundary(int stack_size, int pushed_bytes) const;
     
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
