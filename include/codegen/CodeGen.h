@@ -274,19 +274,4 @@ private:
     PipelineConfig config_;
 };
 
-// Factory for creating code generators
-class CodeGenFactory {
-public:
-    static std::unique_ptr<CodeGen> create(
-        ir::Module& module,
-        const std::string& targetName
-    );
-    
-    // Target info factory methods
-    static std::unique_ptr<target::TargetInfo> createTargetInfo(const std::string& targetName);
-    
-private:
-    CodeGenFactory() = default;
-};
-
 } // namespace codegen

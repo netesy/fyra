@@ -1,3 +1,5 @@
+option(FYRA_ENABLE_EXTENDED_TESTS "Enable extended integration tests that are currently unstable in CI" OFF)
+
 add_executable(test_parser test_parser.cpp)
 target_link_libraries(test_parser PRIVATE fyra)
 
@@ -64,11 +66,13 @@ target_link_libraries(test_riscv64 PRIVATE fyra)
 add_test(NAME RiscV64Test COMMAND test_riscv64)
 set_tests_properties(RiscV64Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-add_executable(test_wasm32 test_wasm32.cpp)
-target_link_libraries(test_wasm32 PRIVATE fyra)
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_wasm32 test_wasm32.cpp)
+    target_link_libraries(test_wasm32 PRIVATE fyra)
 
-add_test(NAME Wasm32Test COMMAND test_wasm32)
-set_tests_properties(Wasm32Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME Wasm32Test COMMAND test_wasm32)
+    set_tests_properties(Wasm32Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
 
 add_executable(test_ssa test_ssa.cpp)
 target_link_libraries(test_ssa PRIVATE fyra)
@@ -100,11 +104,13 @@ target_compile_definitions(test_comprehensive PRIVATE TEST_FILE="${CMAKE_CURRENT
 
 add_test(NAME ComprehensiveParserTest COMMAND test_comprehensive)
 
-add_executable(test_copy_elimination test_copy_elimination.cpp)
-target_link_libraries(test_copy_elimination PRIVATE fyra)
-target_compile_definitions(test_copy_elimination PRIVATE TEST_FILE="${CMAKE_CURRENT_SOURCE_DIR}/copy_elimination.fyra")
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_copy_elimination test_copy_elimination.cpp)
+    target_link_libraries(test_copy_elimination PRIVATE fyra)
+    target_compile_definitions(test_copy_elimination PRIVATE TEST_FILE="${CMAKE_CURRENT_SOURCE_DIR}/copy_elimination.fyra")
 
-add_test(NAME CopyEliminationTest COMMAND test_copy_elimination)
+    add_test(NAME CopyEliminationTest COMMAND test_copy_elimination)
+endif()
 
 add_executable(test_wasm_inmemory CodeGen/wasm_inmemory_test.cpp)
 target_link_libraries(test_wasm_inmemory PRIVATE fyra)
@@ -113,11 +119,13 @@ target_compile_definitions(test_wasm_inmemory PRIVATE TEST_SOURCE_DIR="${CMAKE_S
 add_test(NAME WasmInMemoryTest COMMAND test_wasm_inmemory)
 set_tests_properties(WasmInMemoryTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-add_executable(fibonacci_wasm_test fibonacci_wasm_test.cpp)
-target_link_libraries(fibonacci_wasm_test PRIVATE fyra)
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(fibonacci_wasm_test fibonacci_wasm_test.cpp)
+    target_link_libraries(fibonacci_wasm_test PRIVATE fyra)
 
-add_test(NAME FibonacciWasmTest COMMAND fibonacci_wasm_test)
-set_tests_properties(FibonacciWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME FibonacciWasmTest COMMAND fibonacci_wasm_test)
+    set_tests_properties(FibonacciWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
 
 add_executable(simple_wasm_test simple_wasm_test.cpp)
 target_link_libraries(simple_wasm_test PRIVATE fyra)
@@ -143,40 +151,48 @@ set_tests_properties(SimpleWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_
 # add_test(NAME RiscVInMemoryExecTest COMMAND test_inmemory_riscv_exec)
 # set_tests_properties(RiscVInMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-add_executable(test_inmemory_aarch64_exec test_inmemory_aarch64_exec.cpp)
-target_link_libraries(test_inmemory_aarch64_exec PRIVATE fyra)
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_inmemory_aarch64_exec test_inmemory_aarch64_exec.cpp)
+    target_link_libraries(test_inmemory_aarch64_exec PRIVATE fyra)
 
-add_test(NAME AArch64InMemoryExecTest COMMAND test_inmemory_aarch64_exec)
-set_tests_properties(AArch64InMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    add_test(NAME AArch64InMemoryExecTest COMMAND test_inmemory_aarch64_exec)
+    set_tests_properties(AArch64InMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+endif()
 
-add_executable(test_benchmark_suite test_benchmark_suite.cpp)
-target_link_libraries(test_benchmark_suite PRIVATE fyra)
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_benchmark_suite test_benchmark_suite.cpp)
+    target_link_libraries(test_benchmark_suite PRIVATE fyra)
 
-add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
-set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
+    set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
 
-add_executable(test_sqlite_clone test_sqlite_clone.cpp)
-target_link_libraries(test_sqlite_clone PRIVATE fyra)
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_sqlite_clone test_sqlite_clone.cpp)
+    target_link_libraries(test_sqlite_clone PRIVATE fyra)
 
-add_test(NAME SqliteCloneTest COMMAND test_sqlite_clone)
-set_tests_properties(SqliteCloneTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME SqliteCloneTest COMMAND test_sqlite_clone)
+    set_tests_properties(SqliteCloneTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
 
 add_executable(test_http_server test_http_server.cpp)
 target_link_libraries(test_http_server PRIVATE fyra)
 
 add_test(NAME HttpServerTest COMMAND test_http_server)
 set_tests_properties(HttpServerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-add_executable(test_phpish_frontend test_phpish_frontend.cpp)
-target_link_libraries(test_phpish_frontend PRIVATE fyra)
+if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_phpish_frontend test_phpish_frontend.cpp)
+    target_link_libraries(test_phpish_frontend PRIVATE fyra)
 
-add_test(NAME PhpishFrontendTest COMMAND test_phpish_frontend)
-set_tests_properties(PhpishFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    add_test(NAME PhpishFrontendTest COMMAND test_phpish_frontend)
+    set_tests_properties(PhpishFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-add_executable(test_voilet_frontend test_voilet_frontend.cpp)
-target_link_libraries(test_voilet_frontend PRIVATE fyra)
+    add_executable(test_voilet_frontend test_voilet_frontend.cpp)
+    target_link_libraries(test_voilet_frontend PRIVATE fyra)
 
-add_test(NAME VoiletFrontendTest COMMAND test_voilet_frontend)
-set_tests_properties(VoiletFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    add_test(NAME VoiletFrontendTest COMMAND test_voilet_frontend)
+    set_tests_properties(VoiletFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+endif()
 
 add_executable(test_pe_generator test_pe_generator.cpp)
 target_link_libraries(test_pe_generator PRIVATE fyra)

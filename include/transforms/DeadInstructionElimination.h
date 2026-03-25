@@ -6,7 +6,6 @@
 #include "ir/Instruction.h"
 #include <set>
 #include <vector>
-#include <map>
 
 namespace transforms {
 
@@ -48,7 +47,6 @@ private:
     // Helper methods
     bool hasSideEffects(const ir::Instruction* instr) const;
     bool isTerminator(const ir::Instruction* instr) const;
-    bool isAllocaInstruction(const ir::Instruction* instr) const;
     bool isStoreInstruction(const ir::Instruction* instr) const;
     bool isLoadInstruction(const ir::Instruction* instr) const;
     
@@ -59,8 +57,6 @@ private:
     
     // Memory dependency analysis
     bool mayAlias(ir::Value* ptr1, ir::Value* ptr2) const;
-    std::vector<ir::Instruction*> findInterveningStores(ir::Instruction* load, ir::Instruction* store) const;
-    
     // Statistics tracking
     size_t dead_instructions_removed_ = 0;
     size_t unreachable_blocks_removed_ = 0;

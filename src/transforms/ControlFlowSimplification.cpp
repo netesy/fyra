@@ -37,45 +37,44 @@ bool ControlFlowSimplification::simplifyConstantBranches(ir::Function& func) {
         if (!bb || bb->getInstructions().empty()) continue;
         ir::Instruction* term = bb->getInstructions().back().get();
         
-        if (term->getOpcode() == ir::Instruction::Br || term->getOpcode() == ir::Instruction::Jnz || term->getOpcode() == ir::Instruction::Jz) {
-            if (term->getOperands().empty() || !term->getOperands()[0]) continue;
-            ir::Value* cond = term->getOperands()[0]->get();
-            if (auto* ci = dynamic_cast<ir::ConstantInt*>(cond)) {
-                bool condVal = ci->getValue() != 0;
-                if (term->getOpcode() == ir::Instruction::Jz) condVal = !condVal;
+        if (!isConditionalBranch(term)) {
+            continue;
+        }
 
-                if (term->getOperands().size() < 2) continue;
-                ir::BasicBlock* trueDest = dynamic_cast<ir::BasicBlock*>(term->getOperands()[1]->get());
-                ir::BasicBlock* falseDest = (term->getOperands().size() > 2) ? dynamic_cast<ir::BasicBlock*>(term->getOperands()[2]->get()) : nullptr;
-                
-                ir::BasicBlock* target = condVal ? trueDest : falseDest;
-                ir::BasicBlock* other = condVal ? falseDest : trueDest;
-                
-                if (!target) continue;
+        auto* condConst = dynamic_cast<ir::ConstantInt*>(getConstantCondition(term));
+        if (!condConst) {
+            continue;
+        }
 
-                auto jmp = std::make_unique<ir::Instruction>(nullptr, ir::Instruction::Jmp, std::vector<ir::Value*>{target}, bb);
-                bb->getInstructions().pop_back();
-                bb->getInstructions().push_back(std::move(jmp));
-                
-                if (other) {
-                    for (auto& instr : other->getInstructions()) {
-                        if (!instr) continue;
-                        if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
-                            auto& ops = phi->getOperands();
-                            for (size_t i = 0; i + 1 < ops.size(); i += 2) {
-                                if (ops[i] && ops[i]->get() == bb) {
-                                    ops.erase(ops.begin() + i, ops.begin() + i + 2);
-                                    break;
-                                }
-                            }
-                        } else if (instr->getOpcode() != ir::Instruction::Phi) break;
-                    }
+        if (term->getOperands().size() < 2) continue;
+        ir::BasicBlock* trueDest = dynamic_cast<ir::BasicBlock*>(term->getOperands()[1]->get());
+        ir::BasicBlock* falseDest = (term->getOperands().size() > 2) ? dynamic_cast<ir::BasicBlock*>(term->getOperands()[2]->get()) : nullptr;
+
+        bool condVal = condConst->getValue() != 0;
+        if (term->getOpcode() == ir::Instruction::Jz) condVal = !condVal;
+
+        ir::BasicBlock* target = condVal ? trueDest : falseDest;
+        ir::BasicBlock* other = condVal ? falseDest : trueDest;
+
+        if (!target) continue;
+
+        auto jmp = std::make_unique<ir::Instruction>(nullptr, ir::Instruction::Jmp, std::vector<ir::Value*>{target}, bb);
+        bb->getInstructions().pop_back();
+        bb->getInstructions().push_back(std::move(jmp));
+
+        if (other) {
+            for (auto& instr : other->getInstructions()) {
+                if (!instr) continue;
+                if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
+                    phi->removeIncomingValue(bb);
+                } else if (instr->getOpcode() != ir::Instruction::Phi) {
+                    break;
                 }
-                
-                changed = true;
-                constant_branches_simplified_++;
             }
         }
+
+        changed = true;
+        constant_branches_simplified_++;
     }
     return changed;
 }
@@ -115,9 +114,24 @@ bool ControlFlowSimplification::eliminateUnreachableBlocks(ir::Function& func) {
     while (it != blocks.end()) {
         ir::BasicBlock* bb = it->get();
         if (reachable.find(bb) == reachable.end()) {
-            // Unreachable block removal logic...
+            if (!bb->getInstructions().empty()) {
+                ir::Instruction* term = bb->getInstructions().back().get();
+                for (auto& op : term->getOperands()) {
+                    if (!op) continue;
+                    if (auto* succ = dynamic_cast<ir::BasicBlock*>(op->get())) {
+                        for (auto& instr : succ->getInstructions()) {
+                            if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
+                                phi->removeIncomingValue(bb);
+                            } else if (instr->getOpcode() != ir::Instruction::Phi) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             it = blocks.erase(it);
             changed = true;
+            unconditional_branches_eliminated_++;
         } else {
             ++it;
         }
@@ -137,39 +151,16 @@ bool ControlFlowSimplification::mergeBlocks(ir::Function& func) {
             ir::BasicBlock* bb = it->get();
             if (!bb || bb->getInstructions().empty()) continue;
             
-            ir::Instruction* term = bb->getInstructions().back().get();
-            if (term->getOpcode() == ir::Instruction::Jmp) {
-                if (term->getOperands().empty() || !term->getOperands()[0]) continue;
-                ir::BasicBlock* succ = dynamic_cast<ir::BasicBlock*>(term->getOperands()[0]->get());
-                if (!succ || succ == bb || succ == blocks.front().get()) continue;
+            if (!hasOneSuccessor(bb)) continue;
+            ir::BasicBlock* succ = getSuccessor(bb);
+            if (!succ || succ == bb) continue;
+            if (!canMergeBlocks(bb, succ, func)) continue;
 
-                if (hasOnePredecessor(succ, func)) {
-                    bb->getInstructions().pop_back(); 
-                    auto& succInstrs = succ->getInstructions();
-                    while (!succInstrs.empty()) {
-                        if (auto* phi = dynamic_cast<ir::PhiNode*>(succInstrs.front().get())) {
-                            ir::Value* val = phi->getIncomingValueForBlock(bb);
-                            if (val) phi->replaceAllUsesWith(val);
-                            succInstrs.erase(succInstrs.begin());
-                        } else {
-                            ir::Instruction* si = succInstrs.front().get();
-                            si->setParent(bb);
-                            bb->getInstructions().push_back(std::move(succInstrs.front()));
-                            succInstrs.erase(succInstrs.begin());
-                        }
-                    }
-                    for (auto it2 = blocks.begin(); it2 != blocks.end(); ++it2) {
-                        if (it2->get() == succ) {
-                            blocks.erase(it2);
-                            break;
-                        }
-                    }
-                    changed = true;
-                    block_changed = true;
-                    blocks_merged_++;
-                    break; 
-                }
-            }
+            mergeBlocksImpl(bb, succ, func);
+            changed = true;
+            block_changed = true;
+            blocks_merged_++;
+            break;
         }
     }
     return changed;
@@ -191,48 +182,110 @@ bool ControlFlowSimplification::hasOnePredecessor(ir::BasicBlock* block, ir::Fun
     return count == 1;
 }
 
-bool ControlFlowSimplification::eliminateUnconditionalBranches(ir::Function& func) {
-    (void)func; return false;
+bool ControlFlowSimplification::canMergeBlocks(ir::BasicBlock* pred, ir::BasicBlock* succ, ir::Function& func) {
+    if (!pred || !succ) return false;
+    if (succ == func.getBasicBlocks().front().get()) return false;
+    if (!hasOnePredecessor(succ, func)) return false;
+    return true;
 }
 
-bool ControlFlowSimplification::simplifyBranches(ir::Function& func) {
-    return simplifyConstantBranches(func);
-}
+void ControlFlowSimplification::mergeBlocksImpl(ir::BasicBlock* pred, ir::BasicBlock* succ, ir::Function& func) {
+    if (!pred || !succ) return;
+    if (pred->getInstructions().empty()) return;
 
-bool ControlFlowSimplification::canMergeBlocks(ir::BasicBlock* pred, ir::BasicBlock* succ) {
-    (void)pred; (void)succ; return false;
-}
+    pred->getInstructions().pop_back();
 
-void ControlFlowSimplification::mergeBlocksImpl(ir::BasicBlock* pred, ir::BasicBlock* succ) {
-    (void)pred; (void)succ;
+    auto& succInstrs = succ->getInstructions();
+    while (!succInstrs.empty()) {
+        if (auto* phi = dynamic_cast<ir::PhiNode*>(succInstrs.front().get())) {
+            ir::Value* val = phi->getIncomingValueForBlock(pred);
+            if (val) {
+                phi->replaceAllUsesWith(val);
+            }
+            succInstrs.erase(succInstrs.begin());
+            continue;
+        }
+
+        ir::Instruction* moved = succInstrs.front().get();
+        moved->setParent(pred);
+        pred->getInstructions().push_back(std::move(succInstrs.front()));
+        succInstrs.erase(succInstrs.begin());
+    }
+
+    auto& blocks = func.getBasicBlocks();
+    for (auto it = blocks.begin(); it != blocks.end(); ++it) {
+        if (it->get() == succ) {
+            blocks.erase(it);
+            return;
+        }
+    }
 }
 
 bool ControlFlowSimplification::hasOneSuccessor(ir::BasicBlock* block) {
-    (void)block; return false;
+    if (!block || block->getInstructions().empty()) return false;
+    ir::Instruction* term = block->getInstructions().back().get();
+    if (!isUnconditionalBranch(term)) return false;
+    return getSuccessor(block) != nullptr;
 }
 
 ir::BasicBlock* ControlFlowSimplification::getSuccessor(ir::BasicBlock* block) {
-    (void)block; return nullptr;
+    if (!block || block->getInstructions().empty()) return nullptr;
+    ir::Instruction* term = block->getInstructions().back().get();
+    if (!isUnconditionalBranch(term) || term->getOperands().empty() || !term->getOperands()[0]) {
+        return nullptr;
+    }
+    return dynamic_cast<ir::BasicBlock*>(term->getOperands()[0]->get());
 }
 
 std::vector<ir::BasicBlock*> ControlFlowSimplification::getPredecessors(ir::BasicBlock* block, ir::Function& func) {
-    (void)block; (void)func; return {};
+    std::vector<ir::BasicBlock*> preds;
+    if (!block) return preds;
+
+    for (auto& bb_ptr : func.getBasicBlocks()) {
+        ir::BasicBlock* bb = bb_ptr.get();
+        if (!bb || bb->getInstructions().empty()) continue;
+        ir::Instruction* term = bb->getInstructions().back().get();
+        for (auto& op : term->getOperands()) {
+            if (op && op->get() == block) {
+                preds.push_back(bb);
+                break;
+            }
+        }
+    }
+
+    return preds;
 }
 
 bool ControlFlowSimplification::isTerminator(ir::Instruction* instr) {
-    (void)instr; return false;
+    if (!instr) return false;
+    switch (instr->getOpcode()) {
+        case ir::Instruction::Ret:
+        case ir::Instruction::Jmp:
+        case ir::Instruction::Jnz:
+        case ir::Instruction::Jz:
+        case ir::Instruction::Br:
+        case ir::Instruction::Hlt:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool ControlFlowSimplification::isUnconditionalBranch(ir::Instruction* instr) {
-    (void)instr; return false;
+    return instr && instr->getOpcode() == ir::Instruction::Jmp;
 }
 
 bool ControlFlowSimplification::isConditionalBranch(ir::Instruction* instr) {
-    (void)instr; return false;
+    if (!instr) return false;
+    ir::Instruction::Opcode op = instr->getOpcode();
+    return op == ir::Instruction::Br || op == ir::Instruction::Jnz || op == ir::Instruction::Jz;
 }
 
 ir::Constant* ControlFlowSimplification::getConstantCondition(ir::Instruction* branch) {
-    (void)branch; return nullptr;
+    if (!isConditionalBranch(branch) || branch->getOperands().empty() || !branch->getOperands()[0]) {
+        return nullptr;
+    }
+    return dynamic_cast<ir::Constant*>(branch->getOperands()[0]->get());
 }
 
 } // namespace transforms

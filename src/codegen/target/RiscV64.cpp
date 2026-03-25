@@ -18,6 +18,9 @@ RiscV64::~RiscV64() {}
 size_t RiscV64::getPointerSize() const { return 64; }
 
 namespace {
+std::string getEpilogueLabel(const ir::Function* func) {
+    return func ? func->getName() + "_epilogue" : ".L_epilogue";
+}
 
 uint8_t getLoadFunct3(const ir::Type* type) {
     if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
@@ -258,6 +261,8 @@ void RiscV64::emitRet(CodeGen& cg, ir::Instruction& instr) {
                 *os << "  " << getLoadInstr(retVal->getType()) << " a0, " << retval << "\n";
             }
         }
+        *os << "  j " << getEpilogueLabel(instr.getParent()->getParent()) << "\n";
+        return;
     } else {
         if (!instr.getOperands().empty()) {
             auto& assembler = cg.getAssembler();
@@ -1129,6 +1134,9 @@ void RiscV64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void RiscV64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    if (auto* os = cg.getTextStream()) {
+        *os << getEpilogueLabel(&func) << ":\n";
+    }
     bool hasCalls = false;
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {

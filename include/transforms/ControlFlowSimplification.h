@@ -21,14 +21,12 @@ protected:
     bool performTransformation(ir::Function& func) override;
 
 private:
-    bool simplifyBranches(ir::Function& func);
     bool simplifyConstantBranches(ir::Function& func);
-    bool eliminateUnconditionalBranches(ir::Function& func);
     bool eliminateUnreachableBlocks(ir::Function& func);
     
     bool mergeBlocks(ir::Function& func);
-    bool canMergeBlocks(ir::BasicBlock* pred, ir::BasicBlock* succ);
-    void mergeBlocksImpl(ir::BasicBlock* pred, ir::BasicBlock* succ);
+    bool canMergeBlocks(ir::BasicBlock* pred, ir::BasicBlock* succ, ir::Function& func);
+    void mergeBlocksImpl(ir::BasicBlock* pred, ir::BasicBlock* succ, ir::Function& func);
     
     bool hasOnePredecessor(ir::BasicBlock* block, ir::Function& func);
     bool hasOneSuccessor(ir::BasicBlock* block);

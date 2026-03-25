@@ -18,6 +18,10 @@ public:
     const std::string& getIntegerReturnRegister() const override { return intReturnReg; }
     const std::string& getFloatReturnRegister() const override { return floatReturnReg; }
     size_t getMaxRegistersForArgs() const override { return 6; }
+    const std::string& getReturnRegister(const ir::Type* type) const override;
+    const std::vector<std::string>& getRegisters(RegisterClass regClass) const override;
+    void emitPrologue(CodeGen& cg, int stack_size) override;
+    void emitEpilogue(CodeGen& cg) override;
 
     void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
     void emitFunctionEpilogue(CodeGen& cg, ir::Function& func) override;
@@ -59,9 +63,11 @@ public:
 
     void emitVAStart(CodeGen& cg, ir::Instruction& instr) override;
     void emitVAArg(CodeGen& cg, ir::Instruction& instr) override;
+    void emitVAEnd(CodeGen& cg, ir::Instruction& instr) override;
     void emitSyscall(CodeGen& cg, ir::Instruction& instr) override;
     uint64_t getSyscallNumber(ir::SyscallId id) const override;
     void emitStartFunction(CodeGen& cg) override;
+    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
 };
 
 }

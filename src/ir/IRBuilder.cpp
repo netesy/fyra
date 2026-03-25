@@ -6,10 +6,17 @@
 
 namespace ir {
 
+IRBuilder::IRBuilder() : context(std::make_shared<IRContext>()) {}
+
 IRBuilder::IRBuilder(std::shared_ptr<IRContext> ctx) : context(ctx) {}
 
 void IRBuilder::setModule(Module* m) {
     currentModule = m;
+    if ((!context || context.get() == nullptr) && m) {
+        context = m->getContextShared();
+    } else if (m && m->getContext()) {
+        context = m->getContextShared();
+    }
 }
 
 void IRBuilder::setInsertPoint(BasicBlock* bb) {

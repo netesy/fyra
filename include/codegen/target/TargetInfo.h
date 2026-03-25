@@ -96,6 +96,9 @@ public:
     virtual void emitFusedMultiplyAdd(CodeGen&, const ir::FusedInstruction&) {}
     virtual void emitFusedMultiplySubtract(CodeGen&, const ir::FusedInstruction&) {}
     virtual void emitLoadAndOperate(CodeGen&, ir::Instruction&, ir::Instruction&) {}
+    // Optional target-specific compare+branch fusion hook.
+    // Return true if fusion was emitted and caller should skip normal emission.
+    virtual bool emitCmpAndBranchFusion(CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
     virtual void emitComplexAddressing(CodeGen&, ir::Instruction&) {}
     virtual void emitDebugInfo(CodeGen&, const ir::Function&) {}
     virtual void emitLineInfo(CodeGen&, unsigned, const std::string&) {}
@@ -119,6 +122,9 @@ public:
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
     virtual int32_t getStackOffset(const CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
+    virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const {
+        return func.getName() + "_epilogue";
+    }
 protected:
     int32_t currentStackOffset = 0;
 };
