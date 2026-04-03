@@ -1,4 +1,5 @@
 #include "codegen/InstructionFusion.h"
+#include <string>
 #include "ir/Function.h"
 #include "ir/BasicBlock.h"
 
@@ -11,6 +12,11 @@ FusionCoordinator::FusionCoordinator() {
 
 void FusionCoordinator::setTargetArchitecture(const std::string& arch) {
     // Stub implementation
+}
+
+void FusionCoordinator::setOptimizationLevel(unsigned level) {
+    // Stub implementation
+    this->optimizationLevel = level;
 }
 
 void FusionCoordinator::optimizeFunction(ir::Function& func) {
