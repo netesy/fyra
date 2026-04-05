@@ -27,7 +27,7 @@ int main() {
     std::cout << "Generated ASM:\n" << generated_asm << std::endl;
 
     assert(generated_asm.find("main:") != std::string::npos);
-    assert(generated_asm.find("movl $42, %eax") != std::string::npos);
+    assert(generated_asm.find("movq $42, %rax") != std::string::npos);
     assert(generated_asm.find("ret") != std::string::npos);
 
     return 0;

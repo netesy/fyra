@@ -1,4 +1,5 @@
-#pragma once
+#ifndef FYRA_TARGET_INFO_H
+#define FYRA_TARGET_INFO_H
 #include "ir/Type.h"
 #include "ir/Instruction.h"
 #include "ir/Constant.h"
@@ -8,6 +9,9 @@
 #include <string>
 #include <vector>
 #include <ostream>
+#include <map>
+
+namespace ir { class BasicBlock; }
 
 namespace codegen {
 class CodeGen;
@@ -34,45 +38,47 @@ public:
     virtual void emitPrologue(CodeGen&, int) {}
     virtual void emitHeader(CodeGen&) {}
     virtual void emitEpilogue(CodeGen&) {}
-    virtual void emitFunctionPrologue(CodeGen&, ir::Function&) = 0;
-    virtual void emitFunctionEpilogue(CodeGen&, ir::Function&) = 0;
+    virtual void initRegisters() {}
+    virtual void emitFunctionPrologue(CodeGen&, ir::Function&) {}
+    virtual void emitFunctionEpilogue(CodeGen&, ir::Function&) {}
     virtual void emitStructuredFunctionBody(CodeGen&, ir::Function&) {}
     virtual void emitStartFunction(CodeGen&) {}
+    virtual void emitBasicBlockStart(CodeGen& cg, ir::BasicBlock& bb);
     virtual size_t getMaxRegistersForArgs() const = 0;
-    virtual void emitPassArgument(CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
-    virtual void emitGetArgument(CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
-    virtual void emitRet(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitAdd(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitSub(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitMul(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitDiv(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitRem(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitAnd(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitOr(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitXor(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitShl(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitShr(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitSar(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitNeg(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitNot(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCopy(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCall(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFAdd(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFSub(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFMul(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFDiv(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCmp(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCast(CodeGen&, ir::Instruction&, const ir::Type*, const ir::Type*) = 0;
-    virtual void emitVAStart(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitVAArg(CodeGen&, ir::Instruction&) = 0;
+    virtual void emitPassArgument(CodeGen&, size_t, const std::string&, const ir::Type*) {}
+    virtual void emitGetArgument(CodeGen&, size_t, const std::string&, const ir::Type*) {}
+    virtual void emitRet(CodeGen&, ir::Instruction&) {}
+    virtual void emitAdd(CodeGen&, ir::Instruction&) {}
+    virtual void emitSub(CodeGen&, ir::Instruction&) {}
+    virtual void emitMul(CodeGen&, ir::Instruction&) {}
+    virtual void emitDiv(CodeGen&, ir::Instruction&) {}
+    virtual void emitRem(CodeGen&, ir::Instruction&) {}
+    virtual void emitAnd(CodeGen&, ir::Instruction&) {}
+    virtual void emitOr(CodeGen&, ir::Instruction&) {}
+    virtual void emitXor(CodeGen&, ir::Instruction&) {}
+    virtual void emitShl(CodeGen&, ir::Instruction&) {}
+    virtual void emitShr(CodeGen&, ir::Instruction&) {}
+    virtual void emitSar(CodeGen&, ir::Instruction&) {}
+    virtual void emitNeg(CodeGen&, ir::Instruction&) {}
+    virtual void emitNot(CodeGen&, ir::Instruction&) {}
+    virtual void emitCopy(CodeGen&, ir::Instruction&) {}
+    virtual void emitCall(CodeGen&, ir::Instruction&) {}
+    virtual void emitFAdd(CodeGen&, ir::Instruction&) {}
+    virtual void emitFSub(CodeGen&, ir::Instruction&) {}
+    virtual void emitFMul(CodeGen&, ir::Instruction&) {}
+    virtual void emitFDiv(CodeGen&, ir::Instruction&) {}
+    virtual void emitCmp(CodeGen&, ir::Instruction&) {}
+    virtual void emitCast(CodeGen&, ir::Instruction&, const ir::Type*, const ir::Type*) {}
+    virtual void emitVAStart(CodeGen&, ir::Instruction&) {}
+    virtual void emitVAArg(CodeGen&, ir::Instruction&) {}
     virtual void emitVAEnd(CodeGen&, ir::Instruction&) {}
-    virtual void emitLoad(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitStore(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitAlloc(CodeGen&, ir::Instruction&) = 0;
+    virtual void emitLoad(CodeGen&, ir::Instruction&) {}
+    virtual void emitStore(CodeGen&, ir::Instruction&) {}
+    virtual void emitAlloc(CodeGen&, ir::Instruction&) {}
     virtual void emitSyscall(CodeGen&, ir::Instruction&) {}
     virtual uint64_t getSyscallNumber(ir::SyscallId) const { return 0; }
-    virtual void emitBr(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitJmp(CodeGen&, ir::Instruction&) = 0;
+    virtual void emitBr(CodeGen&, ir::Instruction&) {}
+    virtual void emitJmp(CodeGen&, ir::Instruction&) {}
     virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
     virtual bool supportsVectorWidth(unsigned) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType*) const { return false; }
@@ -96,8 +102,6 @@ public:
     virtual void emitFusedMultiplyAdd(CodeGen&, const ir::FusedInstruction&) {}
     virtual void emitFusedMultiplySubtract(CodeGen&, const ir::FusedInstruction&) {}
     virtual void emitLoadAndOperate(CodeGen&, ir::Instruction&, ir::Instruction&) {}
-    // Optional target-specific compare+branch fusion hook.
-    // Return true if fusion was emitted and caller should skip normal emission.
     virtual bool emitCmpAndBranchFusion(CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
     virtual void emitComplexAddressing(CodeGen&, ir::Instruction&) {}
     virtual void emitDebugInfo(CodeGen&, const ir::Function&) {}
@@ -122,11 +126,11 @@ public:
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
     virtual int32_t getStackOffset(const CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
-    virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const {
-        return func.getName() + "_epilogue";
-    }
+    virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const;
+    virtual std::string getBBLabel(const ir::BasicBlock* bb) const;
 protected:
     int32_t currentStackOffset = 0;
 };
 }
 }
+#endif

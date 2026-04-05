@@ -24,8 +24,7 @@
 #include <sstream>
 
 namespace codegen {
-namespace {
-std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& targetName) {
+std::unique_ptr<target::TargetInfo> CodeGen::createTargetInfoForName(const std::string& targetName) {
     std::string n = targetName;
     std::transform(n.begin(), n.end(), n.begin(), ::tolower);
     if (n == "linux" || n == "systemv" || n == "x86_64") return std::make_unique<target::SystemV_x64>();
@@ -37,7 +36,6 @@ std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& t
     if (n == "aarch64") return std::make_unique<target::AArch64>();
     if (n == "riscv64") return std::make_unique<target::RiscV64>();
     return nullptr;
-}
 }
 
 CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std::ostream* os)
@@ -99,19 +97,8 @@ void CodeGen::emitFunction(ir::Function& func) {
 }
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
-    if (os) {
-        *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
-    } else if (assembler) {
-        // Register basic block as a symbol for binary emission
-        SymbolInfo bb_sym;
-        bb_sym.name = bb.getParent()->getName() + "_" + bb.getName();
-        bb_sym.sectionName = ".text";
-        bb_sym.value = assembler->getCodeSize();
-        bb_sym.type = 0; // STT_NOTYPE
-        bb_sym.binding = 1; // STB_GLOBAL
-        addSymbol(bb_sym);
-    }
-    auto isCompareOpcode = [](ir::Instruction::Opcode opcode) {
+    targetInfo->emitBasicBlockStart(*this, bb);
+auto isCompareOpcode = [](ir::Instruction::Opcode opcode) {
         switch (opcode) {
             case ir::Instruction::Ceq:
             case ir::Instruction::Cne:
@@ -189,6 +176,7 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Load: targetInfo->emitLoad(*this, instr); break;
         case ir::Instruction::Store: targetInfo->emitStore(*this, instr); break;
         case ir::Instruction::Alloc: targetInfo->emitAlloc(*this, instr); break;
+
         case ir::Instruction::Ceq: case ir::Instruction::Cne: case ir::Instruction::Cslt:
         case ir::Instruction::Csle: case ir::Instruction::Csgt: case ir::Instruction::Csge:
         case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
@@ -199,7 +187,18 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
 
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (!value) return "null";
+
+    // 1. Check for stack slots (explicitly assigned or from regalloc)
+    if (stackOffsets.count(const_cast<ir::Value*>(value))) {
+        return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value)));
+    }
+
     if (auto* instr = dynamic_cast<const ir::Instruction*>(value)) {
+        if (currentFunction && currentFunction->hasStackSlot(const_cast<ir::Instruction*>(instr))) {
+            return targetInfo->formatStackOperand(-currentFunction->getStackSlotForVreg(const_cast<ir::Instruction*>(instr)) - 8);
+        }
+
+        // 2. Check for physical registers (only if no stack slot)
         if (instr->hasPhysicalRegister()) {
             auto regClass = instr->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
             auto& regs = targetInfo->getRegisters(regClass);
@@ -207,15 +206,15 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
                 return targetInfo->getRegisterName(regs[instr->getPhysicalRegister()], instr->getType());
             }
         }
-        if (currentFunction && currentFunction->hasStackSlot(const_cast<ir::Instruction*>(instr)))
-            return targetInfo->formatStackOperand(-currentFunction->getStackSlotForVreg(const_cast<ir::Instruction*>(instr)) - 8);
     }
-    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
+
+    // 3. Other value types
+    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->getImmediatePrefix() + targetInfo->formatConstant(ci);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
-    if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets[const_cast<ir::Value*>(value)]);
-    if (auto* p = dynamic_cast<const ir::Parameter*>(value)) { if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value))); } return "$" + value->getName();
+
+    return "$" + value->getName();
 }
 
 int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }
@@ -266,8 +265,8 @@ void CodeGen::deallocateRegister(const std::string&) {}
 void CodeGen::emitTargetSpecificHeader() {
     targetInfo->emitHeader(*this);
     if (os) {
-        if (targetInfo->getName() == "x86_64") *os << ".att_syntax prefix\n";
-        else if (targetInfo->getName() == "win64") *os << ".intel_syntax noprefix\n";
+        if (targetInfo->getName() == "linux") *os << ".att_syntax prefix\n";
+        else if (targetInfo->getName() == "windows") *os << ".intel_syntax noprefix\n";
     }
 }
 void CodeGen::emitDataSection() {
@@ -416,7 +415,7 @@ CodeGenPipeline::PipelineResult CodeGenPipeline::execute(ir::Module& module, con
 
 CodeGenPipeline::PipelineResult CodeGenPipeline::executeForTarget(ir::Module& module, const std::string& t, const PipelineConfig& config) {
     PipelineResult result;
-    auto targetInfo = createTargetInfoForName(t);
+    auto targetInfo = CodeGen::createTargetInfoForName(t);
     if (!targetInfo) { result.success = false; return result; }
     auto cg = std::make_unique<CodeGen>(module, std::move(targetInfo));
     result.targetResults[t] = cg->compileToObject(config.outputPrefix + "_" + t, config.enableValidation, config.enableObjectGeneration);

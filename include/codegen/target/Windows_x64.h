@@ -1,66 +1,43 @@
-#pragma once
-#include "X86_64Base.h"
-
+#ifndef FYRA_WINDOWS_X64_H
+#define FYRA_WINDOWS_X64_H
+#include "codegen/target/X86_64Base.h"
 namespace codegen {
 namespace target {
-
 class Windows_x64 : public X86_64Base {
-private:
-    std::vector<std::string> integerArgRegs;
-    std::vector<std::string> floatArgRegs;
-protected:
-    void initRegisters() override;
 public:
     Windows_x64();
-    std::string getName() const override { return "win64"; }
-    const std::vector<std::string>& getIntegerArgumentRegisters() const override { return integerArgRegs; }
-    const std::vector<std::string>& getFloatArgumentRegisters() const override { return floatArgRegs; }
-    const std::string& getIntegerReturnRegister() const override { return intReturnReg; }
-    const std::string& getFloatReturnRegister() const override { return floatReturnReg; }
-    size_t getMaxRegistersForArgs() const override { return 4; }
-
-    void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
-    void emitFunctionEpilogue(CodeGen& cg, ir::Function& func) override;
-    
-    void emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) override;
-    void emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) override;
-
-    void emitRet(CodeGen& cg, ir::Instruction& instr) override;
-    void emitAdd(CodeGen& cg, ir::Instruction& instr) override;
-    void emitSub(CodeGen& cg, ir::Instruction& instr) override;
-    void emitMul(CodeGen& cg, ir::Instruction& instr) override;
-    void emitDiv(CodeGen& cg, ir::Instruction& instr) override;
-    void emitRem(CodeGen& cg, ir::Instruction& instr) override;
-    void emitAnd(CodeGen& cg, ir::Instruction& instr) override;
-    void emitOr(CodeGen& cg, ir::Instruction& instr) override;
-    void emitXor(CodeGen& cg, ir::Instruction& instr) override;
-    void emitShl(CodeGen& cg, ir::Instruction& instr) override;
-    void emitShr(CodeGen& cg, ir::Instruction& instr) override;
-    void emitSar(CodeGen& cg, ir::Instruction& instr) override;
-    void emitNeg(CodeGen& cg, ir::Instruction& instr) override;
-    void emitNot(CodeGen& cg, ir::Instruction& instr) override;
-    void emitCopy(CodeGen& cg, ir::Instruction& instr) override;
-    void emitCall(CodeGen& cg, ir::Instruction& instr) override;
-
-    void emitFAdd(CodeGen& cg, ir::Instruction& instr) override;
-    void emitFSub(CodeGen& cg, ir::Instruction& instr) override;
-    void emitFMul(CodeGen& cg, ir::Instruction& instr) override;
-    void emitFDiv(CodeGen& cg, ir::Instruction& instr) override;
-    
-    void emitCmp(CodeGen& cg, ir::Instruction& instr) override;
-    void emitCast(CodeGen& cg, ir::Instruction& instr, const ir::Type* fromType, const ir::Type* toType) override;
-    
-    void emitLoad(CodeGen& cg, ir::Instruction& instr) override;
-    void emitStore(CodeGen& cg, ir::Instruction& instr) override;
-    void emitAlloc(CodeGen& cg, ir::Instruction& instr) override;
-    
-    void emitBr(CodeGen& cg, ir::Instruction& instr) override;
-    void emitJmp(CodeGen& cg, ir::Instruction& instr) override;
-
-    void emitVAStart(CodeGen& cg, ir::Instruction& instr) override;
-    void emitVAArg(CodeGen& cg, ir::Instruction& instr) override;
-    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
+    virtual std::string getName() const override { return "windows"; }
+    virtual void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
+    virtual void emitFunctionEpilogue(CodeGen& cg, ir::Function& func) override;
+    virtual void emitRet(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitAdd(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitSub(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitMul(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitDiv(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitCopy(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitCall(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitCmp(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitBr(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitJmp(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitVAStart(CodeGen& cg, ir::Instruction& i) override { (void)cg;(void)i; }
+    virtual void emitVAArg(CodeGen& cg, ir::Instruction& i) override { (void)cg;(void)i; }
+    virtual void emitLoad(CodeGen& cg, ir::Instruction& i) override { (void)cg;(void)i; }
+    virtual void emitStore(CodeGen& cg, ir::Instruction& i) override { (void)cg;(void)i; }
+    virtual void emitAlloc(CodeGen& cg, ir::Instruction& i) override { (void)cg;(void)i; }
+    virtual void emitPassArgument(CodeGen& cg, size_t index, const std::string& reg, const ir::Type* type) override { (void)cg;(void)index;(void)reg;(void)type; }
+    virtual void emitGetArgument(CodeGen& cg, size_t index, const std::string& reg, const ir::Type* type) override { (void)cg;(void)index;(void)reg;(void)type; }
+    virtual void emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* from, const ir::Type* to) override { (void)cg;(void)i;(void)from;(void)to; }
+    virtual void emitStartFunction(CodeGen& cg) override;
+    virtual std::string formatStackOperand(int offset) const override;
+    virtual std::string formatGlobalOperand(const std::string& name) const override;
+    virtual std::string getImmediatePrefix() const override { return ""; }
+    virtual void emitPrologue(CodeGen& cg, int size) override;
+    virtual void emitEpilogue(CodeGen& cg) override;
+    virtual const std::vector<std::string>& getRegisters(RegisterClass regClass) const override;
+    virtual const std::string& getReturnRegister(const ir::Type* type) const override;
+protected:
+    virtual void initRegisters() override;
 };
-
 }
 }
+#endif

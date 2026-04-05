@@ -1,182 +1,56 @@
 #include "codegen/target/X86_64Base.h"
 #include "codegen/CodeGen.h"
-#include "ir/Instruction.h"
+#include "codegen/execgen/Assembler.h"
+#include "ir/Constant.h"
+#include "ir/BasicBlock.h"
 #include "ir/Function.h"
-#include "ir/Parameter.h"
-#include "ir/Type.h"
-#include <algorithm>
-#include <set>
-
-namespace codegen {
-namespace target {
-
-X86_64Base::X86_64Base() {}
-
-int X86_64Base::alignStackForCallBoundary(int stack_size, int pushed_bytes) const {
-    int aligned = stack_size;
-    const int total = pushed_bytes + aligned;
-    if (total % 16 != 0) {
-        aligned += 16 - (total % 16);
-    }
-    return aligned;
+using namespace ir;
+using namespace codegen;
+using namespace codegen::target;
+X86_64Base::X86_64Base() {
+    regToIdx = {{"rax",0}, {"rcx",1}, {"rdx",2}, {"rbx",3}, {"rsp",4}, {"rbp",5}, {"rsi",6}, {"rdi",7},
+                {"r8",8}, {"r9",9}, {"r10",10}, {"r11",11}, {"r12",12}, {"r13",13}, {"r14",14}, {"r15",15},
+                {"%rax",0}, {"%rcx",1}, {"%rdx",2}, {"%rbx",3}, {"%rsp",4}, {"%rbp",5}, {"%rsi",6}, {"%rdi",7},
+                {"%r8",8}, {"%r9",9}, {"%r10",10}, {"%r11",11}, {"%r12",12}, {"%r13",13}, {"%r14",14}, {"%r15",15}};
 }
-
 TypeInfo X86_64Base::getTypeInfo(const ir::Type* type) const {
-    TypeInfo info;
-    info.size = type->getSize() * 8;
-    info.align = 8;
-    info.regClass = type->isFloatingPoint() ? RegisterClass::Float : RegisterClass::Integer;
-    info.isFloatingPoint = type->isFloatingPoint();
-    info.isSigned = true;
-    return info;
+    if (!type || type->isVoidTy()) return {0, 0, RegisterClass::Integer, false, false};
+    if (type->isPointerTy()) return {8, 8, RegisterClass::Integer, false, false};
+    if (auto* it = dynamic_cast<const ir::IntegerType*>(type)) {
+        int w = it->getBitwidth();
+        if (w <= 8) return {1, 1, RegisterClass::Integer, false, false};
+        if (w <= 16) return {2, 2, RegisterClass::Integer, false, false};
+        if (w <= 32) return {4, 4, RegisterClass::Integer, false, false};
+        return {8, 8, RegisterClass::Integer, false, false};
+    }
+    return {8, 8, RegisterClass::Integer, false, false};
 }
-
 const std::vector<std::string>& X86_64Base::getRegisters(RegisterClass regClass) const {
+    if (regClass == RegisterClass::Integer) return integerRegs;
     if (regClass == RegisterClass::Float) return floatRegs;
-    return integerRegs;
+    return vectorRegs;
 }
-
 const std::string& X86_64Base::getReturnRegister(const ir::Type* type) const {
-    return (type && type->isFloatingPoint()) ? floatReturnReg : intReturnReg;
+    if (type && (type->isFloatTy() || type->isDoubleTy())) return floatReturnReg;
+    return intReturnReg;
 }
-
-void X86_64Base::emitPrologue(CodeGen& cg, int stack_size) {
-    if (auto* os = cg.getTextStream()) {
-        std::string p = (getName() == "win64") ? "" : "%";
-        
-        bool isLeaf = true;
-        std::set<std::string> usedCalleeSaved;
-        
-        if (cg.currentFunction) {
-            for (auto& bb : cg.currentFunction->getBasicBlocks()) {
-                for (auto& instr : bb->getInstructions()) {
-                    if (instr->getOpcode() == ir::Instruction::Call) isLeaf = false;
-                    if (instr->hasPhysicalRegister()) {
-                        std::string reg = integerRegs[instr->getPhysicalRegister()];
-                        if (isCalleeSaved(reg)) usedCalleeSaved.insert(reg);
-                    }
-                }
-            }
-        }
-
-        bool needsFrame = stack_size > 0 || !isLeaf || !usedCalleeSaved.empty();
-
-        if (needsFrame) {
-            *os << "  push " << p << framePtrReg << "\n  mov " << p << framePtrReg << ", " << p << stackPtrReg << "\n";
-            
-            for (const auto& reg : usedCalleeSaved) {
-                *os << "  push " << reg << "\n";
-            }
-            
-            if (stack_size > 0) {
-                int pushed = static_cast<int>(1 + usedCalleeSaved.size()) * 8; // rbp + callee-saved bytes
-                int adjusted_stack = alignStackForCallBoundary(stack_size, pushed);
-                if (p == "%") {
-                    *os << "  subq $" << adjusted_stack << ", %" << stackPtrReg << "\n";
-                } else {
-                    *os << "  sub " << p << stackPtrReg << ", " << adjusted_stack << "\n";
-                }
-            }
-        }
-    }
+bool X86_64Base::isCallerSaved(const std::string& reg) const { return callerSaved.count(reg) && callerSaved.at(reg); }
+bool X86_64Base::isCalleeSaved(const std::string& reg) const { return calleeSaved.count(reg) && calleeSaved.at(reg); }
+void X86_64Base::emitBasicBlockStart(CodeGen& cg, ir::BasicBlock& bb) {
+    if (auto* os = cg.getTextStream()) { *os << getBBLabel(&bb) << ":\n"; }
+    else { CodeGen::SymbolInfo s; s.name = getBBLabel(&bb); s.sectionName = ".text"; s.value = cg.getAssembler().getCodeSize(); s.type = 0; s.binding = 1; cg.addSymbol(s); }
 }
-
-void X86_64Base::emitEpilogue(CodeGen& cg) {
-    if (auto* os = cg.getTextStream()) {
-        std::string p = (getName() == "win64") ? "" : "%";
-        
-        bool isLeaf = true;
-        std::vector<std::string> usedCalleeSaved;
-        bool usesStack = false;
-        
-        if (cg.currentFunction) {
-            if (cg.currentFunction->getStackFrameSize() > 0) usesStack = true;
-            if (!cg.getStackOffsets().empty()) usesStack = true;
-
-            for (auto& bb : cg.currentFunction->getBasicBlocks()) {
-                for (auto& instr : bb->getInstructions()) {
-                    if (instr->getOpcode() == ir::Instruction::Call) isLeaf = false;
-                    if (instr->hasPhysicalRegister()) {
-                        std::string reg = integerRegs[instr->getPhysicalRegister()];
-                        if (isCalleeSaved(reg) && std::find(usedCalleeSaved.begin(), usedCalleeSaved.end(), reg) == usedCalleeSaved.end()) {
-                            usedCalleeSaved.push_back(reg);
-                        }
-                    }
-                }
-            }
-        }
-        
-        std::reverse(usedCalleeSaved.begin(), usedCalleeSaved.end());
-        bool needsFrame = usesStack || !isLeaf || !usedCalleeSaved.empty();
-
-        if (needsFrame) {
-            if (!usedCalleeSaved.empty()) {
-                if (p == "%") {
-                    *os << "  leaq -" << (usedCalleeSaved.size() * 8) << "(%rbp), %rsp\n";
-                } else {
-                    *os << "  lea rsp, [rbp - " << (usedCalleeSaved.size() * 8) << "]\n";
-                }
-                for (const auto& reg : usedCalleeSaved) {
-                    *os << "  pop " << reg << "\n";
-                }
-                *os << "  pop " << p << framePtrReg << "\n";
-            } else {
-                if (p == "%") {
-                    *os << "  leave\n";
-                } else {
-                    *os << "  mov " << p << stackPtrReg << ", " << p << framePtrReg << "\n";
-                    *os << "  pop " << p << framePtrReg << "\n";
-                }
-            }
-        }
-        *os << "  ret\n";
-    }
+void X86_64Base::emitRegMem(execgen::Assembler& as, uint8_t rex, uint8_t opcode, uint8_t reg, int32_t offset) {
+    if (rex) as.emitByte(rex);
+    as.emitByte(opcode);
+    if (offset >= -128 && offset <= 127) { as.emitByte(0x45 | (reg << 3)); as.emitByte((uint8_t)offset); }
+    else { as.emitByte(0x85 | (reg << 3)); as.emitDWord(offset); }
 }
-
-bool X86_64Base::isCallerSaved(const std::string& reg) const {
-    return callerSaved.count(reg) && callerSaved.at(reg);
+void X86_64Base::emitLoadValue(CodeGen& cg, execgen::Assembler& as, ir::Value* v, uint8_t regIdx) {
+    if (auto* ci = dynamic_cast<ir::ConstantInt*>(v)) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(ci->getValue()); }
+    else { int32_t offset = cg.getStackOffset(v); uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; emitRegMem(as, rex, 0x8B, regIdx & 7, offset); }
 }
-
-bool X86_64Base::isCalleeSaved(const std::string& reg) const {
-    return calleeSaved.count(reg) && calleeSaved.at(reg);
-}
-
-std::string X86_64Base::formatStackOperand(int offset) const {
-    std::string p = (getName() == "win64") ? "" : "%";
-    if (getName() == "win64") return "[rbp + " + std::to_string(offset) + "]";
-    return std::to_string(offset) + "(%" + framePtrReg + ")";
-}
-
-std::string X86_64Base::formatGlobalOperand(const std::string& name) const {
-    if (getName() == "win64") return "[" + name + "]";
-    return name + "(%rip)";
-}
-
-std::string X86_64Base::getRegisterName(const std::string& baseReg, const ir::Type* type) const {
-    if (!type || type->getSize() >= 8) return baseReg;
-    if (type->isFloatingPoint()) return baseReg;
-    
-    bool hasPrefix = (baseReg[0] == '%');
-    std::string name = hasPrefix ? baseReg.substr(1) : baseReg;
-    std::string result;
-
-    if (type->getSize() == 4) {
-        if (name == "rax") result = "eax";
-        else if (name == "rbx") result = "ebx";
-        else if (name == "rcx") result = "ecx";
-        else if (name == "rdx") result = "edx";
-        else if (name == "rsi") result = "esi";
-        else if (name == "rdi") result = "edi";
-        else if (name == "rbp") result = "ebp";
-        else if (name == "rsp") result = "esp";
-        else if (name.size() > 1 && name[0] == 'r' && isdigit(name[1])) result = name + "d";
-        else result = name;
-    } else {
-        result = name;
-    }
-    
-    return hasPrefix ? "%" + result : result;
-}
-
-}
-}
+void X86_64Base::emitStoreResult(CodeGen& cg, ir::Instruction& instr, uint8_t regIdx) { int32_t offset = cg.getStackOffset(&instr); uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; emitRegMem(cg.getAssembler(), rex, 0x89, regIdx & 7, offset); }
+uint8_t X86_64Base::getRex(const ir::Type* t) { if (!t || t->isPointerTy()) return 0x48; if (auto* it = dynamic_cast<const ir::IntegerType*>(t)) { if (it->getBitwidth() == 64) return 0x48; } return 0; }
+uint8_t X86_64Base::getOpcode(uint8_t baseOp, const ir::Type* t) { if (auto* it = dynamic_cast<const ir::IntegerType*>(t)) { if (it->getBitwidth() == 8) return baseOp - 1; } return baseOp; }
+uint8_t X86_64Base::getArchRegIndex(const std::string& regName) { auto it = regToIdx.find(regName); return (it != regToIdx.end()) ? it->second : 0; }
