@@ -5,28 +5,18 @@
 #include "ir/Instruction.h"
 #include <ostream>
 
-namespace codegen {
-namespace target {
+namespace codegen { namespace target {
 
-void MacOS_x64::initRegisters() {
-    SystemV_x64::initRegisters();
-}
-
-MacOS_x64::MacOS_x64() : SystemV_x64() {
-    initRegisters();
-}
+void MacOS_x64::initRegisters() { SystemV_x64::initRegisters(); }
+MacOS_x64::MacOS_x64() : SystemV_x64() { initRegisters(); }
 
 void MacOS_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
-    if (auto* os = cg.getTextStream()) {
-        *os << "_" << func.getName() << ":\n";
-    }
+    if (auto* os = cg.getTextStream()) { *os << "_" << func.getName() << ":\n"; }
     SystemV_x64::emitFunctionPrologue(cg, func);
 }
 
 void MacOS_x64::emitStartFunction(CodeGen& cg) {
-    if (auto* os = cg.getTextStream()) {
-        *os << "\n.globl _main\n_main:\n  call _main_user\n  ret\n";
-    }
+    if (auto* os = cg.getTextStream()) { *os << "\n.globl _main\n_main:\n  call _main_user\n  ret\n"; }
 }
 
 uint64_t MacOS_x64::getSyscallNumber(ir::SyscallId id) const {
@@ -45,5 +35,4 @@ void MacOS_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-}
-}
+}}

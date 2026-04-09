@@ -171,7 +171,6 @@ size_t AArch64::getMaxRegistersForArgs() const {
 }
 
 void AArch64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
-    if (!cg.getTextStream()) { CodeGen::SymbolInfo s; s.name = func.getName(); s.sectionName = ".text"; s.value = cg.getAssembler().getCodeSize(); s.type = 1; s.binding = 1; cg.addSymbol(s); }
     resetStackOffset();
     int int_reg_idx = 0;
     int float_reg_idx = 0;

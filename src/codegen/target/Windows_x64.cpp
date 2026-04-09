@@ -1,305 +1,274 @@
 #include "codegen/target/Windows_x64.h"
 #include "codegen/CodeGen.h"
-#include "codegen/execgen/Assembler.h"
-#include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
-#include "ir/Function.h"
-#include "ir/Constant.h"
 #include "ir/Use.h"
+#include "ir/Function.h"
+#include "ir/Instruction.h"
+#include "ir/Constant.h"
 #include "ir/Parameter.h"
+#include "ir/Syscall.h"
+#include "ir/GlobalVariable.h"
 #include <ostream>
 #include <algorithm>
 
-namespace codegen {
-namespace target {
+namespace codegen { namespace target {
 
-namespace {
-    std::string getEpilogueLabel(const ir::Function* f) { return f ? f->getName() + "_epilogue" : "L_epilogue"; }
-    std::string getImm(ir::Value* v, CodeGen& cg) { if (auto* ci = dynamic_cast<ir::ConstantInt*>(v)) return std::to_string(ci->getValue()); return cg.getValueAsOperand(v); }
-}
+Windows_x64::Windows_x64() { initRegisters(); }
 
 void Windows_x64::initRegisters() {
-    integerRegs = {"rax", "rcx", "rdx", "r8", "r9", "r10", "r11", "rsi", "rdi", "rbx", "r12", "r13", "r14", "r15"};
-    floatRegs.clear();
-    for (int i=0; i<16; ++i) floatRegs.push_back("xmm"+std::to_string(i));
-    vectorRegs = floatRegs;
-    callerSaved.clear();
-    for (const auto& r : {"rax", "rcx", "rdx", "r8", "r9", "r10", "r11"}) callerSaved[r] = true;
-    calleeSaved.clear();
-    for (const auto& r : {"rbx", "rsi", "rdi", "r12", "r13", "r14", "r15", "rbp"}) calleeSaved[r] = true;
-    intReturnReg = "rax"; floatReturnReg = "xmm0"; stackPtrReg = "rsp"; framePtrReg = "rbp";
+    integerRegs = {"rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"};
+    floatRegs = {"xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"};
     integerArgRegs = {"rcx", "rdx", "r8", "r9"};
     floatArgRegs = {"xmm0", "xmm1", "xmm2", "xmm3"};
+    intReturnReg = "rax"; floatReturnReg = "xmm0"; framePtrReg = "rbp"; stackPtrReg = "rsp";
+    for (const auto& r : integerRegs) { callerSaved[r] = false; calleeSaved[r] = true; }
 }
 
-Windows_x64::Windows_x64() : X86_64Base() { initRegisters(); }
-
-std::string Windows_x64::formatStackOperand(int offset) const {
-    if (offset >= 0) return "[rbp + " + std::to_string(offset) + "]";
-    return "[rbp - " + std::to_string(-offset) + "]";
-}
-
-std::string Windows_x64::formatGlobalOperand(const std::string& name) const {
-    return "[rel " + name + "]";
+void Windows_x64::emitHeader(CodeGen& cg) {
+    if (auto* os = cg.getTextStream()) {
+        *os << ".section .data\n.align 8\nheap_ptr:\n  .quad __fyra_heap\n";
+        *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 1048576\n";
+        *os << ".text\n";
+    } else {
+        // Binary header: we need to ensure heap_ptr and __fyra_heap exist in data sections
+        // This is complex for in-memory, so we'll assume CodeGen handles data sections.
+    }
 }
 
 void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
-    if (!cg.getTextStream()) {
-        CodeGen::SymbolInfo s; s.name = func.getName(); s.sectionName = ".text"; s.value = cg.getAssembler().getCodeSize(); s.type = 2; s.binding = 1; cg.addSymbol(s);
-    }
-
-    resetStackOffset();
-    int current_offset = -8 - 56;
-
-    int p_idx = 0;
-    for (auto& p : func.getParameters()) {
-        cg.getStackOffsets()[p.get()] = 16 + (p_idx * 8);
-        p_idx++;
-    }
-
-    for (auto& bb_ptr : func.getBasicBlocks()) {
-        ir::BasicBlock* bb = bb_ptr.get();
-        for (auto& i_ptr : bb->getInstructions()) {
-            ir::Instruction* i = i_ptr.get();
-            if (!i->getType()->isVoidTy() && cg.getStackOffsets().find(i) == cg.getStackOffsets().end()) {
-                cg.getStackOffsets()[i] = current_offset;
-                current_offset -= 8;
-            }
-        }
-    }
-
-    int stack_alloc = std::abs(current_offset + 8);
-    stack_alloc += 32;
-    if (stack_alloc % 16 != 0) stack_alloc += 16 - (stack_alloc % 16);
-
     if (auto* os = cg.getTextStream()) {
-        *os << "  push rbp\n  mov rbp, rsp\n  push rbx\n  push rsi\n  push rdi\n  push r12\n  push r13\n  push r14\n  push r15\n";
-        if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
-
-        int j = 0;
-        for (auto const& p : func.getParameters()) {
-            (void)p;
-            if (j < 4) {
-                *os << "  mov " << formatStackOperand(16 + (j * 8)) << ", " << integerArgRegs[j] << "\n";
-            }
-            j++;
-        }
+        *os << "  push rbp\n  mov rbp, rsp\n";
+        *os << "  push rbx\n  push rsi\n  push rdi\n  push r12\n  push r13\n  push r14\n  push r15\n";
     } else {
         auto& as = cg.getAssembler();
-        as.emitByte(0x55); as.emitBytes({0x48, 0x89, 0xE5});
-        as.emitByte(0x53); as.emitByte(0x56); as.emitByte(0x57);
-        as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57});
-        if (stack_alloc > 0) {
-            if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc});
-            else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); }
-        }
-        int j = 0;
-        for (auto const& p : func.getParameters()) {
-            if (j < 4) {
-                uint8_t r = getArchRegIndex(integerArgRegs[j]);
-                emitRegMem(as, (r>=8?0x4C:0x48), 0x89, r&7, 16 + (j * 8));
-            } else {
-                // Already on stack at [rbp + 16 + j*8]
-            }
-            (void)p;
-            j++;
-        }
+        as.emitByte(0x55); as.emitBytes({0x48, 0x89, 0xE5}); // push rbp; mov rbp, rsp
+        as.emitByte(0x53); as.emitByte(0x56); as.emitByte(0x57); // push rbx; rsi; rdi
+        as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57}); // push r12; r13; r14; r15
+    }
+    int current_offset = -64;
+    for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
+    for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
+    int stack_alloc = std::abs(current_offset + 56);
+    stack_alloc += 32;
+    if ((stack_alloc + 64) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64) % 16);
+    if (auto* os = cg.getTextStream()) {
+        if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
+        int j = 0; for (auto& param : func.getParameters()) { if (j < 4) *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", " << integerArgRegs[j] << "\n"; j++; }
+    } else {
+        auto& as = cg.getAssembler();
+        if (stack_alloc > 0) { if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); } }
+        int j = 0; for (auto& param : func.getParameters()) { if (j < 4) { uint8_t r = getArchRegIndex(integerArgRegs[j]); emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]); } j++; }
     }
 }
 
 void Windows_x64::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
     if (auto* os = cg.getTextStream()) {
-        *os << getEpilogueLabel(&func) << ":\n  lea rsp, [rbp - 56]\n  pop r15\n  pop r14\n  pop r13\n  pop r12\n  pop rdi\n  pop rsi\n  pop rbx\n  pop rbp\n  ret\n";
+        *os << getFunctionEpilogueLabel(func) << ":\n";
+        *os << "  lea rsp, [rbp - 56]\n";
+        *os << "  pop r15\n  pop r14\n  pop r13\n  pop r12\n  pop rdi\n  pop rsi\n  pop rbx\n";
+        *os << "  leave\n  ret\n";
     } else {
-        CodeGen::SymbolInfo s; s.name = getEpilogueLabel(&func); s.sectionName = ".text"; s.value = cg.getAssembler().getCodeSize(); s.type = 0; s.binding = 0; cg.addSymbol(s);
         auto& as = cg.getAssembler();
-        // lea rsp, [rbp - 56]
-        as.emitBytes({0x48, 0x8D, 0x65, 0xC8});
-        // pop r15, r14, r13, r12
-        as.emitBytes({0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C});
-        // pop rdi, rsi, rbx
-        as.emitBytes({0x5F, 0x5E, 0x5B});
-        // pop rbp
-        as.emitByte(0x5D);
-        // ret
-        as.emitByte(0xC3);
+        CodeGen::SymbolInfo s; s.name = getFunctionEpilogueLabel(func); s.sectionName = ".text"; s.value = as.getCodeSize(); s.type = 0; s.binding = 0; cg.addSymbol(s);
+        as.emitBytes({0x48, 0x8D, 0x65, 0xC8}); // lea rsp, [rbp - 56]
+        as.emitBytes({0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C}); // pop r15-r12
+        as.emitByte(0x5F); as.emitByte(0x5E); as.emitByte(0x5B); // pop rdi, rsi, rbx
+        as.emitByte(0xC9); as.emitByte(0xC3); // leave; ret
     }
 }
 
 void Windows_x64::emitRet(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        if (!i.getOperands().empty()) *os << "  mov rax, " << getImm(i.getOperands()[0]->get(), cg) << "\n";
-        *os << "  jmp " << getEpilogueLabel(i.getParent()->getParent()) << "\n";
-    } else {
-        if (!i.getOperands().empty()) emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        cg.getAssembler().emitByte(0xE9);
-        uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, getEpilogueLabel(i.getParent()->getParent()), ".text"});
-    }
+    if (auto* os = cg.getTextStream()) { if (!i.getOperands().empty()) *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n"; *os << "  jmp " << getFunctionEpilogueLabel(*i.getParent()->getParent()) << "\n"; }
+    else { if (!i.getOperands().empty()) emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitByte(0xE9); uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, getFunctionEpilogueLabel(*i.getParent()->getParent()), ".text"}); }
 }
 
 void Windows_x64::emitAdd(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        *os << "  mov rax, " << getImm(i.getOperands()[0]->get(), cg) << "\n";
-        *os << "  add rax, " << getImm(i.getOperands()[1]->get(), cg) << "\n";
-        *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
-    } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0x01, 0xC8});
-        emitStoreResult(cg, i, 0);
-    }
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  add rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x01, 0xC8}); emitStoreResult(cg, i, 0); }
 }
-
 void Windows_x64::emitSub(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        *os << "  mov rax, " << getImm(i.getOperands()[0]->get(), cg) << "\n";
-        *os << "  sub rax, " << getImm(i.getOperands()[1]->get(), cg) << "\n";
-        *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
-    } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0x29, 0xC8});
-        emitStoreResult(cg, i, 0);
-    }
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  sub rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x29, 0xC8}); emitStoreResult(cg, i, 0); }
 }
-
 void Windows_x64::emitMul(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        *os << "  mov rax, " << getImm(i.getOperands()[0]->get(), cg) << "\n";
-        *os << "  imul rax, " << getImm(i.getOperands()[1]->get(), cg) << "\n";
-        *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
-    } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0x0F, 0xAF, 0xC1});
-        emitStoreResult(cg, i, 0);
-    }
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  imul rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x0F, 0xAF, 0xC1}); emitStoreResult(cg, i, 0); }
 }
-
 void Windows_x64::emitDiv(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cqo\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  idiv rcx\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0x99}); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xF7, 0xF9}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitRem(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cqo\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  idiv rcx\n  mov " << cg.getValueAsOperand(&i) << ", rdx\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0x99}); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xF7, 0xF9}); emitStoreResult(cg, i, 2); }
+}
+void Windows_x64::emitCopy(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitCall(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { for (size_t j=1; j<std::min(i.getOperands().size(), (size_t)5); ++j) *os << "  mov " << integerArgRegs[j-1] << ", " << cg.getValueAsOperand(i.getOperands()[j]->get()) << "\n"; *os << "  call " << i.getOperands()[0]->get()->getName() << "\n"; if (i.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { for (size_t j=1; j<std::min(i.getOperands().size(), (size_t)5); ++j) { uint8_t r = getArchRegIndex(integerArgRegs[j-1]); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), r); } cg.getAssembler().emitByte(0xE8); uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, i.getOperands()[0]->get()->getName(), ".text"}); if (i.getType()->getTypeID() != ir::Type::VoidTyID) emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitCmp(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { std::string set; switch(i.getOpcode()){case ir::Instruction::Ceq:set="sete";break;case ir::Instruction::Cne:set="setne";break;case ir::Instruction::Cslt:set="setl";break;case ir::Instruction::Csle:set="setle";break;case ir::Instruction::Csgt:set="setg";break;case ir::Instruction::Csge:set="setge";break;default:set="sete";break;} *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cmp rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  " << set << " al\n  movzx eax, al\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x39, 0xC8}); uint8_t s = 0x94; switch(i.getOpcode()){case ir::Instruction::Ceq:s=0x94;break;case ir::Instruction::Cne:s=0x95;break;case ir::Instruction::Cslt:s=0x9C;break;case ir::Instruction::Csle:s=0x9E;break;case ir::Instruction::Csgt:s=0x9F;break;case ir::Instruction::Csge:s=0x9D;break;default:s=0x94;break;} cg.getAssembler().emitBytes({0x0F, s, 0xC0, 0x48, 0x0F, 0xB6, 0xC0}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitBr(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  test rax, rax\n  jne " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())) << "\n  jmp " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())) << "\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0x85, 0xC0, 0x0F, 0x85}); uint64_t off1 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off1, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())), ".text"}); cg.getAssembler().emitByte(0xE9); uint64_t off2 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off2, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())), ".text"}); }
+}
+void Windows_x64::emitJmp(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  jmp " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())) << "\n"; }
+    else { cg.getAssembler().emitByte(0xE9); uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())), ".text"}); }
+}
+void Windows_x64::emitAnd(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  and rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x21, 0xC8}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitOr(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  or rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x09, 0xC8}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitXor(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  xor rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x31, 0xC8}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitShl(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  shl rax, cl\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xD3, 0xE0}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitShr(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  shr rax, cl\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xD3, 0xE8}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitSar(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  sar rax, cl\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xD3, 0xF8}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitNeg(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  neg rax\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0xF7, 0xD8}); emitStoreResult(cg, i, 0); }
+}
+void Windows_x64::emitNot(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  not rax\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
+    else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0xF7, 0xD0}); emitStoreResult(cg, i, 0); }
+}
+
+void Windows_x64::emitLoad(CodeGen& cg, ir::Instruction& i) {
+    uint8_t size = 8; bool isSigned = true;
+    switch(i.getOpcode()) {
+        case ir::Instruction::Loadub: size = 1; isSigned = false; break;
+        case ir::Instruction::Loadsb: size = 1; isSigned = true; break;
+        case ir::Instruction::Loaduh: size = 2; isSigned = false; break;
+        case ir::Instruction::Loadsh: size = 2; isSigned = true; break;
+        case ir::Instruction::Loaduw: size = 4; isSigned = false; break;
+        case ir::Instruction::Loadl:  size = 8; isSigned = true; break;
+        default: size = 4; break;
+    }
     if (auto* os = cg.getTextStream()) {
-        *os << "  mov rax, " << getImm(i.getOperands()[0]->get(), cg) << "\n  cqo\n";
-        *os << "  idiv " << getImm(i.getOperands()[1]->get(), cg) << "\n";
+        std::string op = cg.getValueAsOperand(i.getOperands()[0]->get());
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr;
+        if (isGlobal) {
+            if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr " : "  movzx rax, byte ptr ") << op << "\n";
+            else if (size == 2) *os << (isSigned ? "  movsx rax, word ptr " : "  movzx rax, word ptr ") << op << "\n";
+            else if (size == 4) *os << (isSigned ? "  movsxd rax, dword ptr " : "  mov eax, dword ptr ") << op << "\n";
+            else *os << "  mov rax, " << op << "\n";
+        } else {
+            *os << "  mov rax, " << op << "\n";
+            if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr [rax]\n" : "  movzx rax, byte ptr [rax]\n");
+            else if (size == 2) *os << (isSigned ? "  movsx rax, word ptr [rax]\n" : "  movzx rax, word ptr [rax]\n");
+            else if (size == 4) *os << (isSigned ? "  movsxd rax, dword ptr [rax]\n" : "  mov eax, dword ptr [rax]\n");
+            else *os << "  mov rax, [rax]\n";
+        }
         *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
     } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        cg.getAssembler().emitBytes({0x48, 0x99});
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xF7, 0xF9});
+        auto& as = cg.getAssembler(); emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        if (size == 1) as.emitBytes({0x48, 0x0F, (uint8_t)(isSigned ? 0xBE : 0xB6), 0x00});
+        else if (size == 2) as.emitBytes({0x48, 0x0F, (uint8_t)(isSigned ? 0xBF : 0xB7), 0x00});
+        else if (size == 4) as.emitBytes(isSigned ? std::vector<uint8_t>{0x48, 0x63, 0x00} : std::vector<uint8_t>{0x8B, 0x00});
+        else as.emitBytes({0x48, 0x8B, 0x00});
         emitStoreResult(cg, i, 0);
     }
 }
 
-void Windows_x64::emitCopy(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        std::string src = getImm(i.getOperands()[0]->get(), cg), dst = cg.getValueAsOperand(&i);
-        if (src == dst) return;
-        *os << "  mov rax, " << src << "\n  mov " << dst << ", rax\n";
-    } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitStoreResult(cg, i, 0);
+void Windows_x64::emitStore(CodeGen& cg, ir::Instruction& i) {
+    uint8_t size = 8;
+    switch(i.getOpcode()) {
+        case ir::Instruction::Storeb: size = 1; break;
+        case ir::Instruction::Storeh: size = 2; break;
+        case ir::Instruction::Storel: size = 8; break;
+        default: size = 4; break;
     }
-}
-
-void Windows_x64::emitCall(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        for (size_t j=1; j<std::min(i.getOperands().size(), (size_t)5); ++j) {
-            *os << "  mov " << integerArgRegs[j-1] << ", " << getImm(i.getOperands()[j]->get(), cg) << "\n";
-        }
-        *os << "  call " << i.getOperands()[0]->get()->getName() << "\n";
-        if (!i.getType()->isVoidTy()) *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
-    } else {
-        for (size_t j=1; j<std::min(i.getOperands().size(), (size_t)5); ++j) {
-            uint8_t r = getArchRegIndex(integerArgRegs[j-1]);
-            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), r);
-        }
-        cg.getAssembler().emitByte(0xE8);
-        uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, i.getOperands()[0]->get()->getName(), ".text"});
-        if (!i.getType()->isVoidTy()) emitStoreResult(cg, i, 0);
-    }
-}
-
-void Windows_x64::emitCmp(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        std::string set;
-        switch(i.getOpcode()){
-            case ir::Instruction::Ceq:set="sete";break;
-            case ir::Instruction::Cne:set="setne";break;
-            case ir::Instruction::Cslt:set="setl";break;
-            case ir::Instruction::Csle:set="setle";break;
-            case ir::Instruction::Csgt:set="setg";break;
-            case ir::Instruction::Csge:set="setge";break;
-            default:set="sete";break;
-        }
-        *os << "  mov rax, " << getImm(i.getOperands()[0]->get(), cg) << "\n";
-        *os << "  cmp rax, " << getImm(i.getOperands()[1]->get(), cg) << "\n";
-        *os << "  " << set << " al\n  movzx eax, al\n  mov " << cg.getValueAsOperand(&i) << ", eax\n";
-    } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0x39, 0xC8});
-        uint8_t s = 0x94;
-        switch(i.getOpcode()){
-            case ir::Instruction::Ceq:s=0x94;break;
-            case ir::Instruction::Cne:s=0x95;break;
-            case ir::Instruction::Cslt:s=0x9C;break;
-            case ir::Instruction::Csle:s=0x9E;break;
-            case ir::Instruction::Csgt:s=0x9F;break;
-            case ir::Instruction::Csge:s=0x9D;break;
-            default:s=0x94;break;
-        }
-        cg.getAssembler().emitBytes({0x0F, s, 0xC0, 0x0F, 0xB6, 0xC0});
-        emitStoreResult(cg, i, 0);
-    }
-}
-
-void Windows_x64::emitBr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
         *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  test rax, rax\n";
-        *os << "  jne " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())) << "\n";
-        if (i.getOperands().size() > 2)
-            *os << "  jmp " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())) << "\n";
-    } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        cg.getAssembler().emitBytes({0x48, 0x85, 0xC0, 0x0F, 0x85});
-        uint64_t off1 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off1, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())), ".text"});
-        if (i.getOperands().size() > 2) {
-            cg.getAssembler().emitByte(0xE9);
-            uint64_t off2 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-            cg.addRelocation(CodeGen::RelocationInfo{off2, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())), ".text"});
+        std::string op = cg.getValueAsOperand(i.getOperands()[1]->get());
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
+        if (isGlobal) {
+            if (size == 1) *os << "  mov byte ptr " << op << ", al\n";
+            else if (size == 2) *os << "  mov word ptr " << op << ", ax\n";
+            else if (size == 4) *os << "  mov dword ptr " << op << ", eax\n";
+            else *os << "  mov " << op << ", rax\n";
+        } else {
+            *os << "  mov rdx, " << op << "\n";
+            if (size == 1) *os << "  mov byte ptr [rdx], al\n";
+            else if (size == 2) *os << "  mov word ptr [rdx], ax\n";
+            else if (size == 4) *os << "  mov dword ptr [rdx], eax\n";
+            else *os << "  mov [rdx], rax\n";
         }
+    } else {
+        auto& as = cg.getAssembler(); emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 2);
+        if (size == 1) as.emitBytes({0x88, 0x02});
+        else if (size == 2) as.emitBytes({0x66, 0x89, 0x02});
+        else if (size == 4) as.emitBytes({0x89, 0x02});
+        else as.emitBytes({0x48, 0x89, 0x02});
     }
 }
 
-void Windows_x64::emitJmp(CodeGen& cg, ir::Instruction& i) {
+void Windows_x64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
+    int32_t pointerOffset = cg.getStackOffset(&instr);
+    uint64_t size = 8;
+    if (instr.getOpcode() == ir::Instruction::Alloc4) size = 4;
+    else if (instr.getOpcode() == ir::Instruction::Alloc16) size = 16;
+    else if (!instr.getOperands().empty()) { if (auto* sizeConst = dynamic_cast<ir::ConstantInt*>(instr.getOperands()[0]->get())) size = sizeConst->getValue(); }
+    uint64_t alignedSize = (size + 7) & ~7;
     if (auto* os = cg.getTextStream()) {
-        *os << "  jmp " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())) << "\n";
+        *os << "  # Bump Allocation: " << size << " bytes\n";
+        *os << "  mov rax, [rel heap_ptr]\n";
+        *os << "  mov " << formatStackOperand(pointerOffset) << ", rax\n";
+        *os << "  add rax, " << alignedSize << "\n";
+        *os << "  mov [rel heap_ptr], rax\n";
     } else {
-        cg.getAssembler().emitByte(0xE9);
-        uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())), ".text"});
+        auto& as = cg.getAssembler(); ir::GlobalValue hp_val(cg.module.getContext()->getVoidType(), "heap_ptr"); emitLoadValue(cg, as, &hp_val, 0);
+        emitRegMem(as, 0x48, 0x89, 0, pointerOffset); as.emitBytes({0x48, 0x05}); as.emitDWord(alignedSize);
+        as.emitBytes({0x48, 0x89, 0x05}); uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "heap_ptr", ".text"});
+    }
+}
+
+void Windows_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
+    ir::SyscallInstruction* si = dynamic_cast<ir::SyscallInstruction*>(&instr);
+    ir::SyscallId sid = si ? si->getSyscallId() : ir::SyscallId::None;
+    if (sid == ir::SyscallId::Exit) {
+        if (auto* os = cg.getTextStream()) { *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call ExitProcess\n"; }
+        else { auto& as = cg.getAssembler(); emitLoadValue(cg, as, instr.getOperands()[0]->get(), 1); as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "ExitProcess", ".text"}); }
     }
 }
 
 void Windows_x64::emitStartFunction(CodeGen& cg) {
-    if (!cg.getTextStream()) {
-        CodeGen::SymbolInfo s; s.name = "_start"; s.sectionName = ".text"; s.value = cg.getAssembler().getCodeSize(); s.type = 2; s.binding = 1; cg.addSymbol(s);
-        cg.getAssembler().emitBytes({0x48, 0x83, 0xEC, 0x28});
-        cg.getAssembler().emitByte(0xE8);
-        uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "main", ".text"});
-        cg.getAssembler().emitBytes({0x48, 0x83, 0xC4, 0x28, 0xC3});
+    if (auto* os = cg.getTextStream()) {
+        *os << ".globl _start\n_start:\n  sub rsp, 40\n  call main\n  mov rcx, rax\n  call ExitProcess\n";
+    } else {
+        auto& as = cg.getAssembler();
+        CodeGen::SymbolInfo s; s.name = "_start"; s.sectionName = ".text"; s.value = as.getCodeSize(); s.type = 2; s.binding = 1; cg.addSymbol(s);
+        as.emitBytes({0x48, 0x83, 0xEC, 0x28}); // sub rsp, 40
+        as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "main", ".text"});
+        as.emitBytes({0x48, 0x89, 0xC1}); // mov rcx, rax
+        as.emitByte(0xE8); uint64_t off2 = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off2, "R_X86_64_PC32", -4, "ExitProcess", ".text"});
     }
 }
 
-void Windows_x64::emitPrologue(CodeGen&, int) {}
-void Windows_x64::emitEpilogue(CodeGen&) {}
-const std::vector<std::string>& Windows_x64::getRegisters(RegisterClass rc) const { if(rc==RegisterClass::Float)return floatRegs; return integerRegs; }
-const std::string& Windows_x64::getReturnRegister(const ir::Type* t) const { if(t && t->isFloatingPoint())return floatReturnReg; return intReturnReg; }
+std::string Windows_x64::formatStackOperand(int offset) const { return "[rbp + " + std::to_string(offset) + "]"; }
+std::string Windows_x64::formatGlobalOperand(const std::string& name) const { return "[rel " + name + "]"; }
 
-} // namespace target
-} // namespace codegen
+}} // namespace codegen::target

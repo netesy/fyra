@@ -319,44 +319,26 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
 
         } else if (opcodeStr == "phi") {
             ir::Type* phiType = nullptr;
-            std::vector<std::pair<ir::BasicBlock*, ir::Value*>> incoming;
+            std::vector<std::pair<std::string, ir::Value*>> incoming_phi;
             while(currentToken.type == TokenType::Label) {
                 std::string labelName = currentToken.value;
                 getNextToken();
-
                 ir::Value* val = parseValue();
-
-                ir::BasicBlock* bb = nullptr;
-                if (labelMap.count(labelName)) {
-                    bb = labelMap[labelName];
-                } else {
-                    auto* func = builder.getInsertPoint()->getParent();
-                    bb = builder.createBasicBlock(labelName, func);
-                    labelMap[labelName] = bb;
-                }
-                incoming.push_back({bb, val});
-
-                if (currentToken.type == TokenType::Comma) {
-                    getNextToken();
-                } else {
-                    break;
-                }
+                incoming_phi.push_back({labelName, val});
+                if (currentToken.type == TokenType::Comma) getNextToken();
+                else break;
             }
-
-            if (currentToken.type == TokenType::Colon) {
-                getNextToken();
-                phiType = parseIRType();
-            }
-
-            ir::PhiNode* phiNode = builder.createPhi(phiType, incoming.size(), nullptr);
-            for (auto& pair : incoming) {
+            if (currentToken.type == TokenType::Colon) { getNextToken(); phiType = parseIRType(); }
+            ir::PhiNode* phiNode = builder.createPhi(phiType, incoming_phi.size(), nullptr);
+            for (auto& pair : incoming_phi) {
                 ir::Value* val = pair.second;
                 if (phiType && phiType->isIntegerTy()) {
-                    if (auto* ci = dynamic_cast<ir::ConstantInt*>(val)) {
-                        val = context->getConstantInt(static_cast<ir::IntegerType*>(phiType), ci->getValue());
-                    }
+                    if (auto* ci = dynamic_cast<ir::ConstantInt*>(val)) val = context->getConstantInt(static_cast<ir::IntegerType*>(phiType), ci->getValue());
                 }
-                phiNode->addIncoming(val, pair.first);
+                ir::BasicBlock* bbPhi = nullptr;
+                if (labelMap.count(pair.first)) bbPhi = labelMap[pair.first];
+                else { auto* f = builder.getInsertPoint()->getParent(); bbPhi = builder.createBasicBlock(pair.first, f); labelMap[pair.first] = bbPhi; }
+                phiNode->addIncoming(val, bbPhi);
             }
             instr = phiNode;
         }
@@ -388,7 +370,7 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
             // Fyra memory allocation with optional size
             ir::Value* size = nullptr;
             if (currentToken.type == TokenType::Number || currentToken.type == TokenType::Temporary) {
-                size = parseValue();
+                size = parseValue(); if (auto* ci = dynamic_cast<ir::ConstantInt*>(size)) size = context->getConstantInt(context->getIntegerType(64), ci->getValue());
             }
             
             // Parse type with colon syntax
@@ -815,7 +797,7 @@ ir::Value* Parser::parseValue() {
         getNextToken();
         // This is a simplification. We don't have a proper function type, so we
         // just use a void type for now.
-        return new ir::GlobalValue(context->getVoidType(), name);
+        if (module) { for (auto& gv : module->getGlobalVariables()) { if (gv->getName() == name) return gv.get(); } } return new ir::GlobalValue(context->getVoidType(), name);
     }
     return nullptr;
 }

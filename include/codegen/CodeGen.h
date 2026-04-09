@@ -39,8 +39,6 @@ struct InstructionPattern {
 
 class CodeGen {
 public:
-    static std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& targetName);
-public:
     struct SymbolInfo {
         std::string name;
         uint64_t value = 0;

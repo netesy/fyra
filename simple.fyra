@@ -1,4 +1,0 @@
-export function $main() : w {
-@start
-    ret 42 : w
-}

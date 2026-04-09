@@ -24,7 +24,8 @@
 #include <sstream>
 
 namespace codegen {
-std::unique_ptr<target::TargetInfo> CodeGen::createTargetInfoForName(const std::string& targetName) {
+namespace {
+std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& targetName) {
     std::string n = targetName;
     std::transform(n.begin(), n.end(), n.begin(), ::tolower);
     if (n == "linux" || n == "systemv" || n == "x86_64") return std::make_unique<target::SystemV_x64>();
@@ -36,6 +37,7 @@ std::unique_ptr<target::TargetInfo> CodeGen::createTargetInfoForName(const std::
     if (n == "aarch64") return std::make_unique<target::AArch64>();
     if (n == "riscv64") return std::make_unique<target::RiscV64>();
     return nullptr;
+}
 }
 
 CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std::ostream* os)
@@ -56,6 +58,9 @@ CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std
 CodeGen::~CodeGen() = default;
 
 void CodeGen::emit(bool forExecutable) {
+    if (forExecutable && !os && !rodataAssembler) {
+        rodataAssembler = std::make_unique<execgen::Assembler>();
+    }
     usesHeap = false; usesFPNeg = false;
     for (auto& func : module.getFunctions()) {
         for (auto& bb : func->getBasicBlocks()) {
@@ -89,7 +94,17 @@ void CodeGen::emitFunction(ir::Function& func) {
         wasmFunctionBodies.push_back(assembler->getCode());
         assembler = std::move(oldAsm);
     } else {
-        if (os) *os << "\n" << func.getName() << ":\n";
+        if (os) {
+            *os << "\n" << func.getName() << ":\n";
+        } else if (assembler) {
+            SymbolInfo func_sym;
+            func_sym.name = func.getName();
+            func_sym.sectionName = ".text";
+            func_sym.value = assembler->getCodeSize();
+            func_sym.type = 2; // STT_FUNC
+            func_sym.binding = 1; // STB_GLOBAL
+            addSymbol(func_sym);
+        }
         targetInfo->emitFunctionPrologue(*this, func);
         for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
         targetInfo->emitFunctionEpilogue(*this, func);
@@ -97,8 +112,19 @@ void CodeGen::emitFunction(ir::Function& func) {
 }
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
-    targetInfo->emitBasicBlockStart(*this, bb);
-auto isCompareOpcode = [](ir::Instruction::Opcode opcode) {
+    if (os) {
+        *os << targetInfo->getBBLabel(&bb) << ":\n";
+    } else if (assembler) {
+        // Register basic block as a symbol for binary emission
+        SymbolInfo bb_sym;
+        bb_sym.name = targetInfo->getBBLabel(&bb);
+        bb_sym.sectionName = ".text";
+        bb_sym.value = assembler->getCodeSize();
+        bb_sym.type = 0; // STT_NOTYPE
+        bb_sym.binding = 1; // STB_GLOBAL
+        addSymbol(bb_sym);
+    }
+    auto isCompareOpcode = [](ir::Instruction::Opcode opcode) {
         switch (opcode) {
             case ir::Instruction::Ceq:
             case ir::Instruction::Cne:
@@ -173,10 +199,9 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Call: targetInfo->emitCall(*this, instr); break;
         case ir::Instruction::Jmp: targetInfo->emitJmp(*this, instr); break;
         case ir::Instruction::Br: case ir::Instruction::Jnz: targetInfo->emitBr(*this, instr); break;
-        case ir::Instruction::Load: targetInfo->emitLoad(*this, instr); break;
-        case ir::Instruction::Store: targetInfo->emitStore(*this, instr); break;
-        case ir::Instruction::Alloc: targetInfo->emitAlloc(*this, instr); break;
-
+        case ir::Instruction::Load: case ir::Instruction::Loadd: case ir::Instruction::Loads: case ir::Instruction::Loadl: case ir::Instruction::Loaduw: case ir::Instruction::Loadsh: case ir::Instruction::Loaduh: case ir::Instruction::Loadsb: case ir::Instruction::Loadub: targetInfo->emitLoad(*this, instr); break;
+        case ir::Instruction::Store: case ir::Instruction::Stored: case ir::Instruction::Stores: case ir::Instruction::Storel: case ir::Instruction::Storeh: case ir::Instruction::Storeb: targetInfo->emitStore(*this, instr); break;
+        case ir::Instruction::Alloc: case ir::Instruction::Alloc4: case ir::Instruction::Alloc16: targetInfo->emitAlloc(*this, instr); break;
         case ir::Instruction::Ceq: case ir::Instruction::Cne: case ir::Instruction::Cslt:
         case ir::Instruction::Csle: case ir::Instruction::Csgt: case ir::Instruction::Csge:
         case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
@@ -186,19 +211,8 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
 }
 
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
-    if (!value) return "null";
-
-    // 1. Check for stack slots (explicitly assigned or from regalloc)
-    if (stackOffsets.count(const_cast<ir::Value*>(value))) {
-        return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value)));
-    }
-
+    if (!value) return targetInfo->getImmediatePrefix() + "0";
     if (auto* instr = dynamic_cast<const ir::Instruction*>(value)) {
-        if (currentFunction && currentFunction->hasStackSlot(const_cast<ir::Instruction*>(instr))) {
-            return targetInfo->formatStackOperand(-currentFunction->getStackSlotForVreg(const_cast<ir::Instruction*>(instr)) - 8);
-        }
-
-        // 2. Check for physical registers (only if no stack slot)
         if (instr->hasPhysicalRegister()) {
             auto regClass = instr->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
             auto& regs = targetInfo->getRegisters(regClass);
@@ -206,15 +220,15 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
                 return targetInfo->getRegisterName(regs[instr->getPhysicalRegister()], instr->getType());
             }
         }
+        if (currentFunction && currentFunction->hasStackSlot(const_cast<ir::Instruction*>(instr)))
+            return targetInfo->formatStackOperand(-currentFunction->getStackSlotForVreg(const_cast<ir::Instruction*>(instr)) - 8);
     }
-
-    // 3. Other value types
-    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->getImmediatePrefix() + targetInfo->formatConstant(ci);
+    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
-
-    return "$" + value->getName();
+    if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets[const_cast<ir::Value*>(value)]);
+    if (auto* p = dynamic_cast<const ir::Parameter*>(value)) { if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value))); } return "$" + value->getName();
 }
 
 int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }
@@ -265,8 +279,8 @@ void CodeGen::deallocateRegister(const std::string&) {}
 void CodeGen::emitTargetSpecificHeader() {
     targetInfo->emitHeader(*this);
     if (os) {
-        if (targetInfo->getName() == "linux") *os << ".att_syntax prefix\n";
-        else if (targetInfo->getName() == "windows") *os << ".intel_syntax noprefix\n";
+        if (targetInfo->getName() == "x86_64") *os << ".att_syntax prefix\n";
+        else if (targetInfo->getName() == "win64") *os << ".intel_syntax noprefix\n";
     }
 }
 void CodeGen::emitDataSection() {
@@ -300,12 +314,12 @@ void CodeGen::emitDataSection() {
         }
     } else if (rodataAssembler) {
         if (usesHeap) {
-            // Allocate heap base in .data for now (1MB of zeros)
+            // Consistent naming: heap_ptr and __fyra_heap
             uint64_t heap_base_offset = rodataAssembler->getCodeSize();
             for(int i=0; i<1048576; ++i) rodataAssembler->emitByte(0);
             
             SymbolInfo hb_sym;
-            hb_sym.name = "__heap_base";
+            hb_sym.name = "__fyra_heap";
             hb_sym.sectionName = ".data";
             hb_sym.value = heap_base_offset;
             hb_sym.size = 1048576;
@@ -314,17 +328,17 @@ void CodeGen::emitDataSection() {
 
             uint64_t heap_ptr_offset = rodataAssembler->getCodeSize();
             SymbolInfo hp_sym;
-            hp_sym.name = "__heap_ptr";
+            hp_sym.name = "heap_ptr";
             hp_sym.sectionName = ".data";
             hp_sym.value = heap_ptr_offset;
             hp_sym.size = 8;
             hp_sym.binding = 1;
             addSymbol(hp_sym);
             
-            rodataAssembler->emitQWord(0); // Placeholder
+            rodataAssembler->emitQWord(0);
             RelocationInfo hp_reloc;
             hp_reloc.offset = heap_ptr_offset;
-            hp_reloc.symbolName = "__heap_base";
+            hp_reloc.symbolName = "__fyra_heap";
             hp_reloc.type = "R_X86_64_64";
             hp_reloc.sectionName = ".data";
             hp_reloc.addend = 0;
@@ -353,7 +367,14 @@ void CodeGen::emitDataSection() {
         }
     }
 }
-void CodeGen::emitTextSection() { if (os) *os << ".text\n.globl main\n"; }
+void CodeGen::emitTextSection() {
+    if (os) {
+        *os << ".text\n.globl main\n";
+    } else if (assembler) {
+        // No explicit .text needed in the byte buffer,
+        // but we might want to reset symbol list if needed.
+    }
+}
 void CodeGen::emitFunctionAlignment() {}
 void CodeGen::performInstructionFusion(ir::Function&) {}
 void CodeGen::applyFusionOptimizations(ir::BasicBlock&) {}
@@ -415,7 +436,7 @@ CodeGenPipeline::PipelineResult CodeGenPipeline::execute(ir::Module& module, con
 
 CodeGenPipeline::PipelineResult CodeGenPipeline::executeForTarget(ir::Module& module, const std::string& t, const PipelineConfig& config) {
     PipelineResult result;
-    auto targetInfo = CodeGen::createTargetInfoForName(t);
+    auto targetInfo = createTargetInfoForName(t);
     if (!targetInfo) { result.success = false; return result; }
     auto cg = std::make_unique<CodeGen>(module, std::move(targetInfo));
     result.targetResults[t] = cg->compileToObject(config.outputPrefix + "_" + t, config.enableValidation, config.enableObjectGeneration);

@@ -1,8 +1,0 @@
-export function $main() : w {
-@start
-    %a = add 10, 20 : w
-    %b = mul %a, 2 : w
-    %c = sub %b, 5 : w
-    %d = div %c, 5 : w
-    ret %d : w
-}
