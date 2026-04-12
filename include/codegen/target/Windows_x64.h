@@ -34,6 +34,7 @@ public:
     virtual void emitStore(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitExternCall(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitStartFunction(CodeGen& cg) override;
     virtual std::string formatStackOperand(int offset) const override;
     virtual std::string formatGlobalOperand(const std::string& name) const override;

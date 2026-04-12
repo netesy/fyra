@@ -426,6 +426,9 @@ void Wasm32::emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {
 void Wasm32::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << "(module\n";
+        *os << "  (import \"wasi_unstable\" \"fd_write\" (func $fd_write (param i32 i32 i32 i32) (result i32)))\n";
+        *os << "  (import \"wasi_unstable\" \"fd_read\" (func $fd_read (param i32 i32 i32 i32) (result i32)))\n";
+        *os << "  (import \"wasi_unstable\" \"proc_exit\" (func $proc_exit (param i32)))\n";
         *os << "  (memory 1)\n";
         *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
         *os << "  (func $unknown_func (result i32) i32.const 0 return)\n";
@@ -1697,6 +1700,63 @@ void Wasm32::emitStore(CodeGen& cg, ir::Instruction& instr) {
         } else {
             // Default to i32 store
             *os << "  i32.store\n";
+        }
+    }
+}
+
+void Wasm32::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
+    if (!ei) return;
+    const std::string& cap = ei->getCapability();
+    if (auto* os = cg.getTextStream()) {
+        if (cap == "io.write") {
+             // fd_write(fd, ciovec_ptr, ciovec_len, nwritten_ptr)
+             // We need to construct ciovec on the "stack" (memory)
+             *os << "  ;; Construct ciovec for fd_write\n";
+             *os << "  global.get $__heap_ptr\n";
+             *os << "  local.set $temp_i32_0\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+             *os << "  i32.store offset=0\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+             *os << "  i32.store offset=4\n";
+
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  i32.const 1\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  i32.const 8\n";
+             *os << "  i32.add\n";
+             *os << "  call $fd_write\n";
+        } else if (cap == "io.read") {
+             // fd_read(fd, iovec_ptr, iovec_len, nread_ptr)
+             *os << "  global.get $__heap_ptr\n";
+             *os << "  local.set $temp_i32_0\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+             *os << "  i32.store offset=0\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+             *os << "  i32.store offset=4\n";
+
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  i32.const 1\n";
+             *os << "  local.get $temp_i32_0\n";
+             *os << "  i32.const 8\n";
+             *os << "  i32.add\n";
+             *os << "  call $fd_read\n";
+        } else if (cap == "process.exit") {
+             std::string op = cg.getValueAsOperand(instr.getOperands()[0]->get());
+             if (!op.empty()) *os << "  " << op << "\n";
+             *os << "  call $proc_exit\n";
+        } else if (cap == "memory.alloc") {
+             emitAlloc(cg, instr);
+             return;
+        }
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
+            *os << "  local.set " << cg.getStackOffset(&instr) << "\n";
         }
     }
 }

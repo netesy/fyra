@@ -1,0 +1,36 @@
+# Test industrial-level extern capability system
+extern io.write(w, l, w) : w
+extern io.read(w, l, w) : w
+extern memory.alloc(l) : l
+extern memory.free(l, l)
+extern random.u64() : l
+extern time.now() : l
+extern process.exit(w)
+
+export function $main() : w {
+@entry
+    # Test memory.alloc
+    %size = copy 1024 : l
+    %ptr = extern memory.alloc(%size) : l
+
+    # Test random.u64
+    %rand = extern random.u64() : l
+
+    # Test time.now
+    %now = extern time.now() : l
+
+    # Test io.write
+    %fd = copy 1 : w
+    %msg = copy $msg : l
+    %len = copy 14 : w
+    %res_write = extern io.write(%fd, %msg, %len) : w
+
+    # Test memory.free
+    extern memory.free(%ptr, %size)
+
+    # Test process.exit
+    extern process.exit(0)
+    ret 0 : w
+}
+
+data $msg = { b "Testing Extern\n", b 0 }

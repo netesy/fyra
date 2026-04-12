@@ -75,6 +75,7 @@ public:
     void emitLoad(CodeGen& cg, ir::Instruction& instr) override;
     void emitStore(CodeGen& cg, ir::Instruction& instr) override;
     void emitAlloc(CodeGen& cg, ir::Instruction& instr) override;
+    void emitExternCall(CodeGen& cg, ir::Instruction& instr) override;
     void emitBr(CodeGen& cg, ir::Instruction& instr) override;
     void emitJmp(CodeGen& cg, ir::Instruction& instr) override;
 

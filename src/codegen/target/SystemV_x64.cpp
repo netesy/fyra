@@ -194,17 +194,52 @@ void SystemV_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
                 if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
             }
             *os << "  syscall\n";
+        } else if (cap == "io.read") {
+            *os << "  movq $0, %rax\n"; // sys_read
+            for (size_t i = 0; i < instr.getOperands().size(); ++i) {
+                std::string dest_reg;
+                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; }
+                if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
+            }
+            *os << "  syscall\n";
         } else if (cap == "process.exit") {
             *os << "  movq $60, %rax\n"; // sys_exit
             if (!instr.getOperands().empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
             *os << "  syscall\n";
         } else if (cap == "memory.alloc") {
-             // Basic implementation using heap_ptr
-             *os << "  movq heap_ptr(%rip), %rax\n";
-             *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
-             *os << "  addq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rax\n";
-             *os << "  movq %rax, heap_ptr(%rip)\n";
-             return; // already handled return value
+            // mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+            *os << "  movq $9, %rax\n"; // sys_mmap
+            *os << "  xorq %rdi, %rdi\n"; // addr
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n"; // len
+            *os << "  movq $3, %rdx\n"; // prot (READ|WRITE)
+            *os << "  movq $34, %r10\n"; // flags (PRIVATE|ANONYMOUS)
+            *os << "  movq $-1, %r8\n"; // fd
+            *os << "  xorq %r9, %r9\n"; // offset
+            *os << "  syscall\n";
+        } else if (cap == "memory.free") {
+            // munmap(addr, size)
+            *os << "  movq $11, %rax\n"; // sys_munmap
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+            *os << "  syscall\n";
+        } else if (cap == "random.u64") {
+            // getrandom(&buf, 8, 0)
+            *os << "  subq $8, %rsp\n";
+            *os << "  movq $318, %rax\n"; // sys_getrandom
+            *os << "  movq %rsp, %rdi\n";
+            *os << "  movq $8, %rsi\n";
+            *os << "  xorq %rdx, %rdx\n";
+            *os << "  syscall\n";
+            *os << "  popq %rax\n";
+        } else if (cap == "time.now") {
+            // clock_gettime(CLOCK_REALTIME, &ts)
+            *os << "  subq $16, %rsp\n";
+            *os << "  movq $228, %rax\n"; // sys_clock_gettime
+            *os << "  movq $0, %rdi\n";   // CLOCK_REALTIME
+            *os << "  movq %rsp, %rsi\n";
+            *os << "  syscall\n";
+            *os << "  movq (%rsp), %rax\n"; // tv_sec
+            *os << "  addq $16, %rsp\n";
         }
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
     }

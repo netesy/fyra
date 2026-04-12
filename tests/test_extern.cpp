@@ -7,7 +7,7 @@
 #include <iostream>
 
 int main() {
-    std::string test_file = "tests/test_extern.fyra";
+    std::string test_file = "tests/test_extern_industrial.fyra";
     std::ifstream input(test_file);
     if (!input.good()) {
         std::cerr << "Could not open test file: " << test_file << std::endl;
@@ -29,6 +29,10 @@ int main() {
 
     bool foundIoWrite = false;
     bool foundProcessExit = false;
+    bool foundMemoryAlloc = false;
+    bool foundMemoryFree = false;
+    bool foundRandomU64 = false;
+    bool foundTimeNow = false;
 
     for (auto& bb : func->getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
@@ -36,6 +40,10 @@ int main() {
                 auto* ei = dynamic_cast<ir::ExternCallInstruction*>(instr.get());
                 if (ei->getCapability() == "io.write") foundIoWrite = true;
                 if (ei->getCapability() == "process.exit") foundProcessExit = true;
+                if (ei->getCapability() == "memory.alloc") foundMemoryAlloc = true;
+                if (ei->getCapability() == "memory.free") foundMemoryFree = true;
+                if (ei->getCapability() == "random.u64") foundRandomU64 = true;
+                if (ei->getCapability() == "time.now") foundTimeNow = true;
             }
         }
     }
@@ -46,6 +54,22 @@ int main() {
     }
     if (!foundProcessExit) {
         std::cerr << "process.exit extern call not found" << std::endl;
+        return 1;
+    }
+    if (!foundMemoryAlloc) {
+        std::cerr << "memory.alloc extern call not found" << std::endl;
+        return 1;
+    }
+    if (!foundMemoryFree) {
+        std::cerr << "memory.free extern call not found" << std::endl;
+        return 1;
+    }
+    if (!foundRandomU64) {
+        std::cerr << "random.u64 extern call not found" << std::endl;
+        return 1;
+    }
+    if (!foundTimeNow) {
+        std::cerr << "time.now extern call not found" << std::endl;
         return 1;
     }
 

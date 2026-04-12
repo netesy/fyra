@@ -255,6 +255,82 @@ void Windows_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
+void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
+    if (!ei) return;
+    const std::string& cap = ei->getCapability();
+    if (auto* os = cg.getTextStream()) {
+        if (cap == "io.write") {
+             // Windows write: WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped)
+             // simplified: we'll use GetStdHandle(-11) then WriteFile
+             *os << "  sub rsp, 40\n";
+             *os << "  mov rcx, -11\n"; // STD_OUTPUT_HANDLE
+             *os << "  call GetStdHandle\n";
+             *os << "  mov rcx, rax\n"; // hFile
+             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n"; // lpBuffer
+             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n"; // nNumberOfBytesToWrite
+             *os << "  lea r9, [rsp + 32]\n"; // lpNumberOfBytesWritten
+             *os << "  mov qword ptr [rsp + 32], 0\n";
+             *os << "  mov qword ptr [rsp + 40], 0\n"; // lpOverlapped
+             *os << "  call WriteFile\n";
+             *os << "  add rsp, 40\n";
+        } else if (cap == "io.read") {
+             // ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped)
+             *os << "  sub rsp, 40\n";
+             *os << "  mov rcx, -10\n"; // STD_INPUT_HANDLE
+             *os << "  call GetStdHandle\n";
+             *os << "  mov rcx, rax\n";
+             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+             *os << "  lea r9, [rsp + 32]\n";
+             *os << "  mov qword ptr [rsp + 32], 0\n";
+             *os << "  mov qword ptr [rsp + 40], 0\n";
+             *os << "  call ReadFile\n";
+             *os << "  add rsp, 40\n";
+        } else if (cap == "process.exit") {
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  call ExitProcess\n";
+        } else if (cap == "memory.alloc") {
+             // VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+             *os << "  sub rsp, 40\n";
+             *os << "  xor rcx, rcx\n"; // lpAddress
+             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n"; // dwSize
+             *os << "  mov r8, 12288\n"; // MEM_COMMIT | MEM_RESERVE (0x3000)
+             *os << "  mov r9, 4\n";     // PAGE_READWRITE
+             *os << "  call VirtualAlloc\n";
+             *os << "  add rsp, 40\n";
+             *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
+             return;
+        } else if (cap == "memory.free") {
+             // VirtualFree(addr, 0, MEM_RELEASE)
+             *os << "  sub rsp, 40\n";
+             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  xor rdx, rdx\n"; // dwSize must be 0 for MEM_RELEASE
+             *os << "  mov r8, 32768\n"; // MEM_RELEASE (0x8000)
+             *os << "  call VirtualFree\n";
+             *os << "  add rsp, 40\n";
+        } else if (cap == "random.u64") {
+             // BCryptGenRandom(NULL, &buf, 8, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
+             *os << "  sub rsp, 48\n";
+             *os << "  xor rcx, rcx\n";
+             *os << "  lea rdx, [rsp + 32]\n";
+             *os << "  mov r8, 8\n";
+             *os << "  mov r9, 2\n"; // BCRYPT_USE_SYSTEM_PREFERRED_RNG
+             *os << "  call BCryptGenRandom\n";
+             *os << "  mov rax, [rsp + 32]\n";
+             *os << "  add rsp, 48\n";
+        } else if (cap == "time.now") {
+             // GetSystemTimeAsFileTime(&ft)
+             *os << "  sub rsp, 40\n";
+             *os << "  lea rcx, [rsp + 32]\n";
+             *os << "  call GetSystemTimeAsFileTime\n";
+             *os << "  mov rax, [rsp + 32]\n";
+             *os << "  add rsp, 40\n";
+        }
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
+    }
+}
+
 void Windows_x64::emitStartFunction(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << ".globl _start\n_start:\n  sub rsp, 40\n  call main\n  mov rcx, rax\n  call ExitProcess\n";
