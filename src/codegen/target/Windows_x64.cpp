@@ -49,8 +49,9 @@ void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
     int stack_alloc = std::abs(current_offset + 56);
-    stack_alloc += 32;
-    if ((stack_alloc + 64) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64) % 16);
+    stack_alloc += 32; // Shadow space
+    // Total pushed: 8 regs (rbp, rbx, rsi, rdi, r12, r13, r14, r15) = 64 bytes.
+    if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
     if (auto* os = cg.getTextStream()) {
         if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
         int j = 0; for (auto& param : func.getParameters()) { if (j < 4) *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", " << integerArgRegs[j] << "\n"; j++; }

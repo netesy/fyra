@@ -6,6 +6,7 @@
   (import "wasi_unstable" "proc_exit" (func $proc_exit (param i32)))
   (memory 1)
   (global $__heap_ptr (mut i32) (i32.const 1024))
+  (global $__stack_ptr (mut i32) (i32.const 65536))
   (func $unknown_func (result i32) i32.const 0 return)
   (export "main" (func $main))
 .text

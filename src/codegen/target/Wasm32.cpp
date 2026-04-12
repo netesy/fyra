@@ -433,6 +433,7 @@ void Wasm32::emitHeader(CodeGen& cg) {
         *os << "  (import \"wasi_unstable\" \"proc_exit\" (func $proc_exit (param i32)))\n";
         *os << "  (memory 1)\n";
         *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
+        *os << "  (global $__stack_ptr (mut i32) (i32.const 65536))\n";
         *os << "  (func $unknown_func (result i32) i32.const 0 return)\n";
         for (auto& func : cg.module.getFunctions()) {
             *os << "  (export \"" << func->getName() << "\" (func $" << func->getName() << "))\n";
@@ -1714,11 +1715,13 @@ void Wasm32::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
         if (cap == "io.write") {
              // fd_write(fd, ciovec_ptr, ciovec_len, nwritten_ptr)
-             // We use the first 16 bytes of memory as a temporary "scratchpad" for syscalls
-             // In an industrial backend, we would manage a shadow stack.
-             *os << "  ;; Construct ciovec for fd_write in scratchpad (addr 0)\n";
-             *os << "  i32.const 0\n";
-             *os << "  local.set $temp_i32_0\n";
+             // We use the stack pointer to allocate a temporary "scratchpad" for syscalls
+             *os << "  ;; Construct ciovec for fd_write on stack\n";
+             *os << "  global.get $__stack_ptr\n";
+             *os << "  i32.const 16\n";
+             *os << "  i32.sub\n";
+             *os << "  local.tee $temp_i32_0\n"; // scratch base
+
              *os << "  local.get $temp_i32_0\n";
              *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
              *os << "  i32.store offset=0\n";
@@ -1735,8 +1738,11 @@ void Wasm32::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
              *os << "  call $fd_write\n";
         } else if (cap == "io.read") {
              // fd_read(fd, iovec_ptr, iovec_len, nread_ptr)
-             *os << "  i32.const 0\n";
-             *os << "  local.set $temp_i32_0\n";
+             *os << "  global.get $__stack_ptr\n";
+             *os << "  i32.const 16\n";
+             *os << "  i32.sub\n";
+             *os << "  local.tee $temp_i32_0\n";
+
              *os << "  local.get $temp_i32_0\n";
              *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
              *os << "  i32.store offset=0\n";

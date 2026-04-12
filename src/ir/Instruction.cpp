@@ -170,7 +170,10 @@ void ExternCallInstruction::print(std::ostream& os) const {
     }
     os << "extern " << capability << "(";
     for (size_t i = 0; i < getOperands().size(); ++i) {
-        if (getOperands()[i]) printValue(os, getOperands()[i]->get());
+        if (getOperands()[i]) {
+            os << getOperands()[i]->get()->getType()->toString() << " ";
+            printValue(os, getOperands()[i]->get());
+        }
         else os << "null_use";
         if (i < getOperands().size() - 1) os << ", ";
     }

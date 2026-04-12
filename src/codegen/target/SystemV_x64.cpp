@@ -42,7 +42,9 @@ void SystemV_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
     int stack_alloc = std::abs(current_offset + 40); // Base on rsp after pushes
-    if ((stack_alloc + 48) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 48) % 16);
+    // Ensure stack is 16-byte aligned before call. Since we pushed 6 8-byte regs (rbp, rbx, r12, r13, r14, r15),
+    // total pushed = 48 bytes. (48 + stack_alloc + 8 (ret addr)) % 16 == 0.
+    if ((stack_alloc + 48 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 48 + 8) % 16);
     if (auto* os = cg.getTextStream()) {
         if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
         int j = 0; for (auto& param : func.getParameters()) { if (j < 6) *os << "  movq %" << integerArgRegs[j] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n"; j++; }
