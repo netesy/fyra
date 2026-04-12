@@ -199,3 +199,9 @@ target_link_libraries(test_pe_generator PRIVATE fyra)
 
 add_test(NAME PEGeneratorTest COMMAND test_pe_generator)
 set_tests_properties(PEGeneratorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_extern test_extern.cpp)
+target_link_libraries(test_extern PRIVATE fyra)
+
+add_test(NAME ExternTest COMMAND test_extern)
+set_tests_properties(ExternTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

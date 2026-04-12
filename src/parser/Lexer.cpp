@@ -57,11 +57,12 @@ Token Lexer::getNextToken() {
     if (isalpha(lastChar) || lastChar == '_') { // Identifiers and keywords
         std::string identifierStr;
         identifierStr += lastChar;
-        while (isalnum((lastChar = getChar())) || lastChar == '_') {
+        while (isalnum((lastChar = getChar())) || lastChar == '_' || lastChar == '.') {
             identifierStr += lastChar;
         }
         // Check for keywords
         if (identifierStr == "align") return {TokenType::Align, identifierStr};
+        if (identifierStr == "extern") return {TokenType::Extern, identifierStr};
         static const std::map<std::string, TokenType> keywords = {
             {"function", TokenType::Keyword}, {"export", TokenType::Keyword},
             {"data", TokenType::Keyword}, {"type", TokenType::Keyword},

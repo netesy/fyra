@@ -181,4 +181,33 @@ void SystemV_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
+void SystemV_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
+    if (!ei) return;
+    const std::string& cap = ei->getCapability();
+    if (auto* os = cg.getTextStream()) {
+        if (cap == "io.write") {
+            *os << "  movq $1, %rax\n"; // sys_write
+            for (size_t i = 0; i < instr.getOperands().size(); ++i) {
+                std::string dest_reg;
+                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; }
+                if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
+            }
+            *os << "  syscall\n";
+        } else if (cap == "process.exit") {
+            *os << "  movq $60, %rax\n"; // sys_exit
+            if (!instr.getOperands().empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  syscall\n";
+        } else if (cap == "memory.alloc") {
+             // Basic implementation using heap_ptr
+             *os << "  movq heap_ptr(%rip), %rax\n";
+             *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
+             *os << "  addq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rax\n";
+             *os << "  movq %rax, heap_ptr(%rip)\n";
+             return; // already handled return value
+        }
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
+    }
+}
+
 }} // namespace codegen::target

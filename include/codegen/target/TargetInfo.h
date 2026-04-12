@@ -72,6 +72,7 @@ public:
     virtual void emitStore(CodeGen&, ir::Instruction&) = 0;
     virtual void emitAlloc(CodeGen&, ir::Instruction&) = 0;
     virtual void emitSyscall(CodeGen&, ir::Instruction&) {}
+    virtual void emitExternCall(CodeGen&, ir::Instruction&) {}
     virtual uint64_t getSyscallNumber(ir::SyscallId) const { return 0; }
     virtual void emitBr(CodeGen&, ir::Instruction&) = 0;
     virtual void emitJmp(CodeGen&, ir::Instruction&) = 0;

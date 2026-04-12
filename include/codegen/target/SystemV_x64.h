@@ -34,6 +34,7 @@ public:
     virtual void emitStore(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& i) override;
+    void emitExternCall(CodeGen&, ir::Instruction&) override;
     virtual uint64_t getSyscallNumber(ir::SyscallId id) const override;
     virtual void emitStartFunction(CodeGen& cg) override;
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const override { (void)type; return "%" + baseReg; }

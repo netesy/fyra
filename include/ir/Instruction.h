@@ -139,7 +139,8 @@ public:
 
         VAStart,
         VAArg,
-        Syscall
+        Syscall,
+        ExternCall
     };
 
     Instruction(Type* ty, Opcode op, const std::vector<Value*>& operands, BasicBlock* parent = nullptr);
@@ -172,6 +173,18 @@ public:
 
 private:
     SyscallId id;
+};
+
+class ExternCallInstruction : public Instruction {
+public:
+    ExternCallInstruction(Type* ty, const std::vector<Value*>& operands, const std::string& capability, BasicBlock* parent = nullptr);
+
+    const std::string& getCapability() const { return capability; }
+
+    void print(std::ostream& os) const override;
+
+private:
+    std::string capability;
 };
 
 } // namespace ir

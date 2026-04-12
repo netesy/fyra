@@ -124,6 +124,7 @@ void Instruction::print(std::ostream& os) const {
         case VAStart: os << "vastart"; break;
         case VAArg: os << "vaarg"; break;
         case Syscall: os << "syscall"; break;
+        case ExternCall: os << "extern"; break;
         default: os << "v_op"; break;
     }
 
@@ -147,6 +148,22 @@ void SyscallInstruction::print(std::ostream& os) const {
         os << syscallIdToString(id);
         if (getOperands().size() > 0) os << ", ";
     }
+    for (size_t i = 0; i < getOperands().size(); ++i) {
+        if (getOperands()[i]) printValue(os, getOperands()[i]->get());
+        else os << "null_use";
+        if (i < getOperands().size() - 1) os << ", ";
+    }
+    os << ")";
+}
+
+ExternCallInstruction::ExternCallInstruction(Type* ty, const std::vector<Value*>& operands, const std::string& capability, BasicBlock* parent)
+    : Instruction(ty, ExternCall, operands, parent), capability(capability) {}
+
+void ExternCallInstruction::print(std::ostream& os) const {
+    if (!getName().empty()) {
+        os << "%" << getName() << " = ";
+    }
+    os << "extern " << capability << "(";
     for (size_t i = 0; i < getOperands().size(); ++i) {
         if (getOperands()[i]) printValue(os, getOperands()[i]->get());
         else os << "null_use";

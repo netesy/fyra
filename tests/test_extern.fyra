@@ -1,0 +1,18 @@
+# Test extern capability system
+extern io.write(w, l, w) : w
+extern process.exit(w)
+
+export function $main() : w {
+@entry
+    # Test io.write
+    %fd = copy 1 : w
+    %msg = copy $hello : l
+    %len = copy 13 : w
+    %res = extern io.write(%fd, %msg, %len) : w
+
+    # Test process.exit
+    extern process.exit(0)
+    ret 0 : w
+}
+
+data $hello = { b "Hello, World\n", b 0 }

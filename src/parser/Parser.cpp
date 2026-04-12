@@ -37,8 +37,25 @@ std::unique_ptr<ir::Module> Parser::parseModule() {
                 std::cerr << "Skipping unknown top-level token: " << currentToken.value << std::endl;
                 getNextToken();
             }
+        } else if (currentToken.type == TokenType::Extern) {
+            // Top-level extern declaration: extern capability(...) : type
+            getNextToken(); // consume 'extern'
+            std::string capability = currentToken.value;
+            getNextToken();
+            if (currentToken.type == TokenType::LParen) {
+                 getNextToken();
+                 while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
+                     getNextToken(); // Skip param names/types for now in top-level decl
+                     if (currentToken.type == TokenType::Comma) getNextToken();
+                 }
+                 if (currentToken.type == TokenType::RParen) getNextToken();
+            }
+            if (currentToken.type == TokenType::Colon) {
+                getNextToken();
+                parseIRType(); // consume return type
+            }
         } else {
-            std::cerr << "Skipping unknown top-level token: " << currentToken.value << std::endl;
+            std::cerr << "Skipping unknown top-level token: " << (int)currentToken.type << " value: " << currentToken.value << std::endl;
             getNextToken();
         }
     }
@@ -223,7 +240,7 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         getNextToken();
 
         // Parse instruction opcode
-        if (currentToken.type != TokenType::Keyword) return nullptr;
+        if (currentToken.type != TokenType::Keyword && currentToken.type != TokenType::Extern) return nullptr;
         std::string opcodeStr = currentToken.value;
         getNextToken();
 
@@ -507,6 +524,27 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         } else if (opcodeStr == "vastart") {
             ir::Value* val = parseValue();
             instr = builder.createVAStart(val);
+        } else if (opcodeStr == "extern") {
+            std::string capability = currentToken.value;
+            getNextToken();
+            std::vector<ir::Value*> args;
+            if (currentToken.type == TokenType::LParen) {
+                getNextToken();
+                while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
+                    ir::Type* argType = parseIRType();
+                    ir::Value* arg = parseValue();
+                    args.push_back(arg);
+                    if (currentToken.type == TokenType::Comma) getNextToken();
+                    else break;
+                }
+                if (currentToken.type == TokenType::RParen) getNextToken();
+            }
+            ir::Type* retType = context->getVoidType();
+            if (currentToken.type == TokenType::Colon) {
+                getNextToken();
+                retType = parseIRType();
+            }
+            instr = builder.createExternCall(capability, args, retType);
         } else if (opcodeStr == "syscall") {
             ir::SyscallId id = ir::SyscallId::None;
             std::vector<ir::Value*> args;
@@ -549,7 +587,7 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         }
         return instr;
 
-    } else if (currentToken.type == TokenType::Keyword) {
+    } else if (currentToken.type == TokenType::Keyword || currentToken.type == TokenType::Extern) {
         std::string opcodeStr = currentToken.value;
         getNextToken();
 
@@ -633,6 +671,28 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         }
         if (opcodeStr == "call") {
             return parseCallInstruction(nullptr);
+        }
+        if (opcodeStr == "extern") {
+            std::string capability = currentToken.value;
+            getNextToken();
+            std::vector<ir::Value*> args;
+            if (currentToken.type == TokenType::LParen) {
+                getNextToken();
+                while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
+                    ir::Type* argType = parseIRType();
+                    ir::Value* arg = parseValue();
+                    args.push_back(arg);
+                    if (currentToken.type == TokenType::Comma) getNextToken();
+                    else break;
+                }
+                if (currentToken.type == TokenType::RParen) getNextToken();
+            }
+            ir::Type* retType = context->getVoidType();
+            if (currentToken.type == TokenType::Colon) {
+                getNextToken();
+                retType = parseIRType();
+            }
+            return builder.createExternCall(capability, args, retType);
         }
     }
     // If we got here, it's an unknown instruction, consume token to avoid infinite loop

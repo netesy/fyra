@@ -29,6 +29,7 @@ enum class TokenType {
     Align,
     Thread,
     Section,
+    Extern,
 
     Unknown,
 };

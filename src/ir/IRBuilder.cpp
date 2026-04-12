@@ -67,6 +67,14 @@ Instruction* IRBuilder::createRet(Value* val) {
     return instrPtr;
 }
 
+Instruction* IRBuilder::createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType) {
+    Type* returnType = retType ? retType : context->getVoidType();
+    auto instr = std::make_unique<ExternCallInstruction>(returnType, args, capability, insertPoint);
+    Instruction* instrPtr = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
 Instruction* IRBuilder::createSyscall(const std::vector<Value*>& args, Type* retType) {
     Type* returnType = retType ? retType : context->getVoidType();
     auto instr = std::make_unique<SyscallInstruction>(returnType, args, SyscallId::None, insertPoint);

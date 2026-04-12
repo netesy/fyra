@@ -196,6 +196,7 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Not: targetInfo->emitNot(*this, instr); break;
         case ir::Instruction::Copy: targetInfo->emitCopy(*this, instr); break;
         case ir::Instruction::Syscall: targetInfo->emitSyscall(*this, instr); break;
+        case ir::Instruction::ExternCall: targetInfo->emitExternCall(*this, instr); break;
         case ir::Instruction::Call: targetInfo->emitCall(*this, instr); break;
         case ir::Instruction::Jmp: targetInfo->emitJmp(*this, instr); break;
         case ir::Instruction::Br: case ir::Instruction::Jnz: targetInfo->emitBr(*this, instr); break;
