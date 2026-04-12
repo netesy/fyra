@@ -1,4 +1,4 @@
-# Fyra Capability System
+# Fyra Capability System (Expanded)
 
 Fyra uses a portable capability-based external call system instead of OS-specific syscalls. This makes the IR platform-agnostic and allows the backend to map capabilities to the appropriate platform APIs.
 
@@ -13,47 +13,80 @@ Example:
 %res = extern io.write(1, %buf, 10) : w
 ```
 
-## Supported Capabilities
+## Capability Categories
 
-### IO Capability
-- `io.write(fd: w, buf: l, len: w) : w`: Write to a stream.
-- `io.read(fd: w, buf: l, len: w) : w`: Read from a stream.
+### 1. IO Capability (Stream + Resource Abstraction)
+- `io.write(res: l, buf: l, len: l) : l`
+- `io.read(res: l, buf: l, len: l) : l`
+- `io.flush(res: l)`
+- `io.open(path: l, flags: w, mode: w) : l`
+- `io.close(res: l)`
+- `io.seek(res: l, offset: l, whence: w) : l`
+- `io.stat(res: l, stat_ptr: l) : w`
 
-### Memory Capability
-- `memory.alloc(size: l) : l`: Allocate memory.
-- `memory.free(addr: l, size: l)`: Free memory.
+### 2. Memory Capability (Heap + Virtual Memory Abstraction)
+- `memory.alloc(size: l) : l`
+- `memory.free(addr: l, size: l)`
+- `memory.resize(addr: l, old_size: l, new_size: l) : l`
+- `memory.map(addr: l, len: l, prot: w, flags: w, fd: l, off: l) : l`
+- `memory.unmap(addr: l, len: l)`
+- `memory.protect(addr: l, len: l, prot: w) : w`
 
-### Process Capability
-- `process.exit(code: w)`: Terminate the process.
+### 3. Process Capability (Execution Lifecycle Abstraction)
+- `process.exit(code: w)`
+- `process.abort()`
+- `process.spawn(exe: l, args: l) : l`
+- `process.sleep(ms: l)`
+- `process.info(info_ptr: l) : w`
 
-### Randomness Capability
-- `random.u64() : l`: Generate a 64-bit random number.
+### 4. Threading & Concurrency Capability
+- `thread.spawn(func_ptr: l, arg: l) : l`
+- `thread.join(tid: l) : w`
+- `thread.exit(code: w)`
+- `sync.mutex.lock(mutex_ptr: l)`
+- `sync.mutex.unlock(mutex_ptr: l)`
+- `sync.atomic.load(ptr: l) : l`
+- `sync.atomic.store(ptr: l, val: l)`
+- `sync.atomic.add(ptr: l, val: l) : l`
+- `sync.fence()`
+- `sync.condvar.wait(cv_ptr: l, mutex_ptr: l)`
+- `sync.condvar.signal(cv_ptr: l)`
 
-### Time Capability
-- `time.now() : l`: Get the current system time.
+### 5. Time Capability
+- `time.now() : l` (Standard system time)
+- `time.monotonic() : l` (High-resolution monotonic time)
+- `time.sleep(ns: l)`
+- `time.utc_now(ts_ptr: l)`
+- `time.local_now(ts_ptr: l)`
 
-## Backend Implementation
+### 6. Randomness Capability
+- `random.bytes(buf: l, len: l)`
+- `random.u64() : l`
+- `random.seed(val: l)`
 
-### Linux (SystemV x64)
-- `io.write` -> `sys_write`
-- `io.read` -> `sys_read`
-- `process.exit` -> `sys_exit`
-- `memory.alloc` -> `sys_mmap`
-- `memory.free` -> `sys_munmap`
-- `random.u64` -> `sys_getrandom`
-- `time.now` -> `sys_clock_gettime`
+### 7. Error Capability (Unified Failure Model)
+- `error.get() : w` (Get last capability error code)
+- `error.clear()` (Clear last error)
+- `error.raise(msg: l)` (Raise a portable trap/exception)
 
-### Windows (x64)
-- `io.write` -> `WriteFile`
-- `io.read` -> `ReadFile` (to be implemented)
-- `process.exit` -> `ExitProcess`
-- `memory.alloc` -> `VirtualAlloc`
-- `memory.free` -> `VirtualFree`
-- `random.u64` -> `BCryptGenRandom`
-- `time.now` -> `GetSystemTimeAsFileTime`
+### 8. Networking Capability (Stream-based Network Abstraction)
+- `net.connect(addr: l, port: w) : l`
+- `net.send(res: l, buf: l, len: l) : l`
+- `net.recv(res: l, buf: l, len: l) : l`
 
-### WebAssembly (Wasm32)
-- `io.write` -> `wasi_unstable.fd_write`
-- `io.read` -> `wasi_unstable.fd_read`
-- `process.exit` -> `wasi_unstable.proc_exit`
-- `memory.alloc` -> `memory.grow`
+### 9. IPC & Shared Memory
+- `ipc.send(channel: l, buf: l, len: l) : l`
+- `ipc.recv(channel: l, buf: l, len: l) : l`
+- `memory.shared_create(name: l, size: l) : l`
+- `memory.shared_attach(name: l) : l`
+
+### 10. Diagnostics & Debugging (Runtime Observability)
+- `debug.log(msg: l)`
+- `debug.trace()`
+- `debug.assert(cond: w, msg: l)`
+- `debug.dump(addr: l, len: l)`
+
+### 11. Module & Dynamic Linking (Controlled Dynamic Runtime Extension)
+- `module.load(path: l) : l`
+- `module.unload(handle: l)`
+- `module.resolve(handle: l, name: l) : l`

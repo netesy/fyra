@@ -35,12 +35,21 @@ public:
     void addType(const std::string& name, Type* type);
     Type* getType(const std::string& name) const;
 
+    struct ExternDecl {
+        std::string capability;
+        std::vector<Type*> paramTypes;
+        Type* returnType;
+    };
+    void addExternDecl(const std::string& name, ExternDecl decl) { externDecls[name] = decl; }
+    const std::map<std::string, ExternDecl>& getExternDecls() const { return externDecls; }
+
 private:
     std::shared_ptr<IRContext> context;
     std::string name;
     std::list<std::unique_ptr<Function>> functions;
     std::list<std::unique_ptr<GlobalVariable>> globalVariables;
     std::map<std::string, Type*> namedTypes;
+    std::map<std::string, ExternDecl> externDecls;
 };
 
 } // namespace ir

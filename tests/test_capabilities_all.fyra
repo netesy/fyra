@@ -1,0 +1,58 @@
+# Industrial-grade capability test suite
+extern io.open(l, w, w) : l
+extern io.write(l, l, l) : l
+extern io.read(l, l, l) : l
+extern io.seek(l, l, w) : l
+extern io.stat(l, l) : w
+extern io.close(l)
+
+extern memory.alloc(l) : l
+extern memory.free(l, l)
+extern memory.protect(l, l, w) : w
+
+extern process.exit(w)
+extern process.abort()
+extern process.sleep(l)
+
+extern random.u64() : l
+extern time.now() : l
+extern time.monotonic() : l
+
+extern sync.mutex.lock(l)
+extern sync.mutex.unlock(l)
+
+extern debug.log(l)
+
+export function $main() : w {
+@entry
+    # Test IO
+    %path = copy $path_str : l
+    %fd = extern io.open(%path, 0, 0) : l
+    %buf = extern memory.alloc(1024) : l
+    %nread = extern io.read(%fd, %buf, 1024) : l
+    %nwrite = extern io.write(%fd, %buf, 1024) : l
+    %nseek = extern io.seek(%fd, 0, 0) : l
+    extern io.close(%fd)
+
+    # Test Memory
+    extern memory.protect(%buf, 1024, 1) : w
+    extern memory.free(%buf, 1024)
+
+    # Test Time & Random
+    %t1 = extern time.now() : l
+    %t2 = extern time.monotonic() : l
+    %r = extern random.u64() : l
+
+    # Test Sync
+    %mutex = extern memory.alloc(8) : l
+    extern sync.mutex.lock(%mutex)
+    extern sync.mutex.unlock(%mutex)
+
+    # Test Debug
+    extern debug.log($path_str)
+
+    extern process.exit(0)
+    ret 0 : w
+}
+
+data $path_str = { b "test.txt", b 0 }

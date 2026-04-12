@@ -7,7 +7,7 @@
 #include <iostream>
 
 int main() {
-    std::string test_file = "tests/test_extern_industrial.fyra";
+    std::string test_file = "tests/test_capabilities_all.fyra";
     std::ifstream input(test_file);
     if (!input.good()) {
         std::cerr << "Could not open test file: " << test_file << std::endl;
@@ -33,17 +33,21 @@ int main() {
     bool foundMemoryFree = false;
     bool foundRandomU64 = false;
     bool foundTimeNow = false;
+    bool foundSyncMutexLock = false;
+    bool foundIoOpen = false;
 
     for (auto& bb : func->getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
             if (instr->getOpcode() == ir::Instruction::ExternCall) {
                 auto* ei = dynamic_cast<ir::ExternCallInstruction*>(instr.get());
                 if (ei->getCapability() == "io.write") foundIoWrite = true;
+                if (ei->getCapability() == "io.open") foundIoOpen = true;
                 if (ei->getCapability() == "process.exit") foundProcessExit = true;
                 if (ei->getCapability() == "memory.alloc") foundMemoryAlloc = true;
                 if (ei->getCapability() == "memory.free") foundMemoryFree = true;
                 if (ei->getCapability() == "random.u64") foundRandomU64 = true;
                 if (ei->getCapability() == "time.now") foundTimeNow = true;
+                if (ei->getCapability() == "sync.mutex.lock") foundSyncMutexLock = true;
             }
         }
     }
@@ -70,6 +74,14 @@ int main() {
     }
     if (!foundTimeNow) {
         std::cerr << "time.now extern call not found" << std::endl;
+        return 1;
+    }
+    if (!foundSyncMutexLock) {
+        std::cerr << "sync.mutex.lock extern call not found" << std::endl;
+        return 1;
+    }
+    if (!foundIoOpen) {
+        std::cerr << "io.open extern call not found" << std::endl;
         return 1;
     }
 

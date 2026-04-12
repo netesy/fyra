@@ -190,7 +190,7 @@ void SystemV_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
             *os << "  movq $1, %rax\n"; // sys_write
             for (size_t i = 0; i < instr.getOperands().size(); ++i) {
                 std::string dest_reg;
-                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; }
+                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
                 if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
             }
             *os << "  syscall\n";
@@ -198,29 +198,93 @@ void SystemV_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
             *os << "  movq $0, %rax\n"; // sys_read
             for (size_t i = 0; i < instr.getOperands().size(); ++i) {
                 std::string dest_reg;
-                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; }
+                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
                 if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
             }
+            *os << "  syscall\n";
+        } else if (cap == "io.open") {
+            *os << "  movq $2, %rax\n"; // sys_open
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
+            *os << "  syscall\n";
+        } else if (cap == "io.close") {
+            *os << "  movq $3, %rax\n"; // sys_close
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  syscall\n";
+        } else if (cap == "io.seek") {
+            *os << "  movq $8, %rax\n"; // sys_lseek
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
+            *os << "  syscall\n";
+        } else if (cap == "io.stat") {
+            *os << "  movq $4, %rax\n"; // sys_stat
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
             *os << "  syscall\n";
         } else if (cap == "process.exit") {
             *os << "  movq $60, %rax\n"; // sys_exit
             if (!instr.getOperands().empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
             *os << "  syscall\n";
+        } else if (cap == "process.abort") {
+            *os << "  movq $39, %rax\n"; // sys_getpid
+            *os << "  syscall\n";
+            *os << "  movq %rax, %rdi\n"; // pid
+            *os << "  movq $6, %rsi\n"; // SIGABRT
+            *os << "  movq $62, %rax\n"; // sys_kill
+            *os << "  syscall\n";
+        } else if (cap == "process.sleep") {
+            // nanosleep implementation
+            *os << "  subq $16, %rsp\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rax\n";
+            *os << "  movq $1000, %rcx\n";
+            *os << "  xorq %rdx, %rdx\n";
+            *os << "  divq %rcx\n"; // rax = sec, rdx = ms
+            *os << "  movq %rax, (%rsp)\n"; // tv_sec
+            *os << "  imulq $1000000, %rdx, %rdx\n";
+            *os << "  movq %rdx, 8(%rsp)\n"; // tv_nsec
+            *os << "  movq $35, %rax\n"; // sys_nanosleep
+            *os << "  movq %rsp, %rdi\n";
+            *os << "  xorq %rsi, %rsi\n";
+            *os << "  syscall\n";
+            *os << "  addq $16, %rsp\n";
         } else if (cap == "memory.alloc") {
-            // mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
             *os << "  movq $9, %rax\n"; // sys_mmap
-            *os << "  xorq %rdi, %rdi\n"; // addr
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n"; // len
-            *os << "  movq $3, %rdx\n"; // prot (READ|WRITE)
-            *os << "  movq $34, %r10\n"; // flags (PRIVATE|ANONYMOUS)
-            *os << "  movq $-1, %r8\n"; // fd
-            *os << "  xorq %r9, %r9\n"; // offset
+            if (instr.getOperands().size() == 1) {
+                *os << "  xorq %rdi, %rdi\n"; // addr
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n"; // len
+                *os << "  movq $3, %rdx\n"; // prot
+                *os << "  movq $34, %r10\n"; // flags
+                *os << "  movq $-1, %r8\n"; // fd
+                *os << "  xorq %r9, %r9\n"; // off
+            } else {
+                for (size_t i = 0; i < std::min(instr.getOperands().size(), (size_t)6); ++i) {
+                    std::string dest_reg;
+                    switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
+                    if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
+                }
+            }
+            *os << "  syscall\n";
+        } else if (cap == "memory.map") {
+            *os << "  movq $9, %rax\n"; // sys_mmap
+            for (size_t i = 0; i < std::min(instr.getOperands().size(), (size_t)6); ++i) {
+                std::string dest_reg;
+                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
+                if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
+            }
             *os << "  syscall\n";
         } else if (cap == "memory.free") {
             // munmap(addr, size)
             *os << "  movq $11, %rax\n"; // sys_munmap
             *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
             *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+            *os << "  syscall\n";
+        } else if (cap == "memory.protect") {
+            *os << "  movq $10, %rax\n"; // sys_mprotect
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
             *os << "  syscall\n";
         } else if (cap == "random.u64") {
             // getrandom(&buf, 8, 0)
@@ -240,6 +304,40 @@ void SystemV_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
             *os << "  syscall\n";
             *os << "  movq (%rsp), %rax\n"; // tv_sec
             *os << "  addq $16, %rsp\n";
+        } else if (cap == "time.monotonic") {
+            *os << "  subq $16, %rsp\n";
+            *os << "  movq $228, %rax\n"; // sys_clock_gettime
+            *os << "  movq $1, %rdi\n";   // CLOCK_MONOTONIC
+            *os << "  movq %rsp, %rsi\n";
+            *os << "  syscall\n";
+            *os << "  movq (%rsp), %rax\n";
+            *os << "  imulq $1000000000, %rax, %rax\n";
+            *os << "  addq 8(%rsp), %rax\n"; // total ns
+            *os << "  addq $16, %rsp\n";
+        } else if (cap == "error.get") {
+            // This is a bit tricky as errno is in TLS.
+            // Simplified: we'll just assume we can call a __errno_location style thing if libc is there
+            // or just return a dummy for now. Industrial would use TLS.
+            *os << "  xorq %rax, %rax\n";
+        } else if (cap == "sync.mutex.lock") {
+             // simplified spinlock for demonstration, industrial would use futex
+             *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+             *os << "  movq $1, %rax\n";
+             *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
+             *os << "  xchgq %rax, (%rdi)\n";
+             *os << "  testq %rax, %rax\n";
+             *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+             cg.labelCounter++;
+        } else if (cap == "sync.mutex.unlock") {
+             *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+             *os << "  movq $0, (%rdi)\n";
+        } else if (cap == "debug.log") {
+            // log to stderr
+            *os << "  movq $1, %rax\n"; // sys_write
+            *os << "  movq $2, %rdi\n"; // stderr
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+            *os << "  movq $128, %rdx\n"; // fixed length for simplicity
+            *os << "  syscall\n";
         }
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
     }

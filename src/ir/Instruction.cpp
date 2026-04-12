@@ -157,7 +157,12 @@ void SyscallInstruction::print(std::ostream& os) const {
 }
 
 ExternCallInstruction::ExternCallInstruction(Type* ty, const std::vector<Value*>& operands, const std::string& capability, BasicBlock* parent)
-    : Instruction(ty, ExternCall, operands, parent), capability(capability) {}
+    : Instruction(ty, ExternCall, operands, parent), capability(capability) {
+    // Normalize capability name: replace '_' with '.' (e.g., io_write -> io.write)
+    for (char& c : this->capability) {
+        if (c == '_') c = '.';
+    }
+}
 
 void ExternCallInstruction::print(std::ostream& os) const {
     if (!getName().empty()) {

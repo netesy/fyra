@@ -262,34 +262,55 @@ void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
         if (cap == "io.write") {
              // Windows write: WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped)
-             // simplified: we'll use GetStdHandle(-11) then WriteFile
-             *os << "  sub rsp, 40\n";
+             *os << "  sub rsp, 48\n";
              *os << "  mov rcx, -11\n"; // STD_OUTPUT_HANDLE
              *os << "  call GetStdHandle\n";
              *os << "  mov rcx, rax\n"; // hFile
              *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n"; // lpBuffer
              *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n"; // nNumberOfBytesToWrite
-             *os << "  lea r9, [rsp + 32]\n"; // lpNumberOfBytesWritten
-             *os << "  mov qword ptr [rsp + 32], 0\n";
-             *os << "  mov qword ptr [rsp + 40], 0\n"; // lpOverlapped
+             *os << "  lea r9, [rsp + 40]\n"; // lpNumberOfBytesWritten
+             *os << "  mov qword ptr [rsp + 32], 0\n"; // lpOverlapped (5th arg)
              *os << "  call WriteFile\n";
+             *os << "  add rsp, 48\n";
+        } else if (cap == "io.open") {
+             // CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile)
+             *os << "  sub rsp, 64\n";
+             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  mov rdx, 3221225472\n"; // GENERIC_READ | GENERIC_WRITE (0xC0000000)
+             *os << "  mov r8, 1\n"; // FILE_SHARE_READ
+             *os << "  xor r9, r9\n";
+             *os << "  mov qword ptr [rsp + 32], 3\n"; // OPEN_EXISTING
+             *os << "  mov qword ptr [rsp + 40], 128\n"; // FILE_ATTRIBUTE_NORMAL
+             *os << "  mov qword ptr [rsp + 48], 0\n";
+             *os << "  call CreateFileA\n";
+             *os << "  add rsp, 64\n";
+        } else if (cap == "io.close") {
+             *os << "  sub rsp, 40\n";
+             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  call CloseHandle\n";
              *os << "  add rsp, 40\n";
         } else if (cap == "io.read") {
              // ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped)
-             *os << "  sub rsp, 40\n";
+             *os << "  sub rsp, 48\n";
              *os << "  mov rcx, -10\n"; // STD_INPUT_HANDLE
              *os << "  call GetStdHandle\n";
              *os << "  mov rcx, rax\n";
              *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
              *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
-             *os << "  lea r9, [rsp + 32]\n";
-             *os << "  mov qword ptr [rsp + 32], 0\n";
-             *os << "  mov qword ptr [rsp + 40], 0\n";
+             *os << "  lea r9, [rsp + 40]\n";
+             *os << "  mov qword ptr [rsp + 32], 0\n"; // lpOverlapped (5th arg)
              *os << "  call ReadFile\n";
-             *os << "  add rsp, 40\n";
+             *os << "  add rsp, 48\n";
         } else if (cap == "process.exit") {
             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
             *os << "  call ExitProcess\n";
+        } else if (cap == "process.abort") {
+            *os << "  call abort\n";
+        } else if (cap == "process.sleep") {
+            *os << "  sub rsp, 40\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  call Sleep\n";
+            *os << "  add rsp, 40\n";
         } else if (cap == "memory.alloc") {
              // VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
              *os << "  sub rsp, 40\n";
@@ -325,6 +346,32 @@ void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
              *os << "  lea rcx, [rsp + 32]\n";
              *os << "  call GetSystemTimeAsFileTime\n";
              *os << "  mov rax, [rsp + 32]\n";
+             *os << "  add rsp, 40\n";
+        } else if (cap == "sync.mutex.lock") {
+             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  mov rax, 1\n";
+             *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
+             *os << "  lock xchg qword ptr [rcx], rax\n";
+             *os << "  test rax, rax\n";
+             *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+             cg.labelCounter++;
+        } else if (cap == "sync.mutex.unlock") {
+             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  mov qword ptr [rcx], 0\n";
+        } else if (cap == "time.monotonic") {
+             *os << "  sub rsp, 40\n";
+             *os << "  lea rcx, [rsp + 32]\n";
+             *os << "  call QueryPerformanceCounter\n";
+             *os << "  mov rax, [rsp + 32]\n";
+             *os << "  add rsp, 40\n";
+        } else if (cap == "error.get") {
+             *os << "  sub rsp, 40\n";
+             *os << "  call GetLastError\n";
+             *os << "  add rsp, 40\n";
+        } else if (cap == "debug.log") {
+             *os << "  sub rsp, 40\n";
+             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  call OutputDebugStringA\n";
              *os << "  add rsp, 40\n";
         }
         if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";

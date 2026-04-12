@@ -41,19 +41,25 @@ std::unique_ptr<ir::Module> Parser::parseModule() {
             // Top-level extern declaration: extern capability(...) : type
             getNextToken(); // consume 'extern'
             std::string capability = currentToken.value;
+            // Normalize capability name
+            for (char& c : capability) if (c == '_') c = '.';
             getNextToken();
+            std::vector<ir::Type*> paramTypes;
             if (currentToken.type == TokenType::LParen) {
                  getNextToken();
                  while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
-                     getNextToken(); // Skip param names/types for now in top-level decl
+                     paramTypes.push_back(parseIRType());
                      if (currentToken.type == TokenType::Comma) getNextToken();
+                     else break;
                  }
                  if (currentToken.type == TokenType::RParen) getNextToken();
             }
+            ir::Type* returnType = context->getVoidType();
             if (currentToken.type == TokenType::Colon) {
                 getNextToken();
-                parseIRType(); // consume return type
+                returnType = parseIRType();
             }
+            module->addExternDecl(capability, {capability, paramTypes, returnType});
         } else {
             std::cerr << "Skipping unknown top-level token: " << (int)currentToken.type << " value: " << currentToken.value << std::endl;
             getNextToken();
@@ -531,7 +537,10 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
             if (currentToken.type == TokenType::LParen) {
                 getNextToken();
                 while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
-                    ir::Type* argType = parseIRType();
+                    // Try to parse type if it's there
+                    if (currentToken.type == TokenType::Keyword) {
+                         parseIRType();
+                    }
                     ir::Value* arg = parseValue();
                     args.push_back(arg);
                     if (currentToken.type == TokenType::Comma) getNextToken();
@@ -679,7 +688,9 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
             if (currentToken.type == TokenType::LParen) {
                 getNextToken();
                 while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
-                    ir::Type* argType = parseIRType();
+                    if (currentToken.type == TokenType::Keyword) {
+                         parseIRType();
+                    }
                     ir::Value* arg = parseValue();
                     args.push_back(arg);
                     if (currentToken.type == TokenType::Comma) getNextToken();

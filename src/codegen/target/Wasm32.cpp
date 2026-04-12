@@ -428,6 +428,8 @@ void Wasm32::emitHeader(CodeGen& cg) {
         *os << "(module\n";
         *os << "  (import \"wasi_unstable\" \"fd_write\" (func $fd_write (param i32 i32 i32 i32) (result i32)))\n";
         *os << "  (import \"wasi_unstable\" \"fd_read\" (func $fd_read (param i32 i32 i32 i32) (result i32)))\n";
+        *os << "  (import \"wasi_unstable\" \"fd_seek\" (func $fd_seek (param i32 i64 i32 i32) (result i32)))\n";
+        *os << "  (import \"wasi_unstable\" \"fd_datasync\" (func $fd_datasync (param i32) (result i32)))\n";
         *os << "  (import \"wasi_unstable\" \"proc_exit\" (func $proc_exit (param i32)))\n";
         *os << "  (memory 1)\n";
         *os << "  (global $__heap_ptr (mut i32) (i32.const 1024))\n";
@@ -606,6 +608,7 @@ bool Wasm32::needsTempLocals(ir::Function& func) const {
                 case ir::Instruction::Alloc:
                 case ir::Instruction::Alloc4:
                 case ir::Instruction::Alloc16:
+                case ir::Instruction::ExternCall:
                     return true;
                 default: break;
             }
@@ -1711,9 +1714,10 @@ void Wasm32::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
         if (cap == "io.write") {
              // fd_write(fd, ciovec_ptr, ciovec_len, nwritten_ptr)
-             // We need to construct ciovec on the "stack" (memory)
-             *os << "  ;; Construct ciovec for fd_write\n";
-             *os << "  global.get $__heap_ptr\n";
+             // We use the first 16 bytes of memory as a temporary "scratchpad" for syscalls
+             // In an industrial backend, we would manage a shadow stack.
+             *os << "  ;; Construct ciovec for fd_write in scratchpad (addr 0)\n";
+             *os << "  i32.const 0\n";
              *os << "  local.set $temp_i32_0\n";
              *os << "  local.get $temp_i32_0\n";
              *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
@@ -1731,7 +1735,7 @@ void Wasm32::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
              *os << "  call $fd_write\n";
         } else if (cap == "io.read") {
              // fd_read(fd, iovec_ptr, iovec_len, nread_ptr)
-             *os << "  global.get $__heap_ptr\n";
+             *os << "  i32.const 0\n";
              *os << "  local.set $temp_i32_0\n";
              *os << "  local.get $temp_i32_0\n";
              *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
@@ -1747,6 +1751,19 @@ void Wasm32::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
              *os << "  i32.const 8\n";
              *os << "  i32.add\n";
              *os << "  call $fd_read\n";
+        } else if (cap == "io.flush") {
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  call $fd_datasync\n";
+        } else if (cap == "io.seek") {
+             // fd_seek(fd, offset, whence, newoffset_ptr)
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+             *os << "  " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+             *os << "  global.get $__heap_ptr\n";
+             *os << "  call $fd_seek\n";
+             *os << "  drop\n";
+             *os << "  global.get $__heap_ptr\n";
+             *os << "  i64.load\n";
         } else if (cap == "process.exit") {
              std::string op = cg.getValueAsOperand(instr.getOperands()[0]->get());
              if (!op.empty()) *os << "  " << op << "\n";
