@@ -13,7 +13,6 @@
 
 namespace codegen { namespace target {
 
-Windows_x64::Windows_x64() { initRegisters(); }
 
 void Windows_x64::initRegisters() {
     integerRegs = {"rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"};
@@ -29,9 +28,6 @@ void Windows_x64::emitHeader(CodeGen& cg) {
         *os << ".section .data\n.align 8\nheap_ptr:\n  .quad __fyra_heap\n";
         *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 1048576\n";
         *os << ".text\n";
-    } else {
-        // Binary header: we need to ensure heap_ptr and __fyra_heap exist in data sections
-        // This is complex for in-memory, so we'll assume CodeGen handles data sections.
     }
 }
 
@@ -50,7 +46,6 @@ void Windows_x64::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
     int stack_alloc = std::abs(current_offset + 56);
     stack_alloc += 32; // Shadow space
-    // Total pushed: 8 regs (rbp, rbx, rsi, rdi, r12, r13, r14, r15) = 64 bytes.
     if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
     if (auto* os = cg.getTextStream()) {
         if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
@@ -87,70 +82,87 @@ void Windows_x64::emitAdd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  add rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x01, 0xC8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitSub(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  sub rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x29, 0xC8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitMul(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  imul rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x0F, 0xAF, 0xC1}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitDiv(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cqo\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  idiv rcx\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0x99}); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xF7, 0xF9}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitRem(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cqo\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  idiv rcx\n  mov " << cg.getValueAsOperand(&i) << ", rdx\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0x99}); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xF7, 0xF9}); emitStoreResult(cg, i, 2); }
 }
+
 void Windows_x64::emitCopy(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitCall(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { for (size_t j=1; j<std::min(i.getOperands().size(), (size_t)5); ++j) *os << "  mov " << integerArgRegs[j-1] << ", " << cg.getValueAsOperand(i.getOperands()[j]->get()) << "\n"; *os << "  call " << i.getOperands()[0]->get()->getName() << "\n"; if (i.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { for (size_t j=1; j<std::min(i.getOperands().size(), (size_t)5); ++j) { uint8_t r = getArchRegIndex(integerArgRegs[j-1]); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), r); } cg.getAssembler().emitByte(0xE8); uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, i.getOperands()[0]->get()->getName(), ".text"}); if (i.getType()->getTypeID() != ir::Type::VoidTyID) emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitCmp(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { std::string set; switch(i.getOpcode()){case ir::Instruction::Ceq:set="sete";break;case ir::Instruction::Cne:set="setne";break;case ir::Instruction::Cslt:set="setl";break;case ir::Instruction::Csle:set="setle";break;case ir::Instruction::Csgt:set="setg";break;case ir::Instruction::Csge:set="setge";break;default:set="sete";break;} *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cmp rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  " << set << " al\n  movzx eax, al\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x39, 0xC8}); uint8_t s = 0x94; switch(i.getOpcode()){case ir::Instruction::Ceq:s=0x94;break;case ir::Instruction::Cne:s=0x95;break;case ir::Instruction::Cslt:s=0x9C;break;case ir::Instruction::Csle:s=0x9E;break;case ir::Instruction::Csgt:s=0x9F;break;case ir::Instruction::Csge:s=0x9D;break;default:s=0x94;break;} cg.getAssembler().emitBytes({0x0F, s, 0xC0, 0x48, 0x0F, 0xB6, 0xC0}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitBr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  test rax, rax\n  jne " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())) << "\n  jmp " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())) << "\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0x85, 0xC0, 0x0F, 0x85}); uint64_t off1 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off1, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())), ".text"}); cg.getAssembler().emitByte(0xE9); uint64_t off2 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off2, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())), ".text"}); }
 }
+
 void Windows_x64::emitJmp(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  jmp " << getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())) << "\n"; }
     else { cg.getAssembler().emitByte(0xE9); uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())), ".text"}); }
 }
+
 void Windows_x64::emitAnd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  and rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x21, 0xC8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitOr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  or rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x09, 0xC8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitXor(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  xor rax, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0x31, 0xC8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitShl(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  shl rax, cl\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xD3, 0xE0}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitShr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  shr rax, cl\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xD3, 0xE8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitSar(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  mov rcx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  sar rax, cl\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1); cg.getAssembler().emitBytes({0x48, 0xD3, 0xF8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitNeg(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  neg rax\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0xF7, 0xD8}); emitStoreResult(cg, i, 0); }
 }
+
 void Windows_x64::emitNot(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  mov rax, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  not rax\n  mov " << cg.getValueAsOperand(&i) << ", rax\n"; }
     else { emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0); cg.getAssembler().emitBytes({0x48, 0xF7, 0xD0}); emitStoreResult(cg, i, 0); }
@@ -247,138 +259,6 @@ void Windows_x64::emitAlloc(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-void Windows_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
-    ir::SyscallInstruction* si = dynamic_cast<ir::SyscallInstruction*>(&instr);
-    ir::SyscallId sid = si ? si->getSyscallId() : ir::SyscallId::None;
-    if (sid == ir::SyscallId::Exit) {
-        if (auto* os = cg.getTextStream()) { *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call ExitProcess\n"; }
-        else { auto& as = cg.getAssembler(); emitLoadValue(cg, as, instr.getOperands()[0]->get(), 1); as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "ExitProcess", ".text"}); }
-    }
-}
-
-void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
-    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
-    if (!ei) return;
-    const std::string& cap = ei->getCapability();
-    if (auto* os = cg.getTextStream()) {
-        if (cap == "io.write") {
-             // Windows write: WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped)
-             *os << "  sub rsp, 48\n";
-             *os << "  mov rcx, -11\n"; // STD_OUTPUT_HANDLE
-             *os << "  call GetStdHandle\n";
-             *os << "  mov rcx, rax\n"; // hFile
-             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n"; // lpBuffer
-             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n"; // nNumberOfBytesToWrite
-             *os << "  lea r9, [rsp + 40]\n"; // lpNumberOfBytesWritten
-             *os << "  mov qword ptr [rsp + 32], 0\n"; // lpOverlapped (5th arg)
-             *os << "  call WriteFile\n";
-             *os << "  add rsp, 48\n";
-        } else if (cap == "io.open") {
-             // CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile)
-             *os << "  sub rsp, 64\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  mov rdx, 3221225472\n"; // GENERIC_READ | GENERIC_WRITE (0xC0000000)
-             *os << "  mov r8, 1\n"; // FILE_SHARE_READ
-             *os << "  xor r9, r9\n";
-             *os << "  mov qword ptr [rsp + 32], 3\n"; // OPEN_EXISTING
-             *os << "  mov qword ptr [rsp + 40], 128\n"; // FILE_ATTRIBUTE_NORMAL
-             *os << "  mov qword ptr [rsp + 48], 0\n";
-             *os << "  call CreateFileA\n";
-             *os << "  add rsp, 64\n";
-        } else if (cap == "io.close") {
-             *os << "  sub rsp, 40\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  call CloseHandle\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "io.read") {
-             // ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped)
-             *os << "  sub rsp, 48\n";
-             *os << "  mov rcx, -10\n"; // STD_INPUT_HANDLE
-             *os << "  call GetStdHandle\n";
-             *os << "  mov rcx, rax\n";
-             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
-             *os << "  lea r9, [rsp + 40]\n";
-             *os << "  mov qword ptr [rsp + 32], 0\n"; // lpOverlapped (5th arg)
-             *os << "  call ReadFile\n";
-             *os << "  add rsp, 48\n";
-        } else if (cap == "process.exit") {
-            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-            *os << "  call ExitProcess\n";
-        } else if (cap == "process.abort") {
-            *os << "  call abort\n";
-        } else if (cap == "process.sleep") {
-            *os << "  sub rsp, 40\n";
-            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-            *os << "  call Sleep\n";
-            *os << "  add rsp, 40\n";
-        } else if (cap == "memory.alloc") {
-             // VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
-             *os << "  sub rsp, 40\n";
-             *os << "  xor rcx, rcx\n"; // lpAddress
-             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n"; // dwSize
-             *os << "  mov r8, 12288\n"; // MEM_COMMIT | MEM_RESERVE (0x3000)
-             *os << "  mov r9, 4\n";     // PAGE_READWRITE
-             *os << "  call VirtualAlloc\n";
-             *os << "  add rsp, 40\n";
-             *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
-             return;
-        } else if (cap == "memory.free") {
-             // VirtualFree(addr, 0, MEM_RELEASE)
-             *os << "  sub rsp, 40\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  xor rdx, rdx\n"; // dwSize must be 0 for MEM_RELEASE
-             *os << "  mov r8, 32768\n"; // MEM_RELEASE (0x8000)
-             *os << "  call VirtualFree\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "random.u64") {
-             // BCryptGenRandom(NULL, &buf, 8, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
-             *os << "  sub rsp, 48\n";
-             *os << "  xor rcx, rcx\n";
-             *os << "  lea rdx, [rsp + 32]\n";
-             *os << "  mov r8, 8\n";
-             *os << "  mov r9, 2\n"; // BCRYPT_USE_SYSTEM_PREFERRED_RNG
-             *os << "  call BCryptGenRandom\n";
-             *os << "  mov rax, [rsp + 32]\n";
-             *os << "  add rsp, 48\n";
-        } else if (cap == "time.now") {
-             // GetSystemTimeAsFileTime(&ft)
-             *os << "  sub rsp, 40\n";
-             *os << "  lea rcx, [rsp + 32]\n";
-             *os << "  call GetSystemTimeAsFileTime\n";
-             *os << "  mov rax, [rsp + 32]\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "sync.mutex.lock") {
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  mov rax, 1\n";
-             *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
-             *os << "  lock xchg qword ptr [rcx], rax\n";
-             *os << "  test rax, rax\n";
-             *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
-             cg.labelCounter++;
-        } else if (cap == "sync.mutex.unlock") {
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  mov qword ptr [rcx], 0\n";
-        } else if (cap == "time.monotonic") {
-             *os << "  sub rsp, 40\n";
-             *os << "  lea rcx, [rsp + 32]\n";
-             *os << "  call QueryPerformanceCounter\n";
-             *os << "  mov rax, [rsp + 32]\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "error.get") {
-             *os << "  sub rsp, 40\n";
-             *os << "  call GetLastError\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "debug.log") {
-             *os << "  sub rsp, 40\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  call OutputDebugStringA\n";
-             *os << "  add rsp, 40\n";
-        }
-        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
-    }
-}
-
 void Windows_x64::emitStartFunction(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << ".globl _start\n_start:\n  sub rsp, 40\n  call main\n  mov rcx, rax\n  call ExitProcess\n";
@@ -394,5 +274,839 @@ void Windows_x64::emitStartFunction(CodeGen& cg) {
 
 std::string Windows_x64::formatStackOperand(int offset) const { return "[rbp + " + std::to_string(offset) + "]"; }
 std::string Windows_x64::formatGlobalOperand(const std::string& name) const { return "[rel " + name + "]"; }
+
+}} // namespace codegen::target
+
+void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
+    if (!ei) return;
+    const std::string& cap = ei->getCapability();
+
+    if (cap.compare(0, 3, "io.") == 0) emitIOCall(cg, instr, cap);
+    else if (cap.compare(0, 3, "fs.") == 0) emitFSCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "memory.") == 0) emitMemoryCall(cg, instr, cap);
+    else if (cap.compare(0, 8, "process.") == 0) emitProcessCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "thread.") == 0) emitThreadCall(cg, instr, cap);
+    else if (cap.compare(0, 5, "sync.") == 0) emitSyncCall(cg, instr, cap);
+    else if (cap.compare(0, 5, "time.") == 0) emitTimeCall(cg, instr, cap);
+    else if (cap.compare(0, 6, "event.") == 0) emitEventCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "net.") == 0) emitNetCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "ipc.") == 0) emitIPCCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "env.") == 0) emitEnvCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "system.") == 0) emitSystemCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "signal.") == 0) emitSignalCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "random.") == 0) emitRandomCall(cg, instr, cap);
+    else if (cap.compare(0, 6, "error.") == 0) emitErrorCall(cg, instr, cap);
+    else if (cap.compare(0, 6, "debug.") == 0) emitDebugCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "module.") == 0) emitModuleCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "tty.") == 0) emitTTYCall(cg, instr, cap);
+    else if (cap.compare(0, 9, "security.") == 0) emitSecurityCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "gpu.") == 0) emitGPUCall(cg, instr, cap);
+
+    if (auto* os = cg.getTextStream()) {
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&instr) << "\n";
+    }
+}
+
+void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
+    if (!ei) return;
+    const std::string& cap = ei->getCapability();
+
+    if (cap.compare(0, 3, "io.") == 0) emitIOCall(cg, instr, cap);
+    else if (cap.compare(0, 3, "fs.") == 0) emitFSCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "memory.") == 0) emitMemoryCall(cg, instr, cap);
+    else if (cap.compare(0, 8, "process.") == 0) emitProcessCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "thread.") == 0) emitThreadCall(cg, instr, cap);
+    else if (cap.compare(0, 5, "sync.") == 0) emitSyncCall(cg, instr, cap);
+    else if (cap.compare(0, 5, "time.") == 0) emitTimeCall(cg, instr, cap);
+    else if (cap.compare(0, 6, "event.") == 0) emitEventCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "net.") == 0) emitNetCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "ipc.") == 0) emitIPCCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "env.") == 0) emitEnvCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "system.") == 0) emitSystemCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "signal.") == 0) emitSignalCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "random.") == 0) emitRandomCall(cg, instr, cap);
+    else if (cap.compare(0, 6, "error.") == 0) emitErrorCall(cg, instr, cap);
+    else if (cap.compare(0, 6, "debug.") == 0) emitDebugCall(cg, instr, cap);
+    else if (cap.compare(0, 7, "module.") == 0) emitModuleCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "tty.") == 0) emitTTYCall(cg, instr, cap);
+    else if (cap.compare(0, 9, "security.") == 0) emitSecurityCall(cg, instr, cap);
+    else if (cap.compare(0, 4, "gpu.") == 0) emitGPUCall(cg, instr, cap);
+
+    if (auto* os = cg.getTextStream()) {
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&instr) << "\n";
+    }
+}
+
+void Windows_x64::emitIOCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "io.write") {
+        *os << "  sub rsp, 48\n";
+        *os << "  mov rcx, -11\n"; // STD_OUTPUT_HANDLE
+        *os << "  call GetStdHandle\n";
+        *os << "  mov rcx, rax\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  lea r9, [rsp + 40]\n";
+        *os << "  mov qword ptr [rsp + 32], 0\n";
+        *os << "  call WriteFile\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "io.read") {
+        *os << "  sub rsp, 48\n";
+        *os << "  mov rcx, -10\n"; // STD_INPUT_HANDLE
+        *os << "  call GetStdHandle\n";
+        *os << "  mov rcx, rax\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  lea r9, [rsp + 40]\n";
+        *os << "  mov qword ptr [rsp + 32], 0\n";
+        *os << "  call ReadFile\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "io.open") {
+        *os << "  sub rsp, 64\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, 3221225472\n"; // GENERIC_READ | GENERIC_WRITE
+        *os << "  mov r8, 1\n"; // FILE_SHARE_READ
+        *os << "  xor r9, r9\n";
+        *os << "  mov qword ptr [rsp + 32], 3\n"; // OPEN_EXISTING
+        *os << "  mov qword ptr [rsp + 40], 128\n"; // FILE_ATTRIBUTE_NORMAL
+        *os << "  mov qword ptr [rsp + 48], 0\n";
+        *os << "  call CreateFileA\n";
+        *os << "  add rsp, 64\n";
+    } else if (cap == "io.close") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call CloseHandle\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "io.seek") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  call SetFilePointer\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "io.flush") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FlushFileBuffers\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "io.stat") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitProcessCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "process.exit") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call ExitProcess\n";
+    } else if (cap == "process.abort") {
+        *os << "  call abort\n";
+    } else if (cap == "process.spawn") {
+        *os << "  push rsi\n";
+        *os << "  push rdi\n";
+        *os << "  sub rsp, 200\n";
+        *os << "  mov rcx, 92\n";
+        *os << "  lea rdi, [rsp + 96]\n";
+        *os << "  xor rax, rax\n";
+        *os << "  rep stosb\n";
+        *os << "  mov dword ptr [rsp + 96], 68\n";
+        *os << "  mov rdi, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rsi, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov rcx, rdi\n";
+        *os << "  mov rdx, rsi\n";
+        *os << "  xor r8, r8\n";
+        *os << "  xor r9, r9\n";
+        *os << "  mov qword ptr [rsp + 32], 0\n";
+        *os << "  mov qword ptr [rsp + 40], 0\n";
+        *os << "  mov qword ptr [rsp + 48], 0\n";
+        *os << "  mov qword ptr [rsp + 56], 0\n";
+        *os << "  lea rax, [rsp + 96]\n";
+        *os << "  mov [rsp + 64], rax\n";
+        *os << "  lea rax, [rsp + 164]\n";
+        *os << "  mov [rsp + 72], rax\n";
+        *os << "  call CreateProcessA\n";
+        *os << "  add rsp, 200\n";
+        *os << "  pop rdi\n";
+        *os << "  pop rsi\n";
+    } else if (cap == "process.info") {
+        *os << "  call GetCurrentProcessId\n";
+    } else if (cap == "process.sleep") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call Sleep\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "sync.mutex.lock") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, 1\n";
+        *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
+        *os << "  lock xchg qword ptr [rcx], rax\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+        cg.labelCounter++;
+    } else if (cap == "sync.mutex.unlock") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov qword ptr [rcx], 0\n";
+    } else if (cap == "sync.atomic.load") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, [rax]\n";
+    } else if (cap == "sync.atomic.store") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  xchg [rcx], rax\n";
+    } else if (cap == "sync.atomic.add") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  lock xadd [rcx], rax\n";
+        *os << "  add rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+    } else if (cap == "sync.fence") {
+        *os << "  mfence\n";
+    void Windows_x64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "net.connect") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, 2\n";
+        *os << "  mov rdx, 1\n";
+        *os << "  xor r8, r8\n";
+        *os << "  call socket\n";
+        *os << "  push rax\n";
+        *os << "  mov rcx, rax\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, 16\n";
+        *os << "  call connect\n";
+        *os << "  pop rax\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.send" || cap == "ipc.send") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call send\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.recv" || cap == "ipc.recv") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call recv\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "random.u64") {
+        *os << "  sub rsp, 48\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  lea rdx, [rsp + 32]\n";
+        *os << "  mov r8, 8\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  mov rax, [rsp + 32]\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "random.bytes") {
+        *os << "  sub rsp, 40\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "random.seed") {
+        *os << "  xor rax, rax\n";
+    void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "debug.assert") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lassert_ok_" << cg.labelCounter << "\n";
+        *os << "  mov rcx, 1\n";
+        *os << "  call ExitProcess\n";
+        *os << "  .Lassert_ok_" << cg.labelCounter << ":\n";
+        cg.labelCounter++;
+    } else if (cap == "debug.dump") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitFSCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitMemoryCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitProcessCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "process.exit") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call ExitProcess\n";
+    } else if (cap == "process.abort") {
+        *os << "  call abort\n";
+    } else if (cap == "process.spawn") {
+        *os << "  push rsi\n";
+        *os << "  push rdi\n";
+        *os << "  sub rsp, 200\n";
+        *os << "  mov rcx, 92\n";
+        *os << "  lea rdi, [rsp + 96]\n";
+        *os << "  xor rax, rax\n";
+        *os << "  rep stosb\n";
+        *os << "  mov dword ptr [rsp + 96], 68\n";
+        *os << "  mov rdi, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rsi, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov rcx, rdi\n";
+        *os << "  mov rdx, rsi\n";
+        *os << "  xor r8, r8\n";
+        *os << "  xor r9, r9\n";
+        *os << "  mov qword ptr [rsp + 32], 0\n";
+        *os << "  mov qword ptr [rsp + 40], 0\n";
+        *os << "  mov qword ptr [rsp + 48], 0\n";
+        *os << "  mov qword ptr [rsp + 56], 0\n";
+        *os << "  lea rax, [rsp + 96]\n";
+        *os << "  mov [rsp + 64], rax\n";
+        *os << "  lea rax, [rsp + 164]\n";
+        *os << "  mov [rsp + 72], rax\n";
+        *os << "  call CreateProcessA\n";
+        *os << "  add rsp, 200\n";
+        *os << "  pop rdi\n";
+        *os << "  pop rsi\n";
+    } else if (cap == "process.info") {
+        *os << "  call GetCurrentProcessId\n";
+    } else if (cap == "process.sleep") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call Sleep\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "sync.mutex.lock") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, 1\n";
+        *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
+        *os << "  lock xchg qword ptr [rcx], rax\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+        cg.labelCounter++;
+    } else if (cap == "sync.mutex.unlock") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov qword ptr [rcx], 0\n";
+    } else if (cap == "sync.atomic.load") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, [rax]\n";
+    } else if (cap == "sync.atomic.store") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  xchg [rcx], rax\n";
+    } else if (cap == "sync.atomic.add") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  lock xadd [rcx], rax\n";
+        *os << "  add rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+    } else if (cap == "sync.fence") {
+        *os << "  mfence\n";
+    void Windows_x64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "net.connect") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, 2\n";
+        *os << "  mov rdx, 1\n";
+        *os << "  xor r8, r8\n";
+        *os << "  call socket\n";
+        *os << "  push rax\n";
+        *os << "  mov rcx, rax\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, 16\n";
+        *os << "  call connect\n";
+        *os << "  pop rax\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.send" || cap == "ipc.send") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call send\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.recv" || cap == "ipc.recv") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call recv\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "random.u64") {
+        *os << "  sub rsp, 48\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  lea rdx, [rsp + 32]\n";
+        *os << "  mov r8, 8\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  mov rax, [rsp + 32]\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "random.bytes") {
+        *os << "  sub rsp, 40\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "random.seed") {
+        *os << "  xor rax, rax\n";
+    void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "debug.assert") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lassert_ok_" << cg.labelCounter << "\n";
+        *os << "  mov rcx, 1\n";
+        *os << "  call ExitProcess\n";
+        *os << "  .Lassert_ok_" << cg.labelCounter << ":\n";
+        cg.labelCounter++;
+    } else if (cap == "debug.dump") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitThreadCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "sync.mutex.lock") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, 1\n";
+        *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
+        *os << "  lock xchg qword ptr [rcx], rax\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+        cg.labelCounter++;
+    } else if (cap == "sync.mutex.unlock") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov qword ptr [rcx], 0\n";
+    } else if (cap == "sync.atomic.load") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, [rax]\n";
+    } else if (cap == "sync.atomic.store") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  xchg [rcx], rax\n";
+    } else if (cap == "sync.atomic.add") {
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  lock xadd [rcx], rax\n";
+        *os << "  add rax, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+    } else if (cap == "sync.fence") {
+        *os << "  mfence\n";
+    void Windows_x64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "net.connect") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, 2\n";
+        *os << "  mov rdx, 1\n";
+        *os << "  xor r8, r8\n";
+        *os << "  call socket\n";
+        *os << "  push rax\n";
+        *os << "  mov rcx, rax\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, 16\n";
+        *os << "  call connect\n";
+        *os << "  pop rax\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.send" || cap == "ipc.send") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call send\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.recv" || cap == "ipc.recv") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call recv\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "random.u64") {
+        *os << "  sub rsp, 48\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  lea rdx, [rsp + 32]\n";
+        *os << "  mov r8, 8\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  mov rax, [rsp + 32]\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "random.bytes") {
+        *os << "  sub rsp, 40\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "random.seed") {
+        *os << "  xor rax, rax\n";
+    void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "debug.assert") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lassert_ok_" << cg.labelCounter << "\n";
+        *os << "  mov rcx, 1\n";
+        *os << "  call ExitProcess\n";
+        *os << "  .Lassert_ok_" << cg.labelCounter << ":\n";
+        cg.labelCounter++;
+    } else if (cap == "debug.dump") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitTimeCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitEventCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "net.connect") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, 2\n";
+        *os << "  mov rdx, 1\n";
+        *os << "  xor r8, r8\n";
+        *os << "  call socket\n";
+        *os << "  push rax\n";
+        *os << "  mov rcx, rax\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, 16\n";
+        *os << "  call connect\n";
+        *os << "  pop rax\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.send" || cap == "ipc.send") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call send\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "net.recv" || cap == "ipc.recv") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+        *os << "  xor r9, r9\n";
+        *os << "  call recv\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "random.u64") {
+        *os << "  sub rsp, 48\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  lea rdx, [rsp + 32]\n";
+        *os << "  mov r8, 8\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  mov rax, [rsp + 32]\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "random.bytes") {
+        *os << "  sub rsp, 40\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "random.seed") {
+        *os << "  xor rax, rax\n";
+    void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "debug.assert") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lassert_ok_" << cg.labelCounter << "\n";
+        *os << "  mov rcx, 1\n";
+        *os << "  call ExitProcess\n";
+        *os << "  .Lassert_ok_" << cg.labelCounter << ":\n";
+        cg.labelCounter++;
+    } else if (cap == "debug.dump") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitIPCCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitEnvCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitSystemCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitSignalCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "random.u64") {
+        *os << "  sub rsp, 48\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  lea rdx, [rsp + 32]\n";
+        *os << "  mov r8, 8\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  mov rax, [rsp + 32]\n";
+        *os << "  add rsp, 48\n";
+    } else if (cap == "random.bytes") {
+        *os << "  sub rsp, 40\n";
+        *os << "  xor rcx, rcx\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  mov r9, 2\n";
+        *os << "  call BCryptGenRandom\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "random.seed") {
+        *os << "  xor rax, rax\n";
+    void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "debug.assert") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lassert_ok_" << cg.labelCounter << "\n";
+        *os << "  mov rcx, 1\n";
+        *os << "  call ExitProcess\n";
+        *os << "  .Lassert_ok_" << cg.labelCounter << ":\n";
+        cg.labelCounter++;
+    } else if (cap == "debug.dump") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "debug.assert") {
+        *os << "  mov rax, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  test rax, rax\n";
+        *os << "  jnz .Lassert_ok_" << cg.labelCounter << "\n";
+        *os << "  mov rcx, 1\n";
+        *os << "  call ExitProcess\n";
+        *os << "  .Lassert_ok_" << cg.labelCounter << ":\n";
+        cg.labelCounter++;
+    } else if (cap == "debug.dump") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n";
+        *os << "  add rsp, 40\n";
+    void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.unload") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call FreeLibrary\n";
+        *os << "  add rsp, 40\n";
+    } else if (cap == "module.resolve") {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call GetFileInformationByHandle\n";
+        *os << "  add rsp, 40\n";
+    }
+}
+
+void Windows_x64::emitTTYCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitSecurityCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
+void Windows_x64::emitGPUCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
+    (void)cg; (void)instr; (void)cap;
+}
+
 
 }} // namespace codegen::target

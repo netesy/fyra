@@ -72,6 +72,12 @@ void CodeGen::emit(bool forExecutable) {
     }
     if (targetInfo->getName() == "wasm32" && !os && assembler) {
         auto* wasmTarget = static_cast<target::Wasm32*>(targetInfo.get());
+        uint32_t typeIdx = 0; uint32_t funcIdx = 0;
+        for (auto& func : module.getFunctions()) {
+            const auto* ft = dynamic_cast<const ir::FunctionType*>(func->getType());
+            if (wasmTypeIndices.find(ft) == wasmTypeIndices.end()) wasmTypeIndices[ft] = typeIdx++;
+            wasmFunctionIndices[func.get()] = funcIdx++;
+        }
         for (auto& func : module.getFunctions()) emitFunction(*func);
         wasmTarget->emitHeader(*this); wasmTarget->emitTypeSection(*this);
         wasmTarget->emitFunctionSection(*this); wasmTarget->emitExportSection(*this);

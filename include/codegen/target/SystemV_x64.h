@@ -38,6 +38,20 @@ public:
     virtual uint64_t getSyscallNumber(ir::SyscallId id) const override;
     virtual void emitStartFunction(CodeGen& cg) override;
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const override { (void)type; return "%" + baseReg; }
+
+protected:
+    void emitIOCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitFSCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitProcessCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitMemoryCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitThreadCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitTimeCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
 };
 }
 }

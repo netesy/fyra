@@ -10,8 +10,23 @@ public:
     virtual void initRegisters() override;
     virtual void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& i) override;
+    virtual void emitExternCall(CodeGen& cg, ir::Instruction& i) override;
     virtual uint64_t getSyscallNumber(ir::SyscallId id) const override;
     virtual void emitStartFunction(CodeGen& cg) override;
+
+protected:
+    void emitIOCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitFSCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitProcessCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitMemoryCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitThreadCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitTimeCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
 };
 }
 }

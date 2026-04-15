@@ -87,7 +87,23 @@ public:
     void emitLoad(CodeGen& cg, ir::Instruction& instr) override;
     void emitStore(CodeGen& cg, ir::Instruction& instr) override;
     void emitAlloc(CodeGen& cg, ir::Instruction& instr) override;
+    void emitExternCall(CodeGen& cg, ir::Instruction& instr) override;
 
+protected:
+    void emitIOCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitFSCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitProcessCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitMemoryCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitThreadCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitTimeCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+
+public:
     // Control flow
     void emitBr(CodeGen& cg, ir::Instruction& instr) override;
     void emitJmp(CodeGen& cg, ir::Instruction& instr) override;

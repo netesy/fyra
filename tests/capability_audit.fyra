@@ -1,0 +1,125 @@
+# Comprehensive capability audit
+extern io.open(l, w, w) : l
+extern io.write(l, l, l) : l
+extern io.read(l, l, l) : l
+extern io.seek(l, l, w) : l
+extern io.stat(l, l) : w
+extern io.close(l)
+extern io.flush(l)
+
+extern fs.open(l, w, w) : l
+extern fs.read(l, l, l) : l
+extern fs.write(l, l, l) : l
+extern fs.close(l)
+extern fs.mkdir(l, w)
+extern fs.rmdir(l)
+extern fs.listdir(l) : l
+extern fs.rename(l, l)
+extern fs.remove(l)
+extern fs.stat(l, l) : w
+
+extern process.exit(w)
+extern process.abort()
+extern process.spawn(l, l) : l
+extern process.sleep(l)
+extern process.info(l) : w
+
+extern thread.spawn(l, l) : l
+extern thread.join(l) : w
+extern thread.exit(w)
+extern sync.mutex.lock(l)
+extern sync.mutex.unlock(l)
+extern sync.atomic.load(l) : l
+extern sync.atomic.store(l, l)
+extern sync.atomic.add(l, l) : l
+extern sync.fence()
+extern sync.condvar.wait(l, l)
+extern sync.condvar.signal(l)
+
+extern time.now() : l
+extern time.monotonic() : l
+extern time.sleep(l)
+extern time.utc_now(l)
+extern time.local_now(l)
+
+extern random.bytes(l, l)
+extern random.u64() : l
+extern random.seed(l)
+
+extern error.get() : w
+extern error.clear()
+extern error.raise(l)
+
+extern net.connect(l, w) : l
+extern net.send(l, l, l) : l
+extern net.recv(l, l, l) : l
+
+extern ipc.send(l, l, l) : l
+extern ipc.recv(l, l, l) : l
+
+extern memory.alloc(l) : l
+extern memory.free(l, l)
+extern memory.resize(l, l, l) : l
+extern memory.map(l, l, w, w, l, l) : l
+extern memory.unmap(l, l)
+extern memory.protect(l, l, w) : w
+extern memory.shared_create(l, l) : l
+extern memory.shared_attach(l) : l
+
+extern debug.log(l)
+extern debug.trace()
+extern debug.assert(w, l)
+extern debug.dump(l, l) : l
+
+extern module.load(l) : l
+extern module.unload(l)
+extern module.resolve(l, l) : l
+
+export function $main() : w {
+@start
+    %buf = alloc 128
+    %path = alloc 64
+    
+    # 1. IO Capabilities
+    %res1 = extern io.write(1, %buf, 10) : l
+    %res2 = extern io.read(0, %buf, 10) : l
+    extern io.flush(1)
+    
+    # 2. Filesystem Capabilities
+    %fd = extern fs.open(%path, 0, 0) : l
+    %res3 = extern fs.read(%fd, %buf, 10) : l
+    %res4 = extern fs.write(%fd, %buf, 10) : l
+    extern fs.close(%fd)
+    extern fs.mkdir(%path, 0)
+    extern fs.rmdir(%path)
+    %res5 = extern fs.listdir(%path) : l
+    extern fs.rename(%path, %path)
+    extern fs.remove(%path)
+    %res6 = extern fs.stat(%path, %buf) : w
+    
+    # 3. Process Capabilities
+    %pid = extern process.info(%buf) : w
+    extern process.sleep(100)
+    
+    # 4. Threading & Sync
+    %tid = extern thread.spawn(0, 0) : l
+    %res7 = extern thread.join(%tid) : w
+    extern sync.mutex.lock(%buf)
+    extern sync.mutex.unlock(%buf)
+    %val = extern sync.atomic.load(%buf) : l
+    extern sync.atomic.store(%buf, 1)
+    
+    # 5. Time & Random
+    %now = extern time.now() : l
+    %mono = extern time.monotonic() : l
+    %rnd = extern random.u64() : l
+    extern random.bytes(%buf, 10)
+    
+    # 6. Error & Debug
+    %err = extern error.get() : w
+    extern error.clear()
+    extern debug.log(%buf)
+    extern debug.trace()
+    
+    ret 0 : w
+}
