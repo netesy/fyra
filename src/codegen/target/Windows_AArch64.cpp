@@ -253,19 +253,42 @@ void Windows_AArch64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void Windows_AArch64::emitIPCCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    // Placeholder implementation routes unsupported IPC to deterministic ENOSYS-style error.
+    (void)instr; (void)cap;
+    *os << "  mov x0, #-38\n";
 }
 
 void Windows_AArch64::emitEnvCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "env.get") {
+        *os << "  mov x0, #0\n"; // null for missing key by default
+    } else {
+        *os << "  mov x0, #0\n";
+    }
 }
 
 void Windows_AArch64::emitSystemCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "system.cpu_count") {
+        *os << "  bl GetActiveProcessorCount\n";
+    } else if (cap == "system.page_size") {
+        *os << "  sub sp, sp, #64\n";
+        *os << "  mov x0, sp\n";
+        *os << "  bl GetSystemInfo\n";
+        *os << "  ldr w0, [sp, #4]\n";
+        *os << "  add sp, sp, #64\n";
+    } else {
+        *os << "  mov x0, #-38\n";
+    }
 }
 
 void Windows_AArch64::emitSignalCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  mov x0, #-38\n";
 }
 
 void Windows_AArch64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
@@ -277,7 +300,15 @@ void Windows_AArch64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void Windows_AArch64::emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "error.get") {
+        *os << "  mov x0, #0\n";
+    } else if (cap == "error.clear") {
+        *os << "  mov x0, #0\n";
+    } else {
+        *os << "  mov x0, #-38\n";
+    }
 }
 
 void Windows_AArch64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
@@ -287,19 +318,42 @@ void Windows_AArch64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void Windows_AArch64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "module.load") {
+        *os << "  mov x0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  bl LoadLibraryA\n";
+    } else if (cap == "module.unload") {
+        *os << "  mov x0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  bl FreeLibrary\n";
+    } else if (cap == "module.resolve") {
+        *os << "  mov x0, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov x1, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  bl GetProcAddress\n";
+    } else {
+        *os << "  mov x0, #-38\n";
+    }
 }
 
 void Windows_AArch64::emitTTYCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "tty.isatty") {
+        *os << "  mov x0, #1\n";
+    } else {
+        *os << "  mov x0, #-38\n";
+    }
 }
 
 void Windows_AArch64::emitSecurityCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  mov x0, #-38\n";
 }
 
 void Windows_AArch64::emitGPUCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  mov x0, #-38\n";
 }
 
 

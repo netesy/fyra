@@ -1,13 +1,11 @@
-# Simple HTTP Server in Fyra IR (Linux x86_64)
+# Simple HTTP Server in Fyra IR using capabilities.
 
-# Syscall numbers (Linux x64)
-# socket: 41
-# bind: 49
-# listen: 50
-# accept: 43
-# write: 1
-# close: 3
-# exit: 60
+extern net.socket(l, l, l) : l
+extern net.bind(l, l, l)
+extern net.listen(l, l)
+extern net.accept(l, l, l) : l
+extern io.write(l, l, l) : l
+extern io.close(l)
 
 # sockaddr_in structure (16 bytes)
 # sin_family: 2 (AF_INET) - 2 bytes
@@ -21,23 +19,23 @@ data $msg = { b "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!", b 
 export function $main() : w {
 @m_start
     # socket(AF_INET=2, SOCK_STREAM=1, 0)
-    %fd = syscall(l 41, l 2, l 1, l 0) : l
+    %fd = extern net.socket(2, 1, 0) : l
 
     # bind(fd, $addr, 16)
-    %b = syscall(l 49, l %fd, l $addr, l 16) : l
+    extern net.bind(%fd, $addr, 16)
 
     # listen(fd, 5)
-    %l = syscall(l 50, l %fd, l 5, l 0) : l
+    extern net.listen(%fd, 5)
 
 @m_loop
     # accept(fd, 0, 0)
-    %client = syscall(l 43, l %fd, l 0, l 0) : l
+    %client = extern net.accept(%fd, 0, 0) : l
 
     # write(client, $msg, 53)
-    %w = syscall(l 1, l %client, l $msg, l 53) : l
+    %w = extern io.write(%client, $msg, 53) : l
 
     # close(client)
-    %c = syscall(l 3, l %client, l 0, l 0) : l
+    extern io.close(%client)
 
     jmp @m_loop
 

@@ -401,19 +401,30 @@ void Wasm32::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string&
 }
 
 void Wasm32::emitIPCCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  i32.const -38\n";
 }
 
 void Wasm32::emitEnvCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "env.get") *os << "  i32.const 0\n";
+    else *os << "  i32.const 0\n";
 }
 
 void Wasm32::emitSystemCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "system.page_size") *os << "  i32.const 65536\n";
+    else if (cap == "system.cpu_count") *os << "  i32.const 1\n";
+    else *os << "  i32.const -38\n";
 }
 
 void Wasm32::emitSignalCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  i32.const -38\n";
 }
 
 void Wasm32::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
@@ -425,23 +436,40 @@ void Wasm32::emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::strin
 }
 
 void Wasm32::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.trace") {
+        *os << "  nop\n";
+    } else if (cap == "debug.log" && !instr.getOperands().empty()) {
+        *os << "  " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  drop\n";
+    } else {
+        *os << "  i32.const 0\n";
+    }
 }
 
 void Wasm32::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  i32.const -38\n";
 }
 
 void Wasm32::emitTTYCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "tty.isatty") *os << "  i32.const 1\n";
+    else *os << "  i32.const -38\n";
 }
 
 void Wasm32::emitSecurityCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  i32.const -38\n";
 }
 
 void Wasm32::emitGPUCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  i32.const -38\n";
 }
 
 

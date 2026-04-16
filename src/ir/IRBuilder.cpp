@@ -75,22 +75,6 @@ Instruction* IRBuilder::createExternCall(const std::string& capability, const st
     return instrPtr;
 }
 
-Instruction* IRBuilder::createSyscall(const std::vector<Value*>& args, Type* retType) {
-    Type* returnType = retType ? retType : context->getVoidType();
-    auto instr = std::make_unique<SyscallInstruction>(returnType, args, SyscallId::None, insertPoint);
-    Instruction* instrPtr = instr.get();
-    insertPoint->addInstruction(insertIterator, std::move(instr));
-    return instrPtr;
-}
-
-Instruction* IRBuilder::createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType) {
-    Type* returnType = retType ? retType : context->getVoidType();
-    auto instr = std::make_unique<SyscallInstruction>(returnType, args, id, insertPoint);
-    Instruction* instrPtr = instr.get();
-    insertPoint->addInstruction(insertIterator, std::move(instr));
-    return instrPtr;
-}
-
 Instruction* IRBuilder::createUdiv(Value* lhs, Value* rhs, Type* resultType) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Udiv, {lhs, rhs}, insertPoint));
     auto* instrPtr = instr.get();

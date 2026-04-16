@@ -553,7 +553,7 @@ void Windows_x64::emitIOCall(CodeGen& cg, ir::Instruction& instr, const std::str
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }
@@ -722,7 +722,7 @@ void Windows_x64::emitProcessCall(CodeGen& cg, ir::Instruction& instr, const std
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }
@@ -846,7 +846,7 @@ void Windows_x64::emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::s
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }
@@ -947,7 +947,7 @@ void Windows_x64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::st
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }
@@ -1025,7 +1025,7 @@ void Windows_x64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std:
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }
@@ -1070,7 +1070,7 @@ void Windows_x64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }
@@ -1091,7 +1091,7 @@ void Windows_x64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std:
         *os << "  sub rsp, 40\n";
         *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
         *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-        *os << "  call GetFileInformationByHandle\n";
+        *os << "  call GetProcAddress\n";
         *os << "  add rsp, 40\n";
     }
 }

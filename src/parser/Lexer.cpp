@@ -109,19 +109,7 @@ Token Lexer::getNextToken() {
             {"co", TokenType::Keyword}, {"cuo", TokenType::Keyword},
             // Floating point operations
             {"fadd", TokenType::Keyword}, {"fsub", TokenType::Keyword}, {"fmul", TokenType::Keyword},
-            {"fdiv", TokenType::Keyword},
-            {"syscall", TokenType::Keyword},
-            // Syscalls
-            {"sys_exit", TokenType::Keyword}, {"sys_execve", TokenType::Keyword}, {"sys_fork", TokenType::Keyword},
-            {"sys_clone", TokenType::Keyword}, {"sys_wait4", TokenType::Keyword}, {"sys_kill", TokenType::Keyword},
-            {"sys_read", TokenType::Keyword}, {"sys_write", TokenType::Keyword}, {"sys_openat", TokenType::Keyword},
-            {"sys_close", TokenType::Keyword}, {"sys_lseek", TokenType::Keyword}, {"sys_mmap", TokenType::Keyword},
-            {"sys_munmap", TokenType::Keyword}, {"sys_mprotect", TokenType::Keyword}, {"sys_brk", TokenType::Keyword},
-            {"sys_mkdirat", TokenType::Keyword}, {"sys_unlinkat", TokenType::Keyword}, {"sys_renameat", TokenType::Keyword},
-            {"sys_getdents64", TokenType::Keyword}, {"sys_clock_gettime", TokenType::Keyword}, {"sys_nanosleep", TokenType::Keyword},
-            {"sys_rt_sigaction", TokenType::Keyword}, {"sys_rt_sigprocmask", TokenType::Keyword}, {"sys_rt_sigreturn", TokenType::Keyword},
-            {"sys_getrandom", TokenType::Keyword}, {"sys_uname", TokenType::Keyword}, {"sys_getpid", TokenType::Keyword},
-            {"sys_gettid", TokenType::Keyword}
+            {"fdiv", TokenType::Keyword}
         };
         if (keywords.count(identifierStr)) {
             return {keywords.at(identifierStr), identifierStr};

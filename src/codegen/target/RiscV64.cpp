@@ -900,11 +900,19 @@ void RiscV64::emitSyncCall(CodeGen& cg, ir::Instruction& instr, const std::strin
 }
 
 void RiscV64::emitTimeCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "time.now" || cap == "time.monotonic") {
+        *os << "  rdtime a0\n";
+    } else {
+        *os << "  li a0, -38\n";
+    }
 }
 
 void RiscV64::emitEventCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  li a0, -38\n";
 }
 
 void RiscV64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
@@ -917,19 +925,29 @@ void RiscV64::emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string
 }
 
 void RiscV64::emitIPCCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  li a0, -38\n";
 }
 
 void RiscV64::emitEnvCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  li a0, 0\n";
 }
 
 void RiscV64::emitSystemCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "system.page_size") *os << "  li a0, 4096\n";
+    else if (cap == "system.cpu_count") *os << "  li a0, 1\n";
+    else *os << "  li a0, -38\n";
 }
 
 void RiscV64::emitSignalCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  li a0, -38\n";
 }
 
 void RiscV64::emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
@@ -943,7 +961,16 @@ void RiscV64::emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::stri
 }
 
 void RiscV64::emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    if (cap == "debug.log" && !instr.getOperands().empty()) {
+        *os << "  li a7, 64\n";
+        *os << "  li a0, 2\n";
+        *os << "  ld a1, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  li a2, 64\n";
+        *os << "  ecall\n";
+    } else {
+        *os << "  li a0, 0\n";
+    }
 }
 
 void RiscV64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
@@ -951,15 +978,22 @@ void RiscV64::emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::str
 }
 
 void RiscV64::emitTTYCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr;
+    if (cap == "tty.isatty") *os << "  li a0, 1\n";
+    else *os << "  li a0, -38\n";
 }
 
 void RiscV64::emitSecurityCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  li a0, -38\n";
 }
 
 void RiscV64::emitGPUCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap) {
-    (void)cg; (void)instr; (void)cap;
+    auto* os = cg.getTextStream(); if (!os) return;
+    (void)instr; (void)cap;
+    *os << "  li a0, -38\n";
 }
 
 

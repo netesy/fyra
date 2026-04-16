@@ -747,15 +747,6 @@ ir::Value* emitExpr(CompilerCtx& c, ir::Function* fn, ir::BasicBlock*& bb,
             return base;
         }
         case Expr::Call: {
-            if (e->name == "syscall") {
-                if (e->args.empty() || e->args.size() > 7) {
-                    throw std::runtime_error("syscall expects 1..7 arguments");
-                }
-                std::vector<ir::Value*> args;
-                for (const auto& a : e->args) args.push_back(emitExpr(c, fn, bb, vars, a.get(), loopStack));
-                return c.builder.createSyscall(args, c.i32);
-            }
-
             auto fit = c.functions.find(e->name);
             if (fit == c.functions.end()) throw std::runtime_error("Unknown function: " + e->name);
             size_t expected = fit->second->getParameters().size();
@@ -1380,14 +1371,6 @@ fn main() {
     return s;
 }
 )", 12);
-
-    runCase("runtime_syscall_interop", R"(
-fn main() {
-    pid = syscall(39, 0, 0, 0, 0, 0, 0);
-    if pid > 0 { return 1; }
-    return 0;
-}
-)", 1);
 
     bool failed = false;
     try {

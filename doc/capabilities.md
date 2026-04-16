@@ -1,92 +1,347 @@
-# Fyra Capability System (Expanded)
+# Fyra Capability System (Production-Ready)
 
-Fyra uses a portable capability-based external call system instead of OS-specific syscalls. This makes the IR platform-agnostic and allows the backend to map capabilities to the appropriate platform APIs.
+Fyra IR defines **intent**, not implementation. The IR only exposes stable capabilities and never platform details.
 
-## Extern Syntax
+## Core Philosophy
+
+Fyra IR does **not** expose:
+- syscalls
+- libc
+- OS APIs
+- runtime behavior
+
+Fyra IR **does** expose:
+- capability contracts
+
+## External Call Model
+
+### Syntax (non-restrictive)
 
 ```fyra
-extern <capability_name>(<args>) : <return_type>
+extern <capability>(<args>) : <optional_return>
 ```
 
 Example:
+
 ```fyra
-%res = extern io.write(1, %buf, 10) : w
+%fd = extern fs.open("file.txt", 0, 0)
+%n  = extern io.write(%fd, %buf, 10)
 ```
 
-## Capability Categories
+### IR Representation
 
-### 1. IO Capability (Stream + Resource Abstraction)
-- `io.write(res: l, buf: l, len: l) : l`
-- `io.read(res: l, buf: l, len: l) : l`
-- `io.flush(res: l)`
-- `io.open(path: l, flags: w, mode: w) : l`
-- `io.close(res: l)`
-- `io.seek(res: l, offset: l, whence: w) : l`
-- `io.stat(res: l, stat_ptr: l) : w`
+```text
+Call {
+    capability: "io.write",
+    args: [...]
+}
+```
 
-### 2. Memory Capability (Heap + Virtual Memory Abstraction)
-- `memory.alloc(size: l) : l`
-- `memory.free(addr: l, size: l)`
-- `memory.resize(addr: l, old_size: l, new_size: l) : l`
-- `memory.map(addr: l, len: l, prot: w, flags: w, fd: l, off: l) : l`
-- `memory.unmap(addr: l, len: l)`
-- `memory.protect(addr: l, len: l, prot: w) : w`
+### Dispatch
 
-### 3. Process Capability (Execution Lifecycle Abstraction)
-- `process.exit(code: w)`
+```text
+dispatchExtern(capability, args)
+```
+
+The backend resolves the capability to the platform implementation.
+
+## Hard Rules (Enforced)
+
+1. No syscall exposure in IR.
+2. No OS-specific naming.
+3. No libc assumptions.
+4. No capability versioning.
+5. No exceptions.
+6. Capabilities are stable contracts.
+7. All backends must implement all capabilities.
+8. IR must remain fully portable.
+
+## Core Resource Model (Critical)
+
+| Responsibility | Domain |
+| --- | --- |
+| Resource creation | `fs` / `net` / `ipc` |
+| Data movement | `io` |
+| Resource destruction | `io.close` |
+
+Invariants:
+- All reads/writes go through `io.*`.
+- All resources end with `io.close`.
+
+## Capability Domains
+
+### 1) IO — Unified Data Plane
+- `io.read(res, buf, len) : l`
+- `io.write(res, buf, len) : l`
+- `io.flush(res)`
+- `io.seek(res, offset, whence) : l`
+- `io.close(res)`
+- `io.dup(res) : l`
+- `io.dup2(src, dst) : l`
+- `io.set_nonblock(res, enabled)`
+
+Applies to files, sockets, pipes, and devices.
+
+Constraints:
+- No creation
+- No paths
+
+### 2) Filesystem — Structure Only
+- `fs.open(path, flags, mode) : l`
+- `fs.create(path, mode)`
+- `fs.unlink(path)`
+- `fs.mkdir(path, mode)`
+- `fs.rmdir(path)`
+- `fs.rename(old, new)`
+- `fs.stat(path, stat_ptr)`
+- `fs.fstat(fd, stat_ptr)`
+- `fs.listdir(path) : l`
+- `fs.truncate(path, size)`
+- `fs.sync(fd)`
+- `fs.chmod(path, mode)`
+- `fs.chown(path, uid, gid)`
+- `fs.utime(path, access, modify)`
+- `fs.cwd() : l`
+- `fs.chdir(path)`
+- `fs.path_join(a, b) : l`
+- `fs.path_normalize(path) : l`
+- `fs.lock(fd)`
+- `fs.unlock(fd)`
+- `fs.watch(path) : l`
+- `fs.unwatch(handle)`
+- `fs.atomic_write(path, buf, len)`
+
+Constraints:
+- No read/write
+- No close
+
+### 3) Memory
+- `memory.alloc(size) : l`
+- `memory.free(addr, size)`
+- `memory.resize(addr, old, new) : l`
+- `memory.map(addr, len, prot, flags, fd, off) : l`
+- `memory.unmap(addr, len)`
+- `memory.protect(addr, len, prot)`
+- `memory.advise(addr, len, advice)`
+- `memory.lock(addr, len)`
+- `memory.unlock(addr, len)`
+
+### 4) Process
+- `process.exit(code)`
 - `process.abort()`
-- `process.spawn(exe: l, args: l) : l`
-- `process.sleep(ms: l)`
-- `process.info(info_ptr: l) : w`
+- `process.spawn(exe, args) : l`
+- `process.sleep(ms)`
+- `process.info(ptr)`
+- `process.args(out)`
 
-### 4. Threading & Concurrency Capability
-- `thread.spawn(func_ptr: l, arg: l) : l`
-- `thread.join(tid: l) : w`
-- `thread.exit(code: w)`
-- `sync.mutex.lock(mutex_ptr: l)`
-- `sync.mutex.unlock(mutex_ptr: l)`
-- `sync.atomic.load(ptr: l) : l`
-- `sync.atomic.store(ptr: l, val: l)`
-- `sync.atomic.add(ptr: l, val: l) : l`
+### 5) Threading & Synchronization
+- `thread.spawn(fn, arg) : l`
+- `thread.join(tid)`
+- `thread.exit(code)`
+- `sync.mutex.lock(m)`
+- `sync.mutex.unlock(m)`
+- `sync.condvar.wait(cv, m)`
+- `sync.condvar.signal(cv)`
+- `sync.atomic.load(ptr) : l`
+- `sync.atomic.store(ptr, val)`
+- `sync.atomic.add(ptr, val) : l`
 - `sync.fence()`
-- `sync.condvar.wait(cv_ptr: l, mutex_ptr: l)`
-- `sync.condvar.signal(cv_ptr: l)`
 
-### 5. Time Capability
-- `time.now() : l` (Standard system time)
-- `time.monotonic() : l` (High-resolution monotonic time)
-- `time.sleep(ns: l)`
-- `time.utc_now(ts_ptr: l)`
-- `time.local_now(ts_ptr: l)`
+### 6) Time
+- `time.now() : l`
+- `time.monotonic() : l`
+- `time.sleep(ns)`
+- `time.utc_now(ptr)`
+- `time.local_now(ptr)`
+- `time.timer_create(out)`
+- `time.timer_set(timer, ns)`
+- `time.timer_cancel(timer)`
 
-### 6. Randomness Capability
-- `random.bytes(buf: l, len: l)`
+### 7) Event System (Async Foundation)
+- `event.register(res, mask)`
+- `event.unregister(res)`
+- `event.poll(events, count, timeout) : w`
+- `event.wait(handle, timeout) : w`
+
+Typical backend mappings include epoll, kqueue, IOCP, and WASM event loops.
+
+### 8) Networking (Resource Only)
+- `net.socket(domain, type, protocol) : l`
+- `net.bind(sock, addr, len)`
+- `net.listen(sock, backlog)`
+- `net.accept(sock, addr, len_ptr) : l`
+- `net.connect(sock, addr, len)`
+- `net.shutdown(sock, how)`
+- `net.set_option(sock, opt, val)`
+- `net.set_nonblock(sock, enabled)`
+- `net.addr_ipv4(ip, port, out)`
+- `net.addr_ipv6(ip, port, out)`
+
+Constraints:
+- No send/recv
+- No close
+
+### 9) IPC & Shared Memory
+- `ipc.pipe(read_ptr, write_ptr)`
+- `ipc.send(channel, buf, len) : l`
+- `ipc.recv(channel, buf, len) : l`
+- `memory.shared_create(name, size) : l`
+- `memory.shared_attach(name) : l`
+
+### 10) Environment & System
+- `env.get(key) : l`
+- `env.set(key, value)`
+- `env.list(out)`
+- `system.info(out)`
+- `system.cpu_count() : w`
+- `system.page_size() : w`
+- `system.limit(resource, value)`
+
+### 11) Signals
+- `signal.register(sig, handler)`
+- `signal.send(pid, sig)`
+
+### 12) Random
+- `random.bytes(buf, len)`
 - `random.u64() : l`
-- `random.seed(val: l)`
+- `random.seed(val)`
 
-### 7. Error Capability (Unified Failure Model)
-- `error.get() : w` (Get last capability error code)
-- `error.clear()` (Clear last error)
-- `error.raise(msg: l)` (Raise a portable trap/exception)
+### 13) Error Model (Fixed)
 
-### 8. Networking Capability (Stream-based Network Abstraction)
-- `net.connect(addr: l, port: w) : l`
-- `net.send(res: l, buf: l, len: l) : l`
-- `net.recv(res: l, buf: l, len: l) : l`
+Principles:
+- No exceptions
+- No hidden state
+- Errors are explicit and queryable
 
-### 9. IPC & Shared Memory
-- `ipc.send(channel: l, buf: l, len: l) : l`
-- `ipc.recv(channel: l, buf: l, len: l) : l`
-- `memory.shared_create(name: l, size: l) : l`
-- `memory.shared_attach(name: l) : l`
+Functions:
+- `error.get() : w`
+- `error.clear()`
+- `error.str(code, buf) : l`
+- `error.domain(code) : w`
+- `error.category(code) : w`
 
-### 10. Diagnostics & Debugging (Runtime Observability)
-- `debug.log(msg: l)`
+Encoding (32-bit):
+
+```text
+[ DOMAIN (8) | CATEGORY (8) | CODE (16) ]
+```
+
+Domains:
+1 IO
+2 FS
+3 NET
+4 MEMORY
+5 PROCESS
+6 THREAD
+7 EVENT
+8 GPU
+9 SYSTEM
+
+Categories:
+- `0 OK`
+- `1 INVALID`
+- `2 NOT_FOUND`
+- `3 PERMISSION`
+- `4 TIMEOUT`
+- `5 WOULD_BLOCK`
+- `6 INTERRUPTED`
+- `7 UNSUPPORTED`
+- `8 RESOURCE_EXHAUSTED`
+- `9 INTERNAL`
+
+Critical rule:
+
+```fyra
+result = extern io.read(...)
+if result < 0:
+    err = extern error.get()
+```
+
+Do not rely on implicit error state alone.
+
+Async integration example:
+
+```fyra
+if error == WOULD_BLOCK:
+    extern event.register(res, READ)
+```
+
+### 14) Debug
+- `debug.log(msg)`
 - `debug.trace()`
-- `debug.assert(cond: w, msg: l)`
-- `debug.dump(addr: l, len: l)`
+- `debug.assert(cond, msg)`
+- `debug.dump(addr, len) : l`
 
-### 11. Module & Dynamic Linking (Controlled Dynamic Runtime Extension)
-- `module.load(path: l) : l`
-- `module.unload(handle: l)`
-- `module.resolve(handle: l, name: l) : l`
+### 15) Modules
+- `module.load(path) : l`
+- `module.unload(handle)`
+- `module.resolve(handle, name) : l`
+
+### 16) TTY
+- `tty.isatty(res) : w`
+- `tty.get_size(out)`
+- `tty.set_mode(res, mode)`
+
+### 17) Security
+- `security.check(res, op) : w`
+- `security.sandbox(mode)`
+
+### 18) GPU / Accelerator
+- `gpu.device_count() : w`
+- `gpu.device_info(index, out)`
+- `gpu.context_create(device) : l`
+- `gpu.context_destroy(ctx)`
+- `gpu.queue_create(ctx) : l`
+- `gpu.queue_submit(queue, cmd_buf)`
+- `gpu.mem_alloc(ctx, size) : l`
+- `gpu.mem_free(ctx, ptr)`
+- `gpu.mem_copy_to(ctx, dst, src, size)`
+- `gpu.mem_copy_from(ctx, dst, src, size)`
+- `gpu.module_load(ctx, code) : l`
+- `gpu.kernel_launch(ctx, kernel, grid, block, args)`
+- `gpu.event_create(ctx) : l`
+- `gpu.event_record(evt, queue)`
+- `gpu.event_wait(evt)`
+- `gpu.sync(ctx)`
+
+## Backend Mapping Model
+
+```text
+Call { capability: "io.write", args: [...] }
+→ dispatchExtern()
+→ backend adapter
+```
+
+| Target | Implementation |
+| --- | --- |
+| Linux | syscalls |
+| Windows | WinAPI |
+| macOS | POSIX / Mach |
+| WASM | WASI / host imports |
+| Bare metal | runtime / hardware |
+
+## Runtime Position
+
+If Fyra replaces a backend like QBE:
+- You do not need a traditional runtime.
+- You do need a thin platform layer (capability shim).
+
+That shim provides:
+- WASM import glue
+- thread bootstrap
+- optional memory bootstrap
+- process entry normalization
+
+## Production-Readiness Blockers
+
+1. ABI standardization (calling conventions, registers, struct layout, stack alignment).
+2. Capability compliance tests (per-capability and cross-platform failure/stress validation).
+3. Deterministic error behavior across all backends.
+4. WASM contract definition (imports, memory layout, async/event semantics).
+5. Threading model clarification (especially WASM guarantees for `thread.spawn`).
+6. GPU portability ABI standardization (kernel ABI, argument layout, memory model).
+7. Security/sandbox model definition for WASM, embedded, and multi-tenant environments.
+
+## Final Verdict
+
+Fyra’s capability model is a portable systems IR that cleanly separates semantics from execution.

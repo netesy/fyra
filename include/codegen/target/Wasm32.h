@@ -86,10 +86,18 @@ protected:
     void emitThreadCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
     void emitNetCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
     void emitTimeCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitEventCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitIPCCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitEnvCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitSystemCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitSignalCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
     void emitRandomCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
     void emitErrorCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
     void emitDebugCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
     void emitModuleCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitTTYCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitSecurityCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
+    void emitGPUCall(CodeGen& cg, ir::Instruction& instr, const std::string& cap);
 
 public:
     void emitBr(CodeGen& cg, ir::Instruction& instr) override;

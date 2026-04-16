@@ -554,38 +554,6 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
                 retType = parseIRType();
             }
             instr = builder.createExternCall(capability, args, retType);
-        } else if (opcodeStr == "syscall") {
-            ir::SyscallId id = ir::SyscallId::None;
-            std::vector<ir::Value*> args;
-            if (currentToken.type == TokenType::LParen) {
-                getNextToken();
-
-                // Check if the first thing in parens is a syscall name
-                if (currentToken.type == TokenType::Keyword && currentToken.value.find("sys_") == 0) {
-                    id = ir::stringToSyscallId(currentToken.value);
-                    getNextToken();
-                    if (currentToken.type == TokenType::Comma) getNextToken();
-                }
-
-                while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
-                    ir::Type* argType = parseIRType();
-                    ir::Value* arg = parseValue();
-                    args.push_back(arg);
-                    if (currentToken.type == TokenType::Comma) getNextToken();
-                    else break;
-                }
-                getNextToken();
-            }
-            ir::Type* retType = context->getVoidType();
-            if (currentToken.type == TokenType::Colon) {
-                getNextToken();
-                retType = parseIRType();
-            }
-            if (id != ir::SyscallId::None) {
-                instr = builder.createSyscall(id, args, retType);
-            } else {
-                instr = builder.createSyscall(args, retType);
-            }
         } else if (opcodeStr == "call") {
             instr = parseCallInstruction(nullptr);
         }

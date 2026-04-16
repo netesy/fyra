@@ -132,8 +132,6 @@ public:
     Instruction* createCast(Value* val, Type* destTy);
     Instruction* createVAStart(Value* val);
     Instruction* createVAArg(Value* val, Type* destTy);
-    Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
-    Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);
     // ... more instruction builder methods to come ...
 
