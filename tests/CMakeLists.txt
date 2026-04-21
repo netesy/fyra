@@ -205,3 +205,9 @@ target_link_libraries(test_extern PRIVATE fyra)
 
 add_test(NAME ExternTest COMMAND test_extern)
 set_tests_properties(ExternTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_capability_compliance test_capability_compliance.cpp)
+target_link_libraries(test_capability_compliance PRIVATE fyra)
+
+add_test(NAME CapabilityComplianceTest COMMAND test_capability_compliance)
+set_tests_properties(CapabilityComplianceTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

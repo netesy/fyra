@@ -183,166 +183,226 @@ void SystemV_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-void SystemV_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
-    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
-    if (!ei) return;
-    const std::string& cap = ei->getCapability();
+namespace {
+void emitLinuxSyscallArgs(CodeGen& cg, ir::Instruction& instr, size_t maxArgs = 6) {
+    static const char* regs[] = {"%rdi", "%rsi", "%rdx", "%r10", "%r8", "%r9"};
     if (auto* os = cg.getTextStream()) {
-        if (cap == "io.write") {
-            *os << "  movq $1, %rax\n"; // sys_write
-            for (size_t i = 0; i < instr.getOperands().size(); ++i) {
-                std::string dest_reg;
-                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
-                if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
-            }
-            *os << "  syscall\n";
-        } else if (cap == "io.read") {
-            *os << "  movq $0, %rax\n"; // sys_read
-            for (size_t i = 0; i < instr.getOperands().size(); ++i) {
-                std::string dest_reg;
-                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
-                if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
-            }
-            *os << "  syscall\n";
-        } else if (cap == "io.open") {
-            *os << "  movq $2, %rax\n"; // sys_open
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
-            *os << "  syscall\n";
-        } else if (cap == "io.close") {
-            *os << "  movq $3, %rax\n"; // sys_close
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  syscall\n";
-        } else if (cap == "io.seek") {
-            *os << "  movq $8, %rax\n"; // sys_lseek
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
-            *os << "  syscall\n";
-        } else if (cap == "io.stat") {
-            *os << "  movq $4, %rax\n"; // sys_stat
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-            *os << "  syscall\n";
-        } else if (cap == "process.exit") {
-            *os << "  movq $60, %rax\n"; // sys_exit
-            if (!instr.getOperands().empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  syscall\n";
-        } else if (cap == "process.abort") {
-            *os << "  movq $39, %rax\n"; // sys_getpid
-            *os << "  syscall\n";
-            *os << "  movq %rax, %rdi\n"; // pid
-            *os << "  movq $6, %rsi\n"; // SIGABRT
-            *os << "  movq $62, %rax\n"; // sys_kill
-            *os << "  syscall\n";
-        } else if (cap == "process.sleep") {
-            // nanosleep implementation
-            *os << "  subq $16, %rsp\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rax\n";
-            *os << "  movq $1000, %rcx\n";
-            *os << "  xorq %rdx, %rdx\n";
-            *os << "  divq %rcx\n"; // rax = sec, rdx = ms
-            *os << "  movq %rax, (%rsp)\n"; // tv_sec
-            *os << "  imulq $1000000, %rdx, %rdx\n";
-            *os << "  movq %rdx, 8(%rsp)\n"; // tv_nsec
-            *os << "  movq $35, %rax\n"; // sys_nanosleep
-            *os << "  movq %rsp, %rdi\n";
-            *os << "  xorq %rsi, %rsi\n";
-            *os << "  syscall\n";
-            *os << "  addq $16, %rsp\n";
-        } else if (cap == "memory.alloc") {
-            *os << "  movq $9, %rax\n"; // sys_mmap
-            if (instr.getOperands().size() == 1) {
-                *os << "  xorq %rdi, %rdi\n"; // addr
-                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n"; // len
-                *os << "  movq $3, %rdx\n"; // prot
-                *os << "  movq $34, %r10\n"; // flags
-                *os << "  movq $-1, %r8\n"; // fd
-                *os << "  xorq %r9, %r9\n"; // off
-            } else {
-                for (size_t i = 0; i < std::min(instr.getOperands().size(), (size_t)6); ++i) {
-                    std::string dest_reg;
-                    switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
-                    if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
-                }
-            }
-            *os << "  syscall\n";
-        } else if (cap == "memory.map") {
-            *os << "  movq $9, %rax\n"; // sys_mmap
-            for (size_t i = 0; i < std::min(instr.getOperands().size(), (size_t)6); ++i) {
-                std::string dest_reg;
-                switch(i + 1) { case 1: dest_reg = "%rdi"; break; case 2: dest_reg = "%rsi"; break; case 3: dest_reg = "%rdx"; break; case 4: dest_reg = "%r10"; break; case 5: dest_reg = "%r8"; break; case 6: dest_reg = "%r9"; break; }
-                if (!dest_reg.empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << dest_reg << "\n";
-            }
-            *os << "  syscall\n";
-        } else if (cap == "memory.free") {
-            // munmap(addr, size)
-            *os << "  movq $11, %rax\n"; // sys_munmap
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-            *os << "  syscall\n";
-        } else if (cap == "memory.protect") {
-            *os << "  movq $10, %rax\n"; // sys_mprotect
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
-            *os << "  syscall\n";
-        } else if (cap == "random.u64") {
-            // getrandom(&buf, 8, 0)
-            *os << "  subq $8, %rsp\n";
-            *os << "  movq $318, %rax\n"; // sys_getrandom
-            *os << "  movq %rsp, %rdi\n";
-            *os << "  movq $8, %rsi\n";
-            *os << "  xorq %rdx, %rdx\n";
-            *os << "  syscall\n";
-            *os << "  popq %rax\n";
-        } else if (cap == "time.now") {
-            // clock_gettime(CLOCK_REALTIME, &ts)
-            *os << "  subq $16, %rsp\n";
-            *os << "  movq $228, %rax\n"; // sys_clock_gettime
-            *os << "  movq $0, %rdi\n";   // CLOCK_REALTIME
-            *os << "  movq %rsp, %rsi\n";
-            *os << "  syscall\n";
-            *os << "  movq (%rsp), %rax\n"; // tv_sec
-            *os << "  addq $16, %rsp\n";
-        } else if (cap == "time.monotonic") {
-            *os << "  subq $16, %rsp\n";
-            *os << "  movq $228, %rax\n"; // sys_clock_gettime
-            *os << "  movq $1, %rdi\n";   // CLOCK_MONOTONIC
-            *os << "  movq %rsp, %rsi\n";
-            *os << "  syscall\n";
-            *os << "  movq (%rsp), %rax\n";
-            *os << "  imulq $1000000000, %rax, %rax\n";
-            *os << "  addq 8(%rsp), %rax\n"; // total ns
-            *os << "  addq $16, %rsp\n";
-        } else if (cap == "error.get") {
-            // This is a bit tricky as errno is in TLS.
-            // Simplified: we'll just assume we can call a __errno_location style thing if libc is there
-            // or just return a dummy for now. Industrial would use TLS.
-            *os << "  xorq %rax, %rax\n";
-        } else if (cap == "sync.mutex.lock") {
-             // simplified spinlock for demonstration, industrial would use futex
-             *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-             *os << "  movq $1, %rax\n";
-             *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
-             *os << "  xchgq %rax, (%rdi)\n";
-             *os << "  testq %rax, %rax\n";
-             *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
-             cg.labelCounter++;
-        } else if (cap == "sync.mutex.unlock") {
-             *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-             *os << "  movq $0, (%rdi)\n";
-        } else if (cap == "debug.log") {
-            // log to stderr
-            *os << "  movq $1, %rax\n"; // sys_write
-            *os << "  movq $2, %rdi\n"; // stderr
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
-            *os << "  movq $128, %rdx\n"; // fixed length for simplicity
-            *os << "  syscall\n";
+        for (size_t i = 0; i < std::min(instr.getOperands().size(), maxArgs); ++i) {
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << ", " << regs[i] << "\n";
         }
-        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
     }
+}
+void emitStoreExternResult(CodeGen& cg, ir::Instruction& instr) {
+    if (auto* os = cg.getTextStream()) {
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
+            *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
+        }
+    }
+}
+}
+
+bool SystemV_x64::supportsCapability(const CapabilitySpec& spec) const {
+    switch (spec.id) {
+        case CapabilityId::IO_READ:
+        case CapabilityId::IO_WRITE:
+        case CapabilityId::IO_OPEN:
+        case CapabilityId::IO_CLOSE:
+        case CapabilityId::IO_SEEK:
+        case CapabilityId::IO_STAT:
+        case CapabilityId::FS_OPEN:
+        case CapabilityId::FS_CREATE:
+        case CapabilityId::FS_STAT:
+        case CapabilityId::FS_REMOVE:
+        case CapabilityId::MEMORY_ALLOC:
+        case CapabilityId::MEMORY_FREE:
+        case CapabilityId::MEMORY_MAP:
+        case CapabilityId::MEMORY_PROTECT:
+        case CapabilityId::PROCESS_EXIT:
+        case CapabilityId::PROCESS_ABORT:
+        case CapabilityId::PROCESS_SLEEP:
+        case CapabilityId::SYNC_MUTEX_LOCK:
+        case CapabilityId::SYNC_MUTEX_UNLOCK:
+        case CapabilityId::TIME_NOW:
+        case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::NET_SOCKET:
+        case CapabilityId::NET_CONNECT:
+        case CapabilityId::NET_LISTEN:
+        case CapabilityId::NET_ACCEPT:
+        case CapabilityId::NET_SEND:
+        case CapabilityId::NET_RECV:
+        case CapabilityId::SIGNAL_SEND:
+        case CapabilityId::RANDOM_U64:
+        case CapabilityId::ERROR_GET:
+        case CapabilityId::DEBUG_LOG:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void SystemV_x64::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::IO_WRITE: *os << "  movq $1, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::IO_READ: *os << "  movq $0, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::IO_OPEN: *os << "  movq $2, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::IO_CLOSE: *os << "  movq $3, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
+            case CapabilityId::IO_SEEK: *os << "  movq $8, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::IO_STAT: *os << "  movq $4, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
+            case CapabilityId::IO_FLUSH: *os << "  xorq %rax, %rax\n"; break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id == CapabilityId::FS_OPEN || spec.id == CapabilityId::FS_CREATE) {
+        emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_OPEN, "io.open", CapabilityDomain::IO, 2, 3, true, true});
+        return;
+    }
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::FS_STAT: *os << "  movq $4, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
+            case CapabilityId::FS_REMOVE: *os << "  movq $87, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::MEMORY_ALLOC:
+                *os << "  movq $9, %rax\n";
+                if (instr.getOperands().size() == 1) {
+                    *os << "  xorq %rdi, %rdi\n";
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+                    *os << "  movq $3, %rdx\n  movq $34, %r10\n  movq $-1, %r8\n  xorq %r9, %r9\n";
+                } else emitLinuxSyscallArgs(cg, instr, 6);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::MEMORY_MAP: *os << "  movq $9, %rax\n"; emitLinuxSyscallArgs(cg, instr, 6); *os << "  syscall\n"; break;
+            case CapabilityId::MEMORY_FREE: *os << "  movq $11, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
+            case CapabilityId::MEMORY_PROTECT: *os << "  movq $10, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::PROCESS_EXIT: *os << "  movq $60, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
+            case CapabilityId::PROCESS_ABORT:
+                *os << "  movq $39, %rax\n  syscall\n  movq %rax, %rdi\n  movq $6, %rsi\n  movq $62, %rax\n  syscall\n";
+                break;
+            case CapabilityId::PROCESS_SLEEP:
+                *os << "  subq $16, %rsp\n  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rax\n";
+                *os << "  movq $1000, %rcx\n  xorq %rdx, %rdx\n  divq %rcx\n  movq %rax, (%rsp)\n";
+                *os << "  imulq $1000000, %rdx, %rdx\n  movq %rdx, 8(%rsp)\n  movq $35, %rax\n";
+                *os << "  movq %rsp, %rdi\n  xorq %rsi, %rsi\n  syscall\n  addq $16, %rsp\n";
+                break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+
+void SystemV_x64::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::SYNC_MUTEX_LOCK) {
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq $1, %rax\n  .Lmutex_retry_" << cg.labelCounter << ":\n  xchgq %rax, (%rdi)\n  testq %rax, %rax\n  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+            cg.labelCounter++;
+        } else if (spec.id == CapabilityId::SYNC_MUTEX_UNLOCK) {
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n  movq $0, (%rdi)\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::TIME_NOW || spec.id == CapabilityId::TIME_MONOTONIC) {
+            *os << "  subq $16, %rsp\n  movq $228, %rax\n";
+            *os << "  movq $" << (spec.id == CapabilityId::TIME_NOW ? 0 : 1) << ", %rdi\n";
+            *os << "  movq %rsp, %rsi\n  syscall\n  movq (%rsp), %rax\n";
+            if (spec.id == CapabilityId::TIME_MONOTONIC) *os << "  imulq $1000000000, %rax, %rax\n  addq 8(%rsp), %rax\n";
+            *os << "  addq $16, %rsp\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::NET_SOCKET: *os << "  movq $41, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::NET_CONNECT: *os << "  movq $42, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::NET_LISTEN: *os << "  movq $50, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
+            case CapabilityId::NET_ACCEPT: *os << "  movq $43, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::NET_SEND: *os << "  movq $44, %rax\n"; emitLinuxSyscallArgs(cg, instr, 4); *os << "  syscall\n"; break;
+            case CapabilityId::NET_RECV: *os << "  movq $45, %rax\n"; emitLinuxSyscallArgs(cg, instr, 4); *os << "  syscall\n"; break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::SIGNAL_SEND) {
+            *os << "  movq $62, %rax\n";
+            emitLinuxSyscallArgs(cg, instr, 2);
+            *os << "  syscall\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::RANDOM_U64) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  subq $8, %rsp\n  movq $318, %rax\n  movq %rsp, %rdi\n  movq $8, %rsi\n  xorq %rdx, %rdx\n  syscall\n  popq %rax\n";
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::ERROR_GET) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) *os << "  xorq %rax, %rax\n";
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::DEBUG_LOG) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $1, %rax\n  movq $2, %rdi\n";
+        *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+        *os << "  movq $128, %rdx\n  syscall\n";
+    }
+    emitStoreExternResult(cg, instr);
 }
 
 }} // namespace codegen::target

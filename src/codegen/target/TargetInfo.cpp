@@ -1,10 +1,149 @@
 #include "codegen/target/TargetInfo.h"
 #include "codegen/CodeGen.h"
 #include "ir/Type.h"
+#include "ir/Instruction.h"
 #include <iostream>
+#include <array>
 
 namespace codegen {
 namespace target {
+namespace {
+constexpr uint64_t kCapabilityUnsupported = 0x01100001ULL;
+constexpr std::array<CapabilitySpec, 47> kCapabilityRegistry{{
+    {CapabilityId::IO_READ, "io.read", CapabilityDomain::IO, 3, 3, true, true},
+    {CapabilityId::IO_WRITE, "io.write", CapabilityDomain::IO, 3, 3, true, true},
+    {CapabilityId::IO_OPEN, "io.open", CapabilityDomain::IO, 2, 3, true, true},
+    {CapabilityId::IO_CLOSE, "io.close", CapabilityDomain::IO, 1, 1, true, true},
+    {CapabilityId::IO_SEEK, "io.seek", CapabilityDomain::IO, 3, 3, true, true},
+    {CapabilityId::IO_STAT, "io.stat", CapabilityDomain::IO, 2, 2, true, true},
+    {CapabilityId::IO_FLUSH, "io.flush", CapabilityDomain::IO, 1, 1, true, true},
+    {CapabilityId::FS_OPEN, "fs.open", CapabilityDomain::FS, 2, 3, true, true},
+    {CapabilityId::FS_CREATE, "fs.create", CapabilityDomain::FS, 2, 3, true, true},
+    {CapabilityId::FS_STAT, "fs.stat", CapabilityDomain::FS, 2, 2, true, true},
+    {CapabilityId::FS_REMOVE, "fs.remove", CapabilityDomain::FS, 1, 1, true, true},
+    {CapabilityId::MEMORY_ALLOC, "memory.alloc", CapabilityDomain::MEMORY, 1, 6, true, true},
+    {CapabilityId::MEMORY_FREE, "memory.free", CapabilityDomain::MEMORY, 2, 2, true, true},
+    {CapabilityId::MEMORY_MAP, "memory.map", CapabilityDomain::MEMORY, 6, 6, true, true},
+    {CapabilityId::MEMORY_PROTECT, "memory.protect", CapabilityDomain::MEMORY, 3, 3, true, true},
+    {CapabilityId::PROCESS_EXIT, "process.exit", CapabilityDomain::PROCESS, 0, 1, false, false},
+    {CapabilityId::PROCESS_ABORT, "process.abort", CapabilityDomain::PROCESS, 0, 0, false, false},
+    {CapabilityId::PROCESS_SLEEP, "process.sleep", CapabilityDomain::PROCESS, 1, 1, true, true},
+    {CapabilityId::PROCESS_SPAWN, "process.spawn", CapabilityDomain::PROCESS, 2, 4, true, true},
+    {CapabilityId::PROCESS_ARGS, "process.args", CapabilityDomain::PROCESS, 0, 2, true, true},
+    {CapabilityId::THREAD_SPAWN, "thread.spawn", CapabilityDomain::THREAD, 2, 4, true, true},
+    {CapabilityId::THREAD_JOIN, "thread.join", CapabilityDomain::THREAD, 1, 1, true, true},
+    {CapabilityId::SYNC_MUTEX_LOCK, "sync.mutex.lock", CapabilityDomain::SYNC, 1, 1, true, true},
+    {CapabilityId::SYNC_MUTEX_UNLOCK, "sync.mutex.unlock", CapabilityDomain::SYNC, 1, 1, true, true},
+    {CapabilityId::TIME_NOW, "time.now", CapabilityDomain::TIME, 0, 0, true, true},
+    {CapabilityId::TIME_MONOTONIC, "time.monotonic", CapabilityDomain::TIME, 0, 0, true, true},
+    {CapabilityId::EVENT_POLL, "event.poll", CapabilityDomain::EVENT, 1, 4, true, true},
+    {CapabilityId::NET_SOCKET, "net.socket", CapabilityDomain::NET, 3, 3, true, true},
+    {CapabilityId::NET_CONNECT, "net.connect", CapabilityDomain::NET, 3, 3, true, true},
+    {CapabilityId::NET_LISTEN, "net.listen", CapabilityDomain::NET, 2, 2, true, true},
+    {CapabilityId::NET_ACCEPT, "net.accept", CapabilityDomain::NET, 3, 3, true, true},
+    {CapabilityId::NET_SEND, "net.send", CapabilityDomain::NET, 4, 4, true, true},
+    {CapabilityId::NET_RECV, "net.recv", CapabilityDomain::NET, 4, 4, true, true},
+    {CapabilityId::IPC_SEND, "ipc.send", CapabilityDomain::IPC, 2, 4, true, true},
+    {CapabilityId::IPC_RECV, "ipc.recv", CapabilityDomain::IPC, 2, 4, true, true},
+    {CapabilityId::ENV_GET, "env.get", CapabilityDomain::ENV, 1, 2, true, true},
+    {CapabilityId::ENV_LIST, "env.list", CapabilityDomain::ENV, 0, 1, true, true},
+    {CapabilityId::SYSTEM_INFO, "system.info", CapabilityDomain::SYSTEM, 1, 2, true, true},
+    {CapabilityId::SIGNAL_SEND, "signal.send", CapabilityDomain::SIGNAL, 2, 2, true, true},
+    {CapabilityId::SIGNAL_REGISTER, "signal.register", CapabilityDomain::SIGNAL, 2, 2, true, true},
+    {CapabilityId::RANDOM_U64, "random.u64", CapabilityDomain::RANDOM, 0, 0, true, true},
+    {CapabilityId::ERROR_GET, "error.get", CapabilityDomain::ERROR, 0, 0, true, true},
+    {CapabilityId::DEBUG_LOG, "debug.log", CapabilityDomain::DEBUG, 1, 2, true, true},
+    {CapabilityId::MODULE_LOAD, "module.load", CapabilityDomain::MODULE, 1, 2, true, true},
+    {CapabilityId::TTY_ISATTY, "tty.isatty", CapabilityDomain::TTY, 1, 1, true, true},
+    {CapabilityId::SECURITY_CHMOD, "security.chmod", CapabilityDomain::SECURITY, 2, 2, true, true},
+    {CapabilityId::GPU_COMPUTE, "gpu.compute", CapabilityDomain::GPU, 2, 8, true, true}
+}};
+}
+
+const CapabilitySpec* TargetInfo::findCapability(std::string_view name) const {
+    for (const auto& spec : kCapabilityRegistry) {
+        if (name == spec.name) return &spec;
+    }
+    return nullptr;
+}
+
+bool TargetInfo::supportsCapability(const CapabilitySpec&) const {
+    return false;
+}
+
+bool TargetInfo::validateCapability(ir::Instruction& instr, const CapabilitySpec& spec) const {
+    const auto argc = static_cast<int>(instr.getOperands().size());
+    if (argc < spec.minArgs || argc > spec.maxArgs) return false;
+    const bool hasReturn = instr.getType() && instr.getType()->getTypeID() != ir::Type::VoidTyID;
+    if (spec.returnsValue != hasReturn) return false;
+    return supportsCapability(spec);
+}
+
+void TargetInfo::emitUnsupportedCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec*) const {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $" << kCapabilityUnsupported << ", %rax\n";
+        if (instr.getType() && instr.getType()->getTypeID() != ir::Type::VoidTyID) {
+            *os << "  movq %rax, " << cg.getValueAsOperand(&instr) << "\n";
+        }
+    }
+}
+
+void TargetInfo::emitDomainCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    switch (spec.domain) {
+        case CapabilityDomain::IO: emitIOCapability(cg, instr, spec); break;
+        case CapabilityDomain::FS: emitFSCapability(cg, instr, spec); break;
+        case CapabilityDomain::MEMORY: emitMemoryCapability(cg, instr, spec); break;
+        case CapabilityDomain::PROCESS: emitProcessCapability(cg, instr, spec); break;
+        case CapabilityDomain::THREAD: emitThreadCapability(cg, instr, spec); break;
+        case CapabilityDomain::SYNC: emitSyncCapability(cg, instr, spec); break;
+        case CapabilityDomain::TIME: emitTimeCapability(cg, instr, spec); break;
+        case CapabilityDomain::EVENT: emitEventCapability(cg, instr, spec); break;
+        case CapabilityDomain::NET: emitNetCapability(cg, instr, spec); break;
+        case CapabilityDomain::IPC: emitIPCCapability(cg, instr, spec); break;
+        case CapabilityDomain::ENV: emitEnvCapability(cg, instr, spec); break;
+        case CapabilityDomain::SYSTEM: emitSystemCapability(cg, instr, spec); break;
+        case CapabilityDomain::SIGNAL: emitSignalCapability(cg, instr, spec); break;
+        case CapabilityDomain::RANDOM: emitRandomCapability(cg, instr, spec); break;
+        case CapabilityDomain::ERROR: emitErrorCapability(cg, instr, spec); break;
+        case CapabilityDomain::DEBUG: emitDebugCapability(cg, instr, spec); break;
+        case CapabilityDomain::MODULE: emitModuleCapability(cg, instr, spec); break;
+        case CapabilityDomain::TTY: emitTTYCapability(cg, instr, spec); break;
+        case CapabilityDomain::SECURITY: emitSecurityCapability(cg, instr, spec); break;
+        case CapabilityDomain::GPU: emitGPUCapability(cg, instr, spec); break;
+    }
+}
+
+void TargetInfo::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
+    if (!ei) return;
+    const auto* spec = findCapability(ei->getCapability());
+    if (!spec || !validateCapability(instr, *spec)) {
+        emitUnsupportedCapability(cg, instr, spec);
+        return;
+    }
+    emitDomainCapability(cg, instr, *spec);
+}
+
+void TargetInfo::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
 
 SIMDContext TargetInfo::createSIMDContext(const ir::VectorType* type) const {
     SIMDContext ctx;

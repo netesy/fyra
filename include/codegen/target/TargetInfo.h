@@ -9,12 +9,66 @@
 #include <string>
 #include <vector>
 #include <ostream>
+#include <string_view>
 
 namespace codegen {
 class CodeGen;
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
 enum class FusedPattern { MultiplyAdd, MultiplySubtract, LoadAndOperate, CompareAndBranch, AddressCalculation };
+enum class CapabilityDomain {
+    IO,
+    FS,
+    MEMORY,
+    PROCESS,
+    THREAD,
+    SYNC,
+    TIME,
+    EVENT,
+    NET,
+    IPC,
+    ENV,
+    SYSTEM,
+    SIGNAL,
+    RANDOM,
+    ERROR,
+    DEBUG,
+    MODULE,
+    TTY,
+    SECURITY,
+    GPU
+};
+enum class CapabilityId {
+    IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SEEK, IO_STAT, IO_FLUSH,
+    FS_OPEN, FS_CREATE, FS_STAT, FS_REMOVE,
+    MEMORY_ALLOC, MEMORY_FREE, MEMORY_MAP, MEMORY_PROTECT,
+    PROCESS_EXIT, PROCESS_ABORT, PROCESS_SLEEP, PROCESS_SPAWN, PROCESS_ARGS,
+    THREAD_SPAWN, THREAD_JOIN,
+    SYNC_MUTEX_LOCK, SYNC_MUTEX_UNLOCK,
+    TIME_NOW, TIME_MONOTONIC,
+    EVENT_POLL,
+    NET_SOCKET, NET_CONNECT, NET_LISTEN, NET_ACCEPT, NET_SEND, NET_RECV,
+    IPC_SEND, IPC_RECV,
+    ENV_GET, ENV_LIST,
+    SYSTEM_INFO,
+    SIGNAL_SEND, SIGNAL_REGISTER,
+    RANDOM_U64,
+    ERROR_GET,
+    DEBUG_LOG,
+    MODULE_LOAD,
+    TTY_ISATTY,
+    SECURITY_CHMOD,
+    GPU_COMPUTE
+};
+struct CapabilitySpec {
+    CapabilityId id;
+    const char* name;
+    CapabilityDomain domain;
+    int minArgs;
+    int maxArgs;
+    bool returnsValue;
+    bool fallible;
+};
 struct VectorCapabilities { bool supportsSSE = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
 struct TypeInfo { uint64_t size, align; RegisterClass regClass; bool isFloatingPoint, isSigned; };
 struct SIMDContext { unsigned vectorWidth; ir::VectorType* vectorType; std::string elementSuffix, widthSuffix; };
@@ -72,7 +126,32 @@ public:
     virtual void emitStore(CodeGen&, ir::Instruction&) = 0;
     virtual void emitAlloc(CodeGen&, ir::Instruction&) = 0;
     virtual void emitSyscall(CodeGen&, ir::Instruction&) {}
-    virtual void emitExternCall(CodeGen&, ir::Instruction&) {}
+    virtual void emitExternCall(CodeGen&, ir::Instruction&);
+    const CapabilitySpec* findCapability(std::string_view name) const;
+    virtual bool validateCapability(ir::Instruction&, const CapabilitySpec&) const;
+    virtual bool supportsCapability(const CapabilitySpec&) const;
+    virtual void emitUnsupportedCapability(CodeGen&, ir::Instruction&, const CapabilitySpec* spec) const;
+    virtual void emitDomainCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitIOCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitFSCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitMemoryCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitProcessCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitThreadCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSyncCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitTimeCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitEventCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitNetCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitIPCCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitEnvCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSystemCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSignalCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitRandomCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitErrorCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitDebugCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitModuleCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitTTYCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSecurityCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitGPUCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
     virtual uint64_t getSyscallNumber(ir::SyscallId) const { return 0; }
     virtual void emitBr(CodeGen&, ir::Instruction&) = 0;
     virtual void emitJmp(CodeGen&, ir::Instruction&) = 0;
