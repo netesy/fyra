@@ -127,7 +127,7 @@ public:
     virtual void emitAlloc(CodeGen&, ir::Instruction&) = 0;
     virtual void emitSyscall(CodeGen&, ir::Instruction&) {}
     virtual void emitExternCall(CodeGen&, ir::Instruction&);
-    const CapabilitySpec* findCapability(std::string_view name) const;
+    virtual const CapabilitySpec* findCapability(std::string_view name) const;
     virtual bool validateCapability(ir::Instruction&, const CapabilitySpec&) const;
     virtual bool supportsCapability(const CapabilitySpec&) const;
     virtual void emitUnsupportedCapability(CodeGen&, ir::Instruction&, const CapabilitySpec* spec) const;
