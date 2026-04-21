@@ -229,3 +229,9 @@ target_link_libraries(test_aarch64_capability_compliance PRIVATE fyra)
 
 add_test(NAME AArch64CapabilityComplianceTest COMMAND test_aarch64_capability_compliance)
 set_tests_properties(AArch64CapabilityComplianceTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_macos_aarch64_capability_compliance test_macos_aarch64_capability_compliance.cpp)
+target_link_libraries(test_macos_aarch64_capability_compliance PRIVATE fyra)
+
+add_test(NAME MacOSAArch64CapabilityComplianceTest COMMAND test_macos_aarch64_capability_compliance)
+set_tests_properties(MacOSAArch64CapabilityComplianceTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
