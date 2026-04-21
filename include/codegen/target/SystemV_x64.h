@@ -46,6 +46,7 @@ public:
     void emitNetCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
     void emitIPCCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
     void emitEnvCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitSystemCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
     void emitSignalCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
     void emitRandomCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
     void emitErrorCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;

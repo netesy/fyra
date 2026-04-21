@@ -26,6 +26,7 @@ void SystemV_x64::initRegisters() {
 
 void SystemV_x64::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
+        *os << ".section .rodata\n.Lproc_environ:\n  .string \"/proc/self/environ\"\n";
         *os << ".section .data\n.align 8\nheap_ptr:\n  .quad __fyra_heap\n";
         *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 1048576\n";
         *os << ".text\n";
@@ -220,20 +221,33 @@ bool SystemV_x64::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::PROCESS_EXIT:
         case CapabilityId::PROCESS_ABORT:
         case CapabilityId::PROCESS_SLEEP:
+        case CapabilityId::PROCESS_SPAWN:
         case CapabilityId::SYNC_MUTEX_LOCK:
         case CapabilityId::SYNC_MUTEX_UNLOCK:
         case CapabilityId::TIME_NOW:
         case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::EVENT_POLL:
         case CapabilityId::NET_SOCKET:
         case CapabilityId::NET_CONNECT:
         case CapabilityId::NET_LISTEN:
         case CapabilityId::NET_ACCEPT:
         case CapabilityId::NET_SEND:
         case CapabilityId::NET_RECV:
+        case CapabilityId::IPC_SEND:
+        case CapabilityId::IPC_RECV:
+        case CapabilityId::ENV_GET:
+        case CapabilityId::ENV_LIST:
+        case CapabilityId::SYSTEM_INFO:
         case CapabilityId::SIGNAL_SEND:
+        case CapabilityId::SIGNAL_REGISTER:
         case CapabilityId::RANDOM_U64:
         case CapabilityId::ERROR_GET:
         case CapabilityId::DEBUG_LOG:
+        case CapabilityId::MODULE_LOAD:
+        case CapabilityId::TTY_ISATTY:
+        case CapabilityId::SECURITY_CHMOD:
+        case CapabilityId::THREAD_SPAWN:
+        case CapabilityId::THREAD_JOIN:
             return true;
         default:
             return false;
@@ -305,19 +319,158 @@ void SystemV_x64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, con
                 *os << "  imulq $1000000, %rdx, %rdx\n  movq %rdx, 8(%rsp)\n  movq $35, %rax\n";
                 *os << "  movq %rsp, %rdi\n  xorq %rsi, %rsi\n  syscall\n  addq $16, %rsp\n";
                 break;
+            case CapabilityId::PROCESS_SPAWN:
+                *os << "  movq $57, %rax\n  syscall\n"; // fork
+                *os << "  testq %rax, %rax\n";
+                *os << "  jnz .Lspawn_parent_" << cg.labelCounter << "\n";
+                *os << "  movq $59, %rax\n"; // execve(path, argv, envp)
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+                if (instr.getOperands().size() > 1) {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+                } else {
+                    *os << "  xorq %rsi, %rsi\n";
+                }
+                if (instr.getOperands().size() > 2) {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
+                } else {
+                    *os << "  xorq %rdx, %rdx\n";
+                }
+                *os << "  syscall\n";
+                *os << "  movq $60, %rax\n  movq $127, %rdi\n  syscall\n";
+                *os << ".Lspawn_parent_" << cg.labelCounter << ":\n";
+                cg.labelCounter++;
+                break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
     emitStoreExternResult(cg, instr);
 }
 
-void SystemV_x64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
-void SystemV_x64::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
-void SystemV_x64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
-void SystemV_x64::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
-void SystemV_x64::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
-void SystemV_x64::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
-void SystemV_x64::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::THREAD_SPAWN:
+                *os << "  movq $56, %rax\n"; // clone
+                emitLinuxSyscallArgs(cg, instr, 5);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::THREAD_JOIN:
+                *os << "  movq $61, %rax\n"; // wait4
+                emitLinuxSyscallArgs(cg, instr, 1);
+                *os << "  xorq %rsi, %rsi\n  xorq %rdx, %rdx\n  xorq %r10, %r10\n";
+                *os << "  syscall\n";
+                break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::EVENT_POLL) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $232, %rax\n"; // epoll_wait
+        if (instr.getOperands().size() >= 4) {
+            emitLinuxSyscallArgs(cg, instr, 4);
+        } else {
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  subq $16, %rsp\n  movq %rsp, %rsi\n  movq $1, %rdx\n  xorq %r10, %r10\n";
+            *os << "  syscall\n  addq $16, %rsp\n";
+            emitStoreExternResult(cg, instr);
+            return;
+        }
+        *os << "  syscall\n";
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::IPC_SEND) {
+            *os << "  movq $1, %rax\n";
+            emitLinuxSyscallArgs(cg, instr, 3);
+            *os << "  syscall\n";
+        } else if (spec.id == CapabilityId::IPC_RECV) {
+            *os << "  movq $0, %rax\n";
+            emitLinuxSyscallArgs(cg, instr, 3);
+            *os << "  syscall\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id != CapabilityId::ENV_GET && spec.id != CapabilityId::ENV_LIST) {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+        *os << "  movq $257, %rax\n"; // openat
+        *os << "  movq $-100, %rdi\n";
+        *os << "  leaq .Lproc_environ(%rip), %rsi\n";
+        *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
+        *os << "  movq %rax, %r12\n";
+        *os << "  movq $0, %rax\n  movq %r12, %rdi\n";
+        if (!instr.getOperands().empty()) {
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+        } else {
+            *os << "  subq $4096, %rsp\n  movq %rsp, %rsi\n";
+        }
+        *os << "  movq $4096, %rdx\n  syscall\n";
+        *os << "  movq %rax, %r13\n";
+        *os << "  movq $3, %rax\n  movq %r12, %rdi\n  syscall\n";
+        *os << "  movq %r13, %rax\n";
+        if (instr.getOperands().empty()) {
+            *os << "  addq $4096, %rsp\n";
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::MODULE_LOAD) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $257, %rax\n  movq $-100, %rdi\n";
+        *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+        *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
+        *os << "  movq %rax, %rdi\n";
+        *os << "  movq $313, %rax\n"; // finit_module
+        if (instr.getOperands().size() > 1) {
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+        } else {
+            *os << "  xorq %rsi, %rsi\n";
+        }
+        *os << "  xorq %rdx, %rdx\n  syscall\n";
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::TTY_ISATTY) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  subq $64, %rsp\n";
+        *os << "  movq $16, %rax\n"; // ioctl
+        *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+        *os << "  movq $0x5401, %rsi\n"; // TCGETS
+        *os << "  movq %rsp, %rdx\n  syscall\n";
+        *os << "  cmpq $0, %rax\n  sete %al\n  movzbq %al, %rax\n";
+        *os << "  addq $64, %rsp\n";
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::SECURITY_CHMOD) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $90, %rax\n";
+        emitLinuxSyscallArgs(cg, instr, 2);
+        *os << "  syscall\n";
+    }
+    emitStoreExternResult(cg, instr);
+}
 void SystemV_x64::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
 
 void SystemV_x64::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
@@ -373,6 +526,12 @@ void SystemV_x64::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, cons
             *os << "  movq $62, %rax\n";
             emitLinuxSyscallArgs(cg, instr, 2);
             *os << "  syscall\n";
+        } else if (spec.id == CapabilityId::SIGNAL_REGISTER) {
+            *os << "  movq $13, %rax\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+            *os << "  xorq %rdx, %rdx\n  movq $8, %r10\n";
+            *os << "  syscall\n";
         } else {
             emitUnsupportedCapability(cg, instr, &spec);
             return;
@@ -401,6 +560,16 @@ void SystemV_x64::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const
         *os << "  movq $1, %rax\n  movq $2, %rdi\n";
         *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
         *os << "  movq $128, %rdx\n  syscall\n";
+    }
+    emitStoreExternResult(cg, instr);
+}
+
+void SystemV_x64::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::SYSTEM_INFO) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $63, %rax\n"; // uname
+        emitLinuxSyscallArgs(cg, instr, 1);
+        *os << "  syscall\n";
     }
     emitStoreExternResult(cg, instr);
 }
