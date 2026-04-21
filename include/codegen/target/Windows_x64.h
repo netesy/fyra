@@ -34,7 +34,15 @@ public:
     virtual void emitStore(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& i) override;
-    virtual void emitExternCall(CodeGen& cg, ir::Instruction& i) override;
+    bool supportsCapability(const CapabilitySpec& spec) const override;
+    void emitIOCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitMemoryCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitProcessCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitSyncCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitTimeCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitRandomCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitErrorCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
+    void emitDebugCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&) override;
     virtual void emitStartFunction(CodeGen& cg) override;
     virtual std::string formatStackOperand(int offset) const override;
     virtual std::string formatGlobalOperand(const std::string& name) const override;

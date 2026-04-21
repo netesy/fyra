@@ -256,127 +256,154 @@ void Windows_x64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
     }
 }
 
-void Windows_x64::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
-    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
-    if (!ei) return;
-    const std::string& cap = ei->getCapability();
+namespace {
+void emitWindowsStoreExternResult(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
-        if (cap == "io.write") {
-             // Windows write: WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped)
-             *os << "  sub rsp, 48\n";
-             *os << "  mov rcx, -11\n"; // STD_OUTPUT_HANDLE
-             *os << "  call GetStdHandle\n";
-             *os << "  mov rcx, rax\n"; // hFile
-             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n"; // lpBuffer
-             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n"; // nNumberOfBytesToWrite
-             *os << "  lea r9, [rsp + 40]\n"; // lpNumberOfBytesWritten
-             *os << "  mov qword ptr [rsp + 32], 0\n"; // lpOverlapped (5th arg)
-             *os << "  call WriteFile\n";
-             *os << "  add rsp, 48\n";
-        } else if (cap == "io.open") {
-             // CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile)
-             *os << "  sub rsp, 64\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  mov rdx, 3221225472\n"; // GENERIC_READ | GENERIC_WRITE (0xC0000000)
-             *os << "  mov r8, 1\n"; // FILE_SHARE_READ
-             *os << "  xor r9, r9\n";
-             *os << "  mov qword ptr [rsp + 32], 3\n"; // OPEN_EXISTING
-             *os << "  mov qword ptr [rsp + 40], 128\n"; // FILE_ATTRIBUTE_NORMAL
-             *os << "  mov qword ptr [rsp + 48], 0\n";
-             *os << "  call CreateFileA\n";
-             *os << "  add rsp, 64\n";
-        } else if (cap == "io.close") {
-             *os << "  sub rsp, 40\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  call CloseHandle\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "io.read") {
-             // ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped)
-             *os << "  sub rsp, 48\n";
-             *os << "  mov rcx, -10\n"; // STD_INPUT_HANDLE
-             *os << "  call GetStdHandle\n";
-             *os << "  mov rcx, rax\n";
-             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
-             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
-             *os << "  lea r9, [rsp + 40]\n";
-             *os << "  mov qword ptr [rsp + 32], 0\n"; // lpOverlapped (5th arg)
-             *os << "  call ReadFile\n";
-             *os << "  add rsp, 48\n";
-        } else if (cap == "process.exit") {
-            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-            *os << "  call ExitProcess\n";
-        } else if (cap == "process.abort") {
-            *os << "  call abort\n";
-        } else if (cap == "process.sleep") {
-            *os << "  sub rsp, 40\n";
-            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-            *os << "  call Sleep\n";
-            *os << "  add rsp, 40\n";
-        } else if (cap == "memory.alloc") {
-             // VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
-             *os << "  sub rsp, 40\n";
-             *os << "  xor rcx, rcx\n"; // lpAddress
-             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n"; // dwSize
-             *os << "  mov r8, 12288\n"; // MEM_COMMIT | MEM_RESERVE (0x3000)
-             *os << "  mov r9, 4\n";     // PAGE_READWRITE
-             *os << "  call VirtualAlloc\n";
-             *os << "  add rsp, 40\n";
-             *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
-             return;
-        } else if (cap == "memory.free") {
-             // VirtualFree(addr, 0, MEM_RELEASE)
-             *os << "  sub rsp, 40\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  xor rdx, rdx\n"; // dwSize must be 0 for MEM_RELEASE
-             *os << "  mov r8, 32768\n"; // MEM_RELEASE (0x8000)
-             *os << "  call VirtualFree\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "random.u64") {
-             // BCryptGenRandom(NULL, &buf, 8, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
-             *os << "  sub rsp, 48\n";
-             *os << "  xor rcx, rcx\n";
-             *os << "  lea rdx, [rsp + 32]\n";
-             *os << "  mov r8, 8\n";
-             *os << "  mov r9, 2\n"; // BCRYPT_USE_SYSTEM_PREFERRED_RNG
-             *os << "  call BCryptGenRandom\n";
-             *os << "  mov rax, [rsp + 32]\n";
-             *os << "  add rsp, 48\n";
-        } else if (cap == "time.now") {
-             // GetSystemTimeAsFileTime(&ft)
-             *os << "  sub rsp, 40\n";
-             *os << "  lea rcx, [rsp + 32]\n";
-             *os << "  call GetSystemTimeAsFileTime\n";
-             *os << "  mov rax, [rsp + 32]\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "sync.mutex.lock") {
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  mov rax, 1\n";
-             *os << "  .Lmutex_retry_" << cg.labelCounter << ":\n";
-             *os << "  lock xchg qword ptr [rcx], rax\n";
-             *os << "  test rax, rax\n";
-             *os << "  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
-             cg.labelCounter++;
-        } else if (cap == "sync.mutex.unlock") {
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  mov qword ptr [rcx], 0\n";
-        } else if (cap == "time.monotonic") {
-             *os << "  sub rsp, 40\n";
-             *os << "  lea rcx, [rsp + 32]\n";
-             *os << "  call QueryPerformanceCounter\n";
-             *os << "  mov rax, [rsp + 32]\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "error.get") {
-             *os << "  sub rsp, 40\n";
-             *os << "  call GetLastError\n";
-             *os << "  add rsp, 40\n";
-        } else if (cap == "debug.log") {
-             *os << "  sub rsp, 40\n";
-             *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
-             *os << "  call OutputDebugStringA\n";
-             *os << "  add rsp, 40\n";
+        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
+            *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
         }
-        if (instr.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  mov " << cg.getValueAsOperand(&instr) << ", rax\n";
     }
+}
+}
+
+bool Windows_x64::supportsCapability(const CapabilitySpec& spec) const {
+    switch (spec.id) {
+        case CapabilityId::IO_READ:
+        case CapabilityId::IO_WRITE:
+        case CapabilityId::IO_OPEN:
+        case CapabilityId::IO_CLOSE:
+        case CapabilityId::PROCESS_EXIT:
+        case CapabilityId::PROCESS_ABORT:
+        case CapabilityId::PROCESS_SLEEP:
+        case CapabilityId::MEMORY_ALLOC:
+        case CapabilityId::MEMORY_FREE:
+        case CapabilityId::RANDOM_U64:
+        case CapabilityId::TIME_NOW:
+        case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::SYNC_MUTEX_LOCK:
+        case CapabilityId::SYNC_MUTEX_UNLOCK:
+        case CapabilityId::ERROR_GET:
+        case CapabilityId::DEBUG_LOG:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void Windows_x64::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::IO_WRITE) {
+            *os << "  sub rsp, 48\n  mov rcx, -11\n  call GetStdHandle\n  mov rcx, rax\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+            *os << "  lea r9, [rsp + 40]\n  mov qword ptr [rsp + 32], 0\n  call WriteFile\n  add rsp, 48\n";
+        } else if (spec.id == CapabilityId::IO_OPEN) {
+            *os << "  sub rsp, 64\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, 3221225472\n  mov r8, 1\n  xor r9, r9\n";
+            *os << "  mov qword ptr [rsp + 32], 3\n  mov qword ptr [rsp + 40], 128\n  mov qword ptr [rsp + 48], 0\n";
+            *os << "  call CreateFileA\n  add rsp, 64\n";
+        } else if (spec.id == CapabilityId::IO_CLOSE) {
+            *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call CloseHandle\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::IO_READ) {
+            *os << "  sub rsp, 48\n  mov rcx, -10\n  call GetStdHandle\n  mov rcx, rax\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+            *os << "  lea r9, [rsp + 40]\n  mov qword ptr [rsp + 32], 0\n  call ReadFile\n  add rsp, 48\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::MEMORY_ALLOC) {
+            *os << "  sub rsp, 40\n  xor rcx, rcx\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov r8, 12288\n  mov r9, 4\n  call VirtualAlloc\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::MEMORY_FREE) {
+            *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  xor rdx, rdx\n  mov r8, 32768\n  call VirtualFree\n  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::PROCESS_EXIT) {
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call ExitProcess\n";
+        } else if (spec.id == CapabilityId::PROCESS_ABORT) {
+            *os << "  call abort\n";
+        } else if (spec.id == CapabilityId::PROCESS_SLEEP) {
+            *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call Sleep\n  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::SYNC_MUTEX_LOCK) {
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rax, 1\n  .Lmutex_retry_" << cg.labelCounter << ":\n";
+            *os << "  lock xchg qword ptr [rcx], rax\n  test rax, rax\n  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+            cg.labelCounter++;
+        } else if (spec.id == CapabilityId::SYNC_MUTEX_UNLOCK) {
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov qword ptr [rcx], 0\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::TIME_NOW) {
+            *os << "  sub rsp, 40\n  lea rcx, [rsp + 32]\n  call GetSystemTimeAsFileTime\n  mov rax, [rsp + 32]\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::TIME_MONOTONIC) {
+            *os << "  sub rsp, 40\n  lea rcx, [rsp + 32]\n  call QueryPerformanceCounter\n  mov rax, [rsp + 32]\n  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::RANDOM_U64) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 48\n  xor rcx, rcx\n  lea rdx, [rsp + 32]\n  mov r8, 8\n  mov r9, 2\n  call BCryptGenRandom\n";
+        *os << "  mov rax, [rsp + 32]\n  add rsp, 48\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::ERROR_GET) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) *os << "  sub rsp, 40\n  call GetLastError\n  add rsp, 40\n";
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::DEBUG_LOG) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call OutputDebugStringA\n  add rsp, 40\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
 }
 
 void Windows_x64::emitStartFunction(CodeGen& cg) {

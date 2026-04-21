@@ -27,6 +27,7 @@ void SystemV_x64::initRegisters() {
 void SystemV_x64::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << ".section .rodata\n.Lproc_environ:\n  .string \"/proc/self/environ\"\n";
+        *os << ".Lproc_cmdline:\n  .string \"/proc/self/cmdline\"\n";
         *os << ".section .data\n.align 8\nheap_ptr:\n  .quad __fyra_heap\n";
         *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 1048576\n";
         *os << ".text\n";
@@ -210,6 +211,7 @@ bool SystemV_x64::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::IO_CLOSE:
         case CapabilityId::IO_SEEK:
         case CapabilityId::IO_STAT:
+        case CapabilityId::IO_FLUSH:
         case CapabilityId::FS_OPEN:
         case CapabilityId::FS_CREATE:
         case CapabilityId::FS_STAT:
@@ -222,6 +224,7 @@ bool SystemV_x64::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::PROCESS_ABORT:
         case CapabilityId::PROCESS_SLEEP:
         case CapabilityId::PROCESS_SPAWN:
+        case CapabilityId::PROCESS_ARGS:
         case CapabilityId::SYNC_MUTEX_LOCK:
         case CapabilityId::SYNC_MUTEX_UNLOCK:
         case CapabilityId::TIME_NOW:
@@ -263,7 +266,7 @@ void SystemV_x64::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Ca
             case CapabilityId::IO_CLOSE: *os << "  movq $3, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
             case CapabilityId::IO_SEEK: *os << "  movq $8, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
             case CapabilityId::IO_STAT: *os << "  movq $4, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
-            case CapabilityId::IO_FLUSH: *os << "  xorq %rax, %rax\n"; break;
+            case CapabilityId::IO_FLUSH: *os << "  movq $74, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -339,6 +342,30 @@ void SystemV_x64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, con
                 *os << "  movq $60, %rax\n  movq $127, %rdi\n  syscall\n";
                 *os << ".Lspawn_parent_" << cg.labelCounter << ":\n";
                 cg.labelCounter++;
+                break;
+            case CapabilityId::PROCESS_ARGS:
+                *os << "  movq $257, %rax\n"; // openat
+                *os << "  movq $-100, %rdi\n  leaq .Lproc_cmdline(%rip), %rsi\n";
+                *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
+                *os << "  movq %rax, %r12\n";
+                *os << "  movq $0, %rax\n  movq %r12, %rdi\n";
+                if (!instr.getOperands().empty()) {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+                } else {
+                    *os << "  subq $4096, %rsp\n  movq %rsp, %rsi\n";
+                }
+                if (instr.getOperands().size() > 1) {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rdx\n";
+                } else {
+                    *os << "  movq $4096, %rdx\n";
+                }
+                *os << "  syscall\n";
+                *os << "  movq %rax, %r13\n";
+                *os << "  movq $3, %rax\n  movq %r12, %rdi\n  syscall\n";
+                *os << "  movq %r13, %rax\n";
+                if (instr.getOperands().empty()) {
+                    *os << "  addq $4096, %rsp\n";
+                }
                 break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
