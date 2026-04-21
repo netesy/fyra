@@ -272,18 +272,48 @@ bool Windows_x64::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::IO_WRITE:
         case CapabilityId::IO_OPEN:
         case CapabilityId::IO_CLOSE:
+        case CapabilityId::IO_SEEK:
+        case CapabilityId::IO_STAT:
+        case CapabilityId::IO_FLUSH:
+        case CapabilityId::FS_OPEN:
+        case CapabilityId::FS_CREATE:
+        case CapabilityId::FS_STAT:
+        case CapabilityId::FS_REMOVE:
         case CapabilityId::PROCESS_EXIT:
         case CapabilityId::PROCESS_ABORT:
         case CapabilityId::PROCESS_SLEEP:
+        case CapabilityId::PROCESS_SPAWN:
+        case CapabilityId::PROCESS_ARGS:
         case CapabilityId::MEMORY_ALLOC:
         case CapabilityId::MEMORY_FREE:
+        case CapabilityId::MEMORY_MAP:
+        case CapabilityId::MEMORY_PROTECT:
+        case CapabilityId::THREAD_SPAWN:
+        case CapabilityId::THREAD_JOIN:
         case CapabilityId::RANDOM_U64:
         case CapabilityId::TIME_NOW:
         case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::EVENT_POLL:
+        case CapabilityId::NET_SOCKET:
+        case CapabilityId::NET_CONNECT:
+        case CapabilityId::NET_LISTEN:
+        case CapabilityId::NET_ACCEPT:
+        case CapabilityId::NET_SEND:
+        case CapabilityId::NET_RECV:
+        case CapabilityId::IPC_SEND:
+        case CapabilityId::IPC_RECV:
+        case CapabilityId::ENV_GET:
+        case CapabilityId::ENV_LIST:
+        case CapabilityId::SYSTEM_INFO:
+        case CapabilityId::SIGNAL_SEND:
+        case CapabilityId::SIGNAL_REGISTER:
         case CapabilityId::SYNC_MUTEX_LOCK:
         case CapabilityId::SYNC_MUTEX_UNLOCK:
         case CapabilityId::ERROR_GET:
         case CapabilityId::DEBUG_LOG:
+        case CapabilityId::MODULE_LOAD:
+        case CapabilityId::TTY_ISATTY:
+        case CapabilityId::SECURITY_CHMOD:
             return true;
         default:
             return false;
@@ -310,6 +340,44 @@ void Windows_x64::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Ca
             *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
             *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
             *os << "  lea r9, [rsp + 40]\n  mov qword ptr [rsp + 32], 0\n  call ReadFile\n  add rsp, 48\n";
+        } else if (spec.id == CapabilityId::IO_SEEK) {
+            *os << "  sub rsp, 56\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  lea r8, [rsp + 40]\n";
+            *os << "  mov r9, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n";
+            *os << "  call SetFilePointerEx\n";
+            *os << "  mov rax, [rsp + 40]\n  add rsp, 56\n";
+        } else if (spec.id == CapabilityId::IO_STAT) {
+            *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  call GetFileInformationByHandle\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::IO_FLUSH) {
+            *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  call FlushFileBuffers\n  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id == CapabilityId::FS_OPEN || spec.id == CapabilityId::FS_CREATE) {
+        emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_OPEN, "io.open", CapabilityDomain::IO, 2, 3, true, true});
+        return;
+    }
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::FS_STAT) {
+            *os << "  sub rsp, 40\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, 0\n";
+            *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  call GetFileAttributesExA\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::FS_REMOVE) {
+            *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  call DeleteFileA\n  add rsp, 40\n";
         } else {
             emitUnsupportedCapability(cg, instr, &spec);
             return;
@@ -343,6 +411,52 @@ void Windows_x64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, con
             *os << "  call abort\n";
         } else if (spec.id == CapabilityId::PROCESS_SLEEP) {
             *os << "  sub rsp, 40\n  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call Sleep\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::PROCESS_SPAWN) {
+            *os << "  sub rsp, 96\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  xor r8, r8\n  xor r9, r9\n";
+            *os << "  mov qword ptr [rsp + 32], 0\n  mov qword ptr [rsp + 40], 0\n";
+            *os << "  mov qword ptr [rsp + 48], 0\n  mov qword ptr [rsp + 56], 0\n";
+            *os << "  lea rax, [rsp + 64]\n  mov qword ptr [rsp + 64], 0\n";
+            *os << "  mov qword ptr [rsp + 72], 0\n";
+            *os << "  mov qword ptr [rsp + 64], 104\n";
+            *os << "  mov qword ptr [rsp + 80], rax\n";
+            *os << "  call CreateProcessA\n";
+            *os << "  mov rax, [rsp + 88]\n";
+            *os << "  add rsp, 96\n";
+        } else if (spec.id == CapabilityId::PROCESS_ARGS) {
+            *os << "  sub rsp, 40\n  call GetCommandLineA\n";
+            if (!instr.getOperands().empty()) {
+                *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+                *os << "  mov rdx, rax\n";
+                *os << "  call lstrcpyA\n";
+                *os << "  mov rax, rcx\n";
+            }
+            *os << "  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::THREAD_SPAWN) {
+            *os << "  sub rsp, 56\n  xor rcx, rcx\n";
+            *os << "  mov rdx, 0\n";
+            *os << "  mov r8, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov r9, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  mov qword ptr [rsp + 32], 0\n  mov qword ptr [rsp + 40], 0\n";
+            *os << "  call CreateThread\n  add rsp, 56\n";
+        } else if (spec.id == CapabilityId::THREAD_JOIN) {
+            *os << "  sub rsp, 40\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, -1\n  call WaitForSingleObject\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  call CloseHandle\n  add rsp, 40\n";
         } else {
             emitUnsupportedCapability(cg, instr, &spec);
             return;
@@ -382,6 +496,90 @@ void Windows_x64::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const 
     emitWindowsStoreExternResult(cg, instr);
 }
 
+void Windows_x64::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::EVENT_POLL) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << (instr.getOperands().size() > 1 ? cg.getValueAsOperand(instr.getOperands()[1]->get()) : "0") << "\n";
+        *os << "  mov r8, 0\n  call WaitForMultipleObjects\n  add rsp, 40\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::NET_SOCKET: *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n  call socket\n"; break;
+            case CapabilityId::NET_CONNECT: *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n  call connect\n"; break;
+            case CapabilityId::NET_LISTEN: *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n  call listen\n"; break;
+            case CapabilityId::NET_ACCEPT: *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n  call accept\n"; break;
+            case CapabilityId::NET_SEND: *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n  mov r9, " << cg.getValueAsOperand(instr.getOperands()[3]->get()) << "\n  call send\n"; break;
+            case CapabilityId::NET_RECV: *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n  mov r8, " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << "\n  mov r9, " << cg.getValueAsOperand(instr.getOperands()[3]->get()) << "\n  call recv\n"; break;
+            default: emitUnsupportedCapability(cg, instr, &spec); return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id == CapabilityId::IPC_SEND) {
+        emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_WRITE, "io.write", CapabilityDomain::IO, 3, 3, true, true});
+        return;
+    }
+    if (spec.id == CapabilityId::IPC_RECV) {
+        emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_READ, "io.read", CapabilityDomain::IO, 3, 3, true, true});
+        return;
+    }
+    emitUnsupportedCapability(cg, instr, &spec);
+}
+
+void Windows_x64::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::ENV_GET) {
+            *os << "  sub rsp, 40\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, " << (instr.getOperands().size() > 1 ? cg.getValueAsOperand(instr.getOperands()[1]->get()) : "0") << "\n";
+            *os << "  mov r8, 4096\n  call GetEnvironmentVariableA\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::ENV_LIST) {
+            *os << "  sub rsp, 40\n  call GetEnvironmentStringsA\n  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::SYSTEM_INFO) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call GetSystemInfo\n  add rsp, 40\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        if (spec.id == CapabilityId::SIGNAL_SEND) {
+            *os << "  sub rsp, 40\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+            *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  call GenerateConsoleCtrlEvent\n  add rsp, 40\n";
+        } else if (spec.id == CapabilityId::SIGNAL_REGISTER) {
+            *os << "  sub rsp, 40\n";
+            *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+            *os << "  mov rdx, 1\n  call SetConsoleCtrlHandler\n  add rsp, 40\n";
+        } else {
+            emitUnsupportedCapability(cg, instr, &spec);
+            return;
+        }
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
 void Windows_x64::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     if (spec.id != CapabilityId::RANDOM_U64) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
@@ -404,6 +602,42 @@ void Windows_x64::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const
         *os << "  call OutputDebugStringA\n  add rsp, 40\n";
     }
     emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::MODULE_LOAD) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  call LoadLibraryA\n  add rsp, 40\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::TTY_ISATTY) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 48\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  call GetStdHandle\n";
+        *os << "  mov rcx, rax\n  lea rdx, [rsp + 40]\n  call GetConsoleMode\n";
+        *os << "  add rsp, 48\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id != CapabilityId::SECURITY_CHMOD) { emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  sub rsp, 40\n";
+        *os << "  mov rcx, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n";
+        *os << "  mov rdx, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n";
+        *os << "  call _chmod\n  add rsp, 40\n";
+    }
+    emitWindowsStoreExternResult(cg, instr);
+}
+
+void Windows_x64::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    emitUnsupportedCapability(cg, instr, &spec);
 }
 
 void Windows_x64::emitStartFunction(CodeGen& cg) {
