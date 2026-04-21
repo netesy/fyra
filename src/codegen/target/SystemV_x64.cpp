@@ -216,41 +216,77 @@ bool SystemV_x64::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::FS_CREATE:
         case CapabilityId::FS_STAT:
         case CapabilityId::FS_REMOVE:
+        case CapabilityId::FS_RENAME:
+        case CapabilityId::FS_MKDIR:
+        case CapabilityId::FS_RMDIR:
         case CapabilityId::MEMORY_ALLOC:
         case CapabilityId::MEMORY_FREE:
         case CapabilityId::MEMORY_MAP:
         case CapabilityId::MEMORY_PROTECT:
+        case CapabilityId::MEMORY_USAGE:
         case CapabilityId::PROCESS_EXIT:
         case CapabilityId::PROCESS_ABORT:
         case CapabilityId::PROCESS_SLEEP:
         case CapabilityId::PROCESS_SPAWN:
         case CapabilityId::PROCESS_ARGS:
+        case CapabilityId::PROCESS_GETPID:
+        case CapabilityId::THREAD_SPAWN:
+        case CapabilityId::THREAD_JOIN:
+        case CapabilityId::THREAD_DETACH:
+        case CapabilityId::THREAD_YIELD:
+        case CapabilityId::THREAD_GETID:
         case CapabilityId::SYNC_MUTEX_LOCK:
         case CapabilityId::SYNC_MUTEX_UNLOCK:
+        case CapabilityId::SYNC_ATOMIC_ADD:
+        case CapabilityId::SYNC_ATOMIC_SUB:
+        case CapabilityId::SYNC_ATOMIC_CAS:
         case CapabilityId::TIME_NOW:
         case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::TIME_SLEEP:
         case CapabilityId::EVENT_POLL:
+        case CapabilityId::EVENT_CREATE:
+        case CapabilityId::EVENT_MODIFY:
+        case CapabilityId::EVENT_CLOSE:
         case CapabilityId::NET_SOCKET:
         case CapabilityId::NET_CONNECT:
         case CapabilityId::NET_LISTEN:
         case CapabilityId::NET_ACCEPT:
         case CapabilityId::NET_SEND:
         case CapabilityId::NET_RECV:
+        case CapabilityId::NET_CLOSE:
+        case CapabilityId::NET_BIND:
         case CapabilityId::IPC_SEND:
         case CapabilityId::IPC_RECV:
+        case CapabilityId::IPC_CONNECT:
+        case CapabilityId::IPC_LISTEN:
         case CapabilityId::ENV_GET:
+        case CapabilityId::ENV_SET:
         case CapabilityId::ENV_LIST:
         case CapabilityId::SYSTEM_INFO:
+        case CapabilityId::SYSTEM_REBOOT:
+        case CapabilityId::SYSTEM_SHUTDOWN:
         case CapabilityId::SIGNAL_SEND:
         case CapabilityId::SIGNAL_REGISTER:
+        case CapabilityId::SIGNAL_WAIT:
         case CapabilityId::RANDOM_U64:
+        case CapabilityId::RANDOM_BYTES:
         case CapabilityId::ERROR_GET:
+        case CapabilityId::ERROR_STR:
         case CapabilityId::DEBUG_LOG:
+        case CapabilityId::DEBUG_BREAK:
+        case CapabilityId::DEBUG_TRACE:
         case CapabilityId::MODULE_LOAD:
+        case CapabilityId::MODULE_UNLOAD:
+        case CapabilityId::MODULE_GETSYM:
         case CapabilityId::TTY_ISATTY:
+        case CapabilityId::TTY_GETSIZE:
+        case CapabilityId::TTY_SETMODE:
         case CapabilityId::SECURITY_CHMOD:
-        case CapabilityId::THREAD_SPAWN:
-        case CapabilityId::THREAD_JOIN:
+        case CapabilityId::SECURITY_CHOWN:
+        case CapabilityId::SECURITY_GETUID:
+        case CapabilityId::GPU_COMPUTE:
+        case CapabilityId::GPU_MALLOC:
+        case CapabilityId::GPU_MEMCPY:
             return true;
         default:
             return false;
@@ -274,14 +310,20 @@ void SystemV_x64::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Ca
 }
 
 void SystemV_x64::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id == CapabilityId::FS_OPEN || spec.id == CapabilityId::FS_CREATE) {
-        emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_OPEN, "io.open", CapabilityDomain::IO, 2, 3, true, true});
-        return;
-    }
     if (auto* os = cg.getTextStream()) {
         switch (spec.id) {
+            case CapabilityId::FS_OPEN:
+            case CapabilityId::FS_CREATE: {
+                *os << "  movq $2, %rax\n";
+                emitLinuxSyscallArgs(cg, instr, 3);
+                *os << "  syscall\n";
+                break;
+            }
             case CapabilityId::FS_STAT: *os << "  movq $4, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
             case CapabilityId::FS_REMOVE: *os << "  movq $87, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
+            case CapabilityId::FS_RENAME: *os << "  movq $82, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
+            case CapabilityId::FS_MKDIR: *os << "  movq $83, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
+            case CapabilityId::FS_RMDIR: *os << "  movq $84, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -303,6 +345,9 @@ void SystemV_x64::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, cons
             case CapabilityId::MEMORY_MAP: *os << "  movq $9, %rax\n"; emitLinuxSyscallArgs(cg, instr, 6); *os << "  syscall\n"; break;
             case CapabilityId::MEMORY_FREE: *os << "  movq $11, %rax\n"; emitLinuxSyscallArgs(cg, instr, 2); *os << "  syscall\n"; break;
             case CapabilityId::MEMORY_PROTECT: *os << "  movq $10, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
+            case CapabilityId::MEMORY_USAGE:
+                *os << "  xorq %rax, %rax\n";
+                break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -367,6 +412,9 @@ void SystemV_x64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, con
                     *os << "  addq $4096, %rsp\n";
                 }
                 break;
+            case CapabilityId::PROCESS_GETPID:
+                *os << "  movq $39, %rax\n  syscall\n";
+                break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -387,6 +435,15 @@ void SystemV_x64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, cons
                 *os << "  xorq %rsi, %rsi\n  xorq %rdx, %rdx\n  xorq %r10, %r10\n";
                 *os << "  syscall\n";
                 break;
+            case CapabilityId::THREAD_DETACH:
+                *os << "  xorq %rax, %rax\n";
+                break;
+            case CapabilityId::THREAD_YIELD:
+                *os << "  movq $24, %rax\n  syscall\n";
+                break;
+            case CapabilityId::THREAD_GETID:
+                *os << "  movq $186, %rax\n  syscall\n";
+                break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -394,36 +451,63 @@ void SystemV_x64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, cons
 }
 
 void SystemV_x64::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::EVENT_POLL) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq $232, %rax\n"; // epoll_wait
-        if (instr.getOperands().size() >= 4) {
-            emitLinuxSyscallArgs(cg, instr, 4);
-        } else {
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  subq $16, %rsp\n  movq %rsp, %rsi\n  movq $1, %rdx\n  xorq %r10, %r10\n";
-            *os << "  syscall\n  addq $16, %rsp\n";
-            emitStoreExternResult(cg, instr);
-            return;
+        switch (spec.id) {
+            case CapabilityId::EVENT_POLL:
+                *os << "  movq $232, %rax\n"; // epoll_wait
+                if (instr.getOperands().size() >= 4) {
+                    emitLinuxSyscallArgs(cg, instr, 4);
+                } else {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+                    *os << "  subq $16, %rsp\n  movq %rsp, %rsi\n  movq $1, %rdx\n  xorq %r10, %r10\n";
+                    *os << "  syscall\n  addq $16, %rsp\n";
+                    emitStoreExternResult(cg, instr);
+                    return;
+                }
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::EVENT_CREATE:
+                *os << "  movq $213, %rax\n  movq $0, %rdi\n  syscall\n"; // epoll_create1(0)
+                break;
+            case CapabilityId::EVENT_MODIFY:
+                *os << "  movq $233, %rax\n"; // epoll_ctl
+                emitLinuxSyscallArgs(cg, instr, 4);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::EVENT_CLOSE:
+                *os << "  movq $3, %rax\n"; // close
+                emitLinuxSyscallArgs(cg, instr, 1);
+                *os << "  syscall\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
-        *os << "  syscall\n";
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::IPC_SEND) {
-            *os << "  movq $1, %rax\n";
-            emitLinuxSyscallArgs(cg, instr, 3);
-            *os << "  syscall\n";
-        } else if (spec.id == CapabilityId::IPC_RECV) {
-            *os << "  movq $0, %rax\n";
-            emitLinuxSyscallArgs(cg, instr, 3);
-            *os << "  syscall\n";
-        } else {
-            emitUnsupportedCapability(cg, instr, &spec);
-            return;
+        switch (spec.id) {
+            case CapabilityId::IPC_SEND:
+                *os << "  movq $1, %rax\n";
+                emitLinuxSyscallArgs(cg, instr, 3);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::IPC_RECV:
+                *os << "  movq $0, %rax\n";
+                emitLinuxSyscallArgs(cg, instr, 3);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::IPC_CONNECT:
+            case CapabilityId::IPC_LISTEN:
+                // For Unix Domain Sockets, we use net capabilities
+                emitNetCapability(cg, instr, spec);
+                return;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
     }
     emitStoreExternResult(cg, instr);
@@ -431,86 +515,172 @@ void SystemV_x64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const C
 
 void SystemV_x64::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     if (auto* os = cg.getTextStream()) {
-        if (spec.id != CapabilityId::ENV_GET && spec.id != CapabilityId::ENV_LIST) {
-            emitUnsupportedCapability(cg, instr, &spec);
-            return;
-        }
-        *os << "  movq $257, %rax\n"; // openat
-        *os << "  movq $-100, %rdi\n";
-        *os << "  leaq .Lproc_environ(%rip), %rsi\n";
-        *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
-        *os << "  movq %rax, %r12\n";
-        *os << "  movq $0, %rax\n  movq %r12, %rdi\n";
-        if (!instr.getOperands().empty()) {
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
-        } else {
-            *os << "  subq $4096, %rsp\n  movq %rsp, %rsi\n";
-        }
-        *os << "  movq $4096, %rdx\n  syscall\n";
-        *os << "  movq %rax, %r13\n";
-        *os << "  movq $3, %rax\n  movq %r12, %rdi\n  syscall\n";
-        *os << "  movq %r13, %rax\n";
-        if (instr.getOperands().empty()) {
-            *os << "  addq $4096, %rsp\n";
+        switch (spec.id) {
+            case CapabilityId::ENV_GET:
+            case CapabilityId::ENV_LIST:
+                *os << "  movq $257, %rax\n"; // openat
+                *os << "  movq $-100, %rdi\n";
+                *os << "  leaq .Lproc_environ(%rip), %rsi\n";
+                *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
+                *os << "  movq %rax, %r12\n";
+                *os << "  movq $0, %rax\n  movq %r12, %rdi\n";
+                if (!instr.getOperands().empty()) {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+                } else {
+                    *os << "  subq $4096, %rsp\n  movq %rsp, %rsi\n";
+                }
+                *os << "  movq $4096, %rdx\n  syscall\n";
+                *os << "  movq %rax, %r13\n";
+                *os << "  movq $3, %rax\n  movq %r12, %rdi\n  syscall\n";
+                *os << "  movq %r13, %rax\n";
+                if (instr.getOperands().empty()) {
+                    *os << "  addq $4096, %rsp\n";
+                }
+                break;
+            case CapabilityId::ENV_SET:
+                // Linux has no direct syscall for setenv.
+                *os << "  xorq %rax, %rax\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::MODULE_LOAD) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq $257, %rax\n  movq $-100, %rdi\n";
-        *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
-        *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
-        *os << "  movq %rax, %rdi\n";
-        *os << "  movq $313, %rax\n"; // finit_module
-        if (instr.getOperands().size() > 1) {
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-        } else {
-            *os << "  xorq %rsi, %rsi\n";
+        switch (spec.id) {
+            case CapabilityId::MODULE_LOAD:
+                *os << "  movq $257, %rax\n  movq $-100, %rdi\n";
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+                *os << "  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n";
+                *os << "  movq %rax, %rdi\n";
+                *os << "  movq $313, %rax\n"; // finit_module
+                if (instr.getOperands().size() > 1) {
+                    *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+                } else {
+                    *os << "  xorq %rsi, %rsi\n";
+                }
+                *os << "  xorq %rdx, %rdx\n  syscall\n";
+                break;
+            case CapabilityId::MODULE_UNLOAD:
+                *os << "  movq $176, %rax\n"; // delete_module
+                emitLinuxSyscallArgs(cg, instr, 1);
+                *os << "  xorq %rsi, %rsi\n  syscall\n";
+                break;
+            case CapabilityId::MODULE_GETSYM:
+                *os << "  xorq %rax, %rax\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
-        *os << "  xorq %rdx, %rdx\n  syscall\n";
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::TTY_ISATTY) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  subq $64, %rsp\n";
-        *os << "  movq $16, %rax\n"; // ioctl
-        *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-        *os << "  movq $0x5401, %rsi\n"; // TCGETS
-        *os << "  movq %rsp, %rdx\n  syscall\n";
-        *os << "  cmpq $0, %rax\n  sete %al\n  movzbq %al, %rax\n";
-        *os << "  addq $64, %rsp\n";
+        switch (spec.id) {
+            case CapabilityId::TTY_ISATTY:
+                *os << "  subq $64, %rsp\n";
+                *os << "  movq $16, %rax\n"; // ioctl
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+                *os << "  movq $0x5401, %rsi\n"; // TCGETS
+                *os << "  movq %rsp, %rdx\n  syscall\n";
+                *os << "  cmpq $0, %rax\n  sete %al\n  movzbq %al, %rax\n";
+                *os << "  addq $64, %rsp\n";
+                break;
+            case CapabilityId::TTY_GETSIZE:
+                *os << "  subq $8, %rsp\n";
+                *os << "  movq $16, %rax\n"; // ioctl
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+                *os << "  movq $0x5413, %rsi\n"; // TIOCGWINSZ
+                *os << "  movq %rsp, %rdx\n  syscall\n";
+                *os << "  movq (%rsp), %rax\n";
+                *os << "  addq $8, %rsp\n";
+                break;
+            case CapabilityId::TTY_SETMODE:
+                *os << "  movq $16, %rax\n"; // ioctl
+                emitLinuxSyscallArgs(cg, instr, 3);
+                *os << "  syscall\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::SECURITY_CHMOD) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq $90, %rax\n";
-        emitLinuxSyscallArgs(cg, instr, 2);
-        *os << "  syscall\n";
+        switch (spec.id) {
+            case CapabilityId::SECURITY_CHMOD:
+                *os << "  movq $90, %rax\n";
+                emitLinuxSyscallArgs(cg, instr, 2);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::SECURITY_CHOWN:
+                *os << "  movq $92, %rax\n";
+                emitLinuxSyscallArgs(cg, instr, 3);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::SECURITY_GETUID:
+                *os << "  movq $102, %rax\n  syscall\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
     }
     emitStoreExternResult(cg, instr);
 }
-void SystemV_x64::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
+void SystemV_x64::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::GPU_COMPUTE:
+            case CapabilityId::GPU_MALLOC:
+            case CapabilityId::GPU_MEMCPY:
+                *os << "  xorq %rax, %rax\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
+    }
+    emitStoreExternResult(cg, instr);
+}
 
 void SystemV_x64::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::SYNC_MUTEX_LOCK) {
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq $1, %rax\n  .Lmutex_retry_" << cg.labelCounter << ":\n  xchgq %rax, (%rdi)\n  testq %rax, %rax\n  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
-            cg.labelCounter++;
-        } else if (spec.id == CapabilityId::SYNC_MUTEX_UNLOCK) {
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n  movq $0, (%rdi)\n";
-        } else {
-            emitUnsupportedCapability(cg, instr, &spec);
-            return;
+        switch (spec.id) {
+            case CapabilityId::SYNC_MUTEX_LOCK:
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+                *os << "  movq $1, %rax\n  .Lmutex_retry_" << cg.labelCounter << ":\n  xchgq %rax, (%rdi)\n  testq %rax, %rax\n  jnz .Lmutex_retry_" << cg.labelCounter << "\n";
+                cg.labelCounter++;
+                break;
+            case CapabilityId::SYNC_MUTEX_UNLOCK:
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n  movq $0, (%rdi)\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_ADD:
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rax\n";
+                *os << "  lock addq %rax, (" << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ")\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_SUB:
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rax\n";
+                *os << "  lock subq %rax, (" << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ")\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_CAS:
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rax\n";
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[2]->get()) << ", %rdx\n";
+                *os << "  lock cmpxchgq %rdx, (" << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ")\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
     }
     emitStoreExternResult(cg, instr);
@@ -518,15 +688,21 @@ void SystemV_x64::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const 
 
 void SystemV_x64::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::TIME_NOW || spec.id == CapabilityId::TIME_MONOTONIC) {
-            *os << "  subq $16, %rsp\n  movq $228, %rax\n";
-            *os << "  movq $" << (spec.id == CapabilityId::TIME_NOW ? 0 : 1) << ", %rdi\n";
-            *os << "  movq %rsp, %rsi\n  syscall\n  movq (%rsp), %rax\n";
-            if (spec.id == CapabilityId::TIME_MONOTONIC) *os << "  imulq $1000000000, %rax, %rax\n  addq 8(%rsp), %rax\n";
-            *os << "  addq $16, %rsp\n";
-        } else {
-            emitUnsupportedCapability(cg, instr, &spec);
-            return;
+        switch (spec.id) {
+            case CapabilityId::TIME_NOW:
+            case CapabilityId::TIME_MONOTONIC:
+                *os << "  subq $16, %rsp\n  movq $228, %rax\n";
+                *os << "  movq $" << (spec.id == CapabilityId::TIME_NOW ? 0 : 1) << ", %rdi\n";
+                *os << "  movq %rsp, %rsi\n  syscall\n  movq (%rsp), %rax\n";
+                if (spec.id == CapabilityId::TIME_MONOTONIC) *os << "  imulq $1000000000, %rax, %rax\n  addq 8(%rsp), %rax\n";
+                *os << "  addq $16, %rsp\n";
+                break;
+            case CapabilityId::TIME_SLEEP:
+                emitProcessCapability(cg, instr, CapabilitySpec{CapabilityId::PROCESS_SLEEP, "process.sleep", CapabilityDomain::PROCESS, 1, 1, true, true});
+                return;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
     }
     emitStoreExternResult(cg, instr);
@@ -541,6 +717,8 @@ void SystemV_x64::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const C
             case CapabilityId::NET_ACCEPT: *os << "  movq $43, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
             case CapabilityId::NET_SEND: *os << "  movq $44, %rax\n"; emitLinuxSyscallArgs(cg, instr, 4); *os << "  syscall\n"; break;
             case CapabilityId::NET_RECV: *os << "  movq $45, %rax\n"; emitLinuxSyscallArgs(cg, instr, 4); *os << "  syscall\n"; break;
+            case CapabilityId::NET_CLOSE: *os << "  movq $3, %rax\n"; emitLinuxSyscallArgs(cg, instr, 1); *os << "  syscall\n"; break;
+            case CapabilityId::NET_BIND: *os << "  movq $49, %rax\n"; emitLinuxSyscallArgs(cg, instr, 3); *os << "  syscall\n"; break;
             default: emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -549,54 +727,115 @@ void SystemV_x64::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const C
 
 void SystemV_x64::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::SIGNAL_SEND) {
-            *os << "  movq $62, %rax\n";
-            emitLinuxSyscallArgs(cg, instr, 2);
-            *os << "  syscall\n";
-        } else if (spec.id == CapabilityId::SIGNAL_REGISTER) {
-            *os << "  movq $13, %rax\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
-            *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
-            *os << "  xorq %rdx, %rdx\n  movq $8, %r10\n";
-            *os << "  syscall\n";
-        } else {
-            emitUnsupportedCapability(cg, instr, &spec);
-            return;
+        switch (spec.id) {
+            case CapabilityId::SIGNAL_SEND:
+                *os << "  movq $62, %rax\n";
+                emitLinuxSyscallArgs(cg, instr, 2);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::SIGNAL_REGISTER:
+                *os << "  movq $13, %rax\n";
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rdi\n";
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << ", %rsi\n";
+                *os << "  xorq %rdx, %rdx\n  movq $8, %r10\n";
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::SIGNAL_WAIT:
+                *os << "  movq $34, %rax\n"; // pause
+                *os << "  syscall\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
         }
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::RANDOM_U64) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  subq $8, %rsp\n  movq $318, %rax\n  movq %rsp, %rdi\n  movq $8, %rsi\n  xorq %rdx, %rdx\n  syscall\n  popq %rax\n";
+        switch (spec.id) {
+            case CapabilityId::RANDOM_U64:
+                *os << "  subq $8, %rsp\n  movq $318, %rax\n  movq %rsp, %rdi\n  movq $8, %rsi\n  xorq %rdx, %rdx\n  syscall\n  popq %rax\n";
+                break;
+            case CapabilityId::RANDOM_BYTES:
+                *os << "  movq $318, %rax\n"; // getrandom
+                emitLinuxSyscallArgs(cg, instr, 2);
+                *os << "  xorq %rdx, %rdx\n  syscall\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::ERROR_GET) { emitUnsupportedCapability(cg, instr, &spec); return; }
-    if (auto* os = cg.getTextStream()) *os << "  xorq %rax, %rax\n";
+    if (auto* os = cg.getTextStream()) {
+        switch (spec.id) {
+            case CapabilityId::ERROR_GET:
+                *os << "  xorq %rax, %rax\n";
+                break;
+            case CapabilityId::ERROR_STR:
+                *os << "  xorq %rax, %rax\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
+    }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::DEBUG_LOG) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq $1, %rax\n  movq $2, %rdi\n";
-        *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
-        *os << "  movq $128, %rdx\n  syscall\n";
+        switch (spec.id) {
+            case CapabilityId::DEBUG_LOG:
+                *os << "  movq $1, %rax\n  movq $2, %rdi\n";
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+                *os << "  movq $128, %rdx\n  syscall\n";
+                break;
+            case CapabilityId::DEBUG_BREAK:
+                *os << "  int3\n";
+                break;
+            case CapabilityId::DEBUG_TRACE:
+                *os << "  xorq %rax, %rax\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
     }
     emitStoreExternResult(cg, instr);
 }
 
 void SystemV_x64::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
-    if (spec.id != CapabilityId::SYSTEM_INFO) { emitUnsupportedCapability(cg, instr, &spec); return; }
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq $63, %rax\n"; // uname
-        emitLinuxSyscallArgs(cg, instr, 1);
-        *os << "  syscall\n";
+        switch (spec.id) {
+            case CapabilityId::SYSTEM_INFO:
+                *os << "  movq $63, %rax\n"; // uname
+                emitLinuxSyscallArgs(cg, instr, 1);
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::SYSTEM_REBOOT:
+                *os << "  movq $169, %rax\n"; // reboot
+                *os << "  movq $0xfee1dead, %rdi\n";
+                *os << "  movq $672274793, %rsi\n";
+                *os << "  movq $0x01234567, %rdx\n";
+                *os << "  syscall\n";
+                break;
+            case CapabilityId::SYSTEM_SHUTDOWN:
+                *os << "  movq $169, %rax\n"; // reboot (with power off cmd)
+                *os << "  movq $0xfee1dead, %rdi\n";
+                *os << "  movq $672274793, %rsi\n";
+                *os << "  movq $0x4321fedc, %rdx\n";
+                *os << "  syscall\n";
+                break;
+            default:
+                emitUnsupportedCapability(cg, instr, &spec);
+                return;
+        }
     }
     emitStoreExternResult(cg, instr);
 }
