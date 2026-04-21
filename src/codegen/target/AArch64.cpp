@@ -793,6 +793,10 @@ void AArch64::emitPrologue(CodeGen& cg, int stack_size) {
 
 void AArch64::emitStartFunction(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
+        *os << ".section .rodata\n";
+        *os << ".Lproc_environ:\n  .string \"/proc/self/environ\"\n";
+        *os << ".Lproc_cmdline:\n  .string \"/proc/self/cmdline\"\n";
+        *os << ".text\n";
         *os << "\n# --- Executable Entry Point ---\n";
         *os << ".globl _start\n";
         *os << "_start:\n";
@@ -2129,6 +2133,87 @@ void AArch64::emitSyscall(CodeGen& cg, ir::Instruction& instr) {
         }
     }
 }
+
+namespace {
+void emitAArch64SyscallArgs(CodeGen& cg, ir::Instruction& instr, std::ostream& os, size_t maxArgs = 6) {
+    for (size_t i = 0; i < std::min(instr.getOperands().size(), maxArgs); ++i) {
+        os << "  mov x" << i << ", " << cg.getValueAsOperand(instr.getOperands()[i]->get()) << "\n";
+    }
+}
+void emitAArch64Result(CodeGen& cg, ir::Instruction& instr, std::ostream& os) {
+    if (instr.getType()->getTypeID() != ir::Type::VoidTyID) {
+        os << "  str x0, " << cg.getValueAsOperand(&instr) << "\n";
+    }
+}
+}
+
+bool AArch64::supportsCapability(const CapabilitySpec& spec) const {
+    return spec.id != CapabilityId::GPU_COMPUTE;
+}
+
+void AArch64::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    auto* os = cg.getTextStream(); if (!os) return emitUnsupportedCapability(cg, instr, &spec);
+    switch (spec.id) {
+        case CapabilityId::IO_READ: *os << "  mov x8, #63\n"; emitAArch64SyscallArgs(cg, instr, *os, 3); break;
+        case CapabilityId::IO_WRITE: *os << "  mov x8, #64\n"; emitAArch64SyscallArgs(cg, instr, *os, 3); break;
+        case CapabilityId::IO_OPEN: *os << "  mov x8, #56\n  mov x0, #-100\n  mov x1, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov x2, " << cg.getValueAsOperand(instr.getOperands()[1]->get()) << "\n"; *os << "  mov x3, " << (instr.getOperands().size() > 2 ? cg.getValueAsOperand(instr.getOperands()[2]->get()) : "#0") << "\n"; break;
+        case CapabilityId::IO_CLOSE: *os << "  mov x8, #57\n"; emitAArch64SyscallArgs(cg, instr, *os, 1); break;
+        case CapabilityId::IO_SEEK: *os << "  mov x8, #62\n"; emitAArch64SyscallArgs(cg, instr, *os, 3); break;
+        case CapabilityId::IO_STAT: *os << "  mov x8, #80\n"; emitAArch64SyscallArgs(cg, instr, *os, 2); break;
+        case CapabilityId::IO_FLUSH: *os << "  mov x8, #82\n"; emitAArch64SyscallArgs(cg, instr, *os, 1); break;
+        default: return emitUnsupportedCapability(cg, instr, &spec);
+    }
+    *os << "  svc #0\n";
+    emitAArch64Result(cg, instr, *os);
+}
+
+void AArch64::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    if (spec.id == CapabilityId::FS_OPEN || spec.id == CapabilityId::FS_CREATE) {
+        return emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_OPEN, "io.open", CapabilityDomain::IO, 2, 3, true, true});
+    }
+    auto* os = cg.getTextStream(); if (!os) return emitUnsupportedCapability(cg, instr, &spec);
+    if (spec.id == CapabilityId::FS_STAT) { *os << "  mov x8, #80\n"; emitAArch64SyscallArgs(cg, instr, *os, 2); }
+    else if (spec.id == CapabilityId::FS_REMOVE) { *os << "  mov x8, #35\n  mov x0, #-100\n  mov x1, " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << "\n  mov x2, #0\n"; }
+    else return emitUnsupportedCapability(cg, instr, &spec);
+    *os << "  svc #0\n"; emitAArch64Result(cg, instr, *os);
+}
+
+void AArch64::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    auto* os = cg.getTextStream(); if (!os) return emitUnsupportedCapability(cg, instr, &spec);
+    if (spec.id == CapabilityId::MEMORY_ALLOC || spec.id == CapabilityId::MEMORY_MAP) { *os << "  mov x8, #222\n"; emitAArch64SyscallArgs(cg, instr, *os, 6); }
+    else if (spec.id == CapabilityId::MEMORY_FREE) { *os << "  mov x8, #215\n"; emitAArch64SyscallArgs(cg, instr, *os, 2); }
+    else if (spec.id == CapabilityId::MEMORY_PROTECT) { *os << "  mov x8, #226\n"; emitAArch64SyscallArgs(cg, instr, *os, 3); }
+    else return emitUnsupportedCapability(cg, instr, &spec);
+    *os << "  svc #0\n"; emitAArch64Result(cg, instr, *os);
+}
+
+void AArch64::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+    auto* os = cg.getTextStream(); if (!os) return emitUnsupportedCapability(cg, instr, &spec);
+    if (spec.id == CapabilityId::PROCESS_EXIT) { *os << "  mov x8, #93\n"; emitAArch64SyscallArgs(cg, instr, *os, 1); }
+    else if (spec.id == CapabilityId::PROCESS_ABORT) { *os << "  mov x8, #172\n  svc #0\n  mov x0, x0\n  mov x1, #6\n  mov x8, #129\n"; }
+    else if (spec.id == CapabilityId::PROCESS_SLEEP) { *os << "  mov x8, #101\n"; emitAArch64SyscallArgs(cg, instr, *os, 1); *os << "  mov x1, #0\n"; }
+    else if (spec.id == CapabilityId::PROCESS_SPAWN) { *os << "  mov x8, #220\n"; *os << "  svc #0\n"; emitAArch64Result(cg, instr, *os); return; }
+    else if (spec.id == CapabilityId::PROCESS_ARGS) { *os << "  mov x8, #56\n  mov x0, #-100\n  adrp x1, .Lproc_cmdline\n  add x1, x1, :lo12:.Lproc_cmdline\n  mov x2, #0\n  mov x3, #0\n  svc #0\n"; emitAArch64Result(cg, instr, *os); return; }
+    else return emitUnsupportedCapability(cg, instr, &spec);
+    *os << "  svc #0\n"; emitAArch64Result(cg, instr, *os);
+}
+
+void AArch64::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os) return emitUnsupportedCapability(cg,instr,&spec); if(spec.id==CapabilityId::THREAD_SPAWN){*os<<"  mov x8, #220\n"; emitAArch64SyscallArgs(cg,instr,*os,5);} else if(spec.id==CapabilityId::THREAD_JOIN){*os<<"  mov x8, #260\n"; emitAArch64SyscallArgs(cg,instr,*os,1);} else return emitUnsupportedCapability(cg,instr,&spec); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os) return emitUnsupportedCapability(cg,instr,&spec); if(spec.id==CapabilityId::SYNC_MUTEX_LOCK||spec.id==CapabilityId::SYNC_MUTEX_UNLOCK){ *os<<"  mov x9, "<<cg.getValueAsOperand(instr.getOperands()[0]->get())<<"\n"; *os<<"  mov x10, "<<(spec.id==CapabilityId::SYNC_MUTEX_LOCK?"#1":"#0")<<"\n"; *os<<"  str x10, [x9]\n"; *os<<"  mov x0, #0\n"; emitAArch64Result(cg,instr,*os);} else emitUnsupportedCapability(cg,instr,&spec); }
+void AArch64::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os) return emitUnsupportedCapability(cg,instr,&spec); if(spec.id==CapabilityId::TIME_NOW){*os<<"  mov x8, #113\n  mov x0, #0\n  mov x1, sp\n";} else if(spec.id==CapabilityId::TIME_MONOTONIC){*os<<"  mov x8, #113\n  mov x0, #1\n  mov x1, sp\n";} else return emitUnsupportedCapability(cg,instr,&spec); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os||spec.id!=CapabilityId::EVENT_POLL) return emitUnsupportedCapability(cg,instr,&spec); *os<<"  mov x8, #232\n"; emitAArch64SyscallArgs(cg,instr,*os,4); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os) return emitUnsupportedCapability(cg,instr,&spec); uint64_t n=0; switch(spec.id){case CapabilityId::NET_SOCKET:n=198;break;case CapabilityId::NET_CONNECT:n=203;break;case CapabilityId::NET_LISTEN:n=201;break;case CapabilityId::NET_ACCEPT:n=202;break;case CapabilityId::NET_SEND:n=206;break;case CapabilityId::NET_RECV:n=207;break;default:return emitUnsupportedCapability(cg,instr,&spec);} *os<<"  mov x8, #"<<n<<"\n"; emitAArch64SyscallArgs(cg,instr,*os,4); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { if(spec.id==CapabilityId::IPC_SEND) return emitIOCapability(cg,instr,CapabilitySpec{CapabilityId::IO_WRITE,"io.write",CapabilityDomain::IO,3,3,true,true}); if(spec.id==CapabilityId::IPC_RECV) return emitIOCapability(cg,instr,CapabilitySpec{CapabilityId::IO_READ,"io.read",CapabilityDomain::IO,3,3,true,true}); emitUnsupportedCapability(cg,instr,&spec);}
+void AArch64::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os) return emitUnsupportedCapability(cg,instr,&spec); if(spec.id==CapabilityId::ENV_GET||spec.id==CapabilityId::ENV_LIST){ *os<<"  mov x8, #56\n  mov x0, #-100\n  adrp x1, .Lproc_environ\n  add x1, x1, :lo12:.Lproc_environ\n  mov x2, #0\n  mov x3, #0\n  svc #0\n"; emitAArch64Result(cg,instr,*os);} else emitUnsupportedCapability(cg,instr,&spec); }
+void AArch64::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os||spec.id!=CapabilityId::SYSTEM_INFO) return emitUnsupportedCapability(cg,instr,&spec); *os<<"  mov x8, #160\n"; emitAArch64SyscallArgs(cg,instr,*os,1); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os) return emitUnsupportedCapability(cg,instr,&spec); if(spec.id==CapabilityId::SIGNAL_SEND){ *os<<"  mov x8, #129\n"; emitAArch64SyscallArgs(cg,instr,*os,2);} else if(spec.id==CapabilityId::SIGNAL_REGISTER){ *os<<"  mov x8, #134\n"; emitAArch64SyscallArgs(cg,instr,*os,3);} else return emitUnsupportedCapability(cg,instr,&spec); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os||spec.id!=CapabilityId::RANDOM_U64) return emitUnsupportedCapability(cg,instr,&spec); *os<<"  mov x8, #278\n  mov x0, sp\n  mov x1, #8\n  mov x2, #0\n  svc #0\n  ldr x0, [sp]\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { if(spec.id!=CapabilityId::ERROR_GET) return emitUnsupportedCapability(cg,instr,&spec); if(auto* os=cg.getTextStream()){ *os<<"  mov x0, #0\n"; emitAArch64Result(cg,instr,*os);} }
+void AArch64::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { if(spec.id!=CapabilityId::DEBUG_LOG) return emitUnsupportedCapability(cg,instr,&spec); if(auto* os=cg.getTextStream()){ *os<<"  mov x8, #64\n  mov x0, #2\n"; if(!instr.getOperands().empty()) *os<<"  mov x1, "<<cg.getValueAsOperand(instr.getOperands()[0]->get())<<"\n"; else *os<<"  mov x1, #0\n"; *os<<"  mov x2, #128\n  svc #0\n"; emitAArch64Result(cg,instr,*os);} }
+void AArch64::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os||spec.id!=CapabilityId::MODULE_LOAD) return emitUnsupportedCapability(cg,instr,&spec); *os<<"  mov x8, #56\n  mov x0, #-100\n"; if(!instr.getOperands().empty()) *os<<"  mov x1, "<<cg.getValueAsOperand(instr.getOperands()[0]->get())<<"\n"; else *os<<"  mov x1, #0\n"; *os<<"  mov x2, #0\n  mov x3, #0\n  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os||spec.id!=CapabilityId::TTY_ISATTY) return emitUnsupportedCapability(cg,instr,&spec); *os<<"  mov x8, #29\n"; emitAArch64SyscallArgs(cg,instr,*os,3); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { auto* os=cg.getTextStream(); if(!os||spec.id!=CapabilityId::SECURITY_CHMOD) return emitUnsupportedCapability(cg,instr,&spec); *os<<"  mov x8, #53\n"; emitAArch64SyscallArgs(cg,instr,*os,2); *os<<"  svc #0\n"; emitAArch64Result(cg,instr,*os);}
+void AArch64::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) { emitUnsupportedCapability(cg, instr, &spec); }
 
 void AArch64::emitLoad(CodeGen& cg, ir::Instruction& instr) {
     if (auto* os = cg.getTextStream()) {
