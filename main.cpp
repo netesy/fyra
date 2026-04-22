@@ -3,14 +3,8 @@
 #include "codegen/execgen/elf.hh"
 #include "codegen/execgen/pe.hh"
 #include "codegen/execgen/macho.hh"
-#include "codegen/target/SystemV_x64.h"
-#include "codegen/target/Windows_x64.h"
-#include "codegen/target/Windows_AArch64.h"
-#include "codegen/target/MacOS_x64.h"
-#include "codegen/target/MacOS_AArch64.h"
-#include "codegen/target/AArch64.h"
-#include "codegen/target/Wasm32.h"
-#include "codegen/target/RiscV64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
 #include "transforms/CFGBuilder.h"
 #include "transforms/DominatorTree.h"
 #include "transforms/DominanceFrontier.h"
@@ -71,14 +65,13 @@ int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <input.fyra|input.fy> -o <output.s> [options]" << std::endl;
         std::cerr << "Options:" << std::endl;
-        std::cerr << "  --target <linux|windows|windows-amd64|windows-arm64|aarch64|wasm32|riscv64>  Target platform (default: linux)" << std::endl;
+        std::cerr << "  --target <triple>                                Target triple (e.g., x64-linux-bin, aarch64-macos-executable)" << std::endl;
         std::cerr << "  -O0                                              Disable optimizations" << std::endl;
         std::cerr << "  -O1                                              Enable conservative optimizations" << std::endl;
         std::cerr << "  -O2                                              Enable full optimization pipeline (default)" << std::endl;
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
-        std::cerr << "  --enhanced                                       (Deprecated) Uses standard CodeGen path" << std::endl;
         std::cerr << "  --verbose                                        Enable verbose output" << std::endl;
         std::cerr << "  --pipeline                                       Run full compilation pipeline for all targets" << std::endl;
         std::cerr << "  --gen-exec                                       Generate an executable file" << std::endl;
@@ -90,13 +83,14 @@ int main(int argc, char** argv) {
 
     std::string inputFile = argv[1];
     std::string outputFile = get_arg(argc, argv, "-o");
-    std::string target = get_arg(argc, argv, "--target");
+    std::string targetTriple = get_arg(argc, argv, "--target");
+    if (targetTriple.empty()) targetTriple = "x64-linux-bin"; // Default
+
     int optimizationLevel = 2;
 
     // Parse command line options
     bool enableValidation = true;
     bool generateObject = false;
-    bool useEnhanced = false;
     bool verboseOutput = false;
     bool runPipeline = false;
     bool generateExecutable = false;
@@ -109,16 +103,12 @@ int main(int argc, char** argv) {
             enableValidation = true;
         } else if (arg == "--object") {
             generateObject = true;
-        } else if (arg == "--enhanced") {
-            useEnhanced = true;
         } else if (arg == "--verbose") {
             verboseOutput = true;
         } else if (arg == "--pipeline") {
             runPipeline = true;
-            useEnhanced = true; // Pipeline requires enhanced CodeGen
         } else if (arg == "--gen-exec") {
             generateExecutable = true;
-            useEnhanced = true; // Executable generation requires enhanced CodeGen
         } else if (arg == "-O0") {
             optimizationLevel = 0;
         } else if (arg == "-O1") {
@@ -128,14 +118,27 @@ int main(int argc, char** argv) {
         }
     }
     
+    // Resolve target
+    auto desc = target::TargetDescriptor::fromString(targetTriple);
+    if (!desc) {
+        // Compatibility with old target names
+        if (targetTriple == "linux") targetTriple = "x64-linux-bin";
+        else if (targetTriple == "windows" || targetTriple == "windows-amd64") targetTriple = "x64-windows-bin";
+        else if (targetTriple == "windows-arm64") targetTriple = "aarch64-windows-bin";
+        else if (targetTriple == "aarch64") targetTriple = "aarch64-linux-bin";
+        else if (targetTriple == "wasm32") targetTriple = "wasm32-wasi-wasm";
+        else if (targetTriple == "riscv64") targetTriple = "riscv64-linux-bin";
+
+        desc = target::TargetDescriptor::fromString(targetTriple);
+        if (!desc) {
+            std::cerr << "Error: invalid target triple: " << targetTriple << std::endl;
+            return 1;
+        }
+    }
+
     // Detect input file format
     parser::FileFormat format = detectFileFormat(inputFile);
-    std::string formatName;
-    if (format == parser::FileFormat::FYRA) {
-        formatName = "Fyra (.fyra)";
-    } else {
-        formatName = "Fyra (.fy)";
-    }
+    std::string formatName = (format == parser::FileFormat::FYRA) ? "Fyra (.fyra)" : "Fyra (.fy)";
 
     if (outputFile.empty()) {
         std::cerr << "Error: missing output file (-o <output.s>)" << std::endl;
@@ -158,39 +161,22 @@ int main(int argc, char** argv) {
     }
     std::cout << "--- Parsing complete. ---\n" << std::flush;
 
-    // 2. Run Enhanced SSA and Optimization Pipeline
+    // 2. Run Optimization Pipeline
     std::cout << "--- Running Optimization Pipeline (-O" << optimizationLevel << ") ---\n" << std::flush;
-    
-    // Create shared error reporter for all passes
     auto error_reporter = std::make_shared<transforms::ErrorReporter>(std::cerr, false);
     
     for (auto& func : module->getFunctions()) {
-        // Phase 1: SSA Construction (using legacy interface for compatibility)
         transforms::CFGBuilder::run(*func);
-        transforms::DominatorTree domTree;
-        domTree.run(*func);
-        transforms::DominanceFrontier domFrontier;
-        domFrontier.run(*func, domTree);
-        transforms::PhiInsertion phiInserter;
-        phiInserter.run(*func, domFrontier);
-        transforms::SSARenamer ssaRenamer;
-        ssaRenamer.run(*func, domTree);
+        transforms::DominatorTree domTree; domTree.run(*func);
+        transforms::DominanceFrontier domFrontier; domFrontier.run(*func, domTree);
+        transforms::PhiInsertion phiInserter; phiInserter.run(*func, domFrontier);
+        transforms::SSARenamer ssaRenamer; ssaRenamer.run(*func, domTree);
         
-        if (target != "wasm32") {
-            transforms::Mem2Reg mem2reg;
-            mem2reg.run(*func);
-        } else {
-            // Even for WASM, we should run Mem2Reg if we want SSA.
-            // But we must ensure it doesn't break our assumptions.
-            // Let's re-enable it and see.
-            transforms::Mem2Reg mem2reg;
-            mem2reg.run(*func);
-        }
+        transforms::Mem2Reg mem2reg;
+        mem2reg.run(*func);
 
         if (optimizationLevel == 0) continue;
 
-        // Phase 2: Enhanced Optimization Passes
-        // Create enhanced passes with shared error reporter
         transforms::SCCP enhanced_sccp(error_reporter);
         transforms::ControlFlowSimplification cfg_simplifier(error_reporter);
         transforms::DeadInstructionElimination enhanced_dce(error_reporter);
@@ -198,312 +184,101 @@ int main(int argc, char** argv) {
         transforms::GVN gvn;
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         
-        // Run optimization passes in optimal order
         bool optimization_changed = true;
         int iteration = 1;
         const int maxIterations = (optimizationLevel >= 2) ? 5 : 2;
-        const bool isWindowsTarget =
-            (target == "windows" || target == "windows-amd64" || target == "windows-x64" ||
-             target == "win64" || target == "windows-arm64");
-        const bool runAggressiveLoopPasses = (optimizationLevel >= 2 && target != "wasm32" && !isWindowsTarget);
+        bool isWasm = (desc->arch == target::Arch::WASM32);
 
-        if (target != "wasm32") {
-            while (optimization_changed && iteration <= maxIterations) { // Limit iterations to prevent infinite loops
+        if (!isWasm) {
+            while (optimization_changed && iteration <= maxIterations) {
                 optimization_changed = false;
-                
-                if (verboseOutput) {
-                    std::cout << "  Optimization iteration " << iteration << " on function: " << func->getName() << std::endl;
-                }
-                
-                // Constant propagation and folding (should run first)
-                if (verboseOutput) std::cout << "  Running SCCP..." << std::endl;
-                if (enhanced_sccp.run(*func)) {
-                    optimization_changed = true;
-                }
-
+                if (enhanced_sccp.run(*func)) optimization_changed = true;
                 if (copy_elim.run(*func)) optimization_changed = true;
                 if (gvn.run(*func)) optimization_changed = true;
-
-                // Control flow simplification (after constant propagation)
-                if (verboseOutput) std::cout << "  Running CFG Simplifier..." << std::endl;
-                if (cfg_simplifier.run(*func)) {
-                    optimization_changed = true;
-                }
-
-                if (runAggressiveLoopPasses && licm.run(*func)) optimization_changed = true;
-
-                // Dead code elimination (should run last to clean up)
-                if (verboseOutput) std::cout << "  Running DCE..." << std::endl;
-                if (enhanced_dce.run(*func)) {
-                    optimization_changed = true;
-                }
-                
+                if (cfg_simplifier.run(*func)) optimization_changed = true;
+                if (optimizationLevel >= 2 && licm.run(*func)) optimization_changed = true;
+                if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;
             }
         }
     }
     
-    // Print optimization summary
     if (error_reporter->hasErrors()) {
         std::cout << "--- Optimization completed with errors ---\n" << std::flush;
         error_reporter->printSummary();
-    } else if (error_reporter->hasWarnings()) {
-        std::cout << "--- Optimization completed with warnings ---\n" << std::flush;
     } else {
         std::cout << "--- Optimization Pipeline complete ---\n" << std::flush;
     }
     
-    // Continue with register allocation if no critical errors
     if (!error_reporter->hasCriticalErrors()) {
-        // 3. Run Register Allocation (skip for WASM)
-        if (target != "wasm32") {
+        if (desc->arch != target::Arch::WASM32) {
             std::cout << "--- Running Register Allocation... ---\n" << std::flush;
-            for (auto& func : module->getFunctions()) {
-                transforms::RegAllocRewriter rewriter;
-                rewriter.run(*func);
-            }
+            for (auto& func : module->getFunctions()) { transforms::RegAllocRewriter rewriter; rewriter.run(*func); }
             std::cout << "--- Register Allocation complete. ---\n" << std::flush;
-        } else {
-            std::cout << "--- Skipping Register Allocation for WASM target. ---\n" << std::flush;
         }
     } else {
         std::cerr << "Critical errors detected during optimization. Skipping register allocation." << std::endl;
         return 1;
     }
 
-    // 4. Generate code
-    std::string targetName = target.empty() ? "linux" : target;
+    // 3. Generate code
+    std::cout << "--- Target: " << desc->toString() << " ---\n" << std::flush;
+    auto targetInfo = codegen::target::TargetResolver::resolve(*desc);
     
-    if (runPipeline) {
-        // Use comprehensive pipeline for all targets
-        std::cout << "--- Running Comprehensive Compilation Pipeline ---\n" << std::flush;
-        
-        codegen::CodeGenPipeline pipeline;
-        codegen::CodeGenPipeline::PipelineConfig config;
-        config.enableValidation = enableValidation;
-        config.enableObjectGeneration = generateObject;
-        config.enableVerboseOutput = verboseOutput;
-        config.outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
-        
-        if (!target.empty()) {
-            config.targetPlatforms = {target};
-        }
-        
-        auto pipelineResult = pipeline.execute(*module, config);
-        
-        if (pipelineResult.success) {
-            std::cout << "Pipeline completed successfully for " << pipelineResult.getSuccessfulTargets() 
-                     << " targets in " << pipelineResult.totalTimeMs << "ms" << std::endl;
+    if (generateExecutable) {
+        std::cout << "--- Generating Executable (In-Memory) ---\n" << std::flush;
+        codegen::CodeGen codeGenerator(*module, std::move(targetInfo), nullptr);
+        codeGenerator.emit(true);
+
+        std::map<std::string, std::vector<uint8_t>> sections;
+        sections[".text"] = codeGenerator.getAssembler().getCode();
+        sections[".rodata"] = codeGenerator.getRodataAssembler().getCode();
+
+        if (desc->os == target::OS::Windows) {
+            PEGenerator peGen(true);
+            if (desc->arch == target::Arch::AArch64) peGen.setMachine(IMAGE_FILE_MACHINE_ARM64);
+            std::vector<PEGenerator::Symbol> symbols;
+            for (const auto& sym : codeGenerator.getSymbols()) symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
+            std::vector<PEGenerator::Relocation> relocs;
+            for (const auto& reloc : codeGenerator.getRelocations()) relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+            if (peGen.generateFromCode(sections, symbols, relocs, outputFile + ".exe")) std::cout << "PE Executable generated successfully: " << outputFile << ".exe" << std::endl;
+            else { std::cerr << "Error generating PE: " << peGen.getLastError() << std::endl; return 1; }
+        } else if (desc->os == target::OS::MacOS) {
+            MachOGenerator machoGen(inputFile);
+            if (desc->arch == target::Arch::AArch64) machoGen.setCpuType(0x0100000c);
+            std::vector<MachOGenerator::Symbol> symbols;
+            for (const auto& sym : codeGenerator.getSymbols()) symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
+            std::vector<MachOGenerator::Relocation> relocs;
+            for (const auto& reloc : codeGenerator.getRelocations()) relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+            if (machoGen.generateFromCode(sections, symbols, relocs, outputFile)) std::cout << "Mach-O Executable generated successfully: " << outputFile << std::endl;
+            else { std::cerr << "Error generating Mach-O: " << machoGen.getLastError() << std::endl; return 1; }
         } else {
-            std::cerr << "Pipeline failed. " << pipelineResult.getFailedTargets() << " targets failed." << std::endl;
-            for (const auto& error : pipelineResult.errors) {
-                std::cerr << "Pipeline Error: " << error << std::endl;
-            }
-            return 1;
+            ElfGenerator elfGen(inputFile);
+            if (desc->arch == target::Arch::X64) elfGen.setMachine(62);
+            else if (desc->arch == target::Arch::RISCV64) elfGen.setMachine(243);
+            else if (desc->arch == target::Arch::AArch64) elfGen.setMachine(183);
+            std::vector<ElfGenerator::Symbol> symbols;
+            for (const auto& sym : codeGenerator.getSymbols()) symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
+            std::vector<ElfGenerator::Relocation> relocations;
+            for (const auto& reloc : codeGenerator.getRelocations()) relocations.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+            if (elfGen.generateFromCode(sections, symbols, relocations, outputFile)) std::cout << "Executable generated successfully: " << outputFile << std::endl;
+            else { std::cerr << "Error generating executable: " << elfGen.getLastError() << std::endl; return 1; }
         }
-        
-    } else if (useEnhanced) {
-        // Use enhanced CodeGen with validation and object generation
-        std::cout << "--- Using CodeGen with Validation ---\n" << std::flush;
-        
-        std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
-        if (generateExecutable) {
-            std::cout << "--- Generating Executable (In-Memory) ---\n" << std::flush;
-            std::string executablePath = outputFile;
-            if (executablePath.find_last_of('.') != std::string::npos) {
-                 executablePath = executablePath.substr(0, executablePath.find_last_of('.'));
-            }
-
-            // Select target for in-memory generation
-            std::unique_ptr<codegen::target::TargetInfo> targetInfo;
-            bool isWindows = (targetName == "windows" || targetName == "windows-amd64" || targetName == "win64" || targetName == "windows-x64" || targetName == "windows-arm64");
-            bool isMacOS = (targetName == "macos" || targetName == "darwin" || targetName == "macos-aarch64" || targetName == "macos-arm64");
-
-            if (targetName == "linux") {
-                targetInfo = std::make_unique<codegen::target::SystemV_x64>();
-            } else if (targetName == "riscv64") {
-                targetInfo = std::make_unique<codegen::target::RiscV64>();
-            } else if (targetName == "aarch64") {
-                targetInfo = std::make_unique<codegen::target::AArch64>();
-            } else if (isWindows) {
-                if (targetName == "windows-arm64") {
-                    targetInfo = std::make_unique<codegen::target::Windows_AArch64>();
-                } else {
-                    targetInfo = std::make_unique<codegen::target::Windows_x64>();
-                }
-            } else if (isMacOS) {
-                if (targetName == "macos-aarch64" || targetName == "macos-arm64") {
-                    targetInfo = std::make_unique<codegen::target::MacOS_AArch64>();
-                } else {
-                    targetInfo = std::make_unique<codegen::target::MacOS_x64>();
-                }
-            } else {
-                std::cerr << "Error: In-memory executable generation is currently not supported for target: " << targetName << std::endl;
-                return 1;
-            }
-
-            // Create a CodeGen instance for binary-only output
-            codegen::CodeGen codeGenerator(*module, std::move(targetInfo), nullptr);
-
-            // Emit machine code into the in-memory assembler
-            codeGenerator.emit(true);
-
-            // Prepare section data
-            std::map<std::string, std::vector<uint8_t>> sections;
-            sections[".text"] = codeGenerator.getAssembler().getCode();
-            sections[".rodata"] = codeGenerator.getRodataAssembler().getCode();
-
-            if (isWindows) {
-                PEGenerator peGen(true);
-                if (targetName == "windows-arm64") {
-                    peGen.setMachine(IMAGE_FILE_MACHINE_ARM64);
-                }
-                std::vector<PEGenerator::Symbol> symbols;
-                for (const auto& sym : codeGenerator.getSymbols()) {
-                    symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
-                }
-                std::vector<PEGenerator::Relocation> relocs;
-                for (const auto& reloc : codeGenerator.getRelocations()) {
-                    relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-                }
-                if (peGen.generateFromCode(sections, symbols, relocs, executablePath + ".exe")) {
-                    std::cout << "PE Executable generated successfully: " << executablePath << ".exe" << std::endl;
-                } else {
-                    std::cerr << "Error generating PE: " << peGen.getLastError() << std::endl;
-                    return 1;
-                }
-            } else if (isMacOS) {
-                MachOGenerator machoGen(inputFile);
-                if (targetName == "macos-aarch64" || targetName == "macos-arm64") {
-                    machoGen.setCpuType(0x0100000c); // CPU_TYPE_ARM64
-                }
-                std::vector<MachOGenerator::Symbol> symbols;
-                for (const auto& sym : codeGenerator.getSymbols()) {
-                    symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
-                }
-                std::vector<MachOGenerator::Relocation> relocs;
-                for (const auto& reloc : codeGenerator.getRelocations()) {
-                    relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-                }
-                if (machoGen.generateFromCode(sections, symbols, relocs, executablePath)) {
-                    std::cout << "Mach-O Executable generated successfully: " << executablePath << std::endl;
-                } else {
-                    std::cerr << "Error generating Mach-O: " << machoGen.getLastError() << std::endl;
-                    return 1;
-                }
-            } else {
-                ElfGenerator elfGen(inputFile);
-                if (targetName == "linux") elfGen.setMachine(62); // EM_X86_64
-                else if (targetName == "riscv64") elfGen.setMachine(243); // EM_RISCV
-                else if (targetName == "aarch64") elfGen.setMachine(183); // EM_AARCH64
-
-                std::vector<ElfGenerator::Symbol> symbols;
-                for (const auto& sym_info : codeGenerator.getSymbols()) {
-                    symbols.push_back({sym_info.name, sym_info.value, sym_info.size,
-                                       sym_info.type, sym_info.binding, sym_info.sectionName});
-                }
-                std::vector<ElfGenerator::Relocation> relocations;
-                for (const auto& reloc_info : codeGenerator.getRelocations()) {
-                    relocations.push_back({reloc_info.offset, reloc_info.type, reloc_info.addend,
-                                           reloc_info.symbolName, reloc_info.sectionName});
-                }
-
-                if (elfGen.generateFromCode(sections, symbols, relocations, executablePath)) {
-                    std::cout << "Executable generated successfully: " << executablePath << std::endl;
-                } else {
-                    std::cerr << "Error generating executable from in-memory code: " << elfGen.getLastError() << std::endl;
-                    return 1;
-                }
-            }
-        } else {
-            std::unique_ptr<codegen::target::TargetInfo> targetInfo;
-            if (target == "windows" || target == "windows-amd64" || target == "windows-x64") {
-                targetInfo = std::make_unique<codegen::target::Windows_x64>();
-            } else if (target == "windows-arm64") {
-                targetInfo = std::make_unique<codegen::target::Windows_AArch64>();
-            } else if (target == "aarch64") {
-                targetInfo = std::make_unique<codegen::target::AArch64>();
-            } else if (target == "wasm32") {
-                targetInfo = std::make_unique<codegen::target::Wasm32>();
-            } else if (target == "riscv64") {
-                targetInfo = std::make_unique<codegen::target::RiscV64>();
-            } else if (target == "macos" || target == "macos-x64") {
-                targetInfo = std::make_unique<codegen::target::MacOS_x64>();
-            } else if (target == "macos-aarch64" || target == "macos-arm64") {
-                targetInfo = std::make_unique<codegen::target::MacOS_AArch64>();
-            } else {
-                targetInfo = std::make_unique<codegen::target::SystemV_x64>();
-            }
-
-            codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
-            codeGen.enableVerboseOutput(verboseOutput);
-
-            std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
-            auto result = codeGen.compileToObject(outputPrefix, enableValidation, generateObject, false);
-
-            if (result.success) {
-                std::cout << "Compilation successful in " << result.totalTimeMs << "ms" << std::endl;
-                std::cout << "Assembly: " << result.assemblyPath << std::endl;
-                if (generateObject && !result.objectPath.empty()) {
-                    std::cout << "Object: " << result.objectPath << std::endl;
-                }
-                
-                // Print validation summary
-                if (enableValidation) {
-                    std::cout << "Validation: " << result.validation.errors.size() << " errors, "
-                                << result.validation.warnings.size() << " warnings" << std::endl;
-
-                    if (verboseOutput && !result.validation.errors.empty()) {
-                        std::cout << "Validation Errors:" << std::endl;
-                        for (const auto& error : result.validation.errors) {
-                            std::cout << "  [" << error.category << "] " << error.message << std::endl;
-                        }
-                    }
-                }
-            } else {
-                std::cerr << "Compilation failed" << std::endl;
-                auto errors = result.getAllErrors();
-                for (const auto& error : errors) {
-                    std::cerr << "Error: " << error << std::endl;
-                }
-                return 1;
-            }
-        }
-        
     } else {
-        // Use legacy CodeGen
-        std::cout << "--- Generating code for target: " << targetName << " (legacy mode) ---\n" << std::flush;
-        
-        // Select target
-        std::unique_ptr<codegen::target::TargetInfo> targetInfo;
-        if (target == "windows" || target == "windows-amd64" || target == "windows-x64") {
-            targetInfo = std::make_unique<codegen::target::Windows_x64>();
-        } else if (target == "windows-arm64") {
-            targetInfo = std::make_unique<codegen::target::Windows_AArch64>();
-        } else if (target == "aarch64") {
-            targetInfo = std::make_unique<codegen::target::AArch64>();
-        } else if (target == "wasm32") {
-            targetInfo = std::make_unique<codegen::target::Wasm32>();
-        } else if (target == "riscv64") {
-            targetInfo = std::make_unique<codegen::target::RiscV64>();
-        } else if (target == "macos" || target == "macos-x64") {
-            targetInfo = std::make_unique<codegen::target::MacOS_x64>();
-        } else if (target == "macos-aarch64" || target == "macos-arm64") {
-            targetInfo = std::make_unique<codegen::target::MacOS_AArch64>();
+        std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
+        codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
+        codeGen.enableVerboseOutput(verboseOutput);
+
+        auto result = codeGen.compileToObject(outputPrefix, enableValidation, generateObject, false);
+        if (result.success) {
+            std::cout << "Compilation successful in " << result.totalTimeMs << "ms" << std::endl;
+            std::cout << "Assembly: " << result.assemblyPath << std::endl;
+            if (generateObject && !result.objectPath.empty()) std::cout << "Object: " << result.objectPath << std::endl;
         } else {
-            // Default to Linux
-            targetInfo = std::make_unique<codegen::target::SystemV_x64>();
-        }
-        
-        std::ofstream outFile(outputFile);
-        if (!outFile.is_open()) {
-            std::cerr << "Error: could not open output file " << outputFile << std::endl;
+            std::cerr << "Compilation failed" << std::endl;
+            for (const auto& error : result.getAllErrors()) std::cerr << "Error: " << error << std::endl;
             return 1;
         }
-
-        codegen::CodeGen codeGenerator(*module, std::move(targetInfo), &outFile);
-        codeGenerator.emit(false);
-        std::cout << "Compilation successful. Assembly written to " << outputFile << std::endl;
     }
 
     return 0;

@@ -6,7 +6,7 @@
 #include "ir/BasicBlock.h"
 #include "ir/Instruction.h"
 #include "ir/Constant.h"
-#include "codegen/target/TargetInfo.h"
+#include "target/core/TargetInfo.h"
 #include "codegen/execgen/Assembler.h"
 #include "codegen/validation/ASMValidator.h"
 #include "codegen/objectgen/ObjectFileGenerator.h"

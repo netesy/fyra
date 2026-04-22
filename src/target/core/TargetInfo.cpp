@@ -1,4 +1,4 @@
-#include "codegen/target/TargetInfo.h"
+#include "target/core/TargetInfo.h"
 #include "codegen/CodeGen.h"
 #include "ir/Type.h"
 #include "ir/Instruction.h"
@@ -204,6 +204,7 @@ std::string TargetInfo::getVectorInstruction(const std::string& baseInstr, const
 std::string TargetInfo::formatConstant(const ir::ConstantInt* C) const {
     return getImmediatePrefix() + std::to_string(C->getValue());
 }
+
 
 int32_t TargetInfo::getStackOffset(const CodeGen& cg, ir::Value* val) const {
     auto it = cg.getStackOffsets().find(val);

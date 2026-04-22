@@ -55,8 +55,19 @@ set(LIB_SOURCES
     src/transforms/LoopInvariantCodeMotion.cpp
     src/transforms/ControlFlowSimplification.cpp
     src/transforms/ABIAnalysis.cpp
-    src/codegen/target/TargetInfo.cpp
-    src/codegen/target/X86_64Base.cpp
+    src/target/core/TargetInfo.cpp
+    src/target/core/CompositeTargetInfo.cpp
+    src/target/core/ArchitectureInfo.cpp
+    src/target/architecture/x64/X64Architecture.cpp
+    src/target/architecture/aarch64/AArch64Architecture.cpp
+    src/target/architecture/riscv64/RiscV64Architecture.cpp
+    src/target/architecture/wasm32/Wasm32Architecture.cpp
+    src/target/os/linux/LinuxOS.cpp
+    src/target/os/windows/WindowsOS.cpp
+    src/target/os/macos/MacOSOS.cpp
+    src/target/os/wasi/WASIOS.cpp
+    src/target/core/TargetDescriptor.cpp
+    src/target/core/TargetResolver.cpp
     src/codegen/target/SystemV_x64.cpp
     src/codegen/target/Windows_x64.cpp
     src/codegen/target/Windows_AArch64.cpp

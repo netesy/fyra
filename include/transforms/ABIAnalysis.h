@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ir/Function.h"
-#include "codegen/target/TargetInfo.h"
+#include "target/core/TargetInfo.h"
 #include <memory>
 
 namespace transforms {

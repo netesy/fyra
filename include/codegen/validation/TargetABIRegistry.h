@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ValidationTypes.h"
-#include "codegen/target/TargetInfo.h"
+#include "target/core/TargetInfo.h"
 #include <string>
 #include <memory>
 #include <map>

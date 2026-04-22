@@ -1,6 +1,6 @@
 #include "ir/Type.h"
 #include "ir/IRContext.h"
-#include "codegen/target/TargetInfo.h"
+#include "target/core/TargetInfo.h"
 #include "ir/FunctionType.h"
 #include <unordered_map>
 #include <functional>
