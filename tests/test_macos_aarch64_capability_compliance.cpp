@@ -1,11 +1,13 @@
-#include "codegen/target/MacOS_AArch64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include "ir/Instruction.h"
 #include "ir/Constant.h"
 #include <vector>
 #include <iostream>
 
 int main() {
-    codegen::target::MacOS_AArch64 target;
+    auto target_ptr = codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::MacOS}); auto& target = *target_ptr;
     struct Case { const char* name; int argc; bool expect; };
     const std::vector<Case> cases = {
         {"io.read", 3, true}, {"io.write", 3, true}, {"io.open", 3, true}, {"io.close", 1, true},
@@ -21,7 +23,7 @@ int main() {
         {"env.get", 2, true}, {"env.list", 0, true}, {"system.info", 1, true},
         {"signal.send", 2, true}, {"signal.register", 2, true}, {"random.u64", 0, true},
         {"error.get", 0, true}, {"debug.log", 1, true}, {"module.load", 1, true},
-        {"tty.isatty", 1, true}, {"security.chmod", 2, true}, {"gpu.compute", 2, false}
+        {"tty.isatty", 1, true}, {"security.chmod", 2, true}, {"gpu.compute", 2, true}
     };
 
     auto* i64 = ir::IntegerType::get(64);

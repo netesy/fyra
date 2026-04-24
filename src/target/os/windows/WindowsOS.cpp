@@ -3,7 +3,7 @@
 #include "target/core/ArchitectureInfo.h"
 #include "ir/Instruction.h"
 #include "ir/Use.h"
-#include "codegen/execgen/Assembler.h"
+#include "codegen/asm/Assembler.h"
 #include <ostream>
 
 namespace codegen {
@@ -20,6 +20,7 @@ void emitWindowsStoreExternResult(CodeGen& cg, ir::Instruction& instr, const Arc
 }
 
 bool WindowsOS::supportsCapability(const CapabilitySpec& spec) const {
+    if (spec.domain == CapabilityDomain::GPU) return true;
     switch (spec.id) {
         case CapabilityId::IO_READ:
         case CapabilityId::IO_WRITE:
@@ -57,6 +58,7 @@ bool WindowsOS::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::IPC_SEND:
         case CapabilityId::IPC_RECV:
         case CapabilityId::ENV_GET:
+        case CapabilityId::ENV_SET:
         case CapabilityId::ENV_LIST:
         case CapabilityId::SYSTEM_INFO:
         case CapabilityId::SIGNAL_SEND:

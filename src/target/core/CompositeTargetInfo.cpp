@@ -21,6 +21,7 @@ const std::string& CompositeTargetInfo::getIntegerReturnRegister() const { retur
 const std::string& CompositeTargetInfo::getFloatReturnRegister() const { return architecture->getFloatReturnRegister(); }
 
 void CompositeTargetInfo::emitHeader(CodeGen& cg) { os->emitHeader(cg); architecture->emitHeader(cg); }
+void CompositeTargetInfo::emitFooter(CodeGen& cg) { architecture->emitFooter(cg); os->emitFooter(cg); }
 void CompositeTargetInfo::emitFunctionPrologue(CodeGen& cg, ir::Function& func) { architecture->emitFunctionPrologue(cg, func); }
 void CompositeTargetInfo::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) { architecture->emitFunctionEpilogue(cg, func); }
 void CompositeTargetInfo::emitBasicBlockStart(CodeGen& cg, ir::BasicBlock& bb) { architecture->emitBasicBlockStart(cg, bb); }

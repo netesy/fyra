@@ -1,4 +1,6 @@
-#include "codegen/target/SystemV_x64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include "ir/Instruction.h"
 #include "ir/Constant.h"
 #include <iostream>
@@ -6,7 +8,7 @@
 #include <vector>
 
 int main() {
-    codegen::target::SystemV_x64 target;
+    auto target_ptr = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}); auto& target = *target_ptr;
     using codegen::target::CapabilityDomain;
 
     struct Case { const char* name; CapabilityDomain domain; int argc; bool expectSupported; };

@@ -5,7 +5,9 @@
 #include <vector>
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
-#include "codegen/target/SystemV_x64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 
 using namespace ir;
 using namespace codegen;
@@ -30,7 +32,7 @@ int main() {
         return 1;
     }
 
-    auto target = std::make_unique<SystemV_x64>();
+    auto target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
     CodeGen cg(*module, std::move(target), &std::cout);
     cg.emit(true);
 

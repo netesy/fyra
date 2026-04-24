@@ -1,7 +1,7 @@
 #include "target/architecture/x64/X64Architecture.h"
 #include "codegen/CodeGen.h"
 #include "target/core/OperatingSystemInfo.h"
-#include "codegen/execgen/Assembler.h"
+#include "codegen/asm/Assembler.h"
 #include "ir/Instruction.h"
 #include "ir/Function.h"
 #include "ir/Constant.h"
@@ -626,14 +626,14 @@ std::string X64Architecture::getRegisterName(const std::string& base, const ir::
 }
 
 // Helpers
-void X64Architecture::emitRegMem(execgen::Assembler& as, uint8_t rex, uint8_t opcode, uint8_t reg, int32_t offset) {
+void X64Architecture::emitRegMem(asm_::Assembler& as, uint8_t rex, uint8_t opcode, uint8_t reg, int32_t offset) {
     if (rex) as.emitByte(rex);
     as.emitByte(opcode);
     if (offset >= -128 && offset <= 127) { as.emitByte(0x45 | (reg << 3)); as.emitByte((uint8_t)offset); }
     else { as.emitByte(0x85 | (reg << 3)); as.emitDWord(offset); }
 }
 
-void X64Architecture::emitLoadValue(CodeGen& cg, execgen::Assembler& as, ir::Value* v, uint8_t regIdx) {
+void X64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& as, ir::Value* v, uint8_t regIdx) {
     if (!v) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(0); return; }
     if (auto* ci = dynamic_cast<ir::ConstantInt*>(v)) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(ci->getValue()); }
     else if (v->getName() == "__heap_ptr" || dynamic_cast<ir::GlobalVariable*>(v) || dynamic_cast<ir::GlobalValue*>(v)) {

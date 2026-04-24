@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "codegen/CodeGen.h"
-#include "codegen/target/Wasm32.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include "ir/Constant.h"
 #include "ir/IRBuilder.h"
 #include "ir/Module.h"
@@ -391,7 +393,7 @@ Ctx lower(const std::string& source, const std::string& name) {
 void checkWat(const std::string& source, const std::string& tag) {
     Ctx c = lower(source, "voilet_wat_" + tag);
     std::stringstream ss;
-    codegen::CodeGen cg(c.module, std::make_unique<codegen::target::Wasm32>(), &ss);
+    codegen::CodeGen cg(c.module, codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI}), &ss);
     cg.emit();
 
     const std::string wat = ss.str();
@@ -403,7 +405,7 @@ void checkWat(const std::string& source, const std::string& tag) {
 
 void checkWasm(const std::string& source, const std::string& tag) {
     Ctx c = lower(source, "voilet_wasm_" + tag);
-    codegen::CodeGen cg(c.module, std::make_unique<codegen::target::Wasm32>());
+    codegen::CodeGen cg(c.module, codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI}));
     cg.emit();
 
     const auto& code = cg.getAssembler().getCode();

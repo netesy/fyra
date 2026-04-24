@@ -1,7 +1,7 @@
 #include "target/architecture/wasm32/Wasm32Architecture.h"
 #include "codegen/CodeGen.h"
 #include "target/core/OperatingSystemInfo.h"
-#include "codegen/target/WasmBinary.h"
+#include "target/architecture/wasm32/WasmBinary.h"
 #include "ir/Instruction.h"
 #include "ir/Function.h"
 #include "ir/FunctionType.h"
@@ -35,6 +35,26 @@ const std::string& Wasm32Architecture::getReturnRegister(const ir::Type* type) c
     static const std::string empty = ""; return empty;
 }
 
+void Wasm32Architecture::emitHeader(CodeGen& cg) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "(module\n";
+    } else {
+        auto& as = cg.getAssembler();
+        as.emitBytes({0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00});
+    }
+}
+
+void Wasm32Architecture::emitFooter(CodeGen& cg) {
+    if (auto* os = cg.getTextStream()) {
+        *os << ")\n";
+    } else {
+        emitTypeSection(cg);
+        emitFunctionSection(cg);
+        emitExportSection(cg);
+        emitCodeSection(cg);
+    }
+}
+
 void Wasm32Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     uint32_t idx = 0; for (auto& p : func.getParameters()) cg.getStackOffsets()[p.get()] = idx++;
     for (auto& bb : func.getBasicBlocks()) { for (auto& i : bb->getInstructions()) { if (i->getType()->getTypeID() != ir::Type::VoidTyID) cg.getStackOffsets()[i.get()] = idx++; } }
@@ -60,6 +80,20 @@ void Wasm32Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
         if (!i.getOperands().empty()) *os << "  " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
         *os << "  return\n";
+    } else {
+        auto& as = cg.getAssembler();
+        if (!i.getOperands().empty()) {
+            if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[0]->get())) {
+                as.emitByte(0x41); // i32.const
+                std::vector<uint8_t> leb; codegen::wasm::encode_signed_leb128(leb, ci->getValue());
+                as.emitBytes(leb);
+            } else if (cg.getStackOffsets().count(i.getOperands()[0]->get())) {
+                as.emitByte(0x20); // local.get
+                std::vector<uint8_t> leb; codegen::wasm::encode_unsigned_leb128(leb, cg.getStackOffset(i.getOperands()[0]->get()));
+                as.emitBytes(leb);
+            }
+        }
+        as.emitByte(0x0F); // return
     }
 }
 
@@ -69,6 +103,21 @@ void Wasm32Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         *os << "  " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
         *os << "  " << getWasmType(i.getType()) << ".add\n";
         if (cg.getStackOffsets().count(&i)) *os << "  local.set " << cg.getStackOffset(&i) << "\n";
+    } else {
+        auto& as = cg.getAssembler();
+        for (int j = 0; j < 2; ++j) {
+            if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[j]->get())) {
+                as.emitByte(0x41); std::vector<uint8_t> leb; codegen::wasm::encode_signed_leb128(leb, ci->getValue()); as.emitBytes(leb);
+            } else if (cg.getStackOffsets().count(i.getOperands()[j]->get())) {
+                as.emitByte(0x20); std::vector<uint8_t> leb; codegen::wasm::encode_unsigned_leb128(leb, cg.getStackOffset(i.getOperands()[j]->get())); as.emitBytes(leb);
+            }
+        }
+        as.emitByte(0x6A); // i32.add
+        if (cg.getStackOffsets().count(&i)) {
+            as.emitByte(0x21); // local.set
+            std::vector<uint8_t> leb; codegen::wasm::encode_unsigned_leb128(leb, cg.getStackOffset(&i));
+            as.emitBytes(leb);
+        }
     }
 }
 

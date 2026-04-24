@@ -1,7 +1,7 @@
 #include "target/architecture/aarch64/AArch64Architecture.h"
 #include "codegen/CodeGen.h"
 #include "target/core/OperatingSystemInfo.h"
-#include "codegen/execgen/Assembler.h"
+#include "codegen/asm/Assembler.h"
 #include "ir/Instruction.h"
 #include "ir/Function.h"
 #include "ir/Constant.h"
@@ -18,7 +18,7 @@ namespace target {
 
 AArch64Architecture::AArch64Architecture() {}
 
-void AArch64Architecture::emitLoadValue(CodeGen& cg, execgen::Assembler& assembler, ir::Value* val, uint8_t reg) {
+void AArch64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& assembler, ir::Value* val, uint8_t reg) {
     if (auto* instr = dynamic_cast<ir::Instruction*>(val)) {
         if (instr->hasPhysicalRegister()) {
             uint8_t src_reg = static_cast<uint8_t>(instr->getPhysicalRegister());

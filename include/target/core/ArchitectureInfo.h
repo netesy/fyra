@@ -24,6 +24,7 @@ public:
     virtual void emitFunctionPrologue(CodeGen& cg, ir::Function& func) = 0;
     virtual void emitFunctionEpilogue(CodeGen& cg, ir::Function& func) = 0;
     virtual void emitHeader(CodeGen& cg) {}
+    virtual void emitFooter(CodeGen& cg) {}
     virtual void emitStartFunction(CodeGen& cg) {}
     virtual void emitBasicBlockStart(CodeGen& cg, ir::BasicBlock& bb) {}
     virtual void emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) {}

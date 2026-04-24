@@ -4,6 +4,7 @@
   (import "wasi_unstable" "proc_exit" (func $proc_exit (param i32)))
   (memory 1)
   (global $__heap_ptr (mut i32) (i32.const 1024))
+(module
 .text
 .globl main
 
@@ -13,3 +14,4 @@ main_start:
   $42
   return
   )
+)

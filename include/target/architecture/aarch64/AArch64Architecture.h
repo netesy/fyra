@@ -3,7 +3,7 @@
 #include <set>
 
 namespace codegen {
-namespace execgen { class Assembler; }
+namespace asm_ { class Assembler; }
 namespace target {
 
 class AArch64Architecture : public ArchitectureInfo {
@@ -68,7 +68,7 @@ public:
     std::string getImmediatePrefix() const override { return "#"; }
 
 private:
-    void emitLoadValue(CodeGen& cg, class execgen::Assembler& assembler, ir::Value* val, uint8_t reg);
+    void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);
     std::string getWRegister(const std::string& xReg) const;
     size_t align_to_16(size_t size) const { return (size + 15) & ~15; }
     std::string getConditionCode(const std::string& op, bool isFloat = false, bool isUnsigned = false) const;

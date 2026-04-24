@@ -7,8 +7,8 @@
 #include "target/os/linux/LinuxOS.h"
 #include "target/os/windows/WindowsOS.h"
 #include "target/os/macos/MacOSOS.h"
-#include "target/os/android/AndroidOS.h"
 #include "target/os/wasi/WASIOS.h"
+#include "target/artifact/apk/APKArtifact.h"
 #include <map>
 
 namespace codegen {
@@ -36,13 +36,19 @@ std::unique_ptr<TargetInfo> TargetResolver::resolve(const ::target::TargetDescri
         case ::target::OS::Linux: os = std::make_unique<LinuxOS>(); break;
         case ::target::OS::Windows: os = std::make_unique<WindowsOS>(); break;
         case ::target::OS::MacOS: os = std::make_unique<MacOSOS>(); break;
-        case ::target::OS::Android: os = std::make_unique<AndroidOS>(); break;
+        case ::target::OS::Android: os = std::make_unique<LinuxOS>(); break; // Android uses Linux OS base
         case ::target::OS::WASI: os = std::make_unique<WASIOS>(); break;
         default: os = std::make_unique<LinuxOS>(); break;
     }
 
-    // Artifact handling would go here, possibly wrapping the CompositeTargetInfo or being a property of it
-    return std::make_unique<CompositeTargetInfo>(std::move(arch), std::move(os));
+    auto target = std::make_unique<CompositeTargetInfo>(std::move(arch), std::move(os));
+
+    ::target::Artifact art = desc.artifact.value_or(resolveDefaultArtifact(desc.os));
+    if (art == ::target::Artifact::APK) {
+        return std::make_unique<artifact::APKArtifact>(std::move(target));
+    }
+
+    return target;
 }
 
 }

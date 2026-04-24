@@ -12,10 +12,12 @@
 #include "ir/Parameter.h"
 #include "ir/Type.h"
 #include "codegen/CodeGen.h"
-#include "codegen/target/SystemV_x64.h"
-#include "codegen/target/Windows_x64.h"
-#include "../src/codegen/execgen/elf.hh"
-#include "../src/codegen/execgen/pe.hh"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
+
+#include "target/artifact/executable/elf.hh"
+#include "target/artifact/executable/pe.hh"
 
 namespace {
 
@@ -112,9 +114,9 @@ int compileAndRun(const MiniProgram& program, bool isWindows = false) {
 
     std::unique_ptr<TargetInfo> target;
     if (isWindows) {
-        target = std::make_unique<Windows_x64>();
+        target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
     } else {
-        target = std::make_unique<SystemV_x64>();
+        target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
     }
 
     CodeGen cg(module, std::move(target), nullptr);

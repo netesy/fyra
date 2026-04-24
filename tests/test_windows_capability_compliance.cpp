@@ -1,11 +1,13 @@
-#include "codegen/target/Windows_x64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include "ir/Instruction.h"
 #include "ir/Constant.h"
 #include <vector>
 #include <iostream>
 
 int main() {
-    codegen::target::Windows_x64 target;
+    auto target_ptr = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows}); auto& target = *target_ptr;
     struct Case { const char* name; int argc; bool expect; };
     const std::vector<Case> cases = {
         {"io.read", 3, true}, {"io.write", 3, true}, {"io.open", 3, true}, {"io.close", 1, true},
@@ -28,7 +30,7 @@ int main() {
         {"module.load", 1, true},
         {"tty.isatty", 1, true},
         {"security.chmod", 2, true},
-        {"gpu.compute", 2, false}
+        {"gpu.compute", 2, true}
     };
 
     auto* i64 = ir::IntegerType::get(64);

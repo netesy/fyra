@@ -215,12 +215,18 @@ void LinuxOS::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const Capab
     if (auto* os = cg.getTextStream()) {
         switch (spec.id) {
             case CapabilityId::ENV_GET:
+                *os << "  movq $257, %rax\n  movq $-100, %rdi\n  leaq .Lproc_environ(%rip), %rsi\n  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n  movq %rax, %r12\n  movq $0, %rax\n  movq %r12, %rdi\n";
+                *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
+                *os << "  movq $4096, %rdx\n  syscall\n  movq %rax, %r13\n  movq $3, %rax\n  movq %r12, %rdi\n  syscall\n  movq %r13, %rax\n";
+                break;
             case CapabilityId::ENV_LIST:
                 *os << "  movq $257, %rax\n  movq $-100, %rdi\n  leaq .Lproc_environ(%rip), %rsi\n  xorq %rdx, %rdx\n  xorq %r10, %r10\n  syscall\n  movq %rax, %r12\n  movq $0, %rax\n  movq %r12, %rdi\n";
-                if (!instr.getOperands().empty()) *os << "  movq " << cg.getValueAsOperand(instr.getOperands()[0]->get()) << ", %rsi\n";
-                else *os << "  subq $4096, %rsp\n  movq %rsp, %rsi\n";
+                *os << "  subq $4096, %rsp\n  movq %rsp, %rsi\n";
                 *os << "  movq $4096, %rdx\n  syscall\n  movq %rax, %r13\n  movq $3, %rax\n  movq %r12, %rdi\n  syscall\n  movq %r13, %rax\n";
-                if (instr.getOperands().empty()) *os << "  addq $4096, %rsp\n";
+                *os << "  addq $4096, %rsp\n";
+                break;
+            case CapabilityId::ENV_SET:
+                *os << "  xor rax, rax\n"; // Stub for set
                 break;
             default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
         }

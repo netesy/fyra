@@ -1,8 +1,8 @@
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
-#include "codegen/execgen/elf.hh"
-#include "codegen/execgen/pe.hh"
-#include "codegen/execgen/macho.hh"
+#include "target/artifact/executable/elf.hh"
+#include "target/artifact/executable/pe.hh"
+#include "target/artifact/executable/macho.hh"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "transforms/CFGBuilder.h"
@@ -18,8 +18,8 @@
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/ErrorReporter.h"
-#include "transforms/RegAllocRewriter.h"
-#include "transforms/ABIAnalysis.h"
+#include "codegen/regalloc/RegAllocRewriter.h"
+#include "codegen/abi/ABIAnalysis.h"
 #include <iostream>
 #include <fstream>
 #include <memory>

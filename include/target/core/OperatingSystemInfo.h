@@ -38,6 +38,7 @@ public:
     virtual void emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, const class ArchitectureInfo& arch) const = 0;
 
     virtual void emitHeader(CodeGen& cg) {}
+    virtual void emitFooter(CodeGen& cg) {}
     virtual void emitStartFunction(CodeGen& cg, const class ArchitectureInfo& arch) {}
 };
 

@@ -1,7 +1,9 @@
 #include "parser/Parser.h"
 #include "ir/Module.h"
 #include "codegen/CodeGen.h"
-#include "codegen/target/Wasm32.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include <cassert>
 #include <fstream>
 #include <memory>
@@ -26,7 +28,7 @@ export function $main() : w {
 
     // Generate .wat file
     {
-        auto targetInfo = std::make_unique<codegen::target::Wasm32>();
+        auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
         std::ofstream out("simple.wat");
         assert(out.good());
         codegen::CodeGen codeGen(*module, std::move(targetInfo), &out);
@@ -36,7 +38,7 @@ export function $main() : w {
 
     // Generate .wasm file
     {
-        auto targetInfo = std::make_unique<codegen::target::Wasm32>();
+        auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
         codegen::CodeGen codeGen(*module, std::move(targetInfo));
         codeGen.emit();
 

@@ -6,6 +6,7 @@
 #include "ir/Function.h"
 #include "ir/Syscall.h"
 #include "ir/BasicBlock.h"
+#include "target/capabilities/Capabilities.h"
 #include <string>
 #include <vector>
 #include <ostream>
@@ -16,59 +17,7 @@ class CodeGen;
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
 enum class FusedPattern { MultiplyAdd, MultiplySubtract, LoadAndOperate, CompareAndBranch, AddressCalculation };
-enum class CapabilityDomain {
-    IO,
-    FS,
-    MEMORY,
-    PROCESS,
-    THREAD,
-    SYNC,
-    TIME,
-    EVENT,
-    NET,
-    IPC,
-    ENV,
-    SYSTEM,
-    SIGNAL,
-    RANDOM,
-    ERROR,
-    DEBUG,
-    MODULE,
-    TTY,
-    SECURITY,
-    GPU
-};
-enum class CapabilityId {
-    IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SEEK, IO_STAT, IO_FLUSH,
-    FS_OPEN, FS_CREATE, FS_STAT, FS_REMOVE, FS_RENAME, FS_MKDIR, FS_RMDIR,
-    MEMORY_ALLOC, MEMORY_FREE, MEMORY_MAP, MEMORY_PROTECT, MEMORY_USAGE,
-    PROCESS_EXIT, PROCESS_ABORT, PROCESS_SLEEP, PROCESS_SPAWN, PROCESS_ARGS, PROCESS_GETPID,
-    THREAD_SPAWN, THREAD_JOIN, THREAD_DETACH, THREAD_YIELD, THREAD_GETID,
-    SYNC_MUTEX_LOCK, SYNC_MUTEX_UNLOCK, SYNC_ATOMIC_ADD, SYNC_ATOMIC_SUB, SYNC_ATOMIC_CAS,
-    TIME_NOW, TIME_MONOTONIC, TIME_SLEEP,
-    EVENT_POLL, EVENT_CREATE, EVENT_MODIFY, EVENT_CLOSE,
-    NET_SOCKET, NET_CONNECT, NET_LISTEN, NET_ACCEPT, NET_SEND, NET_RECV, NET_CLOSE, NET_BIND,
-    IPC_SEND, IPC_RECV, IPC_CONNECT, IPC_LISTEN,
-    ENV_GET, ENV_SET, ENV_LIST,
-    SYSTEM_INFO, SYSTEM_REBOOT, SYSTEM_SHUTDOWN,
-    SIGNAL_SEND, SIGNAL_REGISTER, SIGNAL_WAIT,
-    RANDOM_U64, RANDOM_BYTES,
-    ERROR_GET, ERROR_STR,
-    DEBUG_LOG, DEBUG_BREAK, DEBUG_TRACE,
-    MODULE_LOAD, MODULE_UNLOAD, MODULE_GETSYM,
-    TTY_ISATTY, TTY_GETSIZE, TTY_SETMODE,
-    SECURITY_CHMOD, SECURITY_CHOWN, SECURITY_GETUID,
-    GPU_COMPUTE, GPU_MALLOC, GPU_MEMCPY
-};
-struct CapabilitySpec {
-    CapabilityId id;
-    const char* name;
-    CapabilityDomain domain;
-    int minArgs;
-    int maxArgs;
-    bool returnsValue;
-    bool fallible;
-};
+
 struct VectorCapabilities { bool supportsSSE = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
 struct TypeInfo { uint64_t size, align; RegisterClass regClass; bool isFloatingPoint, isSigned; };
 struct SIMDContext { unsigned vectorWidth; ir::VectorType* vectorType; std::string elementSuffix, widthSuffix; };
@@ -87,7 +36,8 @@ public:
     virtual const std::string& getIntegerReturnRegister() const = 0;
     virtual const std::string& getFloatReturnRegister() const = 0;
     virtual void emitPrologue(CodeGen&, int) {}
-    virtual void emitHeader(CodeGen&) {}
+    virtual void emitHeader(CodeGen& cg) = 0;
+    virtual void emitFooter(CodeGen& cg) = 0;
     virtual void emitEpilogue(CodeGen&) {}
     virtual void emitFunctionPrologue(CodeGen&, ir::Function&) = 0;
     virtual void emitFunctionEpilogue(CodeGen&, ir::Function&) = 0;

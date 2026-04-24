@@ -5,7 +5,7 @@
 #include <map>
 #include <memory>
 #include <algorithm>
-#include "codegen/execgen/assembler.hh"
+#include "target/artifact/executable/assembler.hh"
 
 namespace codegen {
 namespace objectgen {

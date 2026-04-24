@@ -18,6 +18,8 @@ public:
     const std::string& getIntegerReturnRegister() const override { static const std::string r; return r; }
     const std::string& getFloatReturnRegister() const override { static const std::string r; return r; }
 
+    void emitHeader(CodeGen& cg) override;
+    void emitFooter(CodeGen& cg) override;
     void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
     void emitFunctionEpilogue(CodeGen& cg, ir::Function& func) override;
     void emitStructuredFunctionBody(CodeGen& cg, ir::Function& func) override;

@@ -12,15 +12,21 @@
 #include <vector>
 
 #include "codegen/CodeGen.h"
-#include "codegen/target/AArch64.h"
-#include "codegen/target/RiscV64.h"
-#include "codegen/target/SystemV_x64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include "ir/Constant.h"
 #include "ir/IRBuilder.h"
 #include "ir/Module.h"
 #include "ir/Parameter.h"
 #include "ir/Type.h"
-#include "../src/codegen/execgen/elf.hh"
+#include "target/artifact/executable/elf.hh"
 
 namespace {
 
@@ -1092,9 +1098,9 @@ std::string targetSuffix(BackendTarget t) {
 
 std::unique_ptr<codegen::target::TargetInfo> makeTarget(BackendTarget t) {
     switch (t) {
-        case BackendTarget::X64: return std::make_unique<codegen::target::SystemV_x64>();
-        case BackendTarget::AArch64: return std::make_unique<codegen::target::AArch64>();
-        case BackendTarget::RiscV64: return std::make_unique<codegen::target::RiscV64>();
+        case BackendTarget::X64: return codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+        case BackendTarget::AArch64: return codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
+        case BackendTarget::RiscV64: return codegen::target::TargetResolver::resolve({::target::Arch::RISCV64, ::target::OS::Linux});
     }
     throw std::runtime_error("Unknown backend target");
 }

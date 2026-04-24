@@ -1,7 +1,9 @@
 #include "parser/Parser.h"
 #include "ir/Module.h"
 #include "codegen/CodeGen.h"
-#include "codegen/target/Windows_x64.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include <cassert>
 #include <fstream>
 #include <memory>
@@ -22,7 +24,7 @@ int main() {
     std::unique_ptr<ir::Module> module = parser.parseModule();
     assert(module != nullptr);
 
-    auto targetInfo = std::make_unique<codegen::target::Windows_x64>();
+    auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
     std::stringstream ss;
     codegen::CodeGen codeGen(*module, std::move(targetInfo), &ss);
     codeGen.emit();

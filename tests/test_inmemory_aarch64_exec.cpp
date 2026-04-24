@@ -9,8 +9,10 @@
 #include "ir/Type.h"
 #include "ir/Constant.h"
 #include "codegen/CodeGen.h"
-#include "codegen/target/AArch64.h"
-#include "../src/codegen/execgen/elf.hh"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
+#include "target/artifact/executable/elf.hh"
 #include <fstream>
 
 using namespace ir;
@@ -32,7 +34,7 @@ void test_inmemory_aarch64_exec() {
     entryBB->addInstruction(std::make_unique<Instruction>(intTy, Instruction::Ret, std::vector<Value*>{const42}, entryBB));
 
     // Generate code for AArch64
-    auto aarch64Target = std::make_unique<AArch64>();
+    auto aarch64Target = codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
     CodeGen cg(module, std::move(aarch64Target), nullptr); // nullptr for binary emission
     cg.emit(true); // true for executable
 

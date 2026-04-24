@@ -7,7 +7,7 @@
 #include "ir/Instruction.h"
 #include "ir/Constant.h"
 #include "target/core/TargetInfo.h"
-#include "codegen/execgen/Assembler.h"
+#include "codegen/asm/Assembler.h"
 #include "codegen/validation/ASMValidator.h"
 #include "codegen/objectgen/ObjectFileGenerator.h"
 #include <ostream>
@@ -81,8 +81,8 @@ public:
     CompilationResult compileToAssembly(const std::string& outputPath, bool validateASM = true);
 
     // Access to assembler and output stream
-    execgen::Assembler& getAssembler() { return *assembler; }
-    execgen::Assembler& getRodataAssembler() { return *rodataAssembler; }
+    asm_::Assembler& getAssembler() { return *assembler; }
+    asm_::Assembler& getRodataAssembler() { return *rodataAssembler; }
     std::ostream* getTextStream() { return os; }
     void setStream(std::ostream* s) { os = s; }
 
@@ -172,8 +172,8 @@ public:
 public:
     ir::Module& module;
     std::unique_ptr<target::TargetInfo> targetInfo;
-    std::unique_ptr<execgen::Assembler> assembler;
-    std::unique_ptr<execgen::Assembler> rodataAssembler;
+    std::unique_ptr<asm_::Assembler> assembler;
+    std::unique_ptr<asm_::Assembler> rodataAssembler;
     std::ostream* os; // Optional text output stream
     
     // Instruction patterns for enhanced selection

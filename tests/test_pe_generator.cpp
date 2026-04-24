@@ -9,8 +9,10 @@
 
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
-#include "codegen/target/Windows_x64.h"
-#include "../src/codegen/execgen/pe.hh"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
+#include "target/artifact/executable/pe.hh"
 
 int main() {
     std::ifstream input("tests/windows.fyra");
@@ -23,7 +25,7 @@ int main() {
     std::unique_ptr<ir::Module> module = parser.parseModule();
     assert(module != nullptr);
 
-    auto target = std::make_unique<codegen::target::Windows_x64>();
+    auto target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
     codegen::CodeGen cg(*module, std::move(target), nullptr);
     cg.emit(true);
 

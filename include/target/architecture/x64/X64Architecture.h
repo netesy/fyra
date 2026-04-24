@@ -3,7 +3,7 @@
 #include <map>
 
 namespace codegen {
-namespace execgen { class Assembler; }
+namespace asm_ { class Assembler; }
 namespace target {
 
 enum class X64ABI { SystemV, Windows };
@@ -78,8 +78,8 @@ private:
     std::map<std::string, bool> callerSaved, calleeSaved;
     void initRegisters();
 
-    void emitRegMem(class execgen::Assembler& as, uint8_t rex, uint8_t opcode, uint8_t reg, int32_t offset);
-    void emitLoadValue(CodeGen& cg, class execgen::Assembler& as, ir::Value* v, uint8_t regIdx);
+    void emitRegMem(class asm_::Assembler& as, uint8_t rex, uint8_t opcode, uint8_t reg, int32_t offset);
+    void emitLoadValue(CodeGen& cg, class asm_::Assembler& as, ir::Value* v, uint8_t regIdx);
     void emitStoreResult(CodeGen& cg, ir::Instruction& instr, uint8_t regIdx);
     uint8_t getRex(const ir::Type* t);
     uint8_t getOpcode(uint8_t baseOp, const ir::Type* t);

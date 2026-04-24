@@ -23,6 +23,7 @@ public:
     const std::string& getFloatReturnRegister() const override;
 
     void emitHeader(CodeGen& cg) override;
+    void emitFooter(CodeGen& cg) override;
     void emitFunctionPrologue(CodeGen& cg, ir::Function& func) override;
     void emitFunctionEpilogue(CodeGen& cg, ir::Function& func) override;
     void emitBasicBlockStart(CodeGen& cg, ir::BasicBlock& bb) override;

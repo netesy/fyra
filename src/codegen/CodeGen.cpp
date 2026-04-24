@@ -1,5 +1,5 @@
 #include "codegen/CodeGen.h"
-#include "codegen/execgen/Assembler.h"
+#include "codegen/asm/Assembler.h"
 #include "ir/Constant.h"
 #include "ir/GlobalValue.h"
 #include "ir/Function.h"
@@ -10,15 +10,9 @@
 #include "ir/Module.h"
 #include "codegen/debug/DWARFGenerator.h"
 #include <algorithm>
-#include "codegen/InstructionFusion.h"
-#include "codegen/target/Wasm32.h"
-#include "codegen/target/SystemV_x64.h"
-#include "codegen/target/Windows_x64.h"
-#include "codegen/target/Windows_AArch64.h"
-#include "codegen/target/MacOS_x64.h"
-#include "codegen/target/MacOS_AArch64.h"
-#include "codegen/target/AArch64.h"
-#include "codegen/target/RiscV64.h"
+#include "codegen/optimize/InstructionFusion.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetDescriptor.h"
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -26,24 +20,43 @@
 namespace codegen {
 namespace {
 std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& targetName) {
-    std::string n = targetName;
-    std::transform(n.begin(), n.end(), n.begin(), ::tolower);
-    if (n == "linux" || n == "systemv" || n == "x86_64") return std::make_unique<target::SystemV_x64>();
-    if (n == "windows" || n == "win64" || n == "windows-amd64" || n == "windows-x64") return std::make_unique<target::Windows_x64>();
-    if (n == "windows-arm64") return std::make_unique<target::Windows_AArch64>();
-    if (n == "macos" || n == "darwin" || n == "macos-x64") return std::make_unique<target::MacOS_x64>();
-    if (n == "macos-aarch64" || n == "macos-arm64") return std::make_unique<target::MacOS_AArch64>();
-    if (n == "wasm32") return std::make_unique<target::Wasm32>();
-    if (n == "aarch64") return std::make_unique<target::AArch64>();
-    if (n == "riscv64") return std::make_unique<target::RiscV64>();
-    return nullptr;
+    auto desc = ::target::TargetDescriptor::fromString(targetName);
+    if (!desc) {
+        // Fallback for simple names
+        std::string n = targetName;
+        std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+        ::target::TargetDescriptor d;
+        d.artifact = std::nullopt;
+
+        if (n == "linux" || n == "systemv" || n == "x86_64" || n == "x64") {
+            d.arch = ::target::Arch::X64; d.os = ::target::OS::Linux;
+        } else if (n == "windows" || n == "win64" || n == "windows-amd64" || n == "windows-x64") {
+            d.arch = ::target::Arch::X64; d.os = ::target::OS::Windows;
+        } else if (n == "windows-arm64") {
+            d.arch = ::target::Arch::AArch64; d.os = ::target::OS::Windows;
+        } else if (n == "macos" || n == "darwin" || n == "macos-x64") {
+            d.arch = ::target::Arch::X64; d.os = ::target::OS::MacOS;
+        } else if (n == "macos-aarch64" || n == "macos-arm64") {
+            d.arch = ::target::Arch::AArch64; d.os = ::target::OS::MacOS;
+        } else if (n == "wasm32") {
+            d.arch = ::target::Arch::WASM32; d.os = ::target::OS::WASI;
+        } else if (n == "aarch64") {
+            d.arch = ::target::Arch::AArch64; d.os = ::target::OS::Linux;
+        } else if (n == "riscv64") {
+            d.arch = ::target::Arch::RISCV64; d.os = ::target::OS::Linux;
+        } else {
+            return nullptr;
+        }
+        desc = d;
+    }
+    return target::TargetResolver::resolve(*desc);
 }
 }
 
 CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std::ostream* os)
     : module(module), targetInfo(std::move(ti)),
-      assembler(std::make_unique<execgen::Assembler>()),
-      rodataAssembler(std::make_unique<execgen::Assembler>()), os(os),
+      assembler(std::make_unique<asm_::Assembler>()),
+      rodataAssembler(std::make_unique<asm_::Assembler>()), os(os),
       fusionCoordinator(std::make_unique<target::FusionCoordinator>()),
       debugInfoManager(std::make_unique<debug::DebugInfoManager>()),
       validator_(std::make_unique<validation::ASMValidator>()),
@@ -59,7 +72,7 @@ CodeGen::~CodeGen() = default;
 
 void CodeGen::emit(bool forExecutable) {
     if (forExecutable && !os && !rodataAssembler) {
-        rodataAssembler = std::make_unique<execgen::Assembler>();
+        rodataAssembler = std::make_unique<asm_::Assembler>();
     }
     usesHeap = false; usesFPNeg = false;
     for (auto& func : module.getFunctions()) {
@@ -70,25 +83,18 @@ void CodeGen::emit(bool forExecutable) {
             }
         }
     }
-    if (targetInfo->getName() == "wasm32" && !os && assembler) {
-        auto* wasmTarget = static_cast<target::Wasm32*>(targetInfo.get());
-        for (auto& func : module.getFunctions()) emitFunction(*func);
-        wasmTarget->emitHeader(*this); wasmTarget->emitTypeSection(*this);
-        wasmTarget->emitFunctionSection(*this); wasmTarget->emitExportSection(*this);
-        wasmTarget->emitCodeSection(*this);
-    } else {
-        emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
-        if (forExecutable) targetInfo->emitStartFunction(*this);
-        for (auto& func : module.getFunctions()) emitFunction(*func);
-        if (targetInfo->getName() == "wasm32") *os << ")\n";
-    }
+
+    emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
+    if (forExecutable) targetInfo->emitStartFunction(*this);
+    for (auto& func : module.getFunctions()) emitFunction(*func);
+    targetInfo->emitFooter(*this);
 }
 
 void CodeGen::emitFunction(ir::Function& func) {
     currentFunction = &func;
     stackOffsets.clear();
     if (targetInfo->getName() == "wasm32" && !os) {
-        auto funcBodyAsm = std::make_unique<execgen::Assembler>();
+        auto funcBodyAsm = std::make_unique<asm_::Assembler>();
         auto oldAsm = std::move(assembler); assembler = std::move(funcBodyAsm);
         for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
         wasmFunctionBodies.push_back(assembler->getCode());

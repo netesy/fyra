@@ -51,10 +51,38 @@ void RiscV64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) *os << "  j " << i.getParent()->getParent()->getName() << "_epilogue\n";
 }
 
-void RiscV64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {}
-void RiscV64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {}
-void RiscV64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {}
-void RiscV64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {}
+void RiscV64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        *os << "  add a0, a0, a1\n";
+        *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+    }
+}
+void RiscV64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        *os << "  sub a0, a0, a1\n";
+        *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+    }
+}
+void RiscV64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        *os << "  mul a0, a0, a1\n";
+        *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+    }
+}
+void RiscV64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        *os << "  div a0, a0, a1\n";
+        *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+    }
+}
 void RiscV64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {}
@@ -65,7 +93,14 @@ void RiscV64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {}
-void RiscV64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {}
+void RiscV64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  call " << i.getOperands()[0]->get()->getName() << "\n";
+        if (i.getType() && !i.getType()->isVoidTy()) {
+            *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+        }
+    }
+}
 void RiscV64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {}
 void RiscV64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {}
