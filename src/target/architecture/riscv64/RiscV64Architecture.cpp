@@ -123,7 +123,31 @@ void RiscV64Architecture::emitSyscall(CodeGen& cg, ir::Instruction& i, const Ope
     }
 }
 
-void RiscV64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) {}
+void RiscV64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) {
+    auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&i); if (!ei) return;
+    const auto* spec = cg.getTargetInfo()->findCapability(ei->getCapability());
+    if (!spec || !cg.getTargetInfo()->validateCapability(i, *spec)) { cg.getTargetInfo()->emitUnsupportedCapability(cg, i, spec); return; }
+    cg.getTargetInfo()->emitDomainCapability(cg, i, *spec);
+}
+
+void RiscV64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  li a7, " << syscallNum << "\n";
+        for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
+            *os << "  ld a" << i << ", " << cg.getValueAsOperand(args[i]) << "\n";
+        }
+        *os << "  ecall\n";
+    }
+}
+
+void RiscV64Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {
+    if (auto* os = cg.getTextStream()) {
+        for (size_t i = 0; i < std::min(args.size(), (size_t)8); ++i) {
+            *os << "  ld a" << i << ", " << cg.getValueAsOperand(args[i]) << "\n";
+        }
+        *os << "  call " << name << "\n";
+    }
+}
 
 std::string RiscV64Architecture::formatStackOperand(int o) const { return std::to_string(o) + "(s0)"; }
 std::string RiscV64Architecture::formatGlobalOperand(const std::string& n) const { return n; }

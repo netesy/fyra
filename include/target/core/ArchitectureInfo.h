@@ -111,6 +111,10 @@ public:
 
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& i, const class OperatingSystemInfo& osInfo) = 0;
     virtual void emitExternCall(CodeGen& cg, ir::Instruction& i, const class OperatingSystemInfo& osInfo) = 0;
+
+    // Portable primitive emission for OS layer
+    virtual void emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) = 0;
+    virtual void emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) = 0;
 };
 
 }

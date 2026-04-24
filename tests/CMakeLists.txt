@@ -235,3 +235,11 @@ target_link_libraries(test_macos_aarch64_capability_compliance PRIVATE fyra)
 
 add_test(NAME MacOSAArch64CapabilityComplianceTest COMMAND test_macos_aarch64_capability_compliance)
 set_tests_properties(MacOSAArch64CapabilityComplianceTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_sqlite_emulation test_sqlite_emulation.cpp)
+target_link_libraries(test_sqlite_emulation PRIVATE fyra)
+add_test(NAME SqliteEmulationTest COMMAND test_sqlite_emulation)
+
+add_executable(test_portable_capabilities test_portable_capabilities.cpp)
+target_link_libraries(test_portable_capabilities PRIVATE fyra)
+add_test(NAME PortableCapabilitiesTest COMMAND test_portable_capabilities)

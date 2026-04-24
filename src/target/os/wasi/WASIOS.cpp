@@ -1,26 +1,30 @@
 #include "target/os/wasi/WASIOS.h"
 #include "codegen/CodeGen.h"
+#include "target/core/ArchitectureInfo.h"
 #include "ir/Instruction.h"
+#include "ir/Use.h"
 #include <ostream>
 
 namespace codegen {
 namespace target {
 
-void WASIOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, const ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::IO_WRITE) {
-             *os << "  call $fd_write\n";
-        } else if (spec.id == CapabilityId::IO_READ) {
-             *os << "  call $fd_read\n";
-        }
+void WASIOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    std::string func;
+    if (spec.id == CapabilityId::IO_WRITE) func = "fd_write";
+    else if (spec.id == CapabilityId::IO_READ) func = "fd_read";
+
+    if (!func.empty()) {
+        std::vector<ir::Value*> args;
+        for (auto& op : i.getOperands()) args.push_back(op->get());
+        arch.emitNativeLibraryCall(cg, func, args);
     }
 }
 
-void WASIOS::emitProcessCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, const ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::PROCESS_EXIT) {
-             *os << "  call $proc_exit\n";
-        }
+void WASIOS::emitProcessCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    if (spec.id == CapabilityId::PROCESS_EXIT) {
+        std::vector<ir::Value*> args;
+        for (auto& op : i.getOperands()) args.push_back(op->get());
+        arch.emitNativeLibraryCall(cg, "proc_exit", args);
     }
 }
 

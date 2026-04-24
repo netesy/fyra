@@ -62,6 +62,8 @@ public:
 
     void emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
     void emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
+    void emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) override;
+    void emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) override;
 
     std::string formatStackOperand(int offset) const override;
     std::string formatGlobalOperand(const std::string& name) const override;

@@ -253,7 +253,26 @@ void AArch64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const 
     auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&i); if (!ei) return;
     const auto* spec = cg.getTargetInfo()->findCapability(ei->getCapability());
     if (!spec || !cg.getTargetInfo()->validateCapability(i, *spec)) { cg.getTargetInfo()->emitUnsupportedCapability(cg, i, spec); return; }
-    osInfo.emitIOCapability(cg, i, *spec, *this);
+    cg.getTargetInfo()->emitDomainCapability(cg, i, *spec);
+}
+
+void AArch64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  mov x8, #" << syscallNum << "\n";
+        for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
+            *os << "  ldr " << getRegisterName("x" + std::to_string(i), args[i]->getType()) << ", " << cg.getValueAsOperand(args[i]) << "\n";
+        }
+        *os << "  svc #0\n";
+    }
+}
+
+void AArch64Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {
+    if (auto* os = cg.getTextStream()) {
+        for (size_t i = 0; i < std::min(args.size(), (size_t)8); ++i) {
+            *os << "  ldr " << getRegisterName("x" + std::to_string(i), args[i]->getType()) << ", " << cg.getValueAsOperand(args[i]) << "\n";
+        }
+        *os << "  bl " << name << "\n";
+    }
 }
 
 std::string AArch64Architecture::formatStackOperand(int o) const { return "[x29, #" + std::to_string(o) + "]"; }

@@ -195,5 +195,18 @@ void Wasm32Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {}
 void Wasm32Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) {}
 void Wasm32Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {}
 
+void Wasm32Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {
+    // WASM/WASI uses imports, not syscall instructions
+}
+
+void Wasm32Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {
+    if (auto* os = cg.getTextStream()) {
+        for (auto* arg : args) {
+            *os << "  " << cg.getValueAsOperand(arg) << "\n";
+        }
+        *os << "  call $" << name << "\n";
+    }
+}
+
 }
 }

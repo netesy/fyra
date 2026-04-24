@@ -600,6 +600,66 @@ void X64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const Oper
     cg.getTargetInfo()->emitDomainCapability(cg, i, *spec);
 }
 
+void X64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {
+    std::string rax = getRegisterName("rax", nullptr);
+    if (auto* os = cg.getTextStream()) {
+        *os << "  movq $" << syscallNum << ", " << rax << "\n";
+        static const char* sysregs[] = {"rdi", "rsi", "rdx", "r10", "r8", "r9"};
+        for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
+            *os << "  movq " << cg.getValueAsOperand(args[i]) << ", " << getRegisterName(sysregs[i], args[i]->getType()) << "\n";
+        }
+        *os << "  syscall\n";
+    } else {
+        auto& as = cg.getAssembler();
+        as.emitBytes({0x48, 0xC7, 0xC0}); as.emitDWord(syscallNum);
+        static const char* sysregs[] = {"rdi", "rsi", "rdx", "r10", "r8", "r9"};
+        for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
+            uint8_t r = getArchRegIndex(sysregs[i]);
+            emitLoadValue(cg, as, args[i], r);
+        }
+        as.emitBytes({0x0F, 0x05});
+    }
+}
+
+void X64Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {
+    if (auto* os = cg.getTextStream()) {
+        if (abi == X64ABI::Windows) {
+            *os << "  subq $32, %rsp\n";
+            static const char* winRegs[] = {"rcx", "rdx", "r8", "r9"};
+            for (size_t i = 0; i < std::min(args.size(), (size_t)4); ++i) {
+                *os << "  movq " << cg.getValueAsOperand(args[i]) << ", " << getRegisterName(winRegs[i], args[i]->getType()) << "\n";
+            }
+            *os << "  call " << name << "\n";
+            *os << "  addq $32, %rsp\n";
+        } else {
+            static const char* sysvRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+            for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
+                *os << "  movq " << cg.getValueAsOperand(args[i]) << ", " << getRegisterName(sysvRegs[i], args[i]->getType()) << "\n";
+            }
+            *os << "  call " << name << "\n";
+        }
+    } else {
+        auto& as = cg.getAssembler();
+        if (abi == X64ABI::Windows) {
+            as.emitBytes({0x48, 0x83, 0xEC, 0x20});
+            static const char* winRegs[] = {"rcx", "rdx", "r8", "r9"};
+            for (size_t i = 0; i < std::min(args.size(), (size_t)4); ++i) {
+                emitLoadValue(cg, as, args[i], getArchRegIndex(winRegs[i]));
+            }
+            as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, name, ".text"});
+            as.emitBytes({0x48, 0x83, 0xC4, 0x20});
+        } else {
+            static const char* sysvRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+            for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
+                emitLoadValue(cg, as, args[i], getArchRegIndex(sysvRegs[i]));
+            }
+            as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, name, ".text"});
+        }
+    }
+}
+
 std::string X64Architecture::formatStackOperand(int offset) const {
     if (abi == X64ABI::SystemV) return std::to_string(offset) + "(%rbp)";
     return "[rbp + " + std::to_string(offset) + "]";
