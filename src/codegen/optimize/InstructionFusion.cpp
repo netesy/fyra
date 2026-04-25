@@ -396,19 +396,412 @@ AddressingMode AddressingModeAnalyzer::generateAddressingMode(const AddressExpre
     return mode;
 }
 
-// Additional helper implementations would go here...
 
-// Stub implementations for complex classes that would be fully implemented
+// FMAOptimizer implementation
 std::vector<FMAOptimizer::FMAPattern> FMAOptimizer::findFMAPatterns(ir::BasicBlock& block) {
-    return {}; // Simplified stub
+    std::vector<FMAPattern> patterns;
+    auto& instructions = block.getInstructions();
+    
+    auto it = instructions.begin();
+    auto next_it = std::next(it);
+    
+    while (it != instructions.end() && next_it != instructions.end()) {
+        auto* inst1 = it->get();
+        auto* inst2 = next_it->get();
+        
+        // Check for multiply followed by add/subtract
+        if ((inst1->getOpcode() == ir::Instruction::Mul || inst1->getOpcode() == ir::Instruction::FMul) &&
+            (inst2->getOpcode() == ir::Instruction::Add || inst2->getOpcode() == ir::Instruction::FAdd ||
+             inst2->getOpcode() == ir::Instruction::Sub || inst2->getOpcode() == ir::Instruction::FSub)) {
+            
+            if (canFormFMA(inst1, inst2)) {
+                FMAPattern pattern;
+                pattern.multiply = inst1;
+                pattern.add = inst2;
+                pattern.isSubtract = (inst2->getOpcode() == ir::Instruction::Sub || 
+                                     inst2->getOpcode() == ir::Instruction::FSub);
+                pattern.isNegated = false;
+                
+                // Extract operands
+                if (inst1->getOperands().size() >= 2) {
+                    pattern.multiplicand1 = inst1->getOperands()[0]->get();
+                    pattern.multiplicand2 = inst1->getOperands()[1]->get();
+                }
+                
+                // Find the addend (operand of add that's not the multiply result)
+                for (auto& operand : inst2->getOperands()) {
+                    if (operand->get() != inst1) {
+                        pattern.addend = operand->get();
+                        break;
+                    }
+                }
+                
+                patterns.push_back(pattern);
+            }
+        }
+        
+        ++it;
+        ++next_it;
+    }
+    
+    return patterns;
+}
+
+bool FMAOptimizer::canFormFMA(ir::Instruction* mul, ir::Instruction* add) {
+    if (!mul || !add) return false;
+    
+    // Check if add uses the result of multiply
+    bool usesMultiplyResult = false;
+    for (auto& operand : add->getOperands()) {
+        if (operand->get() == mul) {
+            usesMultiplyResult = true;
+            break;
+        }
+    }
+    
+    if (!usesMultiplyResult) return false;
+    // Validate operands
+    if (mul->getOperands().size() < 2) return false;
+    if (add->getOperands().size() < 2) return false;
+    
+    auto* op1 = mul->getOperands()[0]->get();
+    auto* op2 = mul->getOperands()[1]->get();
+    ir::Value* addend = nullptr;
+    
+    for (auto& operand : add->getOperands()) {
+        if (operand->get() != mul) {
+            addend = operand->get();
+            break;
+        }
+    }
+    
+    return isValidFMAOperands(op1, op2, addend);
+}
+
+bool FMAOptimizer::isValidFMAOperands(ir::Value* a, ir::Value* b, ir::Value* c) {
+    if (!a || !b || !c) return false;
+    
+    // Check if all operands are of compatible types
+    auto* typeA = a->getType();
+    auto* typeB = b->getType();
+    auto* typeC = c->getType();
+    
+    // All should be floating point or all should be integer
+    bool allFloat = typeA->isFloatingPoint() && typeB->isFloatingPoint() && typeC->isFloatingPoint();
+    bool allInt = !typeA->isFloatingPoint() && !typeB->isFloatingPoint() && !typeC->isFloatingPoint();
+    
+    return allFloat || allInt;
+}
+
+ir::FusedInstruction* FMAOptimizer::createFMAInstruction(const FMAPattern& pattern) {
+    std::vector<ir::Value*> operands;
+    operands.push_back(pattern.multiplicand1);
+    operands.push_back(pattern.multiplicand2);
+    operands.push_back(pattern.addend);
+    
+    ir::Instruction::Opcode opcode = pattern.isSubtract ? ir::Instruction::FMS : ir::Instruction::FMA;
+    ir::FusedInstruction::FusedType fusionType = pattern.isSubtract ? 
+        ir::FusedInstruction::MultiplySubtract : ir::FusedInstruction::MultiplyAdd;
+    
+    return new ir::FusedInstruction(pattern.add->getType(), opcode, operands, fusionType, nullptr);
+}
+
+void FMAOptimizer::replaceFMAPattern(ir::BasicBlock& block, const FMAPattern& pattern) {
+    auto& instructions = block.getInstructions();
+    auto it = std::find_if(instructions.begin(), instructions.end(), 
+        [&pattern](const auto& inst) { return inst.get() == pattern.multiply; });
+    
+    if (it != instructions.end()) {
+        auto* fusedInst = createFMAInstruction(pattern);
+        *it = std::unique_ptr<ir::Instruction>(fusedInst);
+        
+        // Remove the add instruction
+        auto addIt = std::find_if(instructions.begin(), instructions.end(),
+            [&pattern](const auto& inst) { return inst.get() == pattern.add; });
+        if (addIt != instructions.end()) {
+            instructions.erase(addIt);
+        }
+    }
+}
+
+double FMAOptimizer::estimateFMABenefit(const FMAPattern& pattern) {
+    // FMA typically provides 2x speedup for multiply-add sequences
+    double benefit = 2.0;
+    
+    // Additional benefit for floating point operations
+    if (pattern.multiply->getType()->isFloatingPoint()) {
+        benefit *= 1.2;
+    }
+    
+    // Penalty if operands are complex (e.g., memory loads)
+    if (pattern.multiplicand1->getType()->isPointerTy() || 
+        pattern.multiplicand2->getType()->isPointerTy()) {
+        benefit *= 0.8;
+    }
+    
+    return benefit;
 }
 
 bool FMAOptimizer::isProfitableToFuse(const FMAPattern& pattern) {
-    return true; // Simplified
+    return estimateFMABenefit(pattern) > 1.0;
 }
 
+bool FMAOptimizer::targetSupportsFMA(const std::string& targetArch) {
+    // Common architectures that support FMA
+    static const std::vector<std::string> fmaArchs = {
+        "x86_64", "x64", "aarch64", "arm64", "riscv64"
+    };
+    
+    for (const auto& arch : fmaArchs) {
+        if (targetArch.find(arch) != std::string::npos) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+std::string FMAOptimizer::getFMAInstruction(const FMAPattern& pattern, const std::string& targetArch) {
+    if (targetArch.find("x86_64") != std::string::npos || targetArch.find("x64") != std::string::npos) {
+        return pattern.isSubtract ? "vfmsub132sd" : "vfmadd132sd";
+    } else if (targetArch.find("aarch64") != std::string::npos || targetArch.find("arm64") != std::string::npos) {
+        return pattern.isSubtract ? "fmsub" : "fmadd";
+    } else if (targetArch.find("riscv64") != std::string::npos) {
+        return pattern.isSubtract ? "fmadd.d" : "fmadd.d"; // RISC-V uses fmadd for both with negation
+    }
+    
+    return "fma";
+}
+
+// LoadOperateFusion implementation
+std::vector<LoadOperateFusion::LoadOperatePattern> LoadOperateFusion::findLoadOperatePatterns(ir::BasicBlock& block) {
+    std::vector<LoadOperatePattern> patterns;
+    auto& instructions = block.getInstructions();
+    
+    auto it = instructions.begin();
+    auto next_it = std::next(it);
+    
+    while (it != instructions.end() && next_it != instructions.end()) {
+        auto* load = it->get();
+        auto* op = next_it->get();
+        
+        if (load->getOpcode() == ir::Instruction::Load && canFuseLoadWithOperation(load, op)) {
+            LoadOperatePattern pattern;
+            pattern.load = load;
+            pattern.operate = op;
+            pattern.canFuseWithMemory = supportsMemoryOperand(op->getOpcode());
+            
+            // Analyze addressing mode
+            if (auto* addrInst = dynamic_cast<ir::Instruction*>(load->getOperands()[0]->get())) {
+                auto expr = AddressingModeAnalyzer::analyzeAddress(addrInst);
+                pattern.addressing = AddressingModeAnalyzer::generateAddressingMode(expr, "x86_64");
+            }
+            
+            patterns.push_back(pattern);
+        }
+        
+        ++it;
+        ++next_it;
+    }
+    
+    return patterns;
+}
+
+bool LoadOperateFusion::canFuseLoadWithOperation(ir::Instruction* load, ir::Instruction* op) {
+    if (!load || !op) return false;
+    if (load->getOpcode() != ir::Instruction::Load) return false;
+    
+    // Check if operation uses loaded value
+    bool usesLoadedValue = false;
+    for (auto& operand : op->getOperands()) {
+        if (operand->get() == load) {
+            usesLoadedValue = true;
+            break;
+        }
+    }
+    
+    if (!usesLoadedValue) return false;
+    
+    return supportsMemoryOperand(op->getOpcode());
+}
+
+bool LoadOperateFusion::supportsMemoryOperand(ir::Instruction::Opcode opcode) {
+    // Operations that typically support memory operands on x86/x64
+    static const std::vector<ir::Instruction::Opcode> memoryOps = {
+        ir::Instruction::Add, ir::Instruction::Sub, ir::Instruction::And,
+        ir::Instruction::Or, ir::Instruction::Xor, ir::Instruction::Mul
+    };
+    
+    return std::find(memoryOps.begin(), memoryOps.end(), opcode) != memoryOps.end();
+}
+
+void LoadOperateFusion::applyLoadOperateFusion(ir::BasicBlock& block, const LoadOperatePattern& pattern) {
+    auto& instructions = block.getInstructions();
+    auto it = std::find_if(instructions.begin(), instructions.end(),
+        [&pattern](const auto& inst) { return inst.get() == pattern.load; });
+    
+    if (it != instructions.end()) {
+        // Replace the operation with a memory-operate version
+        // This would require target-specific implementation
+        // For now, we'll just leave it as-is since the actual fusion
+        // would be done during code generation
+    }
+}
+
+std::string LoadOperateFusion::generateFusedInstruction(const LoadOperatePattern& pattern, const std::string& targetArch) {
+    std::string opcode;
+    
+    switch (pattern.operate->getOpcode()) {
+        case ir::Instruction::Add: opcode = "add"; break;
+        case ir::Instruction::Sub: opcode = "sub"; break;
+        case ir::Instruction::And: opcode = "and"; break;
+        case ir::Instruction::Or: opcode = "or"; break;
+        case ir::Instruction::Xor: opcode = "xor"; break;
+        case ir::Instruction::Mul: opcode = "mul"; break;
+        default: opcode = "mov"; break;
+    }
+    
+    return opcode + " [mem], reg"; // Simplified representation
+}
+
+double LoadOperateFusion::estimateLoadOperateBenefit(const LoadOperatePattern& pattern) {
+    // Load-operate fusion typically saves one instruction
+    double benefit = 1.5;
+    
+    // Additional benefit if addressing mode is complex
+    if (pattern.addressing.type != AddressingMode::Simple) {
+        benefit *= 1.2;
+    }
+    
+    return benefit;
+}
+
+bool LoadOperateFusion::isWorthFusing(const LoadOperatePattern& pattern) {
+    return estimateLoadOperateBenefit(pattern) > 1.0;
+}
+
+// CompareAndBranchFusion implementation
+std::vector<CompareAndBranchFusion::CompareAndBranchPattern> CompareAndBranchFusion::findCompareAndBranchPatterns(ir::BasicBlock& block) {
+    std::vector<CompareAndBranchPattern> patterns;
+    auto& instructions = block.getInstructions();
+    
+    auto it = instructions.begin();
+    auto next_it = std::next(it);
+    
+    while (it != instructions.end() && next_it != instructions.end()) {
+        auto* cmp = it->get();
+        auto* br = next_it->get();
+        
+        if (canFuseCompareWithBranch(cmp, br)) {
+            CompareAndBranchPattern pattern;
+            pattern.compare = cmp;
+            pattern.branch = br;
+            pattern.condition = extractCondition(cmp);
+            
+            if (cmp->getOperands().size() >= 2) {
+                pattern.lhs = cmp->getOperands()[0]->get();
+                pattern.rhs = cmp->getOperands()[1]->get();
+            }
+            
+            patterns.push_back(pattern);
+        }
+        
+        ++it;
+        ++next_it;
+    }
+    
+    return patterns;
+}
+
+bool CompareAndBranchFusion::canFuseCompareWithBranch(ir::Instruction* cmp, ir::Instruction* br) {
+    if (!cmp || !br) return false;
+    
+    // Check if cmp is a comparison
+    switch (cmp->getOpcode()) {
+        case ir::Instruction::Ceq:
+        case ir::Instruction::Cne:
+        case ir::Instruction::Cslt:
+        case ir::Instruction::Csle:
+        case ir::Instruction::Csgt:
+        case ir::Instruction::Csge:
+            break;
+        default:
+            return false;
+    }
+    
+    // Check if br is a conditional branch
+    if (br->getOpcode() != ir::Instruction::Jnz && br->getOpcode() != ir::Instruction::Jz) {
+        return false;
+    }
+    
+    // Check if branch uses comparison result
+    bool usesCmpResult = false;
+    for (auto& operand : br->getOperands()) {
+        if (operand->get() == cmp) {
+            usesCmpResult = true;
+            break;
+        }
+    }
+    
+    return usesCmpResult;
+}
+
+std::string CompareAndBranchFusion::extractCondition(ir::Instruction* cmp) {
+    switch (cmp->getOpcode()) {
+        case ir::Instruction::Ceq: return "eq";
+        case ir::Instruction::Cne: return "ne";
+        case ir::Instruction::Cslt: return "lt";
+        case ir::Instruction::Csle: return "le";
+        case ir::Instruction::Csgt: return "gt";
+        case ir::Instruction::Csge: return "ge";
+        default: return "eq";
+    }
+}
+
+void CompareAndBranchFusion::applyCompareAndBranchFusion(ir::BasicBlock& block, const CompareAndBranchPattern& pattern) {
+    auto& instructions = block.getInstructions();
+    auto it = std::find_if(instructions.begin(), instructions.end(),
+        [&pattern](const auto& inst) { return inst.get() == pattern.compare; });
+    
+    if (it != instructions.end()) {
+        // Replace the compare-branch sequence with a fused instruction
+        // This would require target-specific implementation
+        // For now, we'll just leave it as-is since the actual fusion
+        // would be done during code generation
+    }
+}
+
+std::string CompareAndBranchFusion::generateFusedBranch(const CompareAndBranchPattern& pattern, const std::string& targetArch) {
+    if (targetArch.find("x86_64") != std::string::npos || targetArch.find("x64") != std::string::npos) {
+        return "cmp " + pattern.condition + " [reg], [reg]";
+    } else if (targetArch.find("aarch64") != std::string::npos || targetArch.find("arm64") != std::string::npos) {
+        return "cmp " + pattern.condition + " w0, w1";
+    }
+    
+    return "cmp " + pattern.condition;
+}
+
+double CompareAndBranchFusion::estimateCompareAndBranchBenefit(const CompareAndBranchPattern& pattern) {
+    // Compare-and-branch fusion typically saves one instruction and reduces branch latency
+    return 1.3;
+}
+
+bool CompareAndBranchFusion::shouldFuseCompareAndBranch(const CompareAndBranchPattern& pattern) {
+    return estimateCompareAndBranchBenefit(pattern) > 1.0;
+}
+
+// AddressingModeAnalyzer implementation
 std::vector<ir::Instruction*> AddressingModeAnalyzer::findAddressingOptimizations(ir::BasicBlock& block) {
-    return {}; // Simplified stub
+    std::vector<ir::Instruction*> optimizations;
+    auto& instructions = block.getInstructions();
+    
+    for (auto& inst : instructions) {
+        if (canOptimizeAddressing(inst.get())) {
+            optimizations.push_back(inst.get());
+        }
+    }
+    
+    return optimizations;
 }
 
 } // namespace target
