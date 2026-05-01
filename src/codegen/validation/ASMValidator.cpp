@@ -20,7 +20,7 @@ ASMValidator::ASMValidator(std::shared_ptr<TargetABIRegistry> registry)
 ValidationResult ASMValidator::validateAssembly(
     const std::string& assembly,
     const std::string& targetName,
-    const codegen::target::TargetInfo* targetInfo) {
+    const target::TargetInfo* targetInfo) {
     
     ValidationTimer timer;
     ValidationResult result;
@@ -73,7 +73,7 @@ ValidationResult ASMValidator::validateAssembly(
 ValidationResult ASMValidator::validateAssemblyFile(
     const std::string& assemblyPath,
     const std::string& targetName,
-    const codegen::target::TargetInfo* targetInfo) {
+    const target::TargetInfo* targetInfo) {
     
     std::ifstream file(assemblyPath);
     if (!file.is_open()) {

@@ -9,7 +9,6 @@
 #include "ir/Use.h"
 #include <ostream>
 
-namespace codegen {
 namespace target {
 
 X64Architecture::X64Architecture(X64ABI abi) : abi(abi) {

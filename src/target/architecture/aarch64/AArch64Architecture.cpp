@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <set>
 
-namespace codegen {
 namespace target {
 
 AArch64Architecture::AArch64Architecture() {}

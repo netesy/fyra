@@ -29,13 +29,13 @@ public:
     ValidationResult validateAssembly(
         const std::string& assembly,
         const std::string& targetName,
-        const codegen::target::TargetInfo* targetInfo = nullptr
+        const target::TargetInfo* targetInfo = nullptr
     );
     
     ValidationResult validateAssemblyFile(
         const std::string& assemblyPath,
         const std::string& targetName,
-        const codegen::target::TargetInfo* targetInfo = nullptr
+        const target::TargetInfo* targetInfo = nullptr
     );
     
     // Validation categories

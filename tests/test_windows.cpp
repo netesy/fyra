@@ -24,7 +24,7 @@ int main() {
     std::unique_ptr<ir::Module> module = parser.parseModule();
     assert(module != nullptr);
 
-    auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
+    auto targetInfo = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
     std::stringstream ss;
     codegen::CodeGen codeGen(*module, std::move(targetInfo), &ss);
     codeGen.emit();

@@ -19,7 +19,7 @@ void SSARenamer::run(ir::Function& func, DominatorTree& dt) {
             if (instr->getOpcode() == ir::Instruction::Alloc ||
                 instr->getOpcode() == ir::Instruction::Alloc4 ||
                 instr->getOpcode() == ir::Instruction::Alloc16) {
-                varStacks[instr.get()].push(nullptr); // Push a placeholder for undefined
+                ir::Type* ty = instr->getType(); if (ty->isInteger()) varStacks[instr.get()].push(ir::ConstantInt::get(dynamic_cast<ir::IntegerType*>(ty), 0)); else if (ty->isFloatingPoint()) varStacks[instr.get()].push(ir::ConstantFP::get(ty, 0.0)); else varStacks[instr.get()].push(ir::ConstantInt::get(ir::IRContext::getContext().getIntegerType(64), 0));
             }
         }
     }

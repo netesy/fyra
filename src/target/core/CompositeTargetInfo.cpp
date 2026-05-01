@@ -1,6 +1,5 @@
 #include "target/core/CompositeTargetInfo.h"
 
-namespace codegen {
 namespace target {
 
 CompositeTargetInfo::CompositeTargetInfo(std::unique_ptr<ArchitectureInfo> arch, std::unique_ptr<OperatingSystemInfo> os)

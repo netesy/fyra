@@ -2,7 +2,6 @@
 
 #include "target/core/ArchitectureInfo.h"
 
-namespace codegen {
 namespace target {
 
 class RiscV64Architecture : public ArchitectureInfo {

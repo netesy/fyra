@@ -8,8 +8,8 @@
 #include <vector>
 
 int main() {
-    auto target_ptr = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}); auto& target = *target_ptr;
-    using codegen::target::CapabilityDomain;
+    auto target_ptr = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}); auto& target = *target_ptr;
+    using target::CapabilityDomain;
 
     struct Case { const char* name; CapabilityDomain domain; int argc; bool expectSupported; };
     const std::vector<Case> cases = {

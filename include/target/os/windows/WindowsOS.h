@@ -1,7 +1,6 @@
 #pragma once
 #include "target/core/OperatingSystemInfo.h"
 
-namespace codegen {
 namespace target {
 
 class WindowsOS : public OperatingSystemInfo {

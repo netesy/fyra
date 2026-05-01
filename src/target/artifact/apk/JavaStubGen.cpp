@@ -1,7 +1,6 @@
 #include "target/artifact/apk/JavaStubGen.h"
 #include <sstream>
 
-namespace codegen {
 namespace target {
 namespace artifact {
 

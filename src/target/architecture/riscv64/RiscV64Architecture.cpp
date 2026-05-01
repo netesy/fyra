@@ -5,7 +5,6 @@
 #include "target/core/OperatingSystemInfo.h"
 #include <ostream>
 
-namespace codegen {
 namespace target {
 
 RiscV64Architecture::RiscV64Architecture() {}

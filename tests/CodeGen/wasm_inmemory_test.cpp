@@ -19,7 +19,7 @@ int main() {
     std::unique_ptr<ir::Module> module = parser.parseModule();
     assert(module != nullptr);
 
-    auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+    auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
     codegen::CodeGen codeGen(*module, std::move(targetInfo));
     codeGen.emit();
 

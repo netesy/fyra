@@ -72,7 +72,7 @@ public:
     
     // Integration with existing TargetInfo
     void registerFromTargetInfo(const std::string& targetName, 
-                               const codegen::target::TargetInfo* targetInfo);
+                               const target::TargetInfo* targetInfo);
     
     // Initialize default ABI specifications
     void initializeDefaultSpecs();

@@ -2,7 +2,6 @@
 #include "target/core/TargetInfo.h"
 #include <memory>
 
-namespace codegen {
 namespace target {
 namespace artifact {
 

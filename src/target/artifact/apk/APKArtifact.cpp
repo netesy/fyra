@@ -6,7 +6,6 @@
 #include <fstream>
 #include <filesystem>
 
-namespace codegen {
 namespace target {
 namespace artifact {
 

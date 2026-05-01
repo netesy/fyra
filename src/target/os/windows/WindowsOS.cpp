@@ -6,7 +6,6 @@
 #include "codegen/asm/Assembler.h"
 #include <ostream>
 
-namespace codegen {
 namespace target {
 
 namespace {

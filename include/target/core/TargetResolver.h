@@ -2,7 +2,6 @@
 #include "target/core/TargetDescriptor.h"
 #include <memory>
 
-namespace codegen {
 namespace target {
 
 class ArchitectureInfo;

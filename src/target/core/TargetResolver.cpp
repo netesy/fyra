@@ -11,7 +11,6 @@
 #include "target/artifact/apk/APKArtifact.h"
 #include <map>
 
-namespace codegen {
 namespace target {
 
 ::target::Artifact TargetResolver::resolveDefaultArtifact(::target::OS os) {

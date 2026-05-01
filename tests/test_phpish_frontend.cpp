@@ -1096,11 +1096,11 @@ std::string targetSuffix(BackendTarget t) {
     throw std::runtime_error("Unknown backend target");
 }
 
-std::unique_ptr<codegen::target::TargetInfo> makeTarget(BackendTarget t) {
+std::unique_ptr<target::TargetInfo> makeTarget(BackendTarget t) {
     switch (t) {
-        case BackendTarget::X64: return codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
-        case BackendTarget::AArch64: return codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
-        case BackendTarget::RiscV64: return codegen::target::TargetResolver::resolve({::target::Arch::RISCV64, ::target::OS::Linux});
+        case BackendTarget::X64: return target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+        case BackendTarget::AArch64: return target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
+        case BackendTarget::RiscV64: return target::TargetResolver::resolve({::target::Arch::RISCV64, ::target::OS::Linux});
     }
     throw std::runtime_error("Unknown backend target");
 }

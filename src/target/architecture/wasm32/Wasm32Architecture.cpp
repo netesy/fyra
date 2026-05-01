@@ -13,7 +13,6 @@
 #include <ostream>
 #include <algorithm>
 
-namespace codegen {
 namespace target {
 
 Wasm32Architecture::Wasm32Architecture() {}

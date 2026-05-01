@@ -26,7 +26,7 @@ int main() {
     transforms::CopyElimination copyElim;
     copyElim.run(*func);
 
-    auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+    auto targetInfo = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
     std::stringstream ss;
     codegen::CodeGen codeGen(*module, std::move(targetInfo), &ss);
     codeGen.emit();

@@ -2,95 +2,143 @@
 #include "codegen/CodeGen.h"
 #include "ir/Function.h"
 #include "ir/Instruction.h"
+#include "ir/SIMDInstruction.h"
+#include "ir/BasicBlock.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 
 namespace codegen {
 namespace profiling {
 
-RuntimeProfiler::RuntimeProfiler(CodeGen& codegen) : cg(codegen), profilingEnabled(false), sampleCounter(0) {
+// --- RuntimeProfiler Implementation ---
+
+RuntimeProfiler::RuntimeProfiler(CodeGen& codegen) 
+    : cg(codegen), profilingEnabled(false), sampleCounter(0), instructionCount(0), 
+      functionCount(0), currentFunctionInstructionCount(0), 
+      arithmeticInstructionCount(0), memoryInstructionCount(0), 
+      callInstructionCount(0), branchInstructionCount(0), otherInstructionCount(0) {
     initializeCounters();
 }
 
-RuntimeProfiler::~RuntimeProfiler() {
-    // Cleanup, if necessary
+RuntimeProfiler::~RuntimeProfiler() {}
+
+void RuntimeProfiler::initializeCounters() {
+    counters.clear();
+    counters.push_back(PerformanceCounter(CounterType::InstructionCount, "Instructions"));
+    counters.push_back(PerformanceCounter(CounterType::CycleCount, "Cycles"));
+    counters.push_back(PerformanceCounter(CounterType::CacheMiss, "Cache Misses"));
+    counters.push_back(PerformanceCounter(CounterType::BranchMiss, "Branch Misses"));
+    counters.push_back(PerformanceCounter(CounterType::FunctionCalls, "Function Calls"));
+    counters.push_back(PerformanceCounter(CounterType::MemoryAccess, "Memory Accesses"));
 }
 
 void RuntimeProfiler::enableProfiling(bool enable) {
     profilingEnabled = enable;
 }
 
-
-void RuntimeProfiler::beginFunctionProfiling(const std::string& functionName) {
-    if (!profilingEnabled) return;
-    
-    auto it = functionProfiles.find(functionName);
-    if (it == functionProfiles.end()) {
-        it = functionProfiles.emplace(functionName, functionName).first;
+void RuntimeProfiler::incrementCounter(const std::string& name, uint64_t amount) {
+    for (auto& counter : counters) {
+        if (counter.name == name) {
+            counter.value += amount;
+            return;
+        }
     }
-    
-    it->second.callCount++;
-    it->second.startTime = std::chrono::high_resolution_clock::now();
 }
 
-void RuntimeProfiler::endFunctionProfiling(const std::string& functionName) {
-    if (!profilingEnabled) return;
-    
-    auto it = functionProfiles.find(functionName);
+void RuntimeProfiler::updateCounterRate(CounterType type, double elapsedTime) {
+    if (elapsedTime <= 0) return;
+    for (auto& counter : counters) {
+        if (counter.type == type) {
+            counter.rate = static_cast<double>(counter.value) / elapsedTime;
+            return;
+        }
+    }
+}
+
+PerformanceCounter* RuntimeProfiler::getCounter(CounterType type) {
+    for (auto& counter : counters) {
+        if (counter.type == type) return &counter;
+    }
+    return nullptr;
+}
+
+void RuntimeProfiler::beginFunctionProfiling(const std::string& funcName) {
+    auto& profile = functionProfiles.emplace(funcName, FunctionProfile(funcName)).first->second;
+    profile.startTime = std::chrono::high_resolution_clock::now();
+    profile.callCount++;
+    functionCount++;
+}
+
+void RuntimeProfiler::endFunctionProfiling(const std::string& funcName) {
+    auto it = functionProfiles.find(funcName);
     if (it != functionProfiles.end()) {
         auto endTime = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            endTime - it->second.startTime);
-        it->second.executionTime += duration.count();
-        it->second.totalInstructions += currentFunctionInstructionCount;
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - it->second.startTime).count();
+        it->second.totalTime += duration;
+        it->second.executionTime = duration;
+        it->second.avgTime = it->second.totalTime / it->second.callCount;
     }
-    
-    currentFunctionInstructionCount = 0;
+}
+
+void RuntimeProfiler::beginFunction(const std::string& funcName) {
+    beginFunctionProfiling(funcName);
+}
+
+void RuntimeProfiler::endFunction(const std::string& funcName, uint64_t executionTime) {
+    auto it = functionProfiles.find(funcName);
+    if (it != functionProfiles.end()) {
+        it->second.totalTime += executionTime;
+        it->second.executionTime = executionTime;
+        it->second.callCount++;
+        it->second.avgTime = it->second.totalTime / it->second.callCount;
+    }
+}
+
+FunctionProfile* RuntimeProfiler::getFunctionProfile(const std::string& funcName) {
+    auto it = functionProfiles.find(funcName);
+    return (it != functionProfiles.end()) ? &it->second : nullptr;
 }
 
 void RuntimeProfiler::profileInstruction(const ir::Instruction& instr) {
     if (!profilingEnabled) return;
     
     instructionCount++;
-    currentFunctionInstructionCount++;
-    
-    // Update opcode frequency
     opcodeFrequency[instr.getOpcode()]++;
-    
-    // Update type usage
     if (instr.getType()) {
         typeUsage[instr.getType()->getTypeID()]++;
     }
-    
-    // Profile specific instruction types
+
     switch (instr.getOpcode()) {
         case ir::Instruction::Add:
-        case ir::Instruction::FAdd:
         case ir::Instruction::Sub:
-        case ir::Instruction::FSub:
         case ir::Instruction::Mul:
-        case ir::Instruction::FMul:
         case ir::Instruction::Div:
+        case ir::Instruction::FAdd:
+        case ir::Instruction::FSub:
+        case ir::Instruction::FMul:
         case ir::Instruction::FDiv:
-        case ir::Instruction::Rem:
-        case ir::Instruction::FRem:
             arithmeticInstructionCount++;
             break;
         case ir::Instruction::Load:
         case ir::Instruction::Store:
             memoryInstructionCount++;
+            profileMemoryAccess(instr);
             break;
         case ir::Instruction::Call:
+        case ir::Instruction::ExternCall:
             callInstructionCount++;
             break;
-        case ir::Instruction::Jmp:
-        case ir::Instruction::Jnz:
+        case ir::Instruction::Br:
         case ir::Instruction::Jz:
+        case ir::Instruction::Jnz:
+        case ir::Instruction::Jmp:
             branchInstructionCount++;
+            profileBranch(instr);
             break;
         default:
             otherInstructionCount++;
@@ -98,182 +146,134 @@ void RuntimeProfiler::profileInstruction(const ir::Instruction& instr) {
     }
 }
 
-void RuntimeProfiler::addPerformanceCounter(const std::string& name, uint64_t value) {
-    if (!profilingEnabled) return;
-    
-    auto it = std::find_if(counters.begin(), counters.end(),
-        [&name](const PerformanceCounter& counter) {
-            return counter.name == name;
-        });
-    
-    if (it != counters.end()) {
-        it->value = value;
-    } else {
-        counters.emplace_back(CounterType::InstructionCount, name);
-        counters.back().value = value;
-    }
+void RuntimeProfiler::profileVectorInstruction(const ir::VectorInstruction& instr) {
+    incrementCounter("Vector Instructions");
+    profileInstruction(instr);
 }
 
-void RuntimeProfiler::incrementCounter(const std::string& name, uint64_t increment) {
-    if (!profilingEnabled) return;
-    
-    auto it = std::find_if(counters.begin(), counters.end(),
-        [&name](const PerformanceCounter& counter) {
-            return counter.name == name;
-        });
-    
-    if (it != counters.end()) {
-        it->value += increment;
-    } else {
-        counters.emplace_back(CounterType::InstructionCount, name);
-        counters.back().value = increment;
-    }
+void RuntimeProfiler::profileFusedInstruction(const ir::FusedInstruction& instr) {
+    incrementCounter("Fused Instructions");
+}
+
+void RuntimeProfiler::profileMemoryAccess(const ir::Instruction& instr) {
+    incrementCounter("Memory Accesses");
+}
+
+void RuntimeProfiler::profileBranch(const ir::Instruction& instr) {
+    // Branch profiling logic
+}
+
+bool RuntimeProfiler::shouldSample() {
+    if (options.samplingRate <= 1) return true;
+    return (++sampleCounter % options.samplingRate) == 0;
+}
+
+void RuntimeProfiler::sampleInstruction(const ir::Instruction& instr) {
+    if (shouldSample()) profileInstruction(instr);
 }
 
 RuntimeProfiler::PerformanceReport RuntimeProfiler::generateReport() const {
     PerformanceReport report;
-    
-    if (!profilingEnabled) {
-        return report;
-    }
-    
     report.totalInstructions = instructionCount;
-    report.totalFunctions = functionProfiles.size();
+    report.totalFunctions = functionCount;
     report.arithmeticInstructions = arithmeticInstructionCount;
     report.memoryInstructions = memoryInstructionCount;
     report.callInstructions = callInstructionCount;
     report.branchInstructions = branchInstructionCount;
     report.otherInstructions = otherInstructionCount;
-    
-    // Calculate function statistics
-    uint64_t totalExecutionTime = 0;
-    uint64_t totalFunctionCalls = 0;
-    
-    for (const auto& pair : functionProfiles) {
-        totalExecutionTime += pair.second.executionTime;
-        totalFunctionCalls += pair.second.callCount;
-    }
-    
-    report.averageFunctionExecutionTime = totalFunctionCalls > 0 ? 
-        totalExecutionTime / totalFunctionCalls : 0;
-    
-    // Find hottest functions
-    std::vector<std::pair<std::string, uint64_t>> functionTimes;
-    for (const auto& pair : functionProfiles) {
-        functionTimes.push_back({pair.first, pair.second.executionTime});
-    }
-    
-    std::sort(functionTimes.begin(), functionTimes.end(),
-        [](const auto& a, const auto& b) {
-            return a.second > b.second;
-        });
-    
-    // Get top 10 hottest functions
-    size_t count = std::min(size_t(10), functionTimes.size());
-    for (size_t i = 0; i < count; ++i) {
-        report.hottestFunctions.push_back(functionTimes[i]);
-    }
-    
-    // Opcode frequency analysis
-    std::vector<std::pair<ir::Instruction::Opcode, uint64_t>> opcodeFreq(opcodeFrequency.begin(), 
-                                                                         opcodeFrequency.end());
-    std::sort(opcodeFreq.begin(), opcodeFreq.end(),
-        [](const auto& a, const auto& b) {
-            return a.second > b.second;
-        });
-    
-    // Get top 10 most frequent opcodes
-    count = std::min(size_t(10), opcodeFreq.size());
-    for (size_t i = 0; i < count; ++i) {
-        report.mostFrequentOpcodes.push_back(opcodeFreq[i]);
-    }
-    
-    // Performance counters
+    report.opcodeFrequency = opcodeFrequency;
+    report.typeUsage = typeUsage;
     report.counters = counters;
-    
+
+    // Calculate hottest functions
+    for (const auto& [name, profile] : functionProfiles) {
+        report.hottestFunctions.push_back({name, profile.totalTime});
+    }
+    std::sort(report.hottestFunctions.begin(), report.hottestFunctions.end(), 
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
     return report;
 }
 
 void RuntimeProfiler::printReport(std::ostream& os) const {
-    if (!profilingEnabled) {
-        os << "Profiling is not enabled.\n";
-        return;
-    }
-    
     auto report = generateReport();
-    
-    os << "\n=== Runtime Performance Report ===\n";
+    os << "--- Performance Report ---\n";
     os << "Total Instructions: " << report.totalInstructions << "\n";
     os << "Total Functions: " << report.totalFunctions << "\n";
-    os << "Average Function Execution Time: " << report.averageFunctionExecutionTime << " ns\n";
-    
-    os << "\nInstruction Breakdown:\n";
-    os << "  Arithmetic: " << report.arithmeticInstructions << " (" 
-       << std::fixed << std::setprecision(2) 
-       << (report.totalInstructions > 0 ? (double(report.arithmeticInstructions) / report.totalInstructions * 100) : 0)
-       << "%)\n";
-    os << "  Memory: " << report.memoryInstructions << " (" 
-       << std::fixed << std::setprecision(2)
-       << (report.totalInstructions > 0 ? (double(report.memoryInstructions) / report.totalInstructions * 100) : 0)
-       << "%)\n";
-    os << "  Calls: " << report.callInstructions << " (" 
-       << std::fixed << std::setprecision(2)
-       << (report.totalInstructions > 0 ? (double(report.callInstructions) / report.totalInstructions * 100) : 0)
-       << "%)\n";
-    os << "  Branches: " << report.branchInstructions << " (" 
-       << std::fixed << std::setprecision(2)
-       << (report.totalInstructions > 0 ? (double(report.branchInstructions) / report.totalInstructions * 100) : 0)
-       << "%)\n";
-    os << "  Other: " << report.otherInstructions << " (" 
-       << std::fixed << std::setprecision(2)
-       << (report.totalInstructions > 0 ? (double(report.otherInstructions) / report.totalInstructions * 100) : 0)
-       << "%)\n";
-    
-    if (!report.hottestFunctions.empty()) {
-        os << "\nHottest Functions (Top 10):\n";
-        for (const auto& func : report.hottestFunctions) {
-            os << "  " << func.first << ": " << func.second << " ns\n";
-        }
+    os << "Arithmetic: " << report.arithmeticInstructions << "\n";
+    os << "Memory: " << report.memoryInstructions << "\n";
+    os << "Hottest Functions:\n";
+    for (size_t i = 0; i < std::min<size_t>(5, report.hottestFunctions.size()); ++i) {
+        os << "  " << report.hottestFunctions[i].first << ": " << report.hottestFunctions[i].second << " ns\n";
     }
-    
-    if (!report.mostFrequentOpcodes.empty()) {
-        os << "\nMost Frequent Opcodes (Top 10):\n";
-        for (const auto& opcode : report.mostFrequentOpcodes) {
-            os << "  Opcode " << static_cast<int>(opcode.first) << ": " << opcode.second << " times\n";
-        }
+}
+
+void RuntimeProfiler::generateCSVReport(const std::string& filename) {
+    std::ofstream fs(filename);
+    fs << "Function,Calls,TotalTime,AvgTime\n";
+    for (const auto& [name, profile] : functionProfiles) {
+        fs << name << "," << profile.callCount << "," << profile.totalTime << "," << profile.avgTime << "\n";
     }
-    
-    if (!report.counters.empty()) {
-        os << "\nPerformance Counters:\n";
-        for (const auto& counter : report.counters) {
-            os << "  " << counter.name << ": " << counter.value << "\n";
-        }
-    }
-    
-    os << "==================================\n\n";
+}
+
+void RuntimeProfiler::generateJSONReport(const std::string& filename) {
+    // Simplified JSON emission
 }
 
 void RuntimeProfiler::reset() {
     instructionCount = 0;
     functionCount = 0;
-    arithmeticInstructionCount = 0;
-    memoryInstructionCount = 0;
-    callInstructionCount = 0;
-    branchInstructionCount = 0;
-    otherInstructionCount = 0;
-    
     opcodeFrequency.clear();
-    typeUsage.clear();
     functionProfiles.clear();
-    counters.clear();
-    
-    currentFunctionInstructionCount = 0;
 }
 
-// RegisterPressureAnalyzer implementation
-RegisterPressureAnalyzer::RegisterPressureAnalyzer(const target::TargetInfo* targetInfo)
-    : targetInfo(targetInfo) {
-    // Initialize register counts from target info
+void RuntimeProfiler::emitProfilingHooks(CodeGen& cg, std::ostream& os, const ir::Function& func) {}
+void RuntimeProfiler::emitInstructionProfiling(CodeGen& cg, std::ostream& os, const ir::Instruction& instr) {}
+void RuntimeProfiler::emitFunctionEntryHook(CodeGen& cg, std::ostream& os, const std::string& funcName) {}
+void RuntimeProfiler::emitFunctionExitHook(CodeGen& cg, std::ostream& os, const std::string& funcName) {}
+
+std::vector<FunctionProfile> RuntimeProfiler::getHotFunctions(unsigned count) {
+    std::vector<FunctionProfile> hot;
+    for (const auto& [name, profile] : functionProfiles) hot.push_back(profile);
+    std::sort(hot.begin(), hot.end(), [](const auto& a, const auto& b) { return a.totalTime > b.totalTime; });
+    if (hot.size() > count) hot.resize(count);
+    return hot;
+}
+
+std::vector<PerformanceCounter> RuntimeProfiler::getTopCounters(unsigned count) {
+    auto sorted = counters;
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.value > b.value; });
+    if (sorted.size() > count) sorted.resize(count);
+    return sorted;
+}
+
+double RuntimeProfiler::getOverallPerformanceScore() { return 100.0; }
+
+std::string RuntimeProfiler::getCounterName(CounterType type) {
+    switch(type) {
+        case CounterType::InstructionCount: return "Instructions";
+        case CounterType::CycleCount: return "Cycles";
+        case CounterType::CacheMiss: return "CacheMiss";
+        case CounterType::BranchMiss: return "BranchMiss";
+        case CounterType::FunctionCalls: return "FunctionCalls";
+        case CounterType::MemoryAccess: return "MemoryAccess";
+        case CounterType::VectorInstructions: return "VectorInstructions";
+        case CounterType::FusedInstructions: return "FusedInstructions";
+        default: return "Unknown";
+    }
+}
+
+void RuntimeProfiler::updateFunctionCounters(FunctionProfile& profile, const ir::Instruction& instr) {}
+void RuntimeProfiler::addPerformanceCounter(const std::string& name, uint64_t value) {
+    incrementCounter(name, value);
+}
+
+
+// --- RegisterPressureAnalyzer Implementation ---
+
+RegisterPressureAnalyzer::RegisterPressureAnalyzer(const target::TargetInfo* targetInfo) 
+    : targetInfo(targetInfo), integerRegisters(0), floatRegisters(0), vectorRegisters(0), 
+      currentPressure(0), maxPressure(0), totalInstructions(0), totalSpills(0) {
     if (targetInfo) {
         integerRegisters = targetInfo->getRegisters(target::RegisterClass::Integer).size();
         floatRegisters = targetInfo->getRegisters(target::RegisterClass::Float).size();
@@ -282,42 +282,36 @@ RegisterPressureAnalyzer::RegisterPressureAnalyzer(const target::TargetInfo* tar
 }
 
 void RegisterPressureAnalyzer::analyzeFunction(const ir::Function& func) {
-    currentPressure = 0;
-    maxPressure = 0;
-    liveIntervals.clear();
+    for (auto& bb : func.getBasicBlocks()) {
+        analyzeBasicBlock(*bb);
+    }
+}
+
+void RegisterPressureAnalyzer::analyzeBasicBlock(const ir::BasicBlock& bb) {
+    for (auto& instr : bb.getInstructions()) {
+        analyzeInstruction(*instr);
+    }
+}
+
+void RegisterPressureAnalyzer::analyzeInstruction(const ir::Instruction& instr) {
+    totalInstructions++;
+    unsigned regsNeeded = instr.getOperands().size();
+    if (instr.getType() && instr.getType()->getTypeID() != ir::Type::VoidTyID) {
+        regsNeeded++;
+    }
+
+    currentPressure = regsNeeded;
+    if (currentPressure > maxPressure) maxPressure = currentPressure;
     
-    // Simple analysis: count instructions that typically require registers
-    for (const auto& block : func.getBasicBlocks()) {
-        for (const auto& instr : block->getInstructions()) {
-            switch (instr->getOpcode()) {
-                case ir::Instruction::Add:
-                case ir::Instruction::FAdd:
-                case ir::Instruction::Sub:
-                case ir::Instruction::FSub:
-                case ir::Instruction::Mul:
-                case ir::Instruction::FMul:
-                case ir::Instruction::Div:
-                case ir::Instruction::FDiv:
-                case ir::Instruction::Load:
-                case ir::Instruction::Store:
-                case ir::Instruction::Call:
-                    currentPressure++;
-                    maxPressure = std::max(maxPressure, currentPressure);
-                    break;
-                case ir::Instruction::Ret:
-                    currentPressure = 0; // Reset at return
-                    break;
-                default:
-                    break;
-            }
-        }
+    if (integerRegisters > 0 && currentPressure > integerRegisters) {
+        totalSpills += (currentPressure - integerRegisters);
     }
 }
 
 RegisterPressureAnalyzer::PressureReport RegisterPressureAnalyzer::generateReport() const {
     PressureReport report;
     report.maxPressure = maxPressure;
-    report.averagePressure = maxPressure > 0 ? maxPressure / 2.0 : 0; // Simplified average
+    report.averagePressure = getOverallPressure();
     report.integerRegisterCount = integerRegisters;
     report.floatRegisterCount = floatRegisters;
     report.vectorRegisterCount = vectorRegisters;
@@ -326,116 +320,167 @@ RegisterPressureAnalyzer::PressureReport RegisterPressureAnalyzer::generateRepor
 }
 
 std::string RegisterPressureAnalyzer::getPressureLevel() const {
-    if (maxPressure == 0) return "None";
-    
-    // Calculate pressure relative to available registers
-    size_t totalRegisters = integerRegisters + floatRegisters + vectorRegisters;
-    double pressureRatio = totalRegisters > 0 ? 
-        static_cast<double>(maxPressure) / totalRegisters : 0;
-    
-    if (pressureRatio > 0.8) return "High";
-    if (pressureRatio > 0.5) return "Medium";
-    if (pressureRatio > 0.2) return "Low";
-    return "Very Low";
+    double pressure = getOverallPressure();
+    if (pressure < 0.3) return "Low";
+    if (pressure < 0.7) return "Moderate";
+    return "High";
+}
+
+double RegisterPressureAnalyzer::getOverallPressure() const {
+    if (integerRegisters == 0) return 0.0;
+    return static_cast<double>(maxPressure) / integerRegisters;
+}
+
+std::vector<RegisterPressureAnalyzer::RegisterUsage> RegisterPressureAnalyzer::getHighPressureRegisters(unsigned count) {
+    return {};
+}
+
+std::vector<RegisterPressureAnalyzer::RegisterUsage> RegisterPressureAnalyzer::getAllRegisterUsage() const {
+    std::vector<RegisterUsage> usage;
+    for (auto const& [name, u] : registerUsage) usage.push_back(u);
+    return usage;
+}
+
+std::vector<std::string> RegisterPressureAnalyzer::getSuggestions() {
+    std::vector<std::string> suggestions;
+    if (getPressureLevel() == "High") {
+        suggestions.push_back("Consider spilling some variables to reduce register pressure.");
+        suggestions.push_back("Try reordering instructions to shorten live intervals.");
+    }
+    return suggestions;
 }
 
 void RegisterPressureAnalyzer::printReport(std::ostream& os) const {
     auto report = generateReport();
-    
-    os << "\n=== Register Pressure Analysis ===\n";
-    os << "Maximum Register Pressure: " << report.maxPressure << "\n";
-    os << "Average Register Pressure: " << std::fixed << std::setprecision(2) 
-       << report.averagePressure << "\n";
+    os << "--- Register Pressure Report ---\n";
+    os << "Max Pressure: " << report.maxPressure << "\n";
     os << "Pressure Level: " << report.pressureLevel << "\n";
-    os << "Available Registers:\n";
-    os << "  Integer: " << report.integerRegisterCount << "\n";
-    os << "  Float: " << report.floatRegisterCount << "\n";
-    os << "  Vector: " << report.vectorRegisterCount << "\n";
-    os << "==================================\n\n";
+    os << "Total Instructions: " << totalInstructions << "\n";
+    os << "Estimated Spills: " << totalSpills << "\n";
 }
 
-// CachePerformanceAnalyzer implementation
-CachePerformanceAnalyzer::CachePerformanceAnalyzer()
-    : l1CacheSize(32768), l2CacheSize(262144), l3CacheSize(8388608) { // Default sizes
-}
+// --- CachePerformanceAnalyzer Implementation ---
+
+CachePerformanceAnalyzer::CachePerformanceAnalyzer() : l1CacheSize(32768), l2CacheSize(262144), l3CacheSize(8388608) {}
 
 void CachePerformanceAnalyzer::analyzeMemoryAccesses(const ir::Function& func) {
-    memoryAccesses.clear();
-    cacheMisses.clear();
-    
-    // Collect memory access patterns
-    for (const auto& block : func.getBasicBlocks()) {
-        for (const auto& instr : block->getInstructions()) {
-            if (instr->getOpcode() == ir::Instruction::Load ||
-                instr->getOpcode() == ir::Instruction::Store) {
-                MemoryAccess access;
-                access.instruction = instr.get();
-                access.address = 0; // Would be determined by actual analysis
-                access.size = instr->getType() ? instr->getType()->getSize() : 0;
-                memoryAccesses.push_back(access);
+    for (auto& bb : func.getBasicBlocks()) {
+        for (auto& instr : bb->getInstructions()) {
+            if (instr->getOpcode() == ir::Instruction::Load || instr->getOpcode() == ir::Instruction::Store) {
+                analyzeMemoryAccess(*instr);
             }
         }
     }
-    
-    // Simple cache simulation
-    simulateCacheBehavior();
 }
 
-void CachePerformanceAnalyzer::simulateCacheBehavior() {
-    // Very simplified cache simulation
-    size_t l1Misses = 0;
-    size_t l2Misses = 0;
-    size_t l3Misses = 0;
-    
-    // Assume some percentage of accesses miss each cache level
-    size_t totalAccesses = memoryAccesses.size();
-    l1Misses = totalAccesses * 0.05; // 5% L1 miss rate
-    l2Misses = l1Misses * 0.20;      // 20% of L1 misses go to L2
-    l3Misses = l2Misses * 0.10;      // 10% of L2 misses go to L3
-    
-    cacheMisses["L1"] = l1Misses;
-    cacheMisses["L2"] = l2Misses;
-    cacheMisses["L3"] = l3Misses;
+void CachePerformanceAnalyzer::analyzeMemoryAccess(const ir::Instruction& instr) {
+    MemoryAccess access;
+    access.instruction = &instr;
+    access.address = 0; // In a real simulation, we'd need base + offset
+    access.size = 8;
+    memoryAccesses.push_back(access);
 }
+
+void CachePerformanceAnalyzer::analyzeLoopMemoryPattern(const std::vector<ir::Instruction*>& loopInstructions) {}
+
+void CachePerformanceAnalyzer::analyzeDataLocality(const ir::Function& func) {}
 
 CachePerformanceAnalyzer::CacheReport CachePerformanceAnalyzer::generateReport() const {
     CacheReport report;
     report.totalMemoryAccesses = memoryAccesses.size();
-    report.cacheMisses = cacheMisses;
     
-    // Calculate miss rates
-    if (report.totalMemoryAccesses > 0) {
-        report.l1MissRate = static_cast<double>(cacheMisses.at("L1")) / report.totalMemoryAccesses;
-        report.l2MissRate = static_cast<double>(cacheMisses.at("L2")) / report.totalMemoryAccesses;
-        report.l3MissRate = static_cast<double>(cacheMisses.at("L3")) / report.totalMemoryAccesses;
-    }
-    
+    // Simulate cache behavior for the report
+    double l1Rate = 0.05;
+    report.cacheMisses["L1"] = static_cast<uint64_t>(report.totalMemoryAccesses * l1Rate);
+    report.l1MissRate = l1Rate;
+    report.l2MissRate = 0.01;
+    report.l3MissRate = 0.001;
     return report;
 }
 
 void CachePerformanceAnalyzer::printReport(std::ostream& os) const {
     auto report = generateReport();
-    
-    os << "\n=== Cache Performance Analysis ===\n";
+    os << "--- Cache Performance Report ---\n";
     os << "Total Memory Accesses: " << report.totalMemoryAccesses << "\n";
-    os << "L1 Cache Misses: " << report.cacheMisses.at("L1") 
-       << " (Rate: " << std::fixed << std::setprecision(4) << report.l1MissRate << ")\n";
-    os << "L2 Cache Misses: " << report.cacheMisses.at("L2") 
-       << " (Rate: " << std::fixed << std::setprecision(4) << report.l2MissRate << ")\n";
-    os << "L3 Cache Misses: " << report.cacheMisses.at("L3") 
-       << " (Rate: " << std::fixed << std::setprecision(4) << report.l3MissRate << ")\n";
-    os << "==================================\n\n";
+    os << "L1 Miss Rate: " << (report.l1MissRate * 100) << "%\n";
 }
 
-// Integration with CodeGen
-void integrateWithCodeGen(CodeGen& cg) {
-    // This would be called to integrate profiling with the code generation process
-    // In a real implementation, this would add instrumentation code to the generated assembly
+CachePerformanceAnalyzer::CacheMetrics CachePerformanceAnalyzer::getCacheMetrics(CacheLevel level) const {
+    return CacheMetrics();
 }
 
-void RuntimeProfiler::initializeCounters() {
-    //
+double CachePerformanceAnalyzer::getMemoryBandwidthUsage() const { return 0.0; }
+
+std::vector<std::string> CachePerformanceAnalyzer::getCacheOptimizationSuggestions() {
+    return {"Consider data tiling for large arrays.", "Ensure struct fields are ordered by access frequency."};
 }
+
+void CachePerformanceAnalyzer::simulateCacheBehavior() {}
+
+// --- PerformanceMonitor Implementation ---
+
+PerformanceMonitor::PerformanceMonitor() : monitoringEnabled(false) {
+}
+
+void PerformanceMonitor::startMonitoring() {
+    monitoringEnabled = true;
+    startTime = std::chrono::high_resolution_clock::now();
+}
+
+void PerformanceMonitor::stopMonitoring() {
+    monitoringEnabled = false;
+}
+
+void PerformanceMonitor::beforeFunctionExecution(const std::string& funcName) {
+    if (profiler) profiler->beginFunction(funcName);
+}
+
+void PerformanceMonitor::afterFunctionExecution(const std::string& funcName) {
+    if (profiler) {
+        auto now = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(now - startTime).count();
+        profiler->endFunction(funcName, duration);
+    }
+}
+
+void PerformanceMonitor::beforeInstructionExecution(const ir::Instruction& instr) {
+    if (profiler) profiler->profileInstruction(instr);
+}
+
+void PerformanceMonitor::afterInstructionExecution(const ir::Instruction& instr) {}
+
+void PerformanceMonitor::generatePerformanceReport(std::ostream& os) {
+    if (profiler) profiler->printReport(os);
+}
+
+void PerformanceMonitor::savePerformanceData(const std::string& filename) {
+    if (profiler) profiler->generateCSVReport(filename);
+}
+
+// --- InstrumentationGenerator Implementation ---
+
+void InstrumentationGenerator::generateFunctionHooks(CodeGen& cg, std::ostream& os, const ir::Function& func) {
+    emitTimerStart(cg, os, func.getName());
+}
+
+void InstrumentationGenerator::generateInstructionHooks(CodeGen& cg, std::ostream& os, const ir::Instruction& instr) {
+}
+
+void InstrumentationGenerator::generateLoopHooks(CodeGen& cg, std::ostream& os, const ir::BasicBlock& loopHeader) {}
+
+void InstrumentationGenerator::emitHook(CodeGen& cg, std::ostream& os, const InstrumentationHook& hook) {}
+
+void InstrumentationGenerator::emitTimerStart(CodeGen& cg, std::ostream& os, const std::string& timerName) {}
+
+void InstrumentationGenerator::emitTimerStop(CodeGen& cg, std::ostream& os, const std::string& timerName) {}
+
+void InstrumentationGenerator::emitRuntimeInitialization(CodeGen& cg, std::ostream& os) {}
+
+void InstrumentationGenerator::emitRuntimeCleanup(CodeGen& cg, std::ostream& os) {}
+
+std::string InstrumentationGenerator::getHookLabel(const InstrumentationHook& hook) { return "hook_label"; }
+
+std::string InstrumentationGenerator::generateHookCode(const InstrumentationHook& hook) { return ""; }
 
 } // namespace profiling
 } // namespace codegen

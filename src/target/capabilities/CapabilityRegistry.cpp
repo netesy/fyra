@@ -1,7 +1,6 @@
 #include "target/capabilities/Capabilities.h"
 #include <map>
 
-namespace codegen {
 namespace target {
 
 static const std::vector<CapabilitySpec> specs = {

@@ -8,16 +8,16 @@ namespace transforms {
 
 class ABIAnalysis {
 public:
-    ABIAnalysis(std::unique_ptr<codegen::target::TargetInfo> targetInfo);
+    ABIAnalysis(std::unique_ptr<target::TargetInfo> targetInfo);
     
     // Run ABI analysis on a function
     void run(ir::Function& func);
     
     // Get target info
-    const codegen::target::TargetInfo* getTargetInfo() const { return targetInfo.get(); }
+    const target::TargetInfo* getTargetInfo() const { return targetInfo.get(); }
     
 private:
-    std::unique_ptr<codegen::target::TargetInfo> targetInfo;
+    std::unique_ptr<target::TargetInfo> targetInfo;
     
     // Helper methods
     void analyzeCallingSconvention(ir::Function& func);

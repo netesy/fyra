@@ -68,6 +68,13 @@ StructType* IRContext::createStructType(const std::string& name) {
     return ptr;
 }
 
+UnionType* IRContext::createUnionType(const std::string& name) {
+    auto ty = std::make_unique<UnionType>(name, std::vector<Type*>{});
+    UnionType* ptr = ty.get();
+    ownedTypes.push_back(std::move(ty));
+    return ptr;
+}
+
 ArrayType* IRContext::getArrayType(Type* elementType, uint64_t numElements) {
     ArrayKey key{elementType, numElements};
     if (arrayTypes.count(key)) return arrayTypes[key];
@@ -107,24 +114,42 @@ FunctionType* IRContext::getFunctionType(Type* returnType, const std::vector<Typ
 }
 
 ConstantInt* IRContext::getConstantInt(IntegerType* ty, uint64_t value) {
+    ConstantIntKey key{ty, value};
+    if (constantInts.count(key)) return constantInts[key];
     auto c = std::unique_ptr<ConstantInt>(new ConstantInt(ty, value));
     ConstantInt* ptr = c.get();
     ownedConstants.push_back(std::move(c));
+    constantInts[key] = ptr;
     return ptr;
 }
 
 ConstantFP* IRContext::getConstantFP(Type* ty, double value) {
+    ConstantFPKey key{ty, value};
+    if (constantFPs.count(key)) return constantFPs[key];
     auto c = std::unique_ptr<ConstantFP>(new ConstantFP(ty, value));
     ConstantFP* ptr = c.get();
     ownedConstants.push_back(std::move(c));
+    constantFPs[key] = ptr;
     return ptr;
 }
 
 ConstantString* IRContext::getConstantString(const std::string& value) {
+    if (constantStrings.count(value)) return constantStrings[value];
     auto c = std::unique_ptr<ConstantString>(new ConstantString(value));
     ConstantString* ptr = c.get();
     ptr->setType(getArrayType(getIntegerType(8), value.length() + 1));
     ownedConstants.push_back(std::move(c));
+    constantStrings[value] = ptr;
+    return ptr;
+}
+
+Constant* IRContext::getConstantArray(ArrayType* ty, const std::vector<Constant*>& elements) {
+    ConstantArrayKey key{ty, elements};
+    if (constantArrays.count(key)) return constantArrays[key];
+    auto c = std::unique_ptr<ConstantArray>(new ConstantArray(ty, elements));
+    Constant* ptr = c.get();
+    ownedConstants.push_back(std::move(c));
+    constantArrays[key] = ptr;
     return ptr;
 }
 
@@ -133,3 +158,6 @@ std::unique_ptr<Module> IRContext::createModule(const std::string& name) {
 }
 
 } // namespace ir
+namespace ir {
+IRContext& IRContext::getContext() { static IRContext instance; return instance; }
+}

@@ -25,7 +25,7 @@ int main() {
 
     // Generate .wat file
     {
-        auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
         std::ofstream out("fibonacci.wat");
         assert(out.good());
         codegen::CodeGen codeGen(*module, std::move(targetInfo), &out);
@@ -34,7 +34,7 @@ int main() {
 
     // Generate .wasm file
     {
-        auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
         codegen::CodeGen codeGen(*module, std::move(targetInfo));
         codeGen.emit();
 

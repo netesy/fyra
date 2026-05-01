@@ -4,7 +4,6 @@
 #include "ir/Function.h"
 #include "ir/BasicBlock.h"
 
-namespace codegen {
 namespace target {
 
 FusionCoordinator::FusionCoordinator() : optimizationLevel(1), targetArchitecture("x86_64") {
@@ -190,4 +189,3 @@ void FusionCoordinator::enableOptimization(const std::string& optimizationName, 
 }
 
 } // namespace target
-} // namespace codegen

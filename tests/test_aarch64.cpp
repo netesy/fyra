@@ -20,7 +20,7 @@ int main() {
     std::unique_ptr<ir::Module> module = parser.parseModule();
     assert(module != nullptr);
 
-    auto targetInfo = codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
+    auto targetInfo = target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
     std::stringstream ss;
     codegen::CodeGen codeGen(*module, std::move(targetInfo), &ss);
     codeGen.emit();

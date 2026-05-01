@@ -7,7 +7,7 @@
 #include <iostream>
 
 int main() {
-    auto target_ptr = codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::MacOS}); auto& target = *target_ptr;
+    auto target_ptr = target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::MacOS}); auto& target = *target_ptr;
     struct Case { const char* name; int argc; bool expect; };
     const std::vector<Case> cases = {
         {"io.read", 3, true}, {"io.write", 3, true}, {"io.open", 3, true}, {"io.close", 1, true},

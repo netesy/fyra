@@ -12,7 +12,7 @@
 
 using namespace ir;
 using namespace codegen;
-using namespace codegen::target;
+using namespace target;
 
 void run_test(const std::string& arch_name, ::target::Arch arch, ::target::OS os) {
     std::string source =
@@ -30,7 +30,7 @@ void run_test(const std::string& arch_name, ::target::Arch arch, ::target::OS os
     std::unique_ptr<ir::Module> module = p.parseModule();
 
     std::cout << "--- Target: " << arch_name << " ---\n";
-    auto target = codegen::target::TargetResolver::resolve({arch, os});
+    auto target = target::TargetResolver::resolve({arch, os});
     CodeGen cg(*module, std::move(target), &std::cout);
     cg.emit(true);
     std::cout << "\n";

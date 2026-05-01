@@ -10,7 +10,6 @@ namespace codegen { class CodeGen; }
 #include <map>
 #include <functional>
 
-namespace codegen {
 namespace target {
 
 // Advanced addressing mode patterns
@@ -250,4 +249,3 @@ private:
 };
 
 } // namespace target
-} // namespace codegen

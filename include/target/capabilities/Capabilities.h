@@ -3,7 +3,6 @@
 #include <vector>
 #include <string_view>
 
-namespace codegen {
 namespace target {
 
 enum class CapabilityDomain {
@@ -49,5 +48,4 @@ public:
     static const std::vector<CapabilitySpec>& getAll();
 };
 
-}
 }

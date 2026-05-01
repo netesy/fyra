@@ -4,7 +4,6 @@
 #include "ir/Instruction.h"
 #include <iostream>
 
-namespace codegen {
 namespace target {
 
 const CapabilitySpec* TargetInfo::findCapability(std::string_view name) const {

@@ -5,7 +5,6 @@
 #include "ir/Use.h"
 #include <ostream>
 
-namespace codegen {
 namespace target {
 
 uint64_t MacOSOS::getSyscallNumber(ir::SyscallId id) const {

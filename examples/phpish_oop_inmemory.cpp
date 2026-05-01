@@ -71,7 +71,7 @@ MiniProgram parseMiniPhpLike(const std::string& source) {
 int compileAndRun(const MiniProgram& program, bool isWindows = false) {
     using namespace ir;
     using namespace codegen;
-    using namespace codegen::target;
+    using namespace target;
 
     auto ctx = std::make_shared<IRContext>();
     Module module("phpish_oop_inmemory", ctx);
@@ -114,9 +114,9 @@ int compileAndRun(const MiniProgram& program, bool isWindows = false) {
 
     std::unique_ptr<TargetInfo> target;
     if (isWindows) {
-        target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
+        target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
     } else {
-        target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+        target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
     }
 
     CodeGen cg(module, std::move(target), nullptr);

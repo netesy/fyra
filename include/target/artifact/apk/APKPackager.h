@@ -2,7 +2,6 @@
 #include <string>
 #include <vector>
 
-namespace codegen {
 namespace target {
 namespace artifact {
 

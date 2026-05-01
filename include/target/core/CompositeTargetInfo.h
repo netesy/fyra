@@ -4,7 +4,6 @@
 #include "target/core/OperatingSystemInfo.h"
 #include <memory>
 
-namespace codegen {
 namespace target {
 
 class CompositeTargetInfo : public TargetInfo {

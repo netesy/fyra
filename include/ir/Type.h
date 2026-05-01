@@ -6,10 +6,8 @@
 #include <cstdint>
 #include <stdexcept>
 
-namespace codegen {
 namespace target {
     class TargetInfo; // Forward declaration
-}
 }
 
 namespace ir {
@@ -50,8 +48,8 @@ public:
     // Target-aware methods
     virtual size_t getSize() const = 0; // Size in bytes
     virtual size_t getAlignment() const = 0; // Alignment in bytes
-    virtual size_t getTargetSize(const codegen::target::TargetInfo* target) const;
-    virtual size_t getTargetAlignment(const codegen::target::TargetInfo* target) const;
+    virtual size_t getTargetSize(const target::TargetInfo* target) const;
+    virtual size_t getTargetAlignment(const target::TargetInfo* target) const;
     
     // Type classification for ABI
     virtual bool isFloatingPoint() const { return isFloatTy() || isDoubleTy(); }
@@ -62,6 +60,7 @@ public:
     
     // Utility methods
     virtual std::string toString() const = 0;
+    static Type* getUnionTy(const std::vector<Type*>& members);
 
 protected:
     Type(TypeID id) : id(id) {}

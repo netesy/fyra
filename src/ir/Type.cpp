@@ -18,7 +18,7 @@ namespace std {
 namespace ir {
 
 // Target-aware methods implementation
-size_t Type::getTargetSize(const codegen::target::TargetInfo* target) const {
+size_t Type::getTargetSize(const target::TargetInfo* target) const {
     if (target) {
         auto info = target->getTypeInfo(this);
         return info.size / 8; // Convert bits to bytes
@@ -26,7 +26,7 @@ size_t Type::getTargetSize(const codegen::target::TargetInfo* target) const {
     return getSize(); // Fall back to default
 }
 
-size_t Type::getTargetAlignment(const codegen::target::TargetInfo* target) const {
+size_t Type::getTargetAlignment(const target::TargetInfo* target) const {
     if (target) {
         auto info = target->getTypeInfo(this);
         return info.align / 8; // Convert bits to bytes
@@ -112,3 +112,8 @@ VectorType* VectorType::get(Type* elementType, unsigned numElements) {
 }
 
 } // namespace ir
+namespace ir {
+Type* Type::getUnionTy(const std::vector<Type*>& members) {
+    return IRContext::getContext().createUnionType("union");
+}
+}

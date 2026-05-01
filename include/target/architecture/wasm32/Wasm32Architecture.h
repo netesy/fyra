@@ -2,7 +2,6 @@
 #include "target/core/ArchitectureInfo.h"
 #include <set>
 
-namespace codegen {
 namespace target {
 
 class Wasm32Architecture : public ArchitectureInfo {

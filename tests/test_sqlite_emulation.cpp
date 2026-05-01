@@ -12,7 +12,7 @@
 
 using namespace ir;
 using namespace codegen;
-using namespace codegen::target;
+using namespace target;
 
 int main() {
     std::string source =
@@ -39,7 +39,7 @@ int main() {
         return 1;
     }
 
-    auto target = codegen::target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+    auto target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
     CodeGen cg(*module, std::move(target), &std::cout);
     cg.emit(true);
 

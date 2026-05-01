@@ -11,17 +11,13 @@
 #include <vector>
 #include <ostream>
 #include <string_view>
-
-namespace codegen {
-class CodeGen;
+namespace codegen { class CodeGen; }
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
 enum class FusedPattern { MultiplyAdd, MultiplySubtract, LoadAndOperate, CompareAndBranch, AddressCalculation };
-
 struct VectorCapabilities { bool supportsSSE = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
 struct TypeInfo { uint64_t size, align; RegisterClass regClass; bool isFloatingPoint, isSigned; };
 struct SIMDContext { unsigned vectorWidth; ir::VectorType* vectorType; std::string elementSuffix, widthSuffix; };
-
 class TargetInfo {
 public:
     virtual ~TargetInfo() = default;
@@ -35,105 +31,105 @@ public:
     virtual const std::vector<std::string>& getFloatArgumentRegisters() const = 0;
     virtual const std::string& getIntegerReturnRegister() const = 0;
     virtual const std::string& getFloatReturnRegister() const = 0;
-    virtual void emitPrologue(CodeGen&, int) {}
-    virtual void emitHeader(CodeGen& cg) = 0;
-    virtual void emitFooter(CodeGen& cg) = 0;
-    virtual void emitEpilogue(CodeGen&) {}
-    virtual void emitFunctionPrologue(CodeGen&, ir::Function&) = 0;
-    virtual void emitFunctionEpilogue(CodeGen&, ir::Function&) = 0;
-    virtual void emitBasicBlockStart(CodeGen&, ir::BasicBlock&) {}
-    virtual void emitStructuredFunctionBody(CodeGen&, ir::Function&) {}
-    virtual void emitStartFunction(CodeGen&) {}
+    virtual void emitPrologue(codegen::CodeGen&, int) {}
+    virtual void emitHeader(codegen::CodeGen& cg) = 0;
+    virtual void emitFooter(codegen::CodeGen& cg) = 0;
+    virtual void emitEpilogue(codegen::CodeGen&) {}
+    virtual void emitFunctionPrologue(codegen::CodeGen&, ir::Function&) = 0;
+    virtual void emitFunctionEpilogue(codegen::CodeGen&, ir::Function&) = 0;
+    virtual void emitBasicBlockStart(codegen::CodeGen&, ir::BasicBlock&) {}
+    virtual void emitStructuredFunctionBody(codegen::CodeGen&, ir::Function&) {}
+    virtual void emitStartFunction(codegen::CodeGen&) {}
     virtual size_t getMaxRegistersForArgs() const = 0;
-    virtual void emitPassArgument(CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
-    virtual void emitGetArgument(CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
-    virtual void emitRet(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitAdd(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitSub(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitMul(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitDiv(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitRem(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitAnd(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitOr(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitXor(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitShl(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitShr(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitSar(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitNeg(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitNot(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCopy(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCall(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFAdd(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFSub(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFMul(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitFDiv(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCmp(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitCast(CodeGen&, ir::Instruction&, const ir::Type*, const ir::Type*) = 0;
-    virtual void emitVAStart(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitVAArg(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitVAEnd(CodeGen&, ir::Instruction&) {}
-    virtual void emitLoad(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitStore(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitAlloc(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitSyscall(CodeGen&, ir::Instruction&) {}
-    virtual void emitExternCall(CodeGen&, ir::Instruction&);
+    virtual void emitPassArgument(codegen::CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
+    virtual void emitGetArgument(codegen::CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
+    virtual void emitRet(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitAdd(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitSub(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitMul(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitDiv(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitRem(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitAnd(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitOr(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitXor(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitShl(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitShr(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitSar(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitNeg(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitNot(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitCopy(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitCall(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitFAdd(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitFSub(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitFMul(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitFDiv(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitCmp(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitCast(codegen::CodeGen&, ir::Instruction&, const ir::Type*, const ir::Type*) = 0;
+    virtual void emitVAStart(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitVAArg(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitVAEnd(codegen::CodeGen&, ir::Instruction&) {}
+    virtual void emitLoad(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitStore(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitAlloc(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitSyscall(codegen::CodeGen&, ir::Instruction&) {}
+    virtual void emitExternCall(codegen::CodeGen&, ir::Instruction&);
     virtual const CapabilitySpec* findCapability(std::string_view name) const;
     virtual bool validateCapability(ir::Instruction&, const CapabilitySpec&) const;
     virtual bool supportsCapability(const CapabilitySpec&) const;
-    virtual void emitUnsupportedCapability(CodeGen&, ir::Instruction&, const CapabilitySpec* spec) const;
-    virtual void emitDomainCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitIOCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitFSCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitMemoryCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitProcessCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitThreadCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitSyncCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitTimeCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitEventCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitNetCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitIPCCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitEnvCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitSystemCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitSignalCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitRandomCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitErrorCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitDebugCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitModuleCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitTTYCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitSecurityCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
-    virtual void emitGPUCapability(CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitUnsupportedCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec* spec) const;
+    virtual void emitDomainCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitIOCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitFSCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitMemoryCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitProcessCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitThreadCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSyncCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitTimeCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitEventCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitNetCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitIPCCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitEnvCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSystemCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSignalCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitRandomCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitErrorCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitDebugCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitModuleCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitTTYCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitSecurityCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
+    virtual void emitGPUCapability(codegen::CodeGen&, ir::Instruction&, const CapabilitySpec&);
     virtual uint64_t getSyscallNumber(ir::SyscallId) const { return 0; }
-    virtual void emitBr(CodeGen&, ir::Instruction&) = 0;
-    virtual void emitJmp(CodeGen&, ir::Instruction&) = 0;
+    virtual void emitBr(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitJmp(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
     virtual bool supportsVectorWidth(unsigned) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType*) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type*) const { return 0; }
-    virtual void emitVectorLoad(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorStore(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorArithmetic(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorLogical(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorNeg(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorNot(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorComparison(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorShuffle(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorBroadcast(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorExtract(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorInsert(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorGather(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorScatter(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorHorizontalOp(CodeGen&, ir::VectorInstruction&) {}
-    virtual void emitVectorReduction(CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorLoad(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorStore(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorArithmetic(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorLogical(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorNeg(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorNot(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorComparison(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorShuffle(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorBroadcast(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorExtract(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorInsert(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorGather(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorScatter(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorHorizontalOp(codegen::CodeGen&, ir::VectorInstruction&) {}
+    virtual void emitVectorReduction(codegen::CodeGen&, ir::VectorInstruction&) {}
     virtual bool supportsFusedPattern(FusedPattern) const { return false; }
-    virtual void emitFusedMultiplyAdd(CodeGen&, const ir::FusedInstruction&) {}
-    virtual void emitFusedMultiplySubtract(CodeGen&, const ir::FusedInstruction&) {}
-    virtual void emitLoadAndOperate(CodeGen&, ir::Instruction&, ir::Instruction&) {}
-    virtual bool emitCmpAndBranchFusion(CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
-    virtual void emitComplexAddressing(CodeGen&, ir::Instruction&) {}
-    virtual void emitDebugInfo(CodeGen&, const ir::Function&) {}
-    virtual void emitLineInfo(CodeGen&, unsigned, const std::string&) {}
-    virtual void emitProfilingHook(CodeGen&, const std::string&) {}
-    virtual void emitStackUnwindInfo(CodeGen&, const ir::Function&) {}
+    virtual void emitFusedMultiplyAdd(codegen::CodeGen&, const ir::FusedInstruction&) {}
+    virtual void emitFusedMultiplySubtract(codegen::CodeGen&, const ir::FusedInstruction&) {}
+    virtual void emitLoadAndOperate(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) {}
+    virtual bool emitCmpAndBranchFusion(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
+    virtual void emitComplexAddressing(codegen::CodeGen&, ir::Instruction&) {}
+    virtual void emitDebugInfo(codegen::CodeGen&, const ir::Function&) {}
+    virtual void emitLineInfo(codegen::CodeGen&, unsigned, const std::string&) {}
+    virtual void emitProfilingHook(codegen::CodeGen&, const std::string&) {}
+    virtual void emitStackUnwindInfo(codegen::CodeGen&, const ir::Function&) {}
     virtual SIMDContext createSIMDContext(const ir::VectorType* type) const;
     virtual std::string getVectorRegister(const std::string& baseReg, unsigned width) const;
     virtual std::string getVectorInstruction(const std::string& baseInstr, const SIMDContext& ctx) const;
@@ -150,17 +146,11 @@ public:
     virtual bool isCalleeSaved(const std::string&) const = 0;
     virtual bool isReserved(const std::string&) const { return false; }
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
-    virtual int32_t getStackOffset(const CodeGen&, ir::Value*) const;
+    virtual int32_t getStackOffset(const codegen::CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
-    virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const {
-        return func.getName() + "_epilogue";
-    }
-    virtual std::string getBBLabel(const ir::BasicBlock* bb) const {
-        if (!bb) return "null_bb";
-        return bb->getParent()->getName() + "_" + bb->getName();
-    }
+    virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const { return func.getName() + "_epilogue"; }
+    virtual std::string getBBLabel(const ir::BasicBlock* bb) const { if (!bb) return "null_bb"; return bb->getParent()->getName() + "_" + bb->getName(); }
 protected:
     int32_t currentStackOffset = 0;
 };
-}
 }

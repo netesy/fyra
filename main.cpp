@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
 
     // 3. Generate code
     std::cout << "--- Target: " << desc->toString() << " ---\n" << std::flush;
-    auto targetInfo = codegen::target::TargetResolver::resolve(*desc);
+    auto targetInfo = target::TargetResolver::resolve(*desc);
     
     if (generateExecutable) {
         std::cout << "--- Generating Executable (In-Memory) ---\n" << std::flush;

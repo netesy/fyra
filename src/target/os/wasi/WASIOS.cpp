@@ -5,7 +5,6 @@
 #include "ir/Use.h"
 #include <ostream>
 
-namespace codegen {
 namespace target {
 
 void WASIOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, ArchitectureInfo& arch) const {

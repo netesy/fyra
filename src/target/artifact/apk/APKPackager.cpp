@@ -3,7 +3,6 @@
 #include <iostream>
 #include <filesystem>
 
-namespace codegen {
 namespace target {
 namespace artifact {
 

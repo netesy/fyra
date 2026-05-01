@@ -1,7 +1,6 @@
 #include "target/artifact/apk/ManifestGen.h"
 #include <sstream>
 
-namespace codegen {
 namespace target {
 namespace artifact {
 

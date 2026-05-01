@@ -9,10 +9,11 @@
 #include <chrono>
 #include <memory>
 
-namespace codegen {
 namespace target {
 class TargetInfo;
 }
+
+namespace codegen {
 namespace profiling {
 
 // Performance counter types
@@ -34,6 +35,7 @@ struct PerformanceCounter {
     uint64_t value;
     double rate; // Per second or per instruction
     
+    PerformanceCounter() : type(CounterType::InstructionCount), name(""), value(0), rate(0.0) {}
     PerformanceCounter(CounterType t, const std::string& n) 
         : type(t), name(n), value(0), rate(0.0) {}
 };
@@ -50,8 +52,9 @@ struct FunctionProfile {
     std::chrono::high_resolution_clock::time_point startTime;
     uint64_t executionTime;
     
+    FunctionProfile() : name(""), callCount(0), totalTime(0), avgTime(0), totalInstructions(0), executionTime(0) {}
     FunctionProfile(const std::string& n) 
-        : name(n), callCount(0), totalTime(0), avgTime(0) {}
+        : name(n), callCount(0), totalTime(0), avgTime(0), totalInstructions(0), executionTime(0) {}
 };
 
 // Runtime profiler

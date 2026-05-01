@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <iostream>
 
-namespace codegen {
 namespace target {
 
 // InstructionFusion implementation
@@ -805,4 +804,3 @@ std::vector<ir::Instruction*> AddressingModeAnalyzer::findAddressingOptimization
 }
 
 } // namespace target
-} // namespace codegen

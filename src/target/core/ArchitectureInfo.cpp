@@ -1,7 +1,6 @@
 #include "target/core/ArchitectureInfo.h"
 #include "ir/Constant.h"
 
-namespace codegen {
 namespace target {
 
 std::string ArchitectureInfo::formatConstant(const ir::ConstantInt* C) const {

@@ -122,7 +122,7 @@ std::vector<std::string> TargetABIRegistry::getSupportedTargets() const {
 }
 
 void TargetABIRegistry::registerFromTargetInfo(const std::string& targetName, 
-                                              const codegen::target::TargetInfo* targetInfo) {
+                                              const target::TargetInfo* targetInfo) {
     if (!targetInfo) return;
     
     auto abiSpec = std::make_unique<ABISpecification>(targetName, "x86_64", "unknown");

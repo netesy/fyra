@@ -17,7 +17,7 @@
 
 using namespace ir;
 using namespace codegen;
-using namespace codegen::target;
+using namespace target;
 
 void test_inmemory_aarch64_exec() {
     std::cout << "Running test_inmemory_aarch64_exec..." << std::endl;
@@ -34,7 +34,7 @@ void test_inmemory_aarch64_exec() {
     entryBB->addInstruction(std::make_unique<Instruction>(intTy, Instruction::Ret, std::vector<Value*>{const42}, entryBB));
 
     // Generate code for AArch64
-    auto aarch64Target = codegen::target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
+    auto aarch64Target = target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
     CodeGen cg(module, std::move(aarch64Target), nullptr); // nullptr for binary emission
     cg.emit(true); // true for executable
 
