@@ -22,7 +22,7 @@ bool TargetInfo::validateCapability(ir::Instruction& instr, const CapabilitySpec
     return supportsCapability(spec);
 }
 
-void TargetInfo::emitUnsupportedCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec* spec) const {
+void TargetInfo::emitUnsupportedCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec* spec) const {
     uint64_t domain = spec ? static_cast<uint64_t>(spec->domain) : static_cast<uint64_t>(CapabilityDomain::SYSTEM);
     uint64_t category_unsupported = 0x01;
     uint64_t code = spec ? static_cast<uint64_t>(spec->id) : 0;
@@ -37,7 +37,7 @@ void TargetInfo::emitUnsupportedCapability(CodeGen& cg, ir::Instruction& instr, 
     }
 }
 
-void TargetInfo::emitDomainCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
+void TargetInfo::emitDomainCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec) {
     switch (spec.domain) {
         case CapabilityDomain::IO: emitIOCapability(cg, instr, spec); break;
         case CapabilityDomain::FS: emitFSCapability(cg, instr, spec); break;
@@ -62,7 +62,7 @@ void TargetInfo::emitDomainCapability(CodeGen& cg, ir::Instruction& instr, const
     }
 }
 
-void TargetInfo::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
+void TargetInfo::emitExternCall(codegen::CodeGen& cg, ir::Instruction& instr) {
     auto* ei = dynamic_cast<ir::ExternCallInstruction*>(&instr);
     if (!ei) return;
     const auto* spec = findCapability(ei->getCapability());
@@ -73,26 +73,26 @@ void TargetInfo::emitExternCall(CodeGen& cg, ir::Instruction& instr) {
     emitDomainCapability(cg, instr, *spec);
 }
 
-void TargetInfo::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
-void TargetInfo::emitGPUCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitIOCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitFSCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitMemoryCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitProcessCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitThreadCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSyncCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitTimeCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitEventCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitNetCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitIPCCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitEnvCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSystemCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSignalCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitRandomCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitErrorCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitDebugCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitModuleCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitTTYCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitSecurityCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
+void TargetInfo::emitGPUCapability(codegen::CodeGen& cg, ir::Instruction& instr, const CapabilitySpec&) { emitUnsupportedCapability(cg, instr, nullptr); }
 
 SIMDContext TargetInfo::createSIMDContext(const ir::VectorType* type) const {
     SIMDContext ctx;
@@ -114,11 +114,10 @@ std::string TargetInfo::formatConstant(const ir::ConstantInt* C) const {
 }
 
 
-int32_t TargetInfo::getStackOffset(const CodeGen& cg, ir::Value* val) const {
+int32_t TargetInfo::getStackOffset(const codegen::CodeGen& cg, ir::Value* val) const {
     auto it = cg.getStackOffsets().find(val);
     if (it != cg.getStackOffsets().end()) return it->second;
     return 0;
 }
 
-}
 }

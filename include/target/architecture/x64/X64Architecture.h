@@ -4,7 +4,10 @@
 
 namespace codegen {
 namespace asm_ { class Assembler; }
+}
+
 namespace target {
+using namespace codegen;
 
 enum class X64ABI { SystemV, Windows };
 
@@ -88,5 +91,4 @@ private:
     uint8_t getArchRegIndex(const std::string& regName);
 };
 
-}
 }

@@ -309,4 +309,3 @@ void LinuxOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {
 }
 
 }
-}

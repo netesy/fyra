@@ -157,4 +157,3 @@ void RiscV64Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const s
 void RiscV64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {}
 
 }
-}

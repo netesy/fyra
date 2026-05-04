@@ -38,4 +38,3 @@ bool APKPackager::package(const std::string& outputPath, const std::string& asse
 
 }
 }
-}

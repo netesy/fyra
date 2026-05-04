@@ -6,7 +6,10 @@
 
 namespace codegen {
 class CodeGen;
+}
+
 namespace target {
+using namespace codegen;
 
 class OperatingSystemInfo {
 public:
@@ -42,5 +45,4 @@ public:
     virtual void emitStartFunction(CodeGen& cg, const class ArchitectureInfo& arch) {}
 };
 
-}
 }

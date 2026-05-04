@@ -208,4 +208,3 @@ void Wasm32Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& n
 }
 
 }
-}

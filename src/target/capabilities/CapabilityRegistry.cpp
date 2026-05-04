@@ -100,4 +100,3 @@ const std::vector<CapabilitySpec>& CapabilityRegistry::getAll() {
 }
 
 }
-}

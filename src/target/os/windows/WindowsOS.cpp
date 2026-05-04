@@ -270,4 +270,3 @@ void WindowsOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {
 }
 
 }
-}

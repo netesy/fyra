@@ -4,6 +4,7 @@
 
 namespace target {
 namespace artifact {
+using namespace codegen;
 
 class APKArtifact : public TargetInfo {
     std::unique_ptr<TargetInfo> baseTarget;
@@ -96,6 +97,5 @@ public:
     void buildAPK(const std::string& outputPrefix);
 };
 
-}
 }
 }

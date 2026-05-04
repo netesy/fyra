@@ -287,4 +287,3 @@ std::string AArch64Architecture::getConditionCode(const std::string& op, bool is
 std::string AArch64Architecture::getWRegister(const std::string& xReg) const { return xReg; }
 
 }
-}

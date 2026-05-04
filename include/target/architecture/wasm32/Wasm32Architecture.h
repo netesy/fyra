@@ -3,6 +3,7 @@
 #include <set>
 
 namespace target {
+using namespace codegen;
 
 class Wasm32Architecture : public ArchitectureInfo {
 public:
@@ -80,5 +81,4 @@ private:
     void emitPhis(CodeGen& cg, ir::BasicBlock* target, ir::BasicBlock* source, const std::string& indent);
 };
 
-}
 }

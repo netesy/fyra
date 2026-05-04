@@ -1,4 +1,5 @@
 #include "ir/SIMDInstruction.h"
+#include <iostream>
 #include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
 #include "ir/Function.h"
@@ -21,6 +22,11 @@ bool SIMDPatternMatcher::hasComplexAddressingMode(Instruction* load) {
     }
     return false;
 }
+
+bool SIMDPatternMatcher::canVectorize(Instruction* inst) {
+    return false;
+}
+
 std::vector<VectorInstruction*> SIMDBuilder::vectorizeScalarLoop(const std::vector<Instruction*>& scalarInstructions, unsigned vectorWidth) {
     std::vector<VectorInstruction*> vectorInstructions;
     for (Instruction* inst : scalarInstructions) {
@@ -39,4 +45,21 @@ std::vector<VectorInstruction*> SIMDBuilder::vectorizeScalarLoop(const std::vect
     }
     return vectorInstructions;
 }
+
+VectorInstruction::VectorInstruction(Type* ty, Opcode op, const std::vector<Value*>& operands, 
+                                     unsigned vectorWidth, BasicBlock* parent)
+    : Instruction(ty, op, operands, parent), vectorWidth(vectorWidth) {}
+
+void VectorInstruction::print(std::ostream& os) const {
+    os << "vector instruction";
+}
+
+FusedInstruction::FusedInstruction(Type* ty, Opcode op, const std::vector<Value*>& operands,
+                                   FusedType fusedType, BasicBlock* parent)
+    : Instruction(ty, op, operands, parent), fusedType(fusedType) {}
+
+void FusedInstruction::print(std::ostream& os) const {
+    os << "fused instruction";
+}
+
 }

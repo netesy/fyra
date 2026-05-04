@@ -3,6 +3,9 @@
 #include "ir/BasicBlock.h"
 #include "ir/PhiNode.h"
 #include "ir/Constant.h"
+#include "ir/IRContext.h"
+#include "ir/Type.h"
+#include "ir/Module.h"
 #include "ir/Use.h"
 #include <iostream>
 #include <map>
@@ -19,7 +22,15 @@ void SSARenamer::run(ir::Function& func, DominatorTree& dt) {
             if (instr->getOpcode() == ir::Instruction::Alloc ||
                 instr->getOpcode() == ir::Instruction::Alloc4 ||
                 instr->getOpcode() == ir::Instruction::Alloc16) {
-                ir::Type* ty = instr->getType(); if (ty->isInteger()) varStacks[instr.get()].push(ir::ConstantInt::get(dynamic_cast<ir::IntegerType*>(ty), 0)); else if (ty->isFloatingPoint()) varStacks[instr.get()].push(ir::ConstantFP::get(ty, 0.0)); else varStacks[instr.get()].push(ir::ConstantInt::get(ir::IRContext::getContext().getIntegerType(64), 0));
+                ir::Type* ty = instr->getType();
+                ir::IRContext& context = *func.getParent()->getContext();
+                if (ty->isInteger()) {
+                    varStacks[instr.get()].push(ir::ConstantInt::get(dynamic_cast<ir::IntegerType*>(ty), 0));
+                } else if (ty->isFloatingPoint()) {
+                    varStacks[instr.get()].push(ir::ConstantFP::get(ty, 0.0));
+                } else {
+                    varStacks[instr.get()].push(ir::ConstantInt::get(context.getIntegerType(64), 0));
+                }
             }
         }
     }

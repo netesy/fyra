@@ -19,6 +19,10 @@
 int main() {
     std::string test_file = "tests/ssa.fyra";
     std::ifstream input(test_file);
+    if (!input.good()) {
+        test_file = "../tests/ssa.fyra";
+        input.open(test_file);
+    }
     assert(input.good());
 
     parser::Parser parser(input, parser::FileFormat::FYRA);
@@ -26,6 +30,7 @@ int main() {
     assert(module != nullptr);
 
     ir::Function* func = module->getFunction("main");
+    if (!func) func = module->getFunction("$main");
     assert(func != nullptr);
 
     // Run SSA passes

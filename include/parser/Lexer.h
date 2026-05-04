@@ -22,6 +22,8 @@ enum class TokenType {
     Equal,
     Colon,
     Plus,
+    Semicolon,
+    Arrow,          // ->
     Ellipsis,       // ...
     StringLiteral,  // "hello"
 

@@ -8,4 +8,3 @@ std::string ArchitectureInfo::formatConstant(const ir::ConstantInt* C) const {
 }
 
 }
-}

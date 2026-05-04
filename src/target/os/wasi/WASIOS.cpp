@@ -39,4 +39,3 @@ void WASIOS::emitHeader(CodeGen& cg) {
 }
 
 }
-}

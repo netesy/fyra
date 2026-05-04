@@ -3,6 +3,7 @@
 #include "target/core/ArchitectureInfo.h"
 
 namespace target {
+using namespace codegen;
 
 class RiscV64Architecture : public ArchitectureInfo {
 public:
@@ -70,5 +71,4 @@ private:
     int32_t currentStackOffset = 0;
 };
 
-}
 }

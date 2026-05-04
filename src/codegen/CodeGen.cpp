@@ -9,8 +9,8 @@
 #include "ir/BasicBlock.h"
 #include "ir/Module.h"
 #include "codegen/debug/DWARFGenerator.h"
-#include <algorithm>
 #include "codegen/optimize/InstructionFusion.h"
+#include <algorithm>
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetDescriptor.h"
 #include <cstring>

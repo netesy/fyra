@@ -6,7 +6,10 @@
 
 namespace codegen {
 class CodeGen;
+}
+
 namespace target {
+using namespace codegen;
 
 class ArchitectureInfo {
 public:
@@ -117,5 +120,4 @@ public:
     virtual void emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) = 0;
 };
 
-}
 }

@@ -3,6 +3,7 @@
 #include "ir/Module.h"
 #include "ir/IRContext.h"
 #include "ir/Type.h"
+#include "ir/Use.h"
 #include <algorithm>
 #include <iostream>
 
@@ -34,6 +35,13 @@ void BasicBlock::addSuccessor(BasicBlock* succ) {
 }
 
 void BasicBlock::removeInstructions(const std::vector<Instruction*>& to_remove) {
+    for (auto* instr : to_remove) {
+        if (instr->getParent() == this) {
+            for (auto& op : instr->getOperands()) {
+                op->set(nullptr);
+            }
+        }
+    }
     instructions.remove_if([&](const std::unique_ptr<Instruction>& instr) {
         return std::find(to_remove.begin(), to_remove.end(), instr.get()) != to_remove.end();
     });

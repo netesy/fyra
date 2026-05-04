@@ -719,4 +719,3 @@ void X64Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const std::
 void X64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {}
 
 }
-}

@@ -20,4 +20,3 @@ std::string JavaStubGen::generate(const std::string& packageName, const std::str
 
 }
 }
-}

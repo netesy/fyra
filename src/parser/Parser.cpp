@@ -1,5 +1,6 @@
 #include "parser/Parser.h"
 #include "ir/Type.h"
+#include "ir/FunctionType.h"
 #include "ir/Constant.h"
 #include "ir/PhiNode.h"
 #include "ir/GlobalValue.h"
@@ -127,8 +128,8 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
 void Parser::parseType() {
     getNextToken(); std::string name = currentToken.value; getNextToken(); getNextToken(); getNextToken();
     if (match(TokenType::LCurly)) {
-        std::vector<ir::Type*> members; while (!check(TokenType::RightBrace)) { members.push_back(parseType_actual()); consume(TokenType::Semicolon, "Expected ;"); }
-        consume(TokenType::RightBrace, "Expected }"); auto* ut = Type::getUnionTy(members); module->addType(name, ut);
+        std::vector<ir::Type*> members; while (!check(TokenType::RCurly)) { members.push_back(parseType_actual()); consume(TokenType::Semicolon, "Expected ;"); }
+        consume(TokenType::RCurly, "Expected }"); auto* ut = ir::Type::getUnionTy(members); module->addType(name, ut);
     } else { std::vector<ir::Type*> elements = parseStructElements(); auto* st = context->createStructType(name); st->setBody(elements); module->addType(name, st); }
 }
 ir::Instruction* Parser::parseCallInstruction(ir::Type* retType) {
@@ -145,6 +146,7 @@ ir::Value* Parser::parseValue() {
     if (currentToken.type == TokenType::Number) { long long v = std::stoll(currentToken.value, nullptr, 0); getNextToken(); return context->getConstantInt(context->getIntegerType(32), v); }
     if (currentToken.type == TokenType::Temporary) { std::string n = currentToken.value; getNextToken(); return valueMap.count(n) ? valueMap[n] : nullptr; }
     if (currentToken.type == TokenType::Global) { std::string n = currentToken.value; getNextToken(); for (auto& gv : module->getGlobalVariables()) if (gv->getName() == n) return gv.get(); return new ir::GlobalValue(context->getVoidType(), n); }
+    if (currentToken.type == TokenType::Label) { std::string n = currentToken.value; getNextToken(); return labelMap.count(n) ? labelMap[n] : (labelMap[n] = builder.createBasicBlock(n, builder.getInsertPoint()->getParent())); }
     return nullptr;
 }
 ir::Type* Parser::parseIRType() {

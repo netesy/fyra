@@ -24,11 +24,10 @@ namespace target {
 class FusionCoordinator;
 }
 
+namespace codegen {
 namespace debug {
 class DebugInfoManager;
 }
-
-namespace codegen {
 
 // Instruction pattern matching for enhanced code generation
 struct InstructionPattern {

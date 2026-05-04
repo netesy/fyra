@@ -29,4 +29,3 @@ std::string ManifestGen::generate(const std::string& packageName, const std::str
 
 }
 }
-}

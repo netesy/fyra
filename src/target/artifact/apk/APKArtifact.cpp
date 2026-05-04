@@ -82,11 +82,11 @@ void APKArtifact::emitSystemCapability(CodeGen& cg, ir::Instruction& i, const Ca
 void APKArtifact::emitSignalCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitSignalCapability(cg, i, spec); }
 void APKArtifact::emitRandomCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitRandomCapability(cg, i, spec); }
 void APKArtifact::emitErrorCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitErrorCapability(cg, i, spec); }
-void APKArtifact::emitDebugCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitDebugCapability(cg, i, spec); }
-void APKArtifact::emitModuleCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitModuleCapability(cg, i, spec); }
-void APKArtifact::emitTTYCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitTTYCapability(cg, i, spec); }
-void APKArtifact::emitSecurityCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitSecurityCapability(cg, i, spec); }
-void APKArtifact::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitGPUCapability(cg, i, spec); }
+void APKArtifact::emitDebugCapability(codegen::CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitDebugCapability(cg, i, spec); }
+void APKArtifact::emitModuleCapability(codegen::CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitModuleCapability(cg, i, spec); }
+void APKArtifact::emitTTYCapability(codegen::CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitTTYCapability(cg, i, spec); }
+void APKArtifact::emitSecurityCapability(codegen::CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitSecurityCapability(cg, i, spec); }
+void APKArtifact::emitGPUCapability(codegen::CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec) { baseTarget->emitGPUCapability(cg, i, spec); }
 
 uint64_t APKArtifact::getSyscallNumber(ir::SyscallId id) const { return baseTarget->getSyscallNumber(id); }
 
@@ -121,6 +121,5 @@ void APKArtifact::buildAPK(const std::string& outputPrefix) {
     APKPackager::package(outputPrefix + ".apk", "", libPath, manifestPath);
 }
 
-}
 }
 }

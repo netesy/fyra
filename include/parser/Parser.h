@@ -28,7 +28,12 @@ private:
     void parseFunction();
     void parseData();
     void parseType();
+    ir::Type* parseType_actual();
     std::vector<ir::Type*> parseStructElements();
+
+    bool match(TokenType t);
+    bool check(TokenType t);
+    void consume(TokenType t, const std::string& msg);
 
     void parseBasicBlock(ir::Function* func);
     ir::Instruction* parseInstruction(ir::BasicBlock* bb);

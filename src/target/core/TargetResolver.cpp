@@ -51,4 +51,3 @@ std::unique_ptr<TargetInfo> TargetResolver::resolve(const ::target::TargetDescri
 }
 
 }
-}

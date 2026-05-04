@@ -4,7 +4,10 @@
 
 namespace codegen {
 namespace asm_ { class Assembler; }
+}
+
 namespace target {
+using namespace codegen;
 
 class AArch64Architecture : public ArchitectureInfo {
 public:
@@ -77,5 +80,4 @@ private:
     int32_t currentStackOffset = 0;
 };
 
-}
 }

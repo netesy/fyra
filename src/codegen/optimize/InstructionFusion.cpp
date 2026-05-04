@@ -2,8 +2,13 @@
 #include "codegen/CodeGen.h"
 #include "ir/BasicBlock.h"
 #include "ir/Function.h"
+#include "ir/Constant.h"
+#include "ir/Type.h"
+#include "target/core/TargetInfo.h"
 #include <algorithm>
 #include <iostream>
+#include <vector>
+#include <string>
 
 namespace target {
 

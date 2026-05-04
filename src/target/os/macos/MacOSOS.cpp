@@ -232,4 +232,3 @@ void MacOSOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {
 }
 
 }
-}
