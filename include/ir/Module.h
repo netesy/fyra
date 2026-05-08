@@ -35,6 +35,9 @@ public:
     void addType(const std::string& name, Type* type);
     Type* getType(const std::string& name) const;
 
+    const std::string& getSourceFilename() const { return sourceFilename; }
+    void setSourceFilename(const std::string& filename) { sourceFilename = filename; }
+
     struct ExternDecl {
         std::string capability;
         std::vector<Type*> paramTypes;
@@ -46,6 +49,7 @@ public:
 private:
     std::shared_ptr<IRContext> context;
     std::string name;
+    std::string sourceFilename;
     std::list<std::unique_ptr<Function>> functions;
     std::list<std::unique_ptr<GlobalVariable>> globalVariables;
     std::map<std::string, Type*> namedTypes;

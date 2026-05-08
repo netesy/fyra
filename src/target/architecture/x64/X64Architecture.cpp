@@ -60,8 +60,22 @@ void X64Architecture::emitHeader(CodeGen& cg) {
 void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     if (abi == X64ABI::SystemV) {
         if (auto* os = cg.getTextStream()) {
-            *os << "  pushq %rbp\n  movq %rsp, %rbp\n";
-            *os << "  pushq %rbx\n  pushq %r12\n  pushq %r13\n  pushq %r14\n  pushq %r15\n";
+            *os << "  .cfi_startproc\n";
+            *os << "  pushq %rbp\n";
+            *os << "  .cfi_def_cfa_offset 16\n";
+            *os << "  .cfi_offset 6, -16\n";
+            *os << "  movq %rsp, %rbp\n";
+            *os << "  .cfi_def_cfa_register 6\n";
+            *os << "  pushq %rbx\n";
+            *os << "  .cfi_offset 3, -24\n";
+            *os << "  pushq %r12\n";
+            *os << "  .cfi_offset 12, -32\n";
+            *os << "  pushq %r13\n";
+            *os << "  .cfi_offset 13, -40\n";
+            *os << "  pushq %r14\n";
+            *os << "  .cfi_offset 14, -48\n";
+            *os << "  pushq %r15\n";
+            *os << "  .cfi_offset 15, -56\n";
         }
         int current_offset = -48;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
@@ -104,7 +118,10 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             *os << func.getName() << "_epilogue" << ":\n";
             *os << "  leaq -40(%rbp), %rsp\n";
             *os << "  popq %r15\n  popq %r14\n  popq %r13\n  popq %r12\n  popq %rbx\n";
-            *os << "  leave\n  ret\n";
+            *os << "  popq %rbp\n";
+            *os << "  .cfi_def_cfa 7, 8\n";
+            *os << "  ret\n";
+            *os << "  .cfi_endproc\n";
         }
     } else {
         if (auto* os = cg.getTextStream()) {

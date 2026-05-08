@@ -26,9 +26,9 @@ public:
     // Stack frame management
     int getStackFrameSize() const { return stackFrameSize; }
     void setStackFrameSize(int size) { stackFrameSize = size; }
-    int getStackSlotForVreg(const Instruction* vreg) const;
-    bool hasStackSlot(const Instruction* vreg) const;
-    void setStackSlotForVreg(const Instruction* vreg, int slot);
+    int getStackSlotForVreg(const Value* vreg) const;
+    bool hasStackSlot(const Value* vreg) const;
+    void setStackSlotForVreg(const Value* vreg, int slot);
 
     void print(std::ostream& os) const override;
 
@@ -51,7 +51,7 @@ private:
     Module* parent;
 
     int stackFrameSize = 0;
-    std::map<const Instruction*, int> stackSlots;
+    std::map<const Value*, int> stackSlots;
 };
 
 } // namespace ir

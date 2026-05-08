@@ -8,7 +8,9 @@ namespace parser {
 Lexer::Lexer(std::istream& input) : input(input) {}
 
 int Lexer::getChar() {
-    return input.get();
+    int c = input.get();
+    if (c == '\n') currentLine++;
+    return c;
 }
 
 char Lexer::peek() {
@@ -32,7 +34,7 @@ Token Lexer::getNextToken() {
     }
 
     if (lastChar == EOF) {
-        return {TokenType::Eof, ""};
+        return {TokenType::Eof, "", currentLine};
     }
 
     if ((lastChar == 's' || lastChar == 'd') && input.peek() == '_') {
@@ -51,7 +53,7 @@ Token Lexer::getNextToken() {
             floatStr += lastChar;
             lastChar = getChar();
         }
-        return {TokenType::FloatLiteral, floatStr};
+        return {TokenType::FloatLiteral, floatStr, currentLine};
     }
 
     if (isalpha(lastChar) || lastChar == '_') { // Identifiers and keywords
@@ -61,8 +63,8 @@ Token Lexer::getNextToken() {
             identifierStr += lastChar;
         }
         // Check for keywords
-        if (identifierStr == "align") return {TokenType::Align, identifierStr};
-        if (identifierStr == "extern") return {TokenType::Extern, identifierStr};
+        if (identifierStr == "align") return {TokenType::Align, identifierStr, currentLine};
+        if (identifierStr == "extern") return {TokenType::Extern, identifierStr, currentLine};
         static const std::map<std::string, TokenType> keywords = {
             {"function", TokenType::Keyword}, {"export", TokenType::Keyword},
             {"data", TokenType::Keyword}, {"type", TokenType::Keyword},
@@ -126,7 +128,7 @@ Token Lexer::getNextToken() {
         if (keywords.count(identifierStr)) {
             return {keywords.at(identifierStr), identifierStr};
         }
-        return {TokenType::Identifier, identifierStr};
+        return {TokenType::Identifier, identifierStr, currentLine};
     }
 
     if (isdigit(lastChar) || (lastChar == '-' && isdigit(input.peek()))) { // Numbers
@@ -154,7 +156,7 @@ Token Lexer::getNextToken() {
                 lastChar = getChar();
             }
         }
-        return {TokenType::Number, numStr};
+        return {TokenType::Number, numStr, currentLine};
     }
 
     if (lastChar == '$' || lastChar == '%' || lastChar == '@' || lastChar == ':') {
@@ -167,10 +169,10 @@ Token Lexer::getNextToken() {
                  identifier += lastChar;
              }
              switch (sigil) {
-                 case '$': return {TokenType::Global, identifier};
-                 case '%': return {TokenType::Temporary, identifier};
-                 case '@': return {TokenType::Label, identifier};
-                 case ':': return {TokenType::Type, identifier};
+                 case '$': return {TokenType::Global, identifier, currentLine};
+                 case '%': return {TokenType::Temporary, identifier, currentLine};
+                 case '@': return {TokenType::Label, identifier, currentLine};
+                 case ':': return {TokenType::Type, identifier, currentLine};
              }
         }
     }
@@ -187,11 +189,11 @@ Token Lexer::getNextToken() {
             lastChar = getChar();
         }
         lastChar = getChar(); // consume the closing quote
-        return {TokenType::StringLiteral, str};
+        return {TokenType::StringLiteral, str, currentLine};
     }
 
     if (lastChar == EOF || input.eof()) {
-        return {TokenType::Eof, ""};
+        return {TokenType::Eof, "", currentLine};
     }
 
     // Handle single-character tokens
@@ -204,24 +206,24 @@ Token Lexer::getNextToken() {
         s += lastChar;
         lastChar = getChar();
         if (s == "...") {
-            return {TokenType::Ellipsis, "..."};
+            return {TokenType::Ellipsis, "...", currentLine};
         }
         // Fallback for now
     }
     char thisChar = lastChar;
     lastChar = getChar();
     switch (thisChar) {
-        case '{': return {TokenType::LCurly, "{"};
-        case '}': return {TokenType::RCurly, "}"};
-        case '(': return {TokenType::LParen, "("};
-        case ')': return {TokenType::RParen, ")"};
-        case ',': return {TokenType::Comma, ","};
-        case '=': return {TokenType::Equal, "="};
-        case ':': return {TokenType::Colon, ":"}; // Note: also a sigil prefix
-        case '+': return {TokenType::Plus, "+"};
+        case '{': return {TokenType::LCurly, "{", currentLine};
+        case '}': return {TokenType::RCurly, "}", currentLine};
+        case '(': return {TokenType::LParen, "(", currentLine};
+        case ')': return {TokenType::RParen, ")", currentLine};
+        case ',': return {TokenType::Comma, ",", currentLine};
+        case '=': return {TokenType::Equal, "=", currentLine};
+        case ':': return {TokenType::Colon, ":", currentLine}; // Note: also a sigil prefix
+        case '+': return {TokenType::Plus, "+", currentLine};
     }
 
-    return {TokenType::Unknown, std::string(1, thisChar)};
+    return {TokenType::Unknown, std::string(1, thisChar), currentLine};
 }
 
 } // namespace parser

@@ -12,17 +12,26 @@ DebugInfoManager::DebugInfoManager() : dwarfGenerator(std::make_unique<DWARFGene
 
 void DebugInfoManager::generateDebugInfo(CodeGen& cg, std::ostream& os, ir::Module& module) {
     if (debugEnabled && dwarfGenerator) {
+        dwarfGenerator->beginCompileUnit(module.getSourceFilename(), "fyra compiler");
+
+        for (auto& func : module.getFunctions()) {
+            dwarfGenerator->beginFunction(*func, 0); // Start address will be relative
+            dwarfGenerator->endFunction(0); // End address placeholder
+        }
+
         // Generate debug info sections
         dwarfGenerator->generateDebugInfoSection(os);
         dwarfGenerator->generateDebugAbbrevSection(os);
         dwarfGenerator->generateDebugStringSection(os);
+        dwarfGenerator->generateLineTable(os);
+        dwarfGenerator->generateDebugFrameSection(os);
     }
 }
 
 void DebugInfoManager::beforeFunctionEmission(CodeGen& cg, std::ostream& os, const ir::Function& func) {
     if (debugEnabled && dwarfGenerator) {
-        // Emit debug directives before function
         dwarfGenerator->emitDebugDirectives(os);
+        currentLine = func.getSourceLine();
     }
 }
 
@@ -35,8 +44,11 @@ void DebugInfoManager::afterFunctionEmission(CodeGen& cg, std::ostream& os, cons
 
 void DebugInfoManager::beforeInstructionEmission(CodeGen& cg, std::ostream& os, const ir::Instruction& instr, uint64_t address) {
     if (debugEnabled && dwarfGenerator) {
-        // Track instruction location for debugging
-        // This is a no-op for now, but can be extended
+        unsigned line = instr.getSourceLine();
+        if (line != 0 && line != currentLine) {
+            currentLine = line;
+            dwarfGenerator->addLineInfo(line, 0, cg.module.getSourceFilename(), address);
+        }
     }
 }
 
@@ -48,7 +60,8 @@ void DebugInfoManager::emitFunctionDebugInfo(CodeGen& cg, std::ostream& os, cons
 
 void DebugInfoManager::emitInstructionDebugInfo(CodeGen& cg, std::ostream& os, const ir::Instruction& instr, uint64_t address) {
     if (debugEnabled && dwarfGenerator) {
-        // Emit instruction-level debug info
+        unsigned line = instr.getSourceLine() ? instr.getSourceLine() : currentLine;
+        os << "  .loc 1 " << line << " 0\n";
     }
 }
 

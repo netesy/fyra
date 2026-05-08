@@ -41,6 +41,7 @@ public:
     PointerType* getPointerType(Type* elementType, unsigned addressSpace = 0);
     StructType* createStructType(const std::string& name);
     UnionType* createUnionType(const std::string& name);
+    StructType* getStructTypeFromElements(const std::vector<Type*>& elements);
     ArrayType* getArrayType(Type* elementType, uint64_t numElements);
     VectorType* getVectorType(Type* elementType, unsigned numElements);
     FunctionType* getFunctionType(Type* returnType, const std::vector<Type*>& paramTypes, bool isVariadic = false);

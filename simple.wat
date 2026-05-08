@@ -14,4 +14,5 @@ main_start:
   $42
   return
   )
+.Lfunc_end_main:
 )

@@ -13,13 +13,13 @@ DWARFGenerator::DWARFGenerator() : currentAddress(0), stringIDCounter(1) {
 }
 
 void DWARFGenerator::beginCompileUnit(const std::string& filename, const std::string& producer) {
-    compileUnit->filename = filename;
-    compileUnit->producer = producer;
+    compileUnit->filename = filename.empty() ? "unknown" : filename;
+    compileUnit->producer = producer.empty() ? "fyra" : producer;
     compileUnit->language = 0x0004; // DW_LANG_C_plus_plus (C++)
     
     // Add common strings to string table
-    getStringID(filename);
-    getStringID(producer);
+    getStringID(compileUnit->filename);
+    getStringID(compileUnit->producer);
 }
 
 void DWARFGenerator::endCompileUnit() {
@@ -157,13 +157,15 @@ void DWARFGenerator::generateDebugInfoSection(std::ostream& os) {
     os << "  .section .debug_info\n";
     
     // Compile unit header
-    os << "  # Compile Unit: " << compileUnit->filename << "\n";
-    os << "  # Producer: " << compileUnit->producer << "\n";
-    os << "  # Language: " << compileUnit->language << "\n";
-    
-    // Function information
-    for (const auto& func : compileUnit->functions) {
-        generateFunctionDebugInfo(os, func);
+    if (compileUnit) {
+        os << "  # Compile Unit: " << compileUnit->filename << "\n";
+        os << "  # Producer: " << compileUnit->producer << "\n";
+        os << "  # Language: " << compileUnit->language << "\n";
+
+        // Function information
+        for (const auto& func : compileUnit->functions) {
+            generateFunctionDebugInfo(os, func);
+        }
     }
 }
 
@@ -185,7 +187,29 @@ void DWARFGenerator::generateDebugStringSection(std::ostream& os) {
 void DWARFGenerator::generateDebugFrameSection(std::ostream& os) {
     os << "\n  # DWARF Call Frame Information\n";
     os << "  .section .debug_frame\n";
-    os << "  # Call frame information for stack unwinding\n";
+
+    // Common Information Entry (CIE)
+    os << "  .long .Lcie_end - .Lcie_start # Length\n";
+    os << ".Lcie_start:\n";
+    os << "  .long 0xffffffff # CIE ID\n";
+    os << "  .byte 1 # Version\n";
+    os << "  .asciz \"\" # Augmentation\n";
+    os << "  .byte 1 # Code alignment factor\n";
+    os << "  .byte -8 # Data alignment factor\n";
+    os << "  .byte 16 # Return address register\n";
+    os << "  .align 8\n";
+    os << ".Lcie_end:\n";
+
+    // Frame Description Entry (FDE) for each function
+    for (const auto& func : compileUnit->functions) {
+        os << "  .long .Lfde_end_" << func.name << " - .Lfde_start_" << func.name << " # Length\n";
+        os << ".Lfde_start_" << func.name << ":\n";
+        os << "  .long 0 # CIE Pointer\n";
+        os << "  .quad " << func.name << " # PC Start\n";
+        os << "  .quad .Lfunc_end_" << func.name << " - " << func.name << " # PC Range\n";
+        os << "  .align 8\n";
+        os << ".Lfde_end_" << func.name << ":\n";
+    }
 }
 
 void DWARFGenerator::generateExceptionTables(std::ostream& os) {

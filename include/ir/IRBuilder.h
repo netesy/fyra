@@ -14,6 +14,8 @@ namespace ir {
 
 class IRBuilder {
 public:
+    void setContext(std::shared_ptr<IRContext> ctx) { context = ctx; }
+    std::shared_ptr<IRContext> getContext() { return context; }
     IRBuilder();
     IRBuilder(std::shared_ptr<IRContext> ctx);
 
@@ -21,6 +23,9 @@ public:
     void setInsertPoint(BasicBlock* bb);
     void setInsertPoint(BasicBlock* bb, BasicBlock::instr_iterator it);
     BasicBlock* getInsertPoint() const { return insertPoint; }
+
+    void setLine(unsigned line) { currentLine = line; }
+    unsigned getLine() const { return currentLine; }
 
     // --- Create methods for top-level objects ---
     Function* createFunction(const std::string& name, Type* returnType);
@@ -142,6 +147,7 @@ private:
     Module* currentModule = nullptr;
     BasicBlock* insertPoint = nullptr;
     BasicBlock::instr_iterator insertIterator;
+    unsigned currentLine = 0;
 };
 
 } // namespace ir

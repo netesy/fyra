@@ -39,6 +39,7 @@ enum class TokenType {
 struct Token {
     TokenType type;
     std::string value;
+    unsigned line = 0;
 };
 
 class Lexer {
@@ -46,11 +47,13 @@ public:
     Lexer(std::istream& input);
 
     Token getNextToken();
+    unsigned getCurrentLine() const { return currentLine; }
     char peek();
 
 private:
     std::istream& input;
     int lastChar = ' ';
+    unsigned currentLine = 1;
 
     int getChar();
 };

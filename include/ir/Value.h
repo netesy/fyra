@@ -17,6 +17,8 @@ public:
 
     const std::string& getName() const { return name; }
     void setName(const std::string& newName) { name = newName; }
+    unsigned getSourceLine() const { return sourceLine; }
+    void setSourceLine(unsigned line) { sourceLine = line; }
 
     bool hasPhysicalRegister() const { return physReg != -1; }
     int getPhysicalRegister() const { return physReg; }
@@ -36,6 +38,7 @@ protected:
     std::string name;
     std::list<Use*> use_list;
     int physReg = -1;
+    unsigned sourceLine = 0;
 };
 
 } // namespace ir

@@ -180,6 +180,7 @@ public:
 
     const std::string& getName() const { return name; }
     const std::vector<Type*>& getElements() const { return elements; }
+    void addMember(Type* ty) { elements.push_back(ty); }
     bool isOpaque() const { return opaque; }
     
     // Override Type methods
@@ -221,6 +222,7 @@ public:
 
     const std::string& getName() const { return name; }
     const std::vector<Type*>& getElements() const { return elements; }
+    void addMember(Type* ty) { elements.push_back(ty); }
     
     // Override Type methods
     size_t getSize() const override {

@@ -68,6 +68,13 @@ StructType* IRContext::createStructType(const std::string& name) {
     return ptr;
 }
 
+StructType* IRContext::getStructTypeFromElements(const std::vector<Type*>& elements) {
+    auto ty = std::make_unique<StructType>("", elements, false);
+    StructType* ptr = ty.get();
+    ownedTypes.push_back(std::move(ty));
+    return ptr;
+}
+
 UnionType* IRContext::createUnionType(const std::string& name) {
     auto ty = std::make_unique<UnionType>(name, std::vector<Type*>{});
     UnionType* ptr = ty.get();

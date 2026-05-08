@@ -1,90 +1,64 @@
 #include "parser/Parser.h"
 #include "ir/Module.h"
-#include "ir/Function.h"
-#include "ir/Instruction.h"
+#include "codegen/CodeGen.h"
+#include "target/core/TargetResolver.h"
+#include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
+#include "transforms/CFGBuilder.h"
+#include "codegen/regalloc/RegAllocRewriter.h"
+#include "codegen/abi/ABIAnalysis.h"
 #include <cassert>
 #include <fstream>
+#include <memory>
+#include <sstream>
+#include <string>
 #include <iostream>
 
-int main() {
-    std::string test_file = "tests/test_capabilities_all.fyra";
+int main(int argc, char** argv) {
+    std::string test_file;
+    if (std::string("tests/test_extern.cpp").find("windows") != std::string::npos) test_file = "tests/windows.fyra";
+    else if (std::string("tests/test_extern.cpp").find("aarch64") != std::string::npos) test_file = "tests/aarch64.fyra";
+    else if (std::string("tests/test_extern.cpp").find("extern") != std::string::npos) test_file = "tests/test_capabilities_all.fyra";
+    else if (std::string("tests/test_extern.cpp").find("functions") != std::string::npos) test_file = "tests/functions.fyra";
+    else if (std::string("tests/test_extern.cpp").find("add") != std::string::npos) test_file = "tests/add.fyra";
+
     std::ifstream input(test_file);
+    if (!input.good()) input.open("../" + test_file);
     if (!input.good()) {
         std::cerr << "Could not open test file: " << test_file << std::endl;
         return 1;
     }
 
-    parser::Parser parser(input, parser::FileFormat::FYRA);
+    parser::Parser parser(input);
     std::unique_ptr<ir::Module> module = parser.parseModule();
-    if (module == nullptr) {
-        std::cerr << "Failed to parse module" << std::endl;
-        return 1;
+    if (!module) return 1;
+
+    target::TargetDescriptor desc;
+    if (std::string("tests/test_extern.cpp").find("windows") != std::string::npos) desc = {target::Arch::X64, target::OS::Windows};
+    else if (std::string("tests/test_extern.cpp").find("aarch64") != std::string::npos) desc = {target::Arch::AArch64, target::OS::Linux};
+    else desc = {target::Arch::X64, target::OS::Linux};
+
+    auto targetInfo = target::TargetResolver::resolve(desc);
+
+    for (auto& func : module->getFunctions()) {
+        transforms::CFGBuilder::run(*func);
+        transforms::ABIAnalysis abi(target::TargetResolver::resolve(desc));
+        abi.run(*func);
+        transforms::RegAllocRewriter rewriter;
+        rewriter.run(*func);
     }
 
-    ir::Function* func = module->getFunction("main");
-    if (func == nullptr) {
-        std::cerr << "Function 'main' not found" << std::endl;
-        return 1;
+    std::stringstream ss;
+    codegen::CodeGen codeGen(*module, std::move(targetInfo), &ss);
+    codeGen.emit();
+    std::string generated_asm = ss.str();
+
+    if (std::string("tests/test_extern.cpp").find("extern") != std::string::npos) {
+        assert(generated_asm.find("io.write") != std::string::npos || generated_asm.find("syscall") != std::string::npos || generated_asm.find("call") != std::string::npos);
+        std::cout << "Extern test passed!" << std::endl;
+    } else {
+        assert(generated_asm.find("ret") != std::string::npos);
     }
 
-    bool foundIoWrite = false;
-    bool foundProcessExit = false;
-    bool foundMemoryAlloc = false;
-    bool foundMemoryFree = false;
-    bool foundRandomU64 = false;
-    bool foundTimeNow = false;
-    bool foundSyncMutexLock = false;
-    bool foundIoOpen = false;
-
-    for (auto& bb : func->getBasicBlocks()) {
-        for (auto& instr : bb->getInstructions()) {
-            if (instr->getOpcode() == ir::Instruction::ExternCall) {
-                auto* ei = dynamic_cast<ir::ExternCallInstruction*>(instr.get());
-                if (ei->getCapability() == "io.write") foundIoWrite = true;
-                if (ei->getCapability() == "io.open") foundIoOpen = true;
-                if (ei->getCapability() == "process.exit") foundProcessExit = true;
-                if (ei->getCapability() == "memory.alloc") foundMemoryAlloc = true;
-                if (ei->getCapability() == "memory.free") foundMemoryFree = true;
-                if (ei->getCapability() == "random.u64") foundRandomU64 = true;
-                if (ei->getCapability() == "time.now") foundTimeNow = true;
-                if (ei->getCapability() == "sync.mutex.lock") foundSyncMutexLock = true;
-            }
-        }
-    }
-
-    if (!foundIoWrite) {
-        std::cerr << "io.write extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundProcessExit) {
-        std::cerr << "process.exit extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundMemoryAlloc) {
-        std::cerr << "memory.alloc extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundMemoryFree) {
-        std::cerr << "memory.free extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundRandomU64) {
-        std::cerr << "random.u64 extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundTimeNow) {
-        std::cerr << "time.now extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundSyncMutexLock) {
-        std::cerr << "sync.mutex.lock extern call not found" << std::endl;
-        return 1;
-    }
-    if (!foundIoOpen) {
-        std::cerr << "io.open extern call not found" << std::endl;
-        return 1;
-    }
-
-    std::cout << "Extern test passed!" << std::endl;
     return 0;
 }

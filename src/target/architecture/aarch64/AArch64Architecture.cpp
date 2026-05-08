@@ -92,10 +92,29 @@ void AArch64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) 
     if (!needsFrame) return;
     size_t total_frame_size = align_to_16(local_area_size + (usedCS.size() * 8) + (isLeaf ? 0 : 16));
     if (auto* os = cg.getTextStream()) {
-        *os << "  stp x29, x30, [sp, #-16]!\n  mov x29, sp\n";
+        *os << "  .cfi_startproc\n";
+        *os << "  stp x29, x30, [sp, #-16]!\n";
+        *os << "  .cfi_def_cfa_offset 16\n";
+        *os << "  .cfi_offset 29, -16\n";
+        *os << "  .cfi_offset 30, -8\n";
+        *os << "  mov x29, sp\n";
+        *os << "  .cfi_def_cfa_register 29\n";
         if (total_frame_size > 0) { if (total_frame_size <= 4095) *os << "  sub sp, sp, #" << total_frame_size << "\n"; else { *os << "  mov x9, #" << total_frame_size << "\n  sub sp, sp, x9\n"; } }
         int cs_off = isLeaf ? 0 : 16; auto it = usedCS.begin();
-        while (it != usedCS.end()) { std::string r1 = *it++; if (it != usedCS.end()) { std::string r2 = *it++; *os << "  stp " << r1 << ", " << r2 << ", [sp, #" << cs_off << "]\n"; cs_off += 16; } else { *os << "  str " << r1 << ", [sp, #" << cs_off << "]\n"; cs_off += 8; } }
+        while (it != usedCS.end()) {
+            std::string r1 = *it++;
+            if (it != usedCS.end()) {
+                std::string r2 = *it++;
+                *os << "  stp " << r1 << ", " << r2 << ", [sp, #" << cs_off << "]\n";
+                if (r1[0] == 'x') *os << "  .cfi_offset " << r1.substr(1) << ", " << (int)cs_off - (int)total_frame_size - 16 << "\n";
+                if (r2[0] == 'x') *os << "  .cfi_offset " << r2.substr(1) << ", " << (int)cs_off + 8 - (int)total_frame_size - 16 << "\n";
+                cs_off += 16;
+            } else {
+                *os << "  str " << r1 << ", [sp, #" << cs_off << "]\n";
+                if (r1[0] == 'x') *os << "  .cfi_offset " << r1.substr(1) << ", " << (int)cs_off - (int)total_frame_size - 16 << "\n";
+                cs_off += 8;
+            }
+        }
         int i_idx = 0, f_idx = 0;
         for (auto& param : func.getParameters()) {
             TypeInfo info = getTypeInfo(param->getType());
@@ -114,13 +133,44 @@ void AArch64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) 
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->hasPhysicalRegister()) { std::string reg = getRegisters(RegisterClass::Integer)[instr->getPhysicalRegister()]; if (isCalleeSaved(reg)) usedCS.insert(reg); } } }
     bool isLeaf = !hasCalls;
     bool needsFrame = !isLeaf || local_area_size > 0 || !usedCS.empty();
-    if (!needsFrame) { if (auto* os = cg.getTextStream()) *os << "  ret\n"; else cg.getAssembler().emitDWord(0xD65F03C0); return; }
+    if (!needsFrame) {
+        if (auto* os = cg.getTextStream()) {
+            *os << "  ret\n";
+            *os << "  .cfi_endproc\n";
+        } else {
+            cg.getAssembler().emitDWord(0xD65F03C0);
+        }
+        return;
+    }
     size_t total_frame_size = align_to_16(local_area_size + (usedCS.size() * 8) + (isLeaf ? 0 : 16));
     if (auto* os = cg.getTextStream()) {
         int cs_off = isLeaf ? 0 : 16; auto it = usedCS.begin();
-        while (it != usedCS.end()) { std::string r1 = *it++; if (it != usedCS.end()) { std::string r2 = *it++; *os << "  ldp " << r1 << ", " << r2 << ", [sp, #" << cs_off << "]\n"; cs_off += 16; } else { *os << "  ldr " << r1 << ", [sp, #" << cs_off << "]\n"; cs_off += 8; } }
-        if (!isLeaf) { *os << "  mov sp, x29\n  ldp x29, x30, [sp], #16\n"; } else if (total_frame_size > 0) *os << "  add sp, sp, #" << total_frame_size << "\n";
+        while (it != usedCS.end()) {
+            std::string r1 = *it++;
+            if (it != usedCS.end()) {
+                std::string r2 = *it++;
+                *os << "  ldp " << r1 << ", " << r2 << ", [sp, #" << cs_off << "]\n";
+                if (r1[0] == 'x') *os << "  .cfi_restore " << r1.substr(1) << "\n";
+                if (r2[0] == 'x') *os << "  .cfi_restore " << r2.substr(1) << "\n";
+                cs_off += 16;
+            } else {
+                *os << "  ldr " << r1 << ", [sp, #" << cs_off << "]\n";
+                if (r1[0] == 'x') *os << "  .cfi_restore " << r1.substr(1) << "\n";
+                cs_off += 8;
+            }
+        }
+        if (!isLeaf) {
+            *os << "  mov sp, x29\n";
+            *os << "  .cfi_def_cfa_register 31\n";
+            *os << "  ldp x29, x30, [sp], #16\n";
+            *os << "  .cfi_def_cfa_offset 0\n";
+            *os << "  .cfi_restore 30\n";
+            *os << "  .cfi_restore 29\n";
+        } else if (total_frame_size > 0) {
+            *os << "  add sp, sp, #" << total_frame_size << "\n";
+        }
         *os << "  ret\n";
+        *os << "  .cfi_endproc\n";
     }
 }
 
@@ -227,8 +277,24 @@ void AArch64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { *os << "  ldr x9, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  ldr x10, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  str x10, [x9]\n"; }
 }
 void AArch64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
-    uint64_t size = dynamic_cast<ir::ConstantInt*>(i.getOperands()[0]->get())->getValue(); size = (size + 7) & ~7;
-    if (auto* os = cg.getTextStream()) { *os << "  adrp x9, heap_ptr\n  ldr x9, [x9, :lo12:heap_ptr]\n  str x9, [x29, #" << cg.getStackOffset(&i) << "]\n  add x9, x9, #" << size << "\n  adrp x10, heap_ptr\n  str x9, [x10, :lo12:heap_ptr]\n"; }
+    uint64_t size = 8;
+    if (i.getOpcode() == ir::Instruction::Alloc4) size = 4;
+    else if (i.getOpcode() == ir::Instruction::Alloc16) size = 16;
+    else if (!i.getOperands().empty()) {
+        if (auto* sizeConst = dynamic_cast<ir::ConstantInt*>(i.getOperands()[0]->get()))
+            size = sizeConst->getValue();
+    }
+    uint64_t alignedSize = (size + 7) & ~7;
+
+    if (auto* os = cg.getTextStream()) {
+        *os << "  # AArch64 Bump Allocation\n";
+        *os << "  adrp x9, heap_ptr\n";
+        *os << "  ldr x9, [x9, :lo12:heap_ptr]\n";
+        *os << "  str x9, " << cg.getValueAsOperand(&i) << "\n";
+        *os << "  add x9, x9, #" << alignedSize << "\n";
+        *os << "  adrp x10, heap_ptr\n";
+        *os << "  str x9, [x10, :lo12:heap_ptr]\n";
+    }
 }
 void AArch64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {

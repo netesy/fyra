@@ -88,6 +88,7 @@ void CodeGen::emit(bool forExecutable) {
     if (forExecutable) targetInfo->emitStartFunction(*this);
     for (auto& func : module.getFunctions()) emitFunction(*func);
     targetInfo->emitFooter(*this);
+    emitDebugInfo();
 }
 
 void CodeGen::emitFunction(ir::Function& func) {
@@ -114,6 +115,17 @@ void CodeGen::emitFunction(ir::Function& func) {
         targetInfo->emitFunctionPrologue(*this, func);
         for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
         targetInfo->emitFunctionEpilogue(*this, func);
+        if (os) {
+            *os << ".Lfunc_end_" << func.getName() << ":\n";
+        } else if (assembler) {
+            SymbolInfo end_sym;
+            end_sym.name = ".Lfunc_end_" + func.getName();
+            end_sym.sectionName = ".text";
+            end_sym.value = assembler->getCodeSize();
+            end_sym.type = 0;
+            end_sym.binding = 0; // Local
+            addSymbol(end_sym);
+        }
     }
 }
 
@@ -181,6 +193,11 @@ void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
 }
 
 void CodeGen::emitInstruction(ir::Instruction& instr) {
+    if (debugInfoManager->isDebugEnabled()) {
+        uint64_t address = os ? 0 : assembler->getCodeSize();
+        debugInfoManager->beforeInstructionEmission(*this, os ? *os : std::cerr, instr, address);
+        if (os) debugInfoManager->emitInstructionDebugInfo(*this, *os, instr, address);
+    }
     switch (instr.getOpcode()) {
         case ir::Instruction::Ret: targetInfo->emitRet(*this, instr); break;
         case ir::Instruction::Add: targetInfo->emitAdd(*this, instr); break;
@@ -219,23 +236,29 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
 
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (!value) return targetInfo->getImmediatePrefix() + "0";
-    if (auto* instr = dynamic_cast<const ir::Instruction*>(value)) {
-        if (instr->hasPhysicalRegister()) {
-            auto regClass = instr->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
-            auto& regs = targetInfo->getRegisters(regClass);
-            if (static_cast<size_t>(instr->getPhysicalRegister()) < regs.size()) {
-                return targetInfo->getRegisterName(regs[instr->getPhysicalRegister()], instr->getType());
-            }
+
+    // Handle physical registers and stack slots assigned by Register Allocator
+    if (value->hasPhysicalRegister()) {
+        auto regClass = value->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
+        auto& regs = targetInfo->getRegisters(regClass);
+        if (static_cast<size_t>(value->getPhysicalRegister()) < regs.size()) {
+            return targetInfo->getRegisterName(regs[value->getPhysicalRegister()], value->getType());
         }
-        if (currentFunction && currentFunction->hasStackSlot(const_cast<ir::Instruction*>(instr)))
-            return targetInfo->formatStackOperand(-currentFunction->getStackSlotForVreg(const_cast<ir::Instruction*>(instr)) - 8);
     }
+    if (currentFunction && currentFunction->hasStackSlot(value)) {
+        return targetInfo->formatStackOperand(targetInfo->getStackOffset(*this, const_cast<ir::Value*>(value)));
+    }
+
     if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
-    if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets[const_cast<ir::Value*>(value)]);
-    if (auto* p = dynamic_cast<const ir::Parameter*>(value)) { if (stackOffsets.count(const_cast<ir::Value*>(value))) return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value))); } return "$" + value->getName();
+
+    // Fallback to naive stack offsets if RegAlloc wasn't used
+    if (stackOffsets.count(const_cast<ir::Value*>(value)))
+        return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value)));
+
+    return "$" + value->getName();
 }
 
 int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }
@@ -385,9 +408,9 @@ void CodeGen::emitTextSection() {
 void CodeGen::emitFunctionAlignment() {}
 void CodeGen::performInstructionFusion(ir::Function&) {}
 void CodeGen::applyFusionOptimizations(ir::BasicBlock&) {}
-void CodeGen::enableDebugInfo(bool) {}
-void CodeGen::setCurrentLocation(const std::string&, unsigned) {}
-void CodeGen::emitDebugInfo() {}
+void CodeGen::enableDebugInfo(bool enable) { debugInfoManager->enableDebugInfo(enable); }
+void CodeGen::setCurrentLocation(const std::string& file, unsigned line) { debugInfoManager->setCurrentLocation(file, line); }
+void CodeGen::emitDebugInfo() { if (debugInfoManager->isDebugEnabled()) debugInfoManager->generateDebugInfo(*this, os ? *os : std::cerr, module); }
 void CodeGen::selectInstruction(ir::Instruction&) {}
 bool CodeGen::matchPattern(ir::Instruction&, const InstructionPattern&) { return false; }
 void CodeGen::selectArithmeticInstruction(ir::Instruction&) {}

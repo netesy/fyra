@@ -128,6 +128,10 @@ int main(int argc, char** argv) {
         else if (targetTriple == "aarch64") targetTriple = "aarch64-linux-bin";
         else if (targetTriple == "wasm32") targetTriple = "wasm32-wasi-wasm";
         else if (targetTriple == "riscv64") targetTriple = "riscv64-linux-bin";
+        else {
+            // Last resort for bare names like "x64-linux"
+            targetTriple += "-bin";
+        }
 
         desc = target::TargetDescriptor::fromString(targetTriple);
         if (!desc) {
@@ -268,6 +272,8 @@ int main(int argc, char** argv) {
         std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
         codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
         codeGen.enableVerboseOutput(verboseOutput);
+        codeGen.enableDebugInfo(true);
+        codeGen.module.setSourceFilename(inputFile);
 
         auto result = codeGen.compileToObject(outputPrefix, enableValidation, generateObject, false);
         if (result.success) {

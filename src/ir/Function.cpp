@@ -33,18 +33,18 @@ void Function::print(std::ostream& os) const {
     os << "}\n";
 }
 
-int Function::getStackSlotForVreg(const Instruction* vreg) const {
+int Function::getStackSlotForVreg(const Value* vreg) const {
     if (stackSlots.count(vreg)) {
         return stackSlots.at(vreg);
     }
     return -1;
 }
 
-void Function::setStackSlotForVreg(const Instruction* vreg, int slot) {
+void Function::setStackSlotForVreg(const Value* vreg, int slot) {
     stackSlots[vreg] = slot;
 }
 
-bool Function::hasStackSlot(const Instruction* vreg) const {
+bool Function::hasStackSlot(const Value* vreg) const {
     return stackSlots.find(vreg) != stackSlots.end();
 }
 
