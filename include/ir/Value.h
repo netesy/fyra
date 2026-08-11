@@ -14,6 +14,7 @@ public:
     virtual ~Value();
 
     Type* getType() const { return type; }
+    void setType(Type* ty) { type = ty; }
 
     const std::string& getName() const { return name; }
     void setName(const std::string& newName) { name = newName; }

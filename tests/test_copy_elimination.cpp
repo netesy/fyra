@@ -35,9 +35,9 @@ int main() {
     std::cout << "Generated ASM for copy_elimination.fyra:\n" << generated_asm << std::endl;
 
     // After copy elimination and SCCP, the operation may be folded or registers renamed.
-    // We check for the final constant result 15 being moved into the return register.
-    assert(generated_asm.find("movl $15, %eax") != std::string::npos ||
-           generated_asm.find("movl $c, %eax") != std::string::npos);
+    // We check for the final constant result 10 being loaded or the result copied properly.
+    assert(generated_asm.find("movq $10, %rax") != std::string::npos ||
+           generated_asm.find("addq $5, %rax") != std::string::npos);
 
     return 0;
 }

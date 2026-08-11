@@ -138,6 +138,16 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
     getNextToken();
 
     ir::Instruction* instr = nullptr;
+    const bool isLoadOp = (opcodeStr == "load" || opcodeStr == "loadl" || opcodeStr == "loads" ||
+                           opcodeStr == "loadd" || opcodeStr == "loaduw" || opcodeStr == "loadsh" ||
+                           opcodeStr == "loaduh" || opcodeStr == "loadsb" || opcodeStr == "loadub");
+    const bool isCastOp = (opcodeStr == "extub" || opcodeStr == "extuh" || opcodeStr == "extuw" ||
+                           opcodeStr == "extsb" || opcodeStr == "extsh" || opcodeStr == "extsw" ||
+                           opcodeStr == "exts" || opcodeStr == "truncd" || opcodeStr == "swtof" ||
+                           opcodeStr == "uwtof" || opcodeStr == "sltof" || opcodeStr == "ultof" ||
+                           opcodeStr == "dtosi" || opcodeStr == "dtoui" || opcodeStr == "stosi" ||
+                           opcodeStr == "stoui" || opcodeStr == "cast");
+
     if (opcodeStr == "add" || opcodeStr == "sub" || opcodeStr == "mul" || opcodeStr == "div" ||
         opcodeStr == "udiv" || opcodeStr == "rem" || opcodeStr == "urem" || opcodeStr == "and" ||
         opcodeStr == "or" || opcodeStr == "xor" || opcodeStr == "shl" || opcodeStr == "shr" ||
@@ -146,12 +156,11 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         opcodeStr == "ule" || opcodeStr == "ugt" || opcodeStr == "uge" || opcodeStr == "fadd" ||
         opcodeStr == "fsub" || opcodeStr == "fmul" || opcodeStr == "fdiv" || opcodeStr == "lt" ||
         opcodeStr == "le" || opcodeStr == "gt" || opcodeStr == "ge" || opcodeStr == "co" ||
-        opcodeStr == "cuo" || opcodeStr == "neg" || opcodeStr == "alloc" || opcodeStr == "load" ||
-        opcodeStr == "copy") {
+        opcodeStr == "cuo" || opcodeStr == "neg" || opcodeStr == "alloc" || opcodeStr == "copy" || isLoadOp) {
 
         ir::Value* lhs = parseValue();
         ir::Value* rhs = nullptr;
-        if (opcodeStr != "neg" && opcodeStr != "alloc" && opcodeStr != "load" && opcodeStr != "copy") {
+        if (opcodeStr != "neg" && opcodeStr != "alloc" && opcodeStr != "copy" && !isLoadOp) {
             if (currentToken.type == TokenType::Comma) getNextToken();
             rhs = parseValue();
         }
@@ -175,6 +184,14 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         else if (opcodeStr == "copy") instr = builder.createCopy(lhs, instrType);
         else if (opcodeStr == "neg") instr = builder.createNeg(lhs);
         else if (opcodeStr == "load") instr = builder.createLoad(lhs);
+        else if (opcodeStr == "loadl") instr = builder.createLoadl(lhs);
+        else if (opcodeStr == "loads") instr = builder.createLoads(lhs);
+        else if (opcodeStr == "loadd") instr = builder.createLoadd(lhs);
+        else if (opcodeStr == "loaduw") instr = builder.createLoaduw(lhs);
+        else if (opcodeStr == "loadsh") instr = builder.createLoadsh(lhs);
+        else if (opcodeStr == "loaduh") instr = builder.createLoaduh(lhs);
+        else if (opcodeStr == "loadsb") instr = builder.createLoadsb(lhs);
+        else if (opcodeStr == "loadub") instr = builder.createLoadub(lhs);
         else if (opcodeStr == "alloc") instr = builder.createAlloc(lhs, instrType ? instrType : context->getIntegerType(8));
         else if (opcodeStr == "fadd") instr = builder.createFAdd(lhs, rhs);
         else if (opcodeStr == "fsub") instr = builder.createFSub(lhs, rhs);
@@ -196,6 +213,36 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         else if (opcodeStr == "ge") instr = (lhs->getType()->isFloatingPoint() ? builder.createCge(lhs, rhs) : builder.createCsge(lhs, rhs));
         else if (opcodeStr == "co") instr = builder.createCo(lhs, rhs);
         else if (opcodeStr == "cuo") instr = builder.createCuo(lhs, rhs);
+
+        if (instr && instrType && isLoadOp) {
+            instr->setType(instrType);
+        }
+    } else if (isCastOp) {
+        ir::Value* val = parseValue();
+        ir::Type* destTy = nullptr;
+        if (currentToken.type == TokenType::Colon) {
+            getNextToken();
+            destTy = parseIRType();
+        } else {
+            destTy = context->getVoidType();
+        }
+        if (opcodeStr == "extub") instr = builder.createExtUB(val, destTy);
+        else if (opcodeStr == "extuh") instr = builder.createExtUH(val, destTy);
+        else if (opcodeStr == "extuw") instr = builder.createExtUW(val, destTy);
+        else if (opcodeStr == "extsb") instr = builder.createExtSB(val, destTy);
+        else if (opcodeStr == "extsh") instr = builder.createExtSH(val, destTy);
+        else if (opcodeStr == "extsw") instr = builder.createExtSW(val, destTy);
+        else if (opcodeStr == "exts") instr = builder.createExtS(val, destTy);
+        else if (opcodeStr == "truncd") instr = builder.createTruncD(val, destTy);
+        else if (opcodeStr == "swtof") instr = builder.createSWtoF(val, destTy);
+        else if (opcodeStr == "uwtof") instr = builder.createUWtoF(val, destTy);
+        else if (opcodeStr == "sltof") instr = builder.createSltof(val, destTy);
+        else if (opcodeStr == "ultof") instr = builder.createUltof(val, destTy);
+        else if (opcodeStr == "dtosi") instr = builder.createDToSI(val, destTy);
+        else if (opcodeStr == "dtoui") instr = builder.createDToUI(val, destTy);
+        else if (opcodeStr == "stosi") instr = builder.createSToSI(val, destTy);
+        else if (opcodeStr == "stoui") instr = builder.createSToUI(val, destTy);
+        else if (opcodeStr == "cast") instr = builder.createCast(val, destTy);
     } else if (opcodeStr == "call") {
         instr = parseCallInstruction(nullptr);
     } else if (opcodeStr == "extern") {

@@ -53,6 +53,10 @@ std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& t
 }
 }
 
+std::unique_ptr<target::TargetInfo> CodeGenFactory::createTargetInfo(const std::string& targetName) {
+    return createTargetInfoForName(targetName);
+}
+
 CodeGen::CodeGen(ir::Module& module, std::unique_ptr<target::TargetInfo> ti, std::ostream* os)
     : module(module), targetInfo(std::move(ti)),
       assembler(std::make_unique<asm_::Assembler>()),
@@ -318,10 +322,14 @@ void CodeGen::emitDataSection() {
     if (os) {
         *os << "\n.data\n";
         if (usesHeap) {
-            *os << "__heap_base:\n  .zero 1048576\n";
-            *os << "__heap_ptr:\n  .quad __heap_base\n";
+            *os << ".align 16\n__heap_base:\n  .zero 1048576\n";
+            *os << ".align 8\n__heap_ptr:\n  .quad __heap_base\n";
         }
         for (auto& gv : module.getGlobalVariables()) {
+            size_t align = gv->getType()->getSize();
+            if (align > 8) align = 8;
+            if (align == 0) align = 1;
+            *os << ".align " << align << "\n";
             *os << gv->getName() << ":\n";
             if (auto* init = gv->getInitializer()) {
                 if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
@@ -346,6 +354,10 @@ void CodeGen::emitDataSection() {
         if (usesHeap) {
             // Consistent naming: heap_ptr and __fyra_heap
             uint64_t heap_base_offset = rodataAssembler->getCodeSize();
+            while (heap_base_offset % 16 != 0) {
+                rodataAssembler->emitByte(0);
+                heap_base_offset = rodataAssembler->getCodeSize();
+            }
             for(int i=0; i<1048576; ++i) rodataAssembler->emitByte(0);
             
             SymbolInfo hb_sym;
@@ -357,6 +369,10 @@ void CodeGen::emitDataSection() {
             addSymbol(hb_sym);
 
             uint64_t heap_ptr_offset = rodataAssembler->getCodeSize();
+            while (heap_ptr_offset % 8 != 0) {
+                rodataAssembler->emitByte(0);
+                heap_ptr_offset = rodataAssembler->getCodeSize();
+            }
             SymbolInfo hp_sym;
             hp_sym.name = "heap_ptr";
             hp_sym.sectionName = ".data";
@@ -375,7 +391,15 @@ void CodeGen::emitDataSection() {
             addRelocation(hp_reloc);
         }
         for (auto& gv : module.getGlobalVariables()) {
-            symbols.push_back({gv->getName(), (uint64_t)rodataAssembler->getCode().size(), gv->getType()->getSize(), 0, 1, ".data"});
+            size_t align = gv->getType()->getSize();
+            if (align > 8) align = 8;
+            if (align == 0) align = 1;
+            uint64_t offset = rodataAssembler->getCodeSize();
+            while (offset % align != 0) {
+                rodataAssembler->emitByte(0);
+                offset = rodataAssembler->getCodeSize();
+            }
+            symbols.push_back({gv->getName(), offset, gv->getType()->getSize(), 0, 1, ".data"});
             if (auto* init = gv->getInitializer()) {
                 if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
                     if (ci->getType()->getSize() == 1) rodataAssembler->emitByte(ci->getValue());

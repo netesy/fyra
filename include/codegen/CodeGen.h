@@ -227,6 +227,11 @@ private:
     std::string writeAssemblyToFile(const std::string& assembly, const std::string& path);
 };
 
+class CodeGenFactory {
+public:
+    static std::unique_ptr<target::TargetInfo> createTargetInfo(const std::string& targetName);
+};
+
 // Pipeline for comprehensive code generation workflow
 class CodeGenPipeline {
 public:

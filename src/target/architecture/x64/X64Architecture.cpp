@@ -7,6 +7,7 @@
 #include "ir/Constant.h"
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
+#include <iostream>
 #include <ostream>
 
 namespace target {
@@ -76,6 +77,12 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             *os << "  .cfi_offset 14, -48\n";
             *os << "  pushq %r15\n";
             *os << "  .cfi_offset 15, -56\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitByte(0x55);
+            as.emitBytes({0x48, 0x89, 0xE5});
+            as.emitByte(0x53);
+            as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57});
         }
         int current_offset = -48;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
@@ -85,6 +92,19 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         if (auto* os = cg.getTextStream()) {
             if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
             int j = 0; for (auto& param : func.getParameters()) { if (j < 6) *os << "  movq %" << integerArgRegs[j] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n"; j++; }
+        } else {
+            auto& as = cg.getAssembler();
+            if (stack_alloc > 0) {
+                if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc});
+                else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); }
+            }
+            int j = 0; for (auto& param : func.getParameters()) {
+                if (j < 6) {
+                    uint8_t r = getArchRegIndex(integerArgRegs[j]);
+                    emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]);
+                }
+                j++;
+            }
         }
     } else {
         if (auto* os = cg.getTextStream()) {
@@ -122,6 +142,21 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             *os << "  .cfi_def_cfa 7, 8\n";
             *os << "  ret\n";
             *os << "  .cfi_endproc\n";
+        } else {
+            auto& as = cg.getAssembler();
+            CodeGen::SymbolInfo epilogue_sym;
+            epilogue_sym.name = func.getName() + "_epilogue";
+            epilogue_sym.sectionName = ".text";
+            epilogue_sym.value = as.getCodeSize();
+            epilogue_sym.type = 0; // STT_NOTYPE
+            epilogue_sym.binding = 0; // STB_LOCAL
+            cg.addSymbol(epilogue_sym);
+
+            emitRegMem(as, 0x48, 0x8D, 4, -40);
+            as.emitBytes({0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C});
+            as.emitByte(0x5B);
+            as.emitByte(0x5D);
+            as.emitByte(0xC3);
         }
     } else {
         if (auto* os = cg.getTextStream()) {
@@ -131,6 +166,14 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             *os << "  leave\n  ret\n";
         } else {
             auto& as = cg.getAssembler();
+            CodeGen::SymbolInfo epilogue_sym;
+            epilogue_sym.name = func.getName() + "_epilogue";
+            epilogue_sym.sectionName = ".text";
+            epilogue_sym.value = as.getCodeSize();
+            epilogue_sym.type = 0; // STT_NOTYPE
+            epilogue_sym.binding = 0; // STB_LOCAL
+            cg.addSymbol(epilogue_sym);
+
             as.emitBytes({0x48, 0x8D, 0x65, 0xC8});
             as.emitBytes({0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C});
             as.emitByte(0x5F); as.emitByte(0x5E); as.emitByte(0x5B);
@@ -423,7 +466,17 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
         case ir::Instruction::Loadsh: size = 2; isSigned = true; break;
         case ir::Instruction::Loaduw: size = 4; isSigned = false; break;
         case ir::Instruction::Loadl:  size = 8; isSigned = true; break;
-        default: size = 4; break;
+        default: {
+            if (i.getType()) {
+                TypeInfo info = getTypeInfo(i.getType());
+                size = info.size;
+                isSigned = info.isSigned;
+            } else {
+                size = 4;
+                isSigned = true;
+            }
+            break;
+        }
     }
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
@@ -468,12 +521,21 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
+    std::cout << "[DEBUG emitStore] instr: " << i.getName() << " op0: " << (i.getOperands()[0]->get() ? i.getOperands()[0]->get()->getName() : "null") << " op1: " << (i.getOperands()[1]->get() ? i.getOperands()[1]->get()->getName() : "null") << std::endl;
     uint8_t size = 8;
     switch(i.getOpcode()) {
         case ir::Instruction::Storeb: size = 1; break;
         case ir::Instruction::Storeh: size = 2; break;
         case ir::Instruction::Storel: size = 8; break;
-        default: size = 4; break;
+        default: {
+            if (!i.getOperands().empty() && i.getOperands()[0] && i.getOperands()[0]->get()) {
+                TypeInfo info = getTypeInfo(i.getOperands()[0]->get()->getType());
+                size = info.size;
+            } else {
+                size = 4;
+            }
+            break;
+        }
     }
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string rdx = (abi == X64ABI::SystemV) ? "%rdx" : "rdx";
@@ -712,8 +774,11 @@ void X64Architecture::emitRegMem(asm_::Assembler& as, uint8_t rex, uint8_t opcod
 void X64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& as, ir::Value* v, uint8_t regIdx) {
     if (!v) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(0); return; }
     if (auto* ci = dynamic_cast<ir::ConstantInt*>(v)) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(ci->getValue()); }
-    else if (v->getName() == "__heap_ptr" || dynamic_cast<ir::GlobalVariable*>(v) || dynamic_cast<ir::GlobalValue*>(v)) {
+    else if (v->getName() == "__heap_ptr" || v->getName() == "heap_ptr") {
         uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; as.emitByte(rex); as.emitByte(0x8B); as.emitByte(0x05 | ((regIdx & 7) << 3));
+        uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, v->getName(), ".text"});
+    } else if (dynamic_cast<ir::GlobalVariable*>(v) || dynamic_cast<ir::GlobalValue*>(v)) {
+        uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; as.emitByte(rex); as.emitByte(0x8D); as.emitByte(0x05 | ((regIdx & 7) << 3));
         uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, v->getName(), ".text"});
     } else {
         int32_t offset = cg.getStackOffset(v); uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; emitRegMem(as, rex, 0x8B, regIdx & 7, offset);

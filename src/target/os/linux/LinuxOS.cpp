@@ -302,10 +302,19 @@ void LinuxOS::emitHeader(CodeGen& cg) {
 void LinuxOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {
     if (auto* os = cg.getTextStream()) {
         *os << ".globl _start\n_start:\n";
-        auto* zero = ir::ConstantInt::get(ir::IntegerType::get(64), 0);
-        const_cast<ArchitectureInfo&>(arch).emitNativeLibraryCall(cg, "main", {});
-        const_cast<ArchitectureInfo&>(arch).emitNativeSyscall(cg, 60, {zero});
+    } else {
+        auto& as = cg.getAssembler();
+        CodeGen::SymbolInfo start_sym;
+        start_sym.name = "_start";
+        start_sym.sectionName = ".text";
+        start_sym.value = as.getCodeSize();
+        start_sym.type = 2; // STT_FUNC
+        start_sym.binding = 1; // STB_GLOBAL
+        cg.addSymbol(start_sym);
     }
+    auto* zero = ir::ConstantInt::get(ir::IntegerType::get(64), 0);
+    const_cast<ArchitectureInfo&>(arch).emitNativeLibraryCall(cg, "main", {});
+    const_cast<ArchitectureInfo&>(arch).emitNativeSyscall(cg, 60, {zero});
 }
 
 }

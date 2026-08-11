@@ -52,6 +52,8 @@ private:
     std::map<std::string, ir::Value*> valueMap;
     // Symbol table for basic block labels within a function
     std::map<std::string, ir::BasicBlock*> labelMap;
+    // Map of forward-referenced placeholder values
+    std::map<std::string, ir::Value*> placeholders;
 };
 
 } // namespace parser

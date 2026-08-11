@@ -555,6 +555,7 @@ bool ElfGenerator::Impl::applyRelocations() {
 
         if (reloc.type == "R_X86_64_64" || reloc.type == "R_RISCV_64") {
             uint64_t value = S + A;
+            std::cout << "[DEBUG applyRelocations64] symbol: " << reloc.symbolName << " S: " << std::hex << S << " A: " << A << " value: " << value << std::dec << std::endl;
             if (reloc.offset + 8 <= p_section->data.size())
                 *reinterpret_cast<uint64_t*>(&p_section->data[reloc.offset]) = value;
         } else if (reloc.type == "R_X86_64_PC32" || reloc.type == "R_X86_64_PLT32") {

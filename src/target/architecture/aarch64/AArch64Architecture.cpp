@@ -181,7 +181,11 @@ void AArch64Architecture::emitStartFunction(CodeGen& cg) {
 }
 
 void AArch64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
-    if (!i.getOperands().empty()) { ir::Value* rv = i.getOperands()[0]->get(); if (auto* os = cg.getTextStream()) *os << "  ldr " << getRegisterName("x0", rv->getType()) << ", " << cg.getValueAsOperand(rv) << "\n"; else emitLoadValue(cg, cg.getAssembler(), rv, 0); }
+    if (!i.getOperands().empty() && i.getOperands()[0] && i.getOperands()[0]->get() != nullptr) {
+        ir::Value* rv = i.getOperands()[0]->get();
+        if (auto* os = cg.getTextStream()) *os << "  ldr " << getRegisterName("x0", rv->getType()) << ", " << cg.getValueAsOperand(rv) << "\n";
+        else emitLoadValue(cg, cg.getAssembler(), rv, 0);
+    }
     if (auto* os = cg.getTextStream()) *os << "  b " << i.getParent()->getParent()->getName() << "_epilogue\n";
     else emitFunctionEpilogue(cg, *i.getParent()->getParent());
 }
