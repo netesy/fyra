@@ -7,6 +7,7 @@
 #include "ir/Constant.h"
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
+#include "ir/PhiNode.h"
 #include <iostream>
 #include <ostream>
 
@@ -610,31 +611,133 @@ void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
     }
 }
 
+void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::BasicBlock* target) {
+    if (!target) return;
+    std::vector<std::pair<ir::Value*, ir::PhiNode*>> phiMoves;
+    for (auto& instr : target->getInstructions()) {
+        if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
+            ir::Value* incomingVal = phi->getIncomingValueForBlock(source);
+            if (incomingVal) {
+                phiMoves.push_back({incomingVal, phi});
+            }
+        }
+    }
+    if (phiMoves.empty()) return;
+    for (const auto& move : phiMoves) {
+        ir::Value* incomingVal = move.first;
+        if (auto* os = cg.getTextStream()) {
+            std::string srcOp = cg.getValueAsOperand(incomingVal);
+            std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  pushq " << rax << "\n";
+        } else {
+            auto& as = cg.getAssembler();
+            emitLoadValue(cg, as, incomingVal, 0);
+            as.emitByte(0x50);
+        }
+    }
+    for (auto it = phiMoves.rbegin(); it != phiMoves.rend(); ++it) {
+        ir::PhiNode* phi = it->second;
+        if (auto* os = cg.getTextStream()) {
+            std::string destOp = cg.getValueAsOperand(phi);
+            std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+            *os << "  popq " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitByte(0x58);
+            emitStoreResult(cg, *phi, 0);
+        }
+    }
+}
+
 void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
+    auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
+
     if (auto* os = cg.getTextStream()) {
         *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
         *os << "  testq " << rax << ", " << rax << "\n";
-        *os << "  jne " << cg.getTargetInfo()->getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())) << "\n";
-        *os << "  jmp " << cg.getTargetInfo()->getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())) << "\n";
+
+        std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
+        std::string falseLabel = cg.getTargetInfo()->getBBLabel(targetFalse);
+
+        bool trueHasPhis = false;
+        for (auto& inst : targetTrue->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) trueHasPhis = true;
+        bool falseHasPhis = false;
+        for (auto& inst : targetFalse->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) falseHasPhis = true;
+
+        if (trueHasPhis || falseHasPhis) {
+            std::string labelTrueCopies = ".L_true_copies_" + std::to_string((uintptr_t)&i);
+            std::string labelFalseCopies = ".L_false_copies_" + std::to_string((uintptr_t)&i);
+
+            *os << "  jne " << labelTrueCopies << "\n";
+            *os << "  jmp " << labelFalseCopies << "\n";
+
+            *os << labelTrueCopies << ":\n";
+            emitPhiCopies(cg, i.getParent(), targetTrue);
+            *os << "  jmp " << trueLabel << "\n";
+
+            *os << labelFalseCopies << ":\n";
+            emitPhiCopies(cg, i.getParent(), targetFalse);
+            *os << "  jmp " << falseLabel << "\n";
+        } else {
+            *os << "  jne " << trueLabel << "\n";
+            *os << "  jmp " << falseLabel << "\n";
+        }
     } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        cg.getAssembler().emitBytes({0x48, 0x85, 0xC0, 0x0F, 0x85});
-        uint64_t off1 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off1, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get())), ".text"});
-        cg.getAssembler().emitByte(0xE9);
-        uint64_t off2 = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off2, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get())), ".text"});
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+
+        bool trueHasPhis = false;
+        for (auto& inst : targetTrue->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) trueHasPhis = true;
+        bool falseHasPhis = false;
+        for (auto& inst : targetFalse->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) falseHasPhis = true;
+
+        if (trueHasPhis || falseHasPhis) {
+            as.emitBytes({0x48, 0x85, 0xC0});
+            as.emitBytes({0x0F, 0x85});
+            uint64_t trueCopiesOff = as.getCodeSize();
+            as.emitDWord(0);
+
+            emitPhiCopies(cg, i.getParent(), targetFalse);
+            as.emitByte(0xE9);
+            uint64_t falseTargetOff = as.getCodeSize();
+            as.emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{falseTargetOff, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(targetFalse), ".text"});
+
+            uint32_t trueCopiesRel = as.getCodeSize() - (trueCopiesOff + 4);
+            as.setByteAt(trueCopiesOff, trueCopiesRel & 0xFF);
+            as.setByteAt(trueCopiesOff + 1, (trueCopiesRel >> 8) & 0xFF);
+            as.setByteAt(trueCopiesOff + 2, (trueCopiesRel >> 16) & 0xFF);
+            as.setByteAt(trueCopiesOff + 3, (trueCopiesRel >> 24) & 0xFF);
+
+            emitPhiCopies(cg, i.getParent(), targetTrue);
+            as.emitByte(0xE9);
+            uint64_t trueTargetOff = as.getCodeSize();
+            as.emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{trueTargetOff, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(targetTrue), ".text"});
+        } else {
+            as.emitBytes({0x48, 0x85, 0xC0, 0x0F, 0x85});
+            uint64_t off1 = as.getCodeSize(); as.emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{off1, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(targetTrue), ".text"});
+            as.emitByte(0xE9);
+            uint64_t off2 = as.getCodeSize(); as.emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{off2, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(targetFalse), ".text"});
+        }
     }
 }
 
 void X64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {
+    auto* targetBB = dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get());
+    emitPhiCopies(cg, i.getParent(), targetBB);
     if (auto* os = cg.getTextStream()) {
-        *os << "  jmp " << cg.getTargetInfo()->getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())) << "\n";
+        *os << "  jmp " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";
     } else {
         cg.getAssembler().emitByte(0xE9);
         uint64_t off = cg.getAssembler().getCodeSize(); cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get())), ".text"});
+        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, cg.getTargetInfo()->getBBLabel(targetBB), ".text"});
     }
 }
 

@@ -27,7 +27,7 @@ FYRA_COMPILER = $(BIN_DIR)/fyra_compiler
 TEST_NAMES = \
     parser codegen add sub mul div windows aarch64 riscv64 ssa float \
     functions control_flow comprehensive copy_elimination \
-    inmemory_aarch64_exec benchmark_suite sqlite_clone http_server
+    inmemory_aarch64_exec benchmark_suite sqlite_clone http_server placeholder_store
 
 TEST_EXECUTABLES = \
     $(TEST_DIR)/test_parser \
@@ -48,7 +48,8 @@ TEST_EXECUTABLES = \
     $(TEST_DIR)/test_inmemory_aarch64_exec \
     $(TEST_DIR)/test_benchmark_suite \
     $(TEST_DIR)/test_sqlite_clone \
-    $(TEST_DIR)/test_http_server
+    $(TEST_DIR)/test_http_server \
+    $(TEST_DIR)/test_placeholder_store
 
 # Default target
 .PHONY: all
@@ -195,6 +196,8 @@ test-benchmark_suite: $(TEST_DIR)/test_benchmark_suite
 	./$(TEST_DIR)/test_benchmark_suite
 test-sqlite_clone: $(TEST_DIR)/test_sqlite_clone
 	./$(TEST_DIR)/test_sqlite_clone
+test-placeholder_store: $(TEST_DIR)/test_placeholder_store
+	./$(TEST_DIR)/test_placeholder_store
 test-http_server: $(TEST_DIR)/test_http_server
 	./$(TEST_DIR)/test_http_server
 test-simple_wasm: $(TEST_DIR)/test_simple_wasm

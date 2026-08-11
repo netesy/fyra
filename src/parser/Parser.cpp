@@ -68,6 +68,7 @@ void Parser::parseFunction() {
 
     valueMap.clear();
     labelMap.clear();
+    placeholders.clear();
 
     std::vector<ir::Type*> paramTypes;
     std::vector<std::string> paramNames;
@@ -304,8 +305,18 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         instr = builder.createHlt();
     }
 
+    if (currentToken.type == TokenType::Colon) {
+        getNextToken();
+        parseIRType();
+    }
+
     if (instr && !destName.empty()) {
         instr->setName(destName);
+        if (auto it = placeholders.find(destName); it != placeholders.end()) {
+            ir::Value* ph = it->second;
+            ph->replaceAllUsesWith(instr);
+            placeholders.erase(it);
+        }
         valueMap[destName] = instr;
     }
     return instr;
@@ -359,7 +370,17 @@ ir::Value* Parser::parseValue() {
     }
     if (currentToken.type == TokenType::Temporary) {
         std::string n = currentToken.value; getNextToken();
-        return valueMap.count(n) ? valueMap[n] : nullptr;
+        if (valueMap.count(n)) {
+            return valueMap[n];
+        }
+        if (placeholders.count(n)) {
+            return placeholders[n];
+        }
+        ir::Value* ph = new ir::Value(context->getVoidType());
+        ph->setName(n);
+        placeholders[n] = ph;
+        valueMap[n] = ph;
+        return ph;
     }
     if (currentToken.type == TokenType::Global) {
         std::string n = currentToken.value; getNextToken();
@@ -416,6 +437,7 @@ void Parser::parseData() {
             std::string typeStr = currentToken.value; getNextToken();
             if (typeStr == "b") { if (currentToken.type == TokenType::StringLiteral) { constants.push_back(context->getConstantString(currentToken.value)); getNextToken(); } else if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(8), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
             else if (typeStr == "w") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(32), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
+                else if (typeStr == "l") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(64), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
             if (currentToken.type == TokenType::Comma) getNextToken();
         } else getNextToken();
     }

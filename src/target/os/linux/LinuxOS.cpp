@@ -302,6 +302,10 @@ void LinuxOS::emitHeader(CodeGen& cg) {
 void LinuxOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {
     if (auto* os = cg.getTextStream()) {
         *os << ".globl _start\n_start:\n";
+        *os << "  call main\n";
+        *os << "  movq %rax, %rdi\n";
+        *os << "  movq $60, %rax\n";
+        *os << "  syscall\n";
     } else {
         auto& as = cg.getAssembler();
         CodeGen::SymbolInfo start_sym;
@@ -311,10 +315,21 @@ void LinuxOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {
         start_sym.type = 2; // STT_FUNC
         start_sym.binding = 1; // STB_GLOBAL
         cg.addSymbol(start_sym);
+
+        // call main
+        as.emitByte(0xE8);
+        uint64_t off = as.getCodeSize(); as.emitDWord(0);
+        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "main", ".text"});
+
+        // movq %rax, %rdi
+        as.emitBytes({0x48, 0x89, 0xC7});
+
+        // movq $60, %rax
+        as.emitBytes({0x48, 0xC7, 0xC0}); as.emitDWord(60);
+
+        // syscall
+        as.emitBytes({0x0F, 0x05});
     }
-    auto* zero = ir::ConstantInt::get(ir::IntegerType::get(64), 0);
-    const_cast<ArchitectureInfo&>(arch).emitNativeLibraryCall(cg, "main", {});
-    const_cast<ArchitectureInfo&>(arch).emitNativeSyscall(cg, 60, {zero});
 }
 
 }
