@@ -149,7 +149,6 @@ public:
     PointerType(Type* elementType, unsigned addressSpace = 0)
         : Type(Type::PointerTyID), elementType(elementType), addressSpace(addressSpace) {}
     
-    static PointerType* get(Type* elementType, unsigned addressSpace = 0);
     static PointerType* get(IRContext& ctx, Type* elementType, unsigned addressSpace = 0);
     
     Type* getElementType() const { return elementType; }
@@ -172,9 +171,6 @@ public:
     // For creating a new struct type
     StructType(const std::string& name, std::vector<Type*> elements, bool isOpaque = false)
         : Type(Type::StructTyID), name(name), elements(elements), opaque(isOpaque) {}
-
-    // For forward declaration
-    static StructType* create(const std::string& name);
 
     void setBody(std::vector<Type*> elements, bool isOpaque = false);
 
@@ -218,8 +214,6 @@ public:
     UnionType(const std::string& name, std::vector<Type*> elements)
         : Type(Type::UnionTyID), name(name), elements(elements) {}
 
-    static UnionType* create(const std::string& name, std::vector<Type*> elements);
-
     const std::string& getName() const { return name; }
     const std::vector<Type*>& getElements() const { return elements; }
     void addMember(Type* ty) { elements.push_back(ty); }
@@ -255,8 +249,6 @@ public:
     ArrayType(Type* elementType, uint64_t numElements)
         : Type(Type::ArrayTyID), elementType(elementType), numElements(numElements) {}
 
-    static ArrayType* get(Type* elementType, uint64_t numElements);
-
     Type* getElementType() const { return elementType; }
     uint64_t getNumElements() const { return numElements; }
     
@@ -287,8 +279,6 @@ public:
             throw std::invalid_argument("Vector elements must be integer or floating-point types");
         }
     }
-
-    static VectorType* get(Type* elementType, unsigned numElements);
 
     Type* getElementType() const { return elementType; }
     unsigned getNumElements() const { return numElements; }

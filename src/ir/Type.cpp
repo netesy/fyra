@@ -82,33 +82,13 @@ LabelType* LabelType::get(IRContext& ctx) {
     return ctx.getLabelType();
 }
 
-StructType* StructType::create(const std::string& name) {
-    throw std::runtime_error("StructType::create(name) is deprecated. Use IRContext::createStructType(name).");
-}
-
 void StructType::setBody(std::vector<Type*> elements, bool isOpaque) {
     this->elements = elements;
     this->opaque = isOpaque;
 }
 
-UnionType* UnionType::create(const std::string& name, std::vector<Type*> elements) {
-    throw std::runtime_error("UnionType::create is deprecated.");
-}
-
-PointerType* PointerType::get(Type* elementType, unsigned addressSpace) {
-    throw std::runtime_error("PointerType::get is deprecated. Use IRContext::getPointerType.");
-}
-
 PointerType* PointerType::get(IRContext& ctx, Type* elementType, unsigned addressSpace) {
     return ctx.getPointerType(elementType, addressSpace);
-}
-
-ArrayType* ArrayType::get(Type* elementType, uint64_t numElements) {
-    throw std::runtime_error("ArrayType::get is deprecated. Use IRContext::getArrayType.");
-}
-
-VectorType* VectorType::get(Type* elementType, unsigned numElements) {
-    throw std::runtime_error("VectorType::get is deprecated. Use IRContext::getVectorType.");
 }
 
 } // namespace ir
