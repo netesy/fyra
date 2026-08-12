@@ -1,6 +1,7 @@
 #include "transforms/DominatorTree.h"
 #include <vector>
 #include <set>
+#include <unordered_set>
 #include <algorithm>
 #include <iterator>
 
@@ -136,10 +137,10 @@ void DominatorTree::runPostDominator(ir::Function& func) {
     }
 
     // Identify exit blocks (no successors)
-    std::vector<ir::BasicBlock*> exits;
+    std::unordered_set<ir::BasicBlock*> exits;
     for (ir::BasicBlock* bb : blocks) {
         if (bb->getSuccessors().empty()) {
-            exits.push_back(bb);
+            exits.insert(bb);
         }
     }
 
@@ -149,7 +150,7 @@ void DominatorTree::runPostDominator(ir::Function& func) {
     std::set<ir::BasicBlock*> allBlocks(blocks.begin(), blocks.end());
 
     for (ir::BasicBlock* bb : blocks) {
-        bool isExit = std::find(exits.begin(), exits.end(), bb) != exits.end();
+        bool isExit = exits.find(bb) != exits.end();
         if (isExit) {
             postDomSets[bb] = {bb};
         } else {
@@ -161,7 +162,7 @@ void DominatorTree::runPostDominator(ir::Function& func) {
     while (changed) {
         changed = false;
         for (ir::BasicBlock* bb : blocks) {
-            bool isExit = std::find(exits.begin(), exits.end(), bb) != exits.end();
+            bool isExit = exits.find(bb) != exits.end();
             if (isExit) continue;
 
             std::set<ir::BasicBlock*> newPostDomSet;
@@ -188,7 +189,7 @@ void DominatorTree::runPostDominator(ir::Function& func) {
     childrenMap.clear();
 
     for (ir::BasicBlock* bb : blocks) {
-        bool isExit = std::find(exits.begin(), exits.end(), bb) != exits.end();
+        bool isExit = exits.find(bb) != exits.end();
         if (isExit) {
             iDomMap[bb] = nullptr;
             continue;
