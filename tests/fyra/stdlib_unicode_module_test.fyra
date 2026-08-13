@@ -1,0 +1,1178 @@
+global %str_const_0 = ""
+global %str_const_1 = ""
+global %str_const_2 = "A"
+global %str_const_3 = "a"
+global %str_const_4 = "B"
+global %str_const_5 = "b"
+global %str_const_6 = "C"
+global %str_const_7 = "c"
+global %str_const_8 = "D"
+global %str_const_9 = "d"
+global %str_const_10 = "E"
+global %str_const_11 = "e"
+global %str_const_12 = "F"
+global %str_const_13 = "f"
+global %str_const_14 = "G"
+global %str_const_15 = "g"
+global %str_const_16 = "H"
+global %str_const_17 = "h"
+global %str_const_18 = "I"
+global %str_const_19 = "i"
+global %str_const_20 = "J"
+global %str_const_21 = "j"
+global %str_const_22 = "K"
+global %str_const_23 = "k"
+global %str_const_24 = "L"
+global %str_const_25 = "l"
+global %str_const_26 = "M"
+global %str_const_27 = "m"
+global %str_const_28 = "N"
+global %str_const_29 = "n"
+global %str_const_30 = "O"
+global %str_const_31 = "o"
+global %str_const_32 = "P"
+global %str_const_33 = "p"
+global %str_const_34 = "Q"
+global %str_const_35 = "q"
+global %str_const_36 = "R"
+global %str_const_37 = "r"
+global %str_const_38 = "S"
+global %str_const_39 = "s"
+global %str_const_40 = "T"
+global %str_const_41 = "t"
+global %str_const_42 = "U"
+global %str_const_43 = "u"
+global %str_const_44 = "V"
+global %str_const_45 = "v"
+global %str_const_46 = "W"
+global %str_const_47 = "w"
+global %str_const_48 = "X"
+global %str_const_49 = "x"
+global %str_const_50 = "Y"
+global %str_const_51 = "y"
+global %str_const_52 = "Z"
+global %str_const_53 = "z"
+global %str_const_54 = "a"
+global %str_const_55 = "A"
+global %str_const_56 = "b"
+global %str_const_57 = "B"
+global %str_const_58 = "c"
+global %str_const_59 = "C"
+global %str_const_60 = "d"
+global %str_const_61 = "D"
+global %str_const_62 = "e"
+global %str_const_63 = "E"
+global %str_const_64 = "f"
+global %str_const_65 = "F"
+global %str_const_66 = "g"
+global %str_const_67 = "G"
+global %str_const_68 = "h"
+global %str_const_69 = "H"
+global %str_const_70 = "i"
+global %str_const_71 = "I"
+global %str_const_72 = "j"
+global %str_const_73 = "J"
+global %str_const_74 = "k"
+global %str_const_75 = "K"
+global %str_const_76 = "l"
+global %str_const_77 = "L"
+global %str_const_78 = "m"
+global %str_const_79 = "M"
+global %str_const_80 = "n"
+global %str_const_81 = "N"
+global %str_const_82 = "o"
+global %str_const_83 = "O"
+global %str_const_84 = "p"
+global %str_const_85 = "P"
+global %str_const_86 = "q"
+global %str_const_87 = "Q"
+global %str_const_88 = "r"
+global %str_const_89 = "R"
+global %str_const_90 = "s"
+global %str_const_91 = "S"
+global %str_const_92 = "t"
+global %str_const_93 = "T"
+global %str_const_94 = "u"
+global %str_const_95 = "U"
+global %str_const_96 = "v"
+global %str_const_97 = "V"
+global %str_const_98 = "w"
+global %str_const_99 = "W"
+global %str_const_100 = "x"
+global %str_const_101 = "X"
+global %str_const_102 = "y"
+global %str_const_103 = "Y"
+global %str_const_104 = "z"
+global %str_const_105 = "Z"
+global %str_const_106 = "Testing Rune..."
+global %str_const_107 = "a"
+global %str_const_108 = "b"
+global %str_const_109 = "a"
+global %str_const_110 = "a"
+global %str_const_111 = "Rune to_string failed"
+global %str_const_112 = "Rune compare less failed"
+global %str_const_113 = "Rune compare greater failed"
+global %str_const_114 = "Rune compare equal failed"
+global %str_const_115 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+global %str_const_116 = " "
+global %str_const_117 = "	"
+global %str_const_118 = "
+"
+global %str_const_119 = ""
+global %str_const_120 = "Testing Categories..."
+global %str_const_121 = "A"
+global %str_const_122 = "is_upper A failed"
+global %str_const_123 = "a"
+global %str_const_124 = "is_upper a failed"
+global %str_const_125 = "a"
+global %str_const_126 = "is_lower a failed"
+global %str_const_127 = "A"
+global %str_const_128 = "is_lower A failed"
+global %str_const_129 = "5"
+global %str_const_130 = "is_digit 5 failed"
+global %str_const_131 = "a"
+global %str_const_132 = "is_digit a failed"
+global %str_const_133 = "a"
+global %str_const_134 = "is_alpha a failed"
+global %str_const_135 = "5"
+global %str_const_136 = "is_alpha 5 failed"
+global %str_const_137 = "a"
+global %str_const_138 = "is_alphanumeric a failed"
+global %str_const_139 = "5"
+global %str_const_140 = "is_alphanumeric 5 failed"
+global %str_const_141 = "!"
+global %str_const_142 = "is_alphanumeric ! failed"
+global %str_const_143 = " "
+global %str_const_144 = "is_whitespace space failed"
+global %str_const_145 = "
+"
+global %str_const_146 = "is_whitespace newline failed"
+global %str_const_147 = "a"
+global %str_const_148 = "is_whitespace a failed"
+global %str_const_149 = "Testing Normalize..."
+global %str_const_150 = "hello"
+global %str_const_151 = "HELLO"
+global %str_const_152 = "to_upper failed"
+global %str_const_153 = "WORLD"
+global %str_const_154 = "world"
+global %str_const_155 = "to_lower failed"
+global %str_const_156 = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+global %str_const_157 = "=== Unicode Module Test Suite ==="
+global %str_const_158 = "Rune test failed"
+global %str_const_159 = "Categories test failed"
+global %str_const_160 = "Normalize test failed"
+global %str_const_161 = "All unicode tests passed successfully."
+global %str_const_162 = "abcdefghijklmnopqrstuvwxyz"
+global %str_const_163 = "123456789"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.unicode.index.__init__
+  call %main
+  ret 0
+}
+
+function std.unicode.normalize.__init__() {
+@entry
+  ret 0
+}
+
+function std.unicode.normalize.to_upper(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_0 : i64
+  call %lm_list_len %0
+  jmp %block_5
+@block_5
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_7 %block_20
+@block_7
+  jmp %block_7
+  %r9 = add 1 9 : i64
+  call %substring %0 1 %r9
+  call %std.unicode.normalize._char_to_upper %r10
+  %r12 = call %lm_to_string %r11 : i8*
+  %r13 = call %lm_str_concat %r1 %r12 : i8*
+  %r16 = add 1 9 : i64
+  jmp %block_5
+@block_20
+  ret %r13
+}
+
+function std.unicode.normalize.to_lower(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_1 : i64
+  call %lm_list_len %0
+  jmp %block_5
+@block_5
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_7 %block_20
+@block_7
+  jmp %block_7
+  %r9 = add 1 9 : i64
+  call %substring %0 1 %r9
+  call %std.unicode.normalize._char_to_lower %r10
+  %r12 = call %lm_to_string %r11 : i8*
+  %r13 = call %lm_str_concat %r1 %r12 : i8*
+  %r16 = add 1 9 : i64
+  jmp %block_5
+@block_20
+  ret %r13
+}
+
+function std.unicode.normalize._char_to_lower(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_2 : i64
+  %r2 = ceq %0 %r1 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  %r4 = call %lm_box_string %str_const_3 : i64
+  ret %r4
+@block_5
+  %r5 = call %lm_box_string %str_const_4 : i64
+  %r6 = ceq %0 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_box_string %str_const_5 : i64
+  ret %r8
+@block_10
+  %r9 = call %lm_box_string %str_const_6 : i64
+  %r10 = ceq %0 %r9 : i32
+  br %r10 %block_13 %block_15
+@block_13
+  jmp %block_13
+  %r12 = call %lm_box_string %str_const_7 : i64
+  ret %r12
+@block_15
+  %r13 = call %lm_box_string %str_const_8 : i64
+  %r14 = ceq %0 %r13 : i32
+  br %r14 %block_18 %block_20
+@block_18
+  jmp %block_18
+  %r16 = call %lm_box_string %str_const_9 : i64
+  ret %r16
+@block_20
+  %r17 = call %lm_box_string %str_const_10 : i64
+  %r18 = ceq %0 %r17 : i32
+  br %r18 %block_23 %block_25
+@block_23
+  jmp %block_23
+  %r20 = call %lm_box_string %str_const_11 : i64
+  ret %r20
+@block_25
+  %r21 = call %lm_box_string %str_const_12 : i64
+  %r22 = ceq %0 %r21 : i32
+  br %r22 %block_28 %block_30
+@block_28
+  jmp %block_28
+  %r24 = call %lm_box_string %str_const_13 : i64
+  ret %r24
+@block_30
+  %r25 = call %lm_box_string %str_const_14 : i64
+  %r26 = ceq %0 %r25 : i32
+  br %r26 %block_33 %block_35
+@block_33
+  jmp %block_33
+  %r28 = call %lm_box_string %str_const_15 : i64
+  ret %r28
+@block_35
+  %r29 = call %lm_box_string %str_const_16 : i64
+  %r30 = ceq %0 %r29 : i32
+  br %r30 %block_38 %block_40
+@block_38
+  jmp %block_38
+  %r32 = call %lm_box_string %str_const_17 : i64
+  ret %r32
+@block_40
+  %r33 = call %lm_box_string %str_const_18 : i64
+  %r34 = ceq %0 %r33 : i32
+  br %r34 %block_43 %block_45
+@block_43
+  jmp %block_43
+  %r36 = call %lm_box_string %str_const_19 : i64
+  ret %r36
+@block_45
+  %r37 = call %lm_box_string %str_const_20 : i64
+  %r38 = ceq %0 %r37 : i32
+  br %r38 %block_48 %block_50
+@block_48
+  jmp %block_48
+  %r40 = call %lm_box_string %str_const_21 : i64
+  ret %r40
+@block_50
+  %r41 = call %lm_box_string %str_const_22 : i64
+  %r42 = ceq %0 %r41 : i32
+  br %r42 %block_53 %block_55
+@block_53
+  jmp %block_53
+  %r44 = call %lm_box_string %str_const_23 : i64
+  ret %r44
+@block_55
+  %r45 = call %lm_box_string %str_const_24 : i64
+  %r46 = ceq %0 %r45 : i32
+  br %r46 %block_58 %block_60
+@block_58
+  jmp %block_58
+  %r48 = call %lm_box_string %str_const_25 : i64
+  ret %r48
+@block_60
+  %r49 = call %lm_box_string %str_const_26 : i64
+  %r50 = ceq %0 %r49 : i32
+  br %r50 %block_63 %block_65
+@block_63
+  jmp %block_63
+  %r52 = call %lm_box_string %str_const_27 : i64
+  ret %r52
+@block_65
+  %r53 = call %lm_box_string %str_const_28 : i64
+  %r54 = ceq %0 %r53 : i32
+  br %r54 %block_68 %block_70
+@block_68
+  jmp %block_68
+  %r56 = call %lm_box_string %str_const_29 : i64
+  ret %r56
+@block_70
+  %r57 = call %lm_box_string %str_const_30 : i64
+  %r58 = ceq %0 %r57 : i32
+  br %r58 %block_73 %block_75
+@block_73
+  jmp %block_73
+  %r60 = call %lm_box_string %str_const_31 : i64
+  ret %r60
+@block_75
+  %r61 = call %lm_box_string %str_const_32 : i64
+  %r62 = ceq %0 %r61 : i32
+  br %r62 %block_78 %block_80
+@block_78
+  jmp %block_78
+  %r64 = call %lm_box_string %str_const_33 : i64
+  ret %r64
+@block_80
+  %r65 = call %lm_box_string %str_const_34 : i64
+  %r66 = ceq %0 %r65 : i32
+  br %r66 %block_83 %block_85
+@block_83
+  jmp %block_83
+  %r68 = call %lm_box_string %str_const_35 : i64
+  ret %r68
+@block_85
+  %r69 = call %lm_box_string %str_const_36 : i64
+  %r70 = ceq %0 %r69 : i32
+  br %r70 %block_88 %block_90
+@block_88
+  jmp %block_88
+  %r72 = call %lm_box_string %str_const_37 : i64
+  ret %r72
+@block_90
+  %r73 = call %lm_box_string %str_const_38 : i64
+  %r74 = ceq %0 %r73 : i32
+  br %r74 %block_93 %block_95
+@block_93
+  jmp %block_93
+  %r76 = call %lm_box_string %str_const_39 : i64
+  ret %r76
+@block_95
+  %r77 = call %lm_box_string %str_const_40 : i64
+  %r78 = ceq %0 %r77 : i32
+  br %r78 %block_98 %block_100
+@block_98
+  jmp %block_98
+  %r80 = call %lm_box_string %str_const_41 : i64
+  ret %r80
+@block_100
+  %r81 = call %lm_box_string %str_const_42 : i64
+  %r82 = ceq %0 %r81 : i32
+  br %r82 %block_103 %block_105
+@block_103
+  jmp %block_103
+  %r84 = call %lm_box_string %str_const_43 : i64
+  ret %r84
+@block_105
+  %r85 = call %lm_box_string %str_const_44 : i64
+  %r86 = ceq %0 %r85 : i32
+  br %r86 %block_108 %block_110
+@block_108
+  jmp %block_108
+  %r88 = call %lm_box_string %str_const_45 : i64
+  ret %r88
+@block_110
+  %r89 = call %lm_box_string %str_const_46 : i64
+  %r90 = ceq %0 %r89 : i32
+  br %r90 %block_113 %block_115
+@block_113
+  jmp %block_113
+  %r92 = call %lm_box_string %str_const_47 : i64
+  ret %r92
+@block_115
+  %r93 = call %lm_box_string %str_const_48 : i64
+  %r94 = ceq %0 %r93 : i32
+  br %r94 %block_118 %block_120
+@block_118
+  jmp %block_118
+  %r96 = call %lm_box_string %str_const_49 : i64
+  ret %r96
+@block_120
+  %r97 = call %lm_box_string %str_const_50 : i64
+  %r98 = ceq %0 %r97 : i32
+  br %r98 %block_123 %block_125
+@block_123
+  jmp %block_123
+  %r100 = call %lm_box_string %str_const_51 : i64
+  ret %r100
+@block_125
+  %r101 = call %lm_box_string %str_const_52 : i64
+  %r102 = ceq %0 %r101 : i32
+  br %r102 %block_128 %block_130
+@block_128
+  jmp %block_128
+  %r104 = call %lm_box_string %str_const_53 : i64
+  ret %r104
+@block_130
+  ret 0
+}
+
+function std.unicode.index.__init__() {
+@entry
+  ret 0
+}
+
+function std.unicode.index.to_lower(i64) {
+@entry
+@block_0
+  call %std.unicode.normalize.to_lower %0
+  ret %r1
+}
+
+function std.unicode.index.to_upper(i64) {
+@entry
+@block_0
+  call %std.unicode.normalize.to_upper %0
+  ret %r1
+}
+
+function std.unicode.index.is_whitespace(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_whitespace %0
+  ret %r1
+}
+
+function std.unicode.index.is_digit(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_digit %0
+  ret %r1
+}
+
+function std.unicode.index.is_lower(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_lower %0
+  ret %r1
+}
+
+function std.unicode.index.is_upper(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_upper %0
+  ret %r1
+}
+
+function std.unicode.index.Rune(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.unicode.rune.Rune.init %r1 %0
+  ret %r1
+}
+
+function std.unicode.index.is_alphanumeric(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_alphanumeric %0
+  ret %r1
+}
+
+function std.unicode.normalize._char_to_upper(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_54 : i64
+  %r2 = ceq %0 %r1 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  %r4 = call %lm_box_string %str_const_55 : i64
+  ret %r4
+@block_5
+  %r5 = call %lm_box_string %str_const_56 : i64
+  %r6 = ceq %0 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_box_string %str_const_57 : i64
+  ret %r8
+@block_10
+  %r9 = call %lm_box_string %str_const_58 : i64
+  %r10 = ceq %0 %r9 : i32
+  br %r10 %block_13 %block_15
+@block_13
+  jmp %block_13
+  %r12 = call %lm_box_string %str_const_59 : i64
+  ret %r12
+@block_15
+  %r13 = call %lm_box_string %str_const_60 : i64
+  %r14 = ceq %0 %r13 : i32
+  br %r14 %block_18 %block_20
+@block_18
+  jmp %block_18
+  %r16 = call %lm_box_string %str_const_61 : i64
+  ret %r16
+@block_20
+  %r17 = call %lm_box_string %str_const_62 : i64
+  %r18 = ceq %0 %r17 : i32
+  br %r18 %block_23 %block_25
+@block_23
+  jmp %block_23
+  %r20 = call %lm_box_string %str_const_63 : i64
+  ret %r20
+@block_25
+  %r21 = call %lm_box_string %str_const_64 : i64
+  %r22 = ceq %0 %r21 : i32
+  br %r22 %block_28 %block_30
+@block_28
+  jmp %block_28
+  %r24 = call %lm_box_string %str_const_65 : i64
+  ret %r24
+@block_30
+  %r25 = call %lm_box_string %str_const_66 : i64
+  %r26 = ceq %0 %r25 : i32
+  br %r26 %block_33 %block_35
+@block_33
+  jmp %block_33
+  %r28 = call %lm_box_string %str_const_67 : i64
+  ret %r28
+@block_35
+  %r29 = call %lm_box_string %str_const_68 : i64
+  %r30 = ceq %0 %r29 : i32
+  br %r30 %block_38 %block_40
+@block_38
+  jmp %block_38
+  %r32 = call %lm_box_string %str_const_69 : i64
+  ret %r32
+@block_40
+  %r33 = call %lm_box_string %str_const_70 : i64
+  %r34 = ceq %0 %r33 : i32
+  br %r34 %block_43 %block_45
+@block_43
+  jmp %block_43
+  %r36 = call %lm_box_string %str_const_71 : i64
+  ret %r36
+@block_45
+  %r37 = call %lm_box_string %str_const_72 : i64
+  %r38 = ceq %0 %r37 : i32
+  br %r38 %block_48 %block_50
+@block_48
+  jmp %block_48
+  %r40 = call %lm_box_string %str_const_73 : i64
+  ret %r40
+@block_50
+  %r41 = call %lm_box_string %str_const_74 : i64
+  %r42 = ceq %0 %r41 : i32
+  br %r42 %block_53 %block_55
+@block_53
+  jmp %block_53
+  %r44 = call %lm_box_string %str_const_75 : i64
+  ret %r44
+@block_55
+  %r45 = call %lm_box_string %str_const_76 : i64
+  %r46 = ceq %0 %r45 : i32
+  br %r46 %block_58 %block_60
+@block_58
+  jmp %block_58
+  %r48 = call %lm_box_string %str_const_77 : i64
+  ret %r48
+@block_60
+  %r49 = call %lm_box_string %str_const_78 : i64
+  %r50 = ceq %0 %r49 : i32
+  br %r50 %block_63 %block_65
+@block_63
+  jmp %block_63
+  %r52 = call %lm_box_string %str_const_79 : i64
+  ret %r52
+@block_65
+  %r53 = call %lm_box_string %str_const_80 : i64
+  %r54 = ceq %0 %r53 : i32
+  br %r54 %block_68 %block_70
+@block_68
+  jmp %block_68
+  %r56 = call %lm_box_string %str_const_81 : i64
+  ret %r56
+@block_70
+  %r57 = call %lm_box_string %str_const_82 : i64
+  %r58 = ceq %0 %r57 : i32
+  br %r58 %block_73 %block_75
+@block_73
+  jmp %block_73
+  %r60 = call %lm_box_string %str_const_83 : i64
+  ret %r60
+@block_75
+  %r61 = call %lm_box_string %str_const_84 : i64
+  %r62 = ceq %0 %r61 : i32
+  br %r62 %block_78 %block_80
+@block_78
+  jmp %block_78
+  %r64 = call %lm_box_string %str_const_85 : i64
+  ret %r64
+@block_80
+  %r65 = call %lm_box_string %str_const_86 : i64
+  %r66 = ceq %0 %r65 : i32
+  br %r66 %block_83 %block_85
+@block_83
+  jmp %block_83
+  %r68 = call %lm_box_string %str_const_87 : i64
+  ret %r68
+@block_85
+  %r69 = call %lm_box_string %str_const_88 : i64
+  %r70 = ceq %0 %r69 : i32
+  br %r70 %block_88 %block_90
+@block_88
+  jmp %block_88
+  %r72 = call %lm_box_string %str_const_89 : i64
+  ret %r72
+@block_90
+  %r73 = call %lm_box_string %str_const_90 : i64
+  %r74 = ceq %0 %r73 : i32
+  br %r74 %block_93 %block_95
+@block_93
+  jmp %block_93
+  %r76 = call %lm_box_string %str_const_91 : i64
+  ret %r76
+@block_95
+  %r77 = call %lm_box_string %str_const_92 : i64
+  %r78 = ceq %0 %r77 : i32
+  br %r78 %block_98 %block_100
+@block_98
+  jmp %block_98
+  %r80 = call %lm_box_string %str_const_93 : i64
+  ret %r80
+@block_100
+  %r81 = call %lm_box_string %str_const_94 : i64
+  %r82 = ceq %0 %r81 : i32
+  br %r82 %block_103 %block_105
+@block_103
+  jmp %block_103
+  %r84 = call %lm_box_string %str_const_95 : i64
+  ret %r84
+@block_105
+  %r85 = call %lm_box_string %str_const_96 : i64
+  %r86 = ceq %0 %r85 : i32
+  br %r86 %block_108 %block_110
+@block_108
+  jmp %block_108
+  %r88 = call %lm_box_string %str_const_97 : i64
+  ret %r88
+@block_110
+  %r89 = call %lm_box_string %str_const_98 : i64
+  %r90 = ceq %0 %r89 : i32
+  br %r90 %block_113 %block_115
+@block_113
+  jmp %block_113
+  %r92 = call %lm_box_string %str_const_99 : i64
+  ret %r92
+@block_115
+  %r93 = call %lm_box_string %str_const_100 : i64
+  %r94 = ceq %0 %r93 : i32
+  br %r94 %block_118 %block_120
+@block_118
+  jmp %block_118
+  %r96 = call %lm_box_string %str_const_101 : i64
+  ret %r96
+@block_120
+  %r97 = call %lm_box_string %str_const_102 : i64
+  %r98 = ceq %0 %r97 : i32
+  br %r98 %block_123 %block_125
+@block_123
+  jmp %block_123
+  %r100 = call %lm_box_string %str_const_103 : i64
+  ret %r100
+@block_125
+  %r101 = call %lm_box_string %str_const_104 : i64
+  %r102 = ceq %0 %r101 : i32
+  br %r102 %block_128 %block_130
+@block_128
+  jmp %block_128
+  %r104 = call %lm_box_string %str_const_105 : i64
+  ret %r104
+@block_130
+  ret 0
+}
+
+function std.unicode.rune.Rune.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function test_rune() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_106 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_107 : i64
+  call %std.unicode.index.Rune %r2
+  %r4 = cast %r3 : i8*
+  %r6 = call %lm_box_string %str_const_108 : i64
+  call %std.unicode.index.Rune %r6
+  %r8 = cast %r7 : i8*
+  %r10 = call %lm_box_string %str_const_109 : i64
+  call %std.unicode.index.Rune %r10
+  %r12 = cast %r11 : i8*
+  call %std.unicode.rune.Rune.to_string %r4
+  %r15 = call %lm_box_string %str_const_110 : i64
+  %r16 = ceq %r14 %r15 : i32
+  %r17 = call %lm_box_string %str_const_111 : i64
+  call %lm_assert %r16 %r17
+  call %std.unicode.rune.Rune.compare %r4 %r8
+  %r21 = neg 9 : i64
+  %r22 = ceq %r19 %r21 : i32
+  %r23 = call %lm_box_string %str_const_112 : i64
+  call %lm_assert %r22 %r23
+  call %std.unicode.rune.Rune.compare %r8 %r4
+  %r27 = ceq %r25 9 : i32
+  %r28 = call %lm_box_string %str_const_113 : i64
+  call %lm_assert %r27 %r28
+  call %std.unicode.rune.Rune.compare %r4 %r12
+  %r32 = ceq %r30 1 : i32
+  %r33 = call %lm_box_string %str_const_114 : i64
+  call %lm_assert %r32 %r33
+  ret 9
+}
+
+function std.unicode.category.is_upper(i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  %r3 = ceq %r1 1 : i32
+  br %r3 %block_4 %block_6
+@block_4
+  jmp %block_4
+  ret 10
+@block_6
+  call %substring %0 1 9
+  %r10 = call %lm_box_string %str_const_115 : i64
+  jmp %block_12
+@block_12
+  jmp %block_14
+@block_14
+  call %lm_list_len %r10
+  %r14 = cslt 1 %r13 : i32
+  br %r14 %block_17 %block_31
+@block_17
+  jmp %block_17
+  %r17 = add 1 9 : i64
+  call %substring %r10 1 %r17
+  %r19 = ceq %r18 %r8 : i32
+  br %r19 %block_23 %block_25
+@block_23
+  jmp %block_23
+  ret 18
+@block_25
+  jmp %block_26
+@block_26
+  %r24 = add 1 9 : i64
+  jmp %block_14
+@block_31
+  ret 10
+}
+
+function std.unicode.category.is_whitespace(i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  %r3 = ceq %r1 1 : i32
+  br %r3 %block_4 %block_6
+@block_4
+  jmp %block_4
+  ret 10
+@block_6
+  call %substring %0 1 9
+  %r13 = call %lm_box_string %str_const_116 : i64
+  %r14 = ceq %r8 %r13 : i32
+  br %r14 %block_18 %block_14
+@block_14
+  jmp %block_14
+  %r15 = call %lm_box_string %str_const_117 : i64
+  %r16 = ceq %r8 %r15 : i32
+  jmp %block_18
+@block_18
+  br %r16 %block_24 %block_20
+@block_20
+  jmp %block_20
+  %r17 = call %lm_box_string %str_const_118 : i64
+  %r18 = ceq %r8 %r17 : i32
+  jmp %block_24
+@block_24
+  br %r18 %block_30 %block_26
+@block_26
+  jmp %block_26
+  %r19 = call %lm_box_string %str_const_119 : i64
+  %r20 = ceq %r8 %r19 : i32
+  jmp %block_30
+@block_30
+  ret %r20
+}
+
+function std.unicode.rune.Rune.compare(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.unicode.rune.__init__() {
+@entry
+  ret 0
+}
+
+function test_categories() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_120 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_121 : i64
+  call %std.unicode.index.is_upper %r2
+  %r5 = ceq %r3 18 : i32
+  %r6 = call %lm_box_string %str_const_122 : i64
+  call %lm_assert %r5 %r6
+  %r8 = call %lm_box_string %str_const_123 : i64
+  call %std.unicode.index.is_upper %r8
+  %r11 = ceq %r9 10 : i32
+  %r12 = call %lm_box_string %str_const_124 : i64
+  call %lm_assert %r11 %r12
+  %r14 = call %lm_box_string %str_const_125 : i64
+  call %std.unicode.index.is_lower %r14
+  %r17 = ceq %r15 18 : i32
+  %r18 = call %lm_box_string %str_const_126 : i64
+  call %lm_assert %r17 %r18
+  %r20 = call %lm_box_string %str_const_127 : i64
+  call %std.unicode.index.is_lower %r20
+  %r23 = ceq %r21 10 : i32
+  %r24 = call %lm_box_string %str_const_128 : i64
+  call %lm_assert %r23 %r24
+  %r26 = call %lm_box_string %str_const_129 : i64
+  call %std.unicode.index.is_digit %r26
+  %r29 = ceq %r27 18 : i32
+  %r30 = call %lm_box_string %str_const_130 : i64
+  call %lm_assert %r29 %r30
+  %r32 = call %lm_box_string %str_const_131 : i64
+  call %std.unicode.index.is_digit %r32
+  %r35 = ceq %r33 10 : i32
+  %r36 = call %lm_box_string %str_const_132 : i64
+  call %lm_assert %r35 %r36
+  %r38 = call %lm_box_string %str_const_133 : i64
+  call %std.unicode.index.is_alpha %r38
+  %r41 = ceq %r39 18 : i32
+  %r42 = call %lm_box_string %str_const_134 : i64
+  call %lm_assert %r41 %r42
+  %r44 = call %lm_box_string %str_const_135 : i64
+  call %std.unicode.index.is_alpha %r44
+  %r47 = ceq %r45 10 : i32
+  %r48 = call %lm_box_string %str_const_136 : i64
+  call %lm_assert %r47 %r48
+  %r50 = call %lm_box_string %str_const_137 : i64
+  call %std.unicode.index.is_alphanumeric %r50
+  %r53 = ceq %r51 18 : i32
+  %r54 = call %lm_box_string %str_const_138 : i64
+  call %lm_assert %r53 %r54
+  %r56 = call %lm_box_string %str_const_139 : i64
+  call %std.unicode.index.is_alphanumeric %r56
+  %r59 = ceq %r57 18 : i32
+  %r60 = call %lm_box_string %str_const_140 : i64
+  call %lm_assert %r59 %r60
+  %r62 = call %lm_box_string %str_const_141 : i64
+  call %std.unicode.index.is_alphanumeric %r62
+  %r65 = ceq %r63 10 : i32
+  %r66 = call %lm_box_string %str_const_142 : i64
+  call %lm_assert %r65 %r66
+  %r68 = call %lm_box_string %str_const_143 : i64
+  call %std.unicode.index.is_whitespace %r68
+  %r71 = ceq %r69 18 : i32
+  %r72 = call %lm_box_string %str_const_144 : i64
+  call %lm_assert %r71 %r72
+  %r74 = call %lm_box_string %str_const_145 : i64
+  call %std.unicode.index.is_whitespace %r74
+  %r77 = ceq %r75 18 : i32
+  %r78 = call %lm_box_string %str_const_146 : i64
+  call %lm_assert %r77 %r78
+  %r80 = call %lm_box_string %str_const_147 : i64
+  call %std.unicode.index.is_whitespace %r80
+  %r83 = ceq %r81 10 : i32
+  %r84 = call %lm_box_string %str_const_148 : i64
+  call %lm_assert %r83 %r84
+  ret 9
+}
+
+function test_normalize() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_149 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_150 : i64
+  call %std.unicode.index.to_upper %r2
+  %r4 = call %lm_box_string %str_const_151 : i64
+  %r5 = ceq %r3 %r4 : i32
+  %r6 = call %lm_box_string %str_const_152 : i64
+  call %lm_assert %r5 %r6
+  %r8 = call %lm_box_string %str_const_153 : i64
+  call %std.unicode.index.to_lower %r8
+  %r10 = call %lm_box_string %str_const_154 : i64
+  %r11 = ceq %r9 %r10 : i32
+  %r12 = call %lm_box_string %str_const_155 : i64
+  call %lm_assert %r11 %r12
+  ret 9
+}
+
+function std.unicode.rune.char_code(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_156 : i64
+  call %lm_list_len %r1
+  jmp %block_5
+@block_5
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_7 %block_19
+@block_7
+  jmp %block_7
+  %r9 = add 1 9 : i64
+  call %substring %r1 1 %r9
+  %r11 = ceq %r10 %0 : i32
+  br %r11 %block_13 %block_14
+@block_13
+  jmp %block_13
+  ret 1
+@block_14
+  %r15 = add 1 9 : i64
+  jmp %block_5
+@block_19
+  ret 7993
+}
+
+function std.unicode.category.__init__() {
+@entry
+  ret 0
+}
+
+function main() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_157 : i64
+  call %lm_print_int %r0
+  call %test_rune
+  %r4 = ceq %r2 9 : i32
+  %r5 = call %lm_box_string %str_const_158 : i64
+  call %lm_assert %r4 %r5
+  call %test_categories
+  %r9 = ceq %r7 9 : i32
+  %r10 = call %lm_box_string %str_const_159 : i64
+  call %lm_assert %r9 %r10
+  call %test_normalize
+  %r14 = ceq %r12 9 : i32
+  %r15 = call %lm_box_string %str_const_160 : i64
+  call %lm_assert %r14 %r15
+  %r17 = call %lm_box_string %str_const_161 : i64
+  call %lm_print_int %r17
+  ret 1
+}
+
+function std.unicode.index.is_alpha(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_alpha %0
+  ret %r1
+}
+
+function std.unicode.category.is_lower(i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  %r3 = ceq %r1 1 : i32
+  br %r3 %block_4 %block_6
+@block_4
+  jmp %block_4
+  ret 10
+@block_6
+  call %substring %0 1 9
+  %r10 = call %lm_box_string %str_const_162 : i64
+  jmp %block_12
+@block_12
+  jmp %block_14
+@block_14
+  call %lm_list_len %r10
+  %r14 = cslt 1 %r13 : i32
+  br %r14 %block_17 %block_31
+@block_17
+  jmp %block_17
+  %r17 = add 1 9 : i64
+  call %substring %r10 1 %r17
+  %r19 = ceq %r18 %r8 : i32
+  br %r19 %block_23 %block_25
+@block_23
+  jmp %block_23
+  ret 18
+@block_25
+  jmp %block_26
+@block_26
+  %r24 = add 1 9 : i64
+  jmp %block_14
+@block_31
+  ret 10
+}
+
+function std.unicode.category.is_alphanumeric(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_alpha %0
+  br %r2 %block_6 %block_3
+@block_3
+  jmp %block_3
+  call %std.unicode.category.is_digit %0
+  jmp %block_6
+@block_6
+  ret %r3
+}
+
+function std.unicode.category.is_alpha(i64) {
+@entry
+@block_0
+  call %std.unicode.category.is_upper %0
+  br %r2 %block_6 %block_3
+@block_3
+  jmp %block_3
+  call %std.unicode.category.is_lower %0
+  jmp %block_6
+@block_6
+  ret %r3
+}
+
+function std.unicode.category.is_digit(i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  %r3 = ceq %r1 1 : i32
+  br %r3 %block_4 %block_6
+@block_4
+  jmp %block_4
+  ret 10
+@block_6
+  call %substring %0 1 9
+  %r10 = call %lm_box_string %str_const_163 : i64
+  jmp %block_12
+@block_12
+  jmp %block_14
+@block_14
+  call %lm_list_len %r10
+  %r14 = cslt 1 %r13 : i32
+  br %r14 %block_17 %block_31
+@block_17
+  jmp %block_17
+  %r17 = add 1 9 : i64
+  call %substring %r10 1 %r17
+  %r19 = ceq %r18 %r8 : i32
+  br %r19 %block_23 %block_25
+@block_23
+  jmp %block_23
+  ret 18
+@block_25
+  jmp %block_26
+@block_26
+  %r24 = add 1 9 : i64
+  jmp %block_14
+@block_31
+  ret 10
+}
+
+function std.unicode.rune.Rune.to_string(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_list_len(i64) {
+}
+
+function substring(i64, i64, i64) {
+}
+
+function lm_to_string(i64) {
+}
+
+function lm_str_concat(i8*, i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_list_new() {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}

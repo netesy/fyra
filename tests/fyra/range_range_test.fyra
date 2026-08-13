@@ -1,0 +1,120 @@
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.range.__init__
+  call %main
+  ret 0
+}
+
+function std.range.reverse(i64, i64, i64) {
+@entry
+@block_0
+  %r5 = alloc 16 : i64
+  call %std.range.Range.init %r5 %0 %1 %2 18 10
+  ret %r5
+}
+
+function std.range.inclusive(i64, i64, i64) {
+@entry
+@block_0
+  %r5 = alloc 16 : i64
+  call %std.range.Range.init %r5 %0 %1 %2 18 10
+  ret %r5
+}
+
+function std.range.exclusive(i64, i64, i64) {
+@entry
+@block_0
+  %r5 = alloc 16 : i64
+  call %std.range.Range.init %r5 %0 %1 %2 10 10
+  ret %r5
+}
+
+function std.range.RangeIterator.init(i64, i64, i64, i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.range.Range.iterator(i64) {
+@entry
+  ret 0
+}
+
+function main() {
+@entry
+@block_0
+  call %std.range.inclusive 9 17 9
+  call %std.range.Range.iterator %r3
+  call %std.range.RangeIterator.next %r4
+  %r8 = cne %r6 9 : i32
+  br %r8 %block_10 %block_12
+@block_10
+  jmp %block_10
+  ret 9
+@block_12
+  call %std.range.RangeIterator.next %r4
+  %r13 = cne %r11 17 : i32
+  br %r13 %block_16 %block_18
+@block_16
+  jmp %block_16
+  ret 17
+@block_18
+  call %std.range.RangeIterator.next %r4
+  %r18 = cne %r16 2 : i32
+  br %r18 %block_22 %block_24
+@block_22
+  jmp %block_22
+  ret 25
+@block_24
+  %r24 = neg 9 : i64
+  call %std.range.reverse 25 9 %r24
+  call %std.range.Range.iterator %r25
+  call %std.range.RangeIterator.next %r26
+  %r30 = cne %r28 25 : i32
+  br %r30 %block_35 %block_37
+@block_35
+  jmp %block_35
+  ret 33
+@block_37
+  call %std.range.infinite 81 17
+  call %std.range.Range.iterator %r35
+  call %std.range.RangeIterator.next %r36
+  %r40 = cne %r38 81 : i32
+  br %r40 %block_46 %block_48
+@block_46
+  jmp %block_46
+  ret 41
+@block_48
+  ret 1
+}
+
+function std.range.infinite(i64, i64) {
+@entry
+@block_0
+  %r5 = alloc 16 : i64
+  call %std.range.Range.init %r5 %0 1 %1 10 18
+  ret %r5
+}
+
+function std.range.Range.init(i64, i64, i64, i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.range.__init__() {
+@entry
+  ret 0
+}
+
+function std.range.stepped(i64, i64, i64) {
+@entry
+@block_0
+  %r5 = alloc 16 : i64
+  call %std.range.Range.init %r5 %0 %1 %2 10 10
+  ret %r5
+}
+
+function std.range.RangeIterator.next(i64) {
+@entry
+  ret 0
+}

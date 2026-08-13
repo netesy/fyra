@@ -1,0 +1,91 @@
+global %str_const_0 = "Trait dispatch tests passed!"
+global %str_minus = "-"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %lm_list_append %r0 9
+  call %lm_list_append %r0 17
+  call %lm_list_append %r0 25
+  %r7 = alloc 16 : i64
+  call %ListIterator.init %r7 %r0
+  call %ListIterator.next %r7
+  call %lm_print_int %r10
+  call %main
+  ret 0
+}
+
+function main() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  ret 1
+}
+
+function ListIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function ListIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_print_int(void) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  neg %0
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}
+
+function lm_list_len(i64) {
+}

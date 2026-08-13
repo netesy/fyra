@@ -1,0 +1,94 @@
+global %str_const_0 = "Start"
+global %str_const_1 = "End"
+global %str_minus = "-"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %run_test
+  ret 0
+}
+
+function run_test() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = alloc 16 : i64
+  call %Outer.init %r2
+  call %Outer.test %r2
+  %r6 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r6
+  ret 0
+}
+
+function Outer.init(i64) {
+@entry
+  ret 0
+}
+
+function Inner.say_hi(i64) {
+@entry
+  ret 0
+}
+
+function Inner.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function Outer.test(i64) {
+@entry
+  ret 0
+}
+
+function Inner.deinit(i64) {
+@entry
+  ret 0
+}
+
+function Outer.deinit(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}

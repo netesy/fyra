@@ -1,0 +1,1631 @@
+global %str_const_0 = ""
+global %str_const_1 = " "
+global %str_const_2 = "%20"
+global %str_const_3 = "/"
+global %str_const_4 = "%2"
+global %str_const_5 = "F"
+global %str_const_6 = ":"
+global %str_const_7 = "%3"
+global %str_const_8 = "A"
+global %str_const_9 = "?"
+global %str_const_10 = "%3"
+global %str_const_11 = "F"
+global %str_const_12 = "="
+global %str_const_13 = "%3"
+global %str_const_14 = "D"
+global %str_const_15 = "&"
+global %str_const_16 = "%26"
+global %str_const_17 = "%"
+global %str_const_18 = "%25"
+global %str_const_19 = "+"
+global %str_const_20 = "%2"
+global %str_const_21 = "B"
+global %str_const_22 = "#"
+global %str_const_23 = "%23"
+global %str_const_24 = "=== URL Module Test Suite ==="
+global %str_const_25 = "Parsing tests failed"
+global %str_const_26 = "Query params tests failed"
+global %str_const_27 = "Builder tests failed"
+global %str_const_28 = "All URL tests completed successfully."
+global %str_const_29 = "Running URLBuilder tests..."
+global %str_const_30 = "https"
+global %str_const_31 = "example.org"
+global %str_const_32 = "/api/v1/resource"
+global %str_const_33 = "active=true"
+global %str_const_34 = "details"
+global %str_const_35 = "https"
+global %str_const_36 = "builder.build() scheme incorrect"
+global %str_const_37 = "example.org"
+global %str_const_38 = "builder.build() host incorrect"
+global %str_const_39 = "builder.build() port incorrect"
+global %str_const_40 = "/api/v1/resource"
+global %str_const_41 = "builder.build() path incorrect"
+global %str_const_42 = "active=true"
+global %str_const_43 = "builder.build() query incorrect"
+global %str_const_44 = "details"
+global %str_const_45 = "builder.build() fragment incorrect"
+global %str_const_46 = "https://example.org:9000/api/v1/resource?active=true#details"
+global %str_const_47 = "serialized incorrect: "
+global %str_const_48 = "URLBuilder tests passed!"
+global %str_const_49 = ""
+global %str_const_50 = ""
+global %str_const_51 = "Running URL query parameters tests..."
+global %str_const_52 = "a=1&b=2&a=3&c=special%20value&empty="
+global %str_const_53 = "a"
+global %str_const_54 = "1"
+global %str_const_55 = "qp.get('a') should return first value '1'"
+global %str_const_56 = "b"
+global %str_const_57 = "2"
+global %str_const_58 = "qp.get('b') should return '2'"
+global %str_const_59 = "c"
+global %str_const_60 = "special value"
+global %str_const_61 = "qp.get('c') should be decoded 'special value'"
+global %str_const_62 = "empty"
+global %str_const_63 = ""
+global %str_const_64 = "qp.get('empty') should be empty string"
+global %str_const_65 = "nonexistent"
+global %str_const_66 = ""
+global %str_const_67 = "qp.get('nonexistent') should be empty string"
+global %str_const_68 = "a"
+global %str_const_69 = "qp.get_all('a') should return list of length 2"
+global %str_const_70 = "1"
+global %str_const_71 = "a_all[0] should be '1'"
+global %str_const_72 = "3"
+global %str_const_73 = "a_all[1] should be '3'"
+global %str_const_74 = "b"
+global %str_const_75 = "qp.has('b') should be true"
+global %str_const_76 = "xyz"
+global %str_const_77 = "qp.has('xyz') should be false"
+global %str_const_78 = "b"
+global %str_const_79 = "99"
+global %str_const_80 = "b"
+global %str_const_81 = "99"
+global %str_const_82 = "qp.set('b', '99') failed"
+global %str_const_83 = "d"
+global %str_const_84 = "new"
+global %str_const_85 = "d"
+global %str_const_86 = "new"
+global %str_const_87 = "qp.add('d', 'new') failed"
+global %str_const_88 = "a"
+global %str_const_89 = "a"
+global %str_const_90 = "qp.remove('a') failed to remove 'a'"
+global %str_const_91 = "b=99&c=special%20value&empty=&d=new"
+global %str_const_92 = "qp.to_string() failed: "
+global %str_const_93 = "Query parameters tests passed!"
+global %str_const_94 = ""
+global %str_const_95 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+global %str_const_96 = "abcdefghijklmnopqrstuvwxyz"
+global %str_const_97 = ""
+global %str_const_98 = "%"
+global %str_const_99 = "20"
+global %str_const_100 = " "
+global %str_const_101 = "2"
+global %str_const_102 = "F"
+global %str_const_103 = "/"
+global %str_const_104 = "2"
+global %str_const_105 = "f"
+global %str_const_106 = "/"
+global %str_const_107 = "3"
+global %str_const_108 = "A"
+global %str_const_109 = ":"
+global %str_const_110 = "3"
+global %str_const_111 = "a"
+global %str_const_112 = ":"
+global %str_const_113 = "3"
+global %str_const_114 = "F"
+global %str_const_115 = "?"
+global %str_const_116 = "3"
+global %str_const_117 = "f"
+global %str_const_118 = "?"
+global %str_const_119 = "3"
+global %str_const_120 = "D"
+global %str_const_121 = "="
+global %str_const_122 = "3"
+global %str_const_123 = "d"
+global %str_const_124 = "="
+global %str_const_125 = "26"
+global %str_const_126 = "&"
+global %str_const_127 = "25"
+global %str_const_128 = "%"
+global %str_const_129 = "2"
+global %str_const_130 = "B"
+global %str_const_131 = "+"
+global %str_const_132 = "2"
+global %str_const_133 = "b"
+global %str_const_134 = "+"
+global %str_const_135 = "23"
+global %str_const_136 = "#"
+global %str_const_137 = "%"
+global %str_const_138 = ""
+global %str_const_139 = ""
+global %str_const_140 = ""
+global %str_const_141 = ""
+global %str_const_142 = "/"
+global %str_const_143 = ""
+global %str_const_144 = "."
+global %str_const_145 = ".."
+global %str_const_146 = ""
+global %str_const_147 = "/"
+global %str_const_148 = "/"
+global %str_const_149 = "/"
+global %str_const_150 = ""
+global %str_const_151 = ""
+global %str_const_152 = ""
+global %str_const_153 = "&"
+global %str_const_154 = ""
+global %str_const_155 = "="
+global %str_const_156 = ""
+global %str_const_157 = "Running URL parsing tests..."
+global %str_const_158 = "http://example.com/path/to/page?query=1#frag"
+global %str_const_159 = "http"
+global %str_const_160 = "u1.scheme should be http"
+global %str_const_161 = "example.com"
+global %str_const_162 = "u1.host should be example.com"
+global %str_const_163 = "u1.port should be 80"
+global %str_const_164 = "/path/to/page"
+global %str_const_165 = "u1.path should be /path/to/page"
+global %str_const_166 = "query=1"
+global %str_const_167 = "u1.query should be query=1"
+global %str_const_168 = "frag"
+global %str_const_169 = "u1.fragment should be frag"
+global %str_const_170 = "u1.is_valid should be true"
+global %str_const_171 = "https://secure.example.org:8443/"
+global %str_const_172 = "https"
+global %str_const_173 = "u2.scheme should be https"
+global %str_const_174 = "secure.example.org"
+global %str_const_175 = "u2.host should be secure.example.org"
+global %str_const_176 = "u2.port should be 8443"
+global %str_const_177 = "/"
+global %str_const_178 = "u2.path should be /"
+global %str_const_179 = "ftp://user:pass@ftp.example.com/dir/file.txt"
+global %str_const_180 = "ftp"
+global %str_const_181 = "u3.scheme should be ftp"
+global %str_const_182 = "user"
+global %str_const_183 = "u3.username should be user"
+global %str_const_184 = "pass"
+global %str_const_185 = "u3.password should be pass"
+global %str_const_186 = "ftp.example.com"
+global %str_const_187 = "u3.host should be ftp.example.com"
+global %str_const_188 = "/dir/file.txt"
+global %str_const_189 = "u3.path should be /dir/file.txt"
+global %str_const_190 = "http://[2001:db8::1]:8080/index.html"
+global %str_const_191 = "http"
+global %str_const_192 = "u4.scheme should be http"
+global %str_const_193 = "[2001:db8::1]"
+global %str_const_194 = "u4.host should be [2001:db8::1]"
+global %str_const_195 = "u4.port should be 8080"
+global %str_const_196 = "/new-path?new-query#new-frag"
+global %str_const_197 = "Resolved path: %s"
+global %str_const_198 = "Resolved query: %s"
+global %str_const_199 = "Resolved fragment: %s"
+global %str_const_200 = "http"
+global %str_const_201 = "resolved.scheme should be http"
+global %str_const_202 = "example.com"
+global %str_const_203 = "resolved.host should be example.com"
+global %str_const_204 = "/new-path"
+global %str_const_205 = "resolved.path should be /new-path"
+global %str_const_206 = "new-query"
+global %str_const_207 = "resolved.query should be new-query"
+global %str_const_208 = "new-frag"
+global %str_const_209 = "resolved.fragment should be new-frag"
+global %str_const_210 = "http://example.com"
+global %str_const_211 = "u1.origin() failed"
+global %str_const_212 = "https://secure.example.org:8443"
+global %str_const_213 = "u2.origin() failed"
+global %str_const_214 = "Parsing tests passed!"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.url.index.__init__
+  call %std.url.url.__init__
+  call %std.url.query.__init__
+  call %std.url.builder.__init__
+  call %main
+  ret 0
+}
+
+function std.url.index.__init__() {
+@entry
+  ret 0
+}
+
+function std.url.index.parse(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.url.url.URL.init %r1 %0
+  ret %r1
+}
+
+function std.url.index.QueryParams() {
+@entry
+@block_0
+  %r0 = alloc 16 : i64
+  call %std.url.query.QueryParams.init %r0
+  ret 0
+}
+
+function std.url.index.URL(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.url.url.URL.init %r1 %0
+  ret %r1
+}
+
+function std.url.index.parse_query(i64) {
+@entry
+@block_0
+  call %std.url.query.parse %0
+  ret %r1
+}
+
+function std.url.builder.URLBuilder.init(i64) {
+@entry
+  ret 0
+}
+
+function std.url.url.URL.resolve(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.QueryParams.set(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.encoding.percent.encode(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_0 : i64
+  call %lm_list_len %0
+  jmp %block_5
+@block_5
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_7 %block_101
+@block_7
+  jmp %block_7
+  %r9 = add 1 9 : i64
+  call %substring %0 1 %r9
+  %r12 = call %lm_box_string %str_const_1 : i64
+  %r13 = ceq %r10 %r12 : i32
+  br %r13 %block_15 %block_19
+@block_15
+  jmp %block_15
+  %r15 = call %lm_box_string %str_const_2 : i64
+  %r16 = call %lm_str_concat %r1 %r15 : i8*
+  jmp %block_96
+@block_19
+  %r17 = call %lm_box_string %str_const_3 : i64
+  %r18 = ceq %r10 %r17 : i32
+  br %r18 %block_22 %block_28
+@block_22
+  jmp %block_22
+  %r20 = call %lm_box_string %str_const_4 : i64
+  %r21 = call %lm_str_concat %r16 %r20 : i8*
+  %r22 = call %lm_box_string %str_const_5 : i64
+  %r23 = call %lm_str_concat %r21 %r22 : i8*
+  jmp %block_95
+@block_28
+  %r24 = call %lm_box_string %str_const_6 : i64
+  %r25 = ceq %r10 %r24 : i32
+  br %r25 %block_31 %block_37
+@block_31
+  jmp %block_31
+  %r27 = call %lm_box_string %str_const_7 : i64
+  %r28 = call %lm_str_concat %r23 %r27 : i8*
+  %r29 = call %lm_box_string %str_const_8 : i64
+  %r30 = call %lm_str_concat %r28 %r29 : i8*
+  jmp %block_94
+@block_37
+  %r31 = call %lm_box_string %str_const_9 : i64
+  %r32 = ceq %r10 %r31 : i32
+  br %r32 %block_40 %block_46
+@block_40
+  jmp %block_40
+  %r34 = call %lm_box_string %str_const_10 : i64
+  %r35 = call %lm_str_concat %r30 %r34 : i8*
+  %r36 = call %lm_box_string %str_const_11 : i64
+  %r37 = call %lm_str_concat %r35 %r36 : i8*
+  jmp %block_93
+@block_46
+  %r38 = call %lm_box_string %str_const_12 : i64
+  %r39 = ceq %r10 %r38 : i32
+  br %r39 %block_49 %block_55
+@block_49
+  jmp %block_49
+  %r41 = call %lm_box_string %str_const_13 : i64
+  %r42 = call %lm_str_concat %r37 %r41 : i8*
+  %r43 = call %lm_box_string %str_const_14 : i64
+  %r44 = call %lm_str_concat %r42 %r43 : i8*
+  jmp %block_92
+@block_55
+  %r45 = call %lm_box_string %str_const_15 : i64
+  %r46 = ceq %r10 %r45 : i32
+  br %r46 %block_58 %block_62
+@block_58
+  jmp %block_58
+  %r48 = call %lm_box_string %str_const_16 : i64
+  %r49 = call %lm_str_concat %r44 %r48 : i8*
+  jmp %block_91
+@block_62
+  %r50 = call %lm_box_string %str_const_17 : i64
+  %r51 = ceq %r10 %r50 : i32
+  br %r51 %block_65 %block_69
+@block_65
+  jmp %block_65
+  %r53 = call %lm_box_string %str_const_18 : i64
+  %r54 = call %lm_str_concat %r49 %r53 : i8*
+  jmp %block_90
+@block_69
+  %r55 = call %lm_box_string %str_const_19 : i64
+  %r56 = ceq %r10 %r55 : i32
+  br %r56 %block_72 %block_78
+@block_72
+  jmp %block_72
+  %r58 = call %lm_box_string %str_const_20 : i64
+  %r59 = call %lm_str_concat %r54 %r58 : i8*
+  %r60 = call %lm_box_string %str_const_21 : i64
+  %r61 = call %lm_str_concat %r59 %r60 : i8*
+  jmp %block_89
+@block_78
+  %r62 = call %lm_box_string %str_const_22 : i64
+  %r63 = ceq %r10 %r62 : i32
+  br %r63 %block_81 %block_85
+@block_81
+  jmp %block_81
+  %r65 = call %lm_box_string %str_const_23 : i64
+  %r66 = call %lm_str_concat %r61 %r65 : i8*
+  jmp %block_88
+@block_85
+  %r67 = call %lm_str_concat %r66 %r10 : i8*
+  jmp %block_88
+@block_88
+  jmp %block_89
+@block_89
+  jmp %block_90
+@block_90
+  jmp %block_91
+@block_91
+  jmp %block_92
+@block_92
+  jmp %block_93
+@block_93
+  jmp %block_94
+@block_94
+  jmp %block_95
+@block_95
+  jmp %block_96
+@block_96
+  %r70 = add 1 9 : i64
+  jmp %block_5
+@block_101
+  ret %r67
+}
+
+function std.url.url.URL.query_params(i64) {
+@entry
+  ret 0
+}
+
+function main() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_24 : i64
+  call %lm_print_int %r0
+  call %test_parsing
+  %r4 = ceq %r2 9 : i32
+  %r5 = call %lm_box_string %str_const_25 : i64
+  call %lm_assert %r4 %r5
+  call %test_query_params
+  %r9 = ceq %r7 9 : i32
+  %r10 = call %lm_box_string %str_const_26 : i64
+  call %lm_assert %r9 %r10
+  call %test_builder
+  %r14 = ceq %r12 9 : i32
+  %r15 = call %lm_box_string %str_const_27 : i64
+  call %lm_assert %r14 %r15
+  %r17 = call %lm_box_string %str_const_28 : i64
+  call %lm_print_int %r17
+  ret 1
+}
+
+function std.url.query.build(i64) {
+@entry
+@block_0
+  call %std.url.query.QueryParams.to_string %0
+  ret %r1
+}
+
+function test_builder() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_29 : i64
+  call %lm_print_int %r0
+  call %std.url.index.URLBuilder
+  %r3 = cast %r2 : i8*
+  %r5 = call %lm_box_string %str_const_30 : i64
+  call %std.url.builder.URLBuilder.set_scheme %r3 %r5
+  %r7 = call %lm_box_string %str_const_31 : i64
+  call %std.url.builder.URLBuilder.set_host %r3 %r7
+  call %std.url.builder.URLBuilder.set_port %r3 72001
+  %r11 = call %lm_box_string %str_const_32 : i64
+  call %std.url.builder.URLBuilder.set_path %r3 %r11
+  %r13 = call %lm_box_string %str_const_33 : i64
+  call %std.url.builder.URLBuilder.set_query %r3 %r13
+  %r15 = call %lm_box_string %str_const_34 : i64
+  call %std.url.builder.URLBuilder.set_fragment %r3 %r15
+  call %std.url.builder.URLBuilder.build %r3
+  add %r17 0
+  %r20 = load %0 : i32
+  %r21 = call %lm_box_string %str_const_35 : i64
+  %r22 = ceq %r20 %r21 : i32
+  %r23 = call %lm_box_string %str_const_36 : i64
+  call %lm_assert %r22 %r23
+  add %r17 0
+  %r25 = load %1 : i32
+  %r26 = call %lm_box_string %str_const_37 : i64
+  %r27 = ceq %r25 %r26 : i32
+  %r28 = call %lm_box_string %str_const_38 : i64
+  call %lm_assert %r27 %r28
+  add %r17 0
+  %r30 = load %2 : i32
+  %r32 = ceq %r30 72001 : i32
+  %r33 = call %lm_box_string %str_const_39 : i64
+  call %lm_assert %r32 %r33
+  add %r17 0
+  %r35 = load %3 : i32
+  %r36 = call %lm_box_string %str_const_40 : i64
+  %r37 = ceq %r35 %r36 : i32
+  %r38 = call %lm_box_string %str_const_41 : i64
+  call %lm_assert %r37 %r38
+  add %r17 0
+  %r40 = load %4 : i32
+  %r41 = call %lm_box_string %str_const_42 : i64
+  %r42 = ceq %r40 %r41 : i32
+  %r43 = call %lm_box_string %str_const_43 : i64
+  call %lm_assert %r42 %r43
+  add %r17 0
+  %r45 = load %5 : i32
+  %r46 = call %lm_box_string %str_const_44 : i64
+  %r47 = ceq %r45 %r46 : i32
+  %r48 = call %lm_box_string %str_const_45 : i64
+  call %lm_assert %r47 %r48
+  call %std.url.url.URL.to_string %r17
+  %r52 = call %lm_box_string %str_const_46 : i64
+  %r53 = ceq %r50 %r52 : i32
+  %r54 = call %lm_box_string %str_const_47 : i64
+  %r55 = call %lm_str_concat %r54 %r50 : i8*
+  call %lm_assert %r53 %r55
+  %r57 = call %lm_box_string %str_const_48 : i64
+  call %lm_print_int %r57
+  ret 9
+}
+
+function std.url.builder.__init__() {
+@entry
+  ret 0
+}
+
+function std.url.url.find_last(i64, i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  sub %r2 9
+  jmp %block_5
+@block_5
+  %r7 = csge %r4 1 : i32
+  br %r7 %block_8 %block_19
+@block_8
+  jmp %block_8
+  add %r4 9
+  call %substring %0 %r4 %r11
+  %r13 = ceq %r12 %1 : i32
+  br %r13 %block_14 %block_15
+@block_14
+  jmp %block_14
+  ret %r4
+@block_15
+  sub %r4 9
+  jmp %block_5
+@block_19
+  %r18 = neg 9 : i64
+  ret %r18
+}
+
+function std.url.url.split_str(i64, i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  %r5 = call %lm_box_string %str_const_49 : i64
+  jmp %block_6
+@block_6
+  call %lm_list_len %0
+  %r8 = cslt 1 %r7 : i32
+  br %r8 %block_9 %block_32
+@block_9
+  jmp %block_9
+  %r12 = add 1 9 : i64
+  call %substring %0 1 %r12
+  %r14 = ceq %r13 %1 : i32
+  br %r14 %block_15 %block_19
+@block_15
+  jmp %block_15
+  call %lm_list_append %r2 %r5
+  %r18 = call %lm_box_string %str_const_50 : i64
+  jmp %block_27
+@block_19
+  %r21 = add 1 9 : i64
+  call %substring %0 1 %r21
+  %r23 = call %lm_to_string %r22 : i8*
+  %r24 = call %lm_str_concat %r18 %r23 : i8*
+  jmp %block_27
+@block_27
+  %r27 = add 1 9 : i64
+  jmp %block_6
+@block_32
+  call %lm_list_append %r2 %r24
+  ret %r2
+}
+
+function test_query_params() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_51 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_52 : i64
+  call %std.url.index.parse_query %r2
+  %r4 = cast %r3 : i8*
+  %r6 = call %lm_box_string %str_const_53 : i64
+  call %std.url.query.QueryParams.get %r4 %r6
+  %r8 = call %lm_box_string %str_const_54 : i64
+  %r9 = ceq %r7 %r8 : i32
+  %r10 = call %lm_box_string %str_const_55 : i64
+  call %lm_assert %r9 %r10
+  %r12 = call %lm_box_string %str_const_56 : i64
+  call %std.url.query.QueryParams.get %r4 %r12
+  %r14 = call %lm_box_string %str_const_57 : i64
+  %r15 = ceq %r13 %r14 : i32
+  %r16 = call %lm_box_string %str_const_58 : i64
+  call %lm_assert %r15 %r16
+  %r18 = call %lm_box_string %str_const_59 : i64
+  call %std.url.query.QueryParams.get %r4 %r18
+  %r20 = call %lm_box_string %str_const_60 : i64
+  %r21 = ceq %r19 %r20 : i32
+  %r22 = call %lm_box_string %str_const_61 : i64
+  call %lm_assert %r21 %r22
+  %r24 = call %lm_box_string %str_const_62 : i64
+  call %std.url.query.QueryParams.get %r4 %r24
+  %r26 = call %lm_box_string %str_const_63 : i64
+  %r27 = ceq %r25 %r26 : i32
+  %r28 = call %lm_box_string %str_const_64 : i64
+  call %lm_assert %r27 %r28
+  %r30 = call %lm_box_string %str_const_65 : i64
+  call %std.url.query.QueryParams.get %r4 %r30
+  %r32 = call %lm_box_string %str_const_66 : i64
+  %r33 = ceq %r31 %r32 : i32
+  %r34 = call %lm_box_string %str_const_67 : i64
+  call %lm_assert %r33 %r34
+  %r36 = call %lm_box_string %str_const_68 : i64
+  call %std.url.query.QueryParams.get_all %r4 %r36
+  call %lm_list_len %r37
+  %r42 = ceq %r40 17 : i32
+  %r43 = call %lm_box_string %str_const_69 : i64
+  call %lm_assert %r42 %r43
+  call %lm_list_get %r37 1
+  %r47 = call %lm_box_string %str_const_70 : i64
+  %r48 = ceq %r46 %r47 : i32
+  %r49 = call %lm_box_string %str_const_71 : i64
+  call %lm_assert %r48 %r49
+  call %lm_list_get %r37 9
+  %r53 = call %lm_box_string %str_const_72 : i64
+  %r54 = ceq %r52 %r53 : i32
+  %r55 = call %lm_box_string %str_const_73 : i64
+  call %lm_assert %r54 %r55
+  %r57 = call %lm_box_string %str_const_74 : i64
+  call %std.url.query.QueryParams.has %r4 %r57
+  %r60 = ceq %r58 18 : i32
+  %r61 = call %lm_box_string %str_const_75 : i64
+  call %lm_assert %r60 %r61
+  %r63 = call %lm_box_string %str_const_76 : i64
+  call %std.url.query.QueryParams.has %r4 %r63
+  %r66 = ceq %r64 10 : i32
+  %r67 = call %lm_box_string %str_const_77 : i64
+  call %lm_assert %r66 %r67
+  %r69 = call %lm_box_string %str_const_78 : i64
+  %r70 = call %lm_box_string %str_const_79 : i64
+  call %std.url.query.QueryParams.set %r4 %r69 %r70
+  %r72 = call %lm_box_string %str_const_80 : i64
+  call %std.url.query.QueryParams.get %r4 %r72
+  %r74 = call %lm_box_string %str_const_81 : i64
+  %r75 = ceq %r73 %r74 : i32
+  %r76 = call %lm_box_string %str_const_82 : i64
+  call %lm_assert %r75 %r76
+  %r78 = call %lm_box_string %str_const_83 : i64
+  %r79 = call %lm_box_string %str_const_84 : i64
+  call %std.url.query.QueryParams.add %r4 %r78 %r79
+  %r81 = call %lm_box_string %str_const_85 : i64
+  call %std.url.query.QueryParams.get %r4 %r81
+  %r83 = call %lm_box_string %str_const_86 : i64
+  %r84 = ceq %r82 %r83 : i32
+  %r85 = call %lm_box_string %str_const_87 : i64
+  call %lm_assert %r84 %r85
+  %r87 = call %lm_box_string %str_const_88 : i64
+  call %std.url.query.QueryParams.remove %r4 %r87
+  %r89 = call %lm_box_string %str_const_89 : i64
+  call %std.url.query.QueryParams.has %r4 %r89
+  %r92 = ceq %r90 10 : i32
+  %r93 = call %lm_box_string %str_const_90 : i64
+  call %lm_assert %r92 %r93
+  call %std.url.query.QueryParams.to_string %r4
+  %r97 = call %lm_box_string %str_const_91 : i64
+  %r98 = ceq %r95 %r97 : i32
+  %r99 = call %lm_box_string %str_const_92 : i64
+  %r100 = call %lm_str_concat %r99 %r95 : i8*
+  call %lm_assert %r98 %r100
+  %r102 = call %lm_box_string %str_const_93 : i64
+  call %lm_print_int %r102
+  ret 9
+}
+
+function std.url.query.__init__() {
+@entry
+  ret 0
+}
+
+function std.url.url.to_lower(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_94 : i64
+  %r3 = call %lm_box_string %str_const_95 : i64
+  %r4 = call %lm_box_string %str_const_96 : i64
+  jmp %block_5
+@block_5
+  call %lm_list_len %0
+  %r6 = cslt 1 %r5 : i32
+  br %r6 %block_8 %block_35
+@block_8
+  jmp %block_8
+  %r10 = add 1 9 : i64
+  call %substring %0 1 %r10
+  call %std.url.url.index_of %r3 %r11
+  %r16 = neg 9 : i64
+  %r17 = cne %r13 %r16 : i32
+  br %r17 %block_19 %block_27
+@block_19
+  jmp %block_19
+  add %r13 9
+  call %substring %r4 %r13 %r21
+  %r23 = call %lm_to_string %r22 : i8*
+  %r24 = call %lm_str_concat %r1 %r23 : i8*
+  jmp %block_30
+@block_27
+  %r25 = call %lm_str_concat %r24 %r11 : i8*
+  jmp %block_30
+@block_30
+  %r28 = add 1 9 : i64
+  jmp %block_5
+@block_35
+  ret %r25
+}
+
+function std.encoding.percent.__init__() {
+@entry
+  ret 0
+}
+
+function std.url.index.URLBuilder() {
+@entry
+@block_0
+  %r0 = alloc 16 : i64
+  call %std.url.builder.URLBuilder.init %r0
+  ret 0
+}
+
+function std.url.query.QueryParams.add(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.index.build(i64, i64, i64, i64, i64, i64) {
+@entry
+@block_0
+  call %std.url.url.build %0 %1 %2 %3 %4 %5
+  ret %r6
+}
+
+function std.url.url.URL.origin(i64) {
+@entry
+  ret 0
+}
+
+function std.url.url.URL.parse(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.url.URL.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.builder.URLBuilder.set_query(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.builder.URLBuilder.set_path(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.url.URL.to_string(i64) {
+@entry
+  ret 0
+}
+
+function std.url.builder.URLBuilder.set_scheme(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.encoding.percent.decode(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_97 : i64
+  call %lm_list_len %0
+  jmp %block_5
+@block_5
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_7 %block_180
+@block_7
+  jmp %block_7
+  %r9 = add 1 9 : i64
+  call %substring %0 1 %r9
+  %r13 = call %lm_box_string %str_const_98 : i64
+  %r14 = ceq %r10 %r13 : i32
+  br %r14 %block_16 %block_22
+@block_16
+  jmp %block_16
+  %r17 = add 1 17 : i64
+  %r18 = cslt %r17 %r3 : i32
+  jmp %block_22
+@block_22
+  br %r18 %block_23 %block_172
+@block_23
+  jmp %block_23
+  %r22 = add 1 9 : i64
+  %r25 = add 1 25 : i64
+  call %substring %0 %r22 %r25
+  %r28 = call %lm_box_string %str_const_99 : i64
+  %r29 = ceq %r26 %r28 : i32
+  br %r29 %block_34 %block_38
+@block_34
+  jmp %block_34
+  %r31 = call %lm_box_string %str_const_100 : i64
+  %r32 = call %lm_str_concat %r1 %r31 : i8*
+  jmp %block_167
+@block_38
+  %r33 = call %lm_box_string %str_const_101 : i64
+  %r34 = call %lm_box_string %str_const_102 : i64
+  %r35 = call %lm_str_concat %r33 %r34 : i8*
+  %r36 = ceq %r26 %r35 : i32
+  br %r36 %block_43 %block_47
+@block_43
+  jmp %block_43
+  %r38 = call %lm_box_string %str_const_103 : i64
+  %r39 = call %lm_str_concat %r32 %r38 : i8*
+  jmp %block_166
+@block_47
+  %r40 = call %lm_box_string %str_const_104 : i64
+  %r41 = call %lm_box_string %str_const_105 : i64
+  %r42 = call %lm_str_concat %r40 %r41 : i8*
+  %r43 = ceq %r26 %r42 : i32
+  br %r43 %block_52 %block_56
+@block_52
+  jmp %block_52
+  %r45 = call %lm_box_string %str_const_106 : i64
+  %r46 = call %lm_str_concat %r39 %r45 : i8*
+  jmp %block_165
+@block_56
+  %r47 = call %lm_box_string %str_const_107 : i64
+  %r48 = call %lm_box_string %str_const_108 : i64
+  %r49 = call %lm_str_concat %r47 %r48 : i8*
+  %r50 = ceq %r26 %r49 : i32
+  br %r50 %block_61 %block_65
+@block_61
+  jmp %block_61
+  %r52 = call %lm_box_string %str_const_109 : i64
+  %r53 = call %lm_str_concat %r46 %r52 : i8*
+  jmp %block_164
+@block_65
+  %r54 = call %lm_box_string %str_const_110 : i64
+  %r55 = call %lm_box_string %str_const_111 : i64
+  %r56 = call %lm_str_concat %r54 %r55 : i8*
+  %r57 = ceq %r26 %r56 : i32
+  br %r57 %block_70 %block_74
+@block_70
+  jmp %block_70
+  %r59 = call %lm_box_string %str_const_112 : i64
+  %r60 = call %lm_str_concat %r53 %r59 : i8*
+  jmp %block_163
+@block_74
+  %r61 = call %lm_box_string %str_const_113 : i64
+  %r62 = call %lm_box_string %str_const_114 : i64
+  %r63 = call %lm_str_concat %r61 %r62 : i8*
+  %r64 = ceq %r26 %r63 : i32
+  br %r64 %block_79 %block_83
+@block_79
+  jmp %block_79
+  %r66 = call %lm_box_string %str_const_115 : i64
+  %r67 = call %lm_str_concat %r60 %r66 : i8*
+  jmp %block_162
+@block_83
+  %r68 = call %lm_box_string %str_const_116 : i64
+  %r69 = call %lm_box_string %str_const_117 : i64
+  %r70 = call %lm_str_concat %r68 %r69 : i8*
+  %r71 = ceq %r26 %r70 : i32
+  br %r71 %block_88 %block_92
+@block_88
+  jmp %block_88
+  %r73 = call %lm_box_string %str_const_118 : i64
+  %r74 = call %lm_str_concat %r67 %r73 : i8*
+  jmp %block_161
+@block_92
+  %r75 = call %lm_box_string %str_const_119 : i64
+  %r76 = call %lm_box_string %str_const_120 : i64
+  %r77 = call %lm_str_concat %r75 %r76 : i8*
+  %r78 = ceq %r26 %r77 : i32
+  br %r78 %block_97 %block_101
+@block_97
+  jmp %block_97
+  %r80 = call %lm_box_string %str_const_121 : i64
+  %r81 = call %lm_str_concat %r74 %r80 : i8*
+  jmp %block_160
+@block_101
+  %r82 = call %lm_box_string %str_const_122 : i64
+  %r83 = call %lm_box_string %str_const_123 : i64
+  %r84 = call %lm_str_concat %r82 %r83 : i8*
+  %r85 = ceq %r26 %r84 : i32
+  br %r85 %block_106 %block_110
+@block_106
+  jmp %block_106
+  %r87 = call %lm_box_string %str_const_124 : i64
+  %r88 = call %lm_str_concat %r81 %r87 : i8*
+  jmp %block_159
+@block_110
+  %r89 = call %lm_box_string %str_const_125 : i64
+  %r90 = ceq %r26 %r89 : i32
+  br %r90 %block_113 %block_117
+@block_113
+  jmp %block_113
+  %r92 = call %lm_box_string %str_const_126 : i64
+  %r93 = call %lm_str_concat %r88 %r92 : i8*
+  jmp %block_158
+@block_117
+  %r94 = call %lm_box_string %str_const_127 : i64
+  %r95 = ceq %r26 %r94 : i32
+  br %r95 %block_120 %block_124
+@block_120
+  jmp %block_120
+  %r97 = call %lm_box_string %str_const_128 : i64
+  %r98 = call %lm_str_concat %r93 %r97 : i8*
+  jmp %block_157
+@block_124
+  %r99 = call %lm_box_string %str_const_129 : i64
+  %r100 = call %lm_box_string %str_const_130 : i64
+  %r101 = call %lm_str_concat %r99 %r100 : i8*
+  %r102 = ceq %r26 %r101 : i32
+  br %r102 %block_129 %block_133
+@block_129
+  jmp %block_129
+  %r104 = call %lm_box_string %str_const_131 : i64
+  %r105 = call %lm_str_concat %r98 %r104 : i8*
+  jmp %block_156
+@block_133
+  %r106 = call %lm_box_string %str_const_132 : i64
+  %r107 = call %lm_box_string %str_const_133 : i64
+  %r108 = call %lm_str_concat %r106 %r107 : i8*
+  %r109 = ceq %r26 %r108 : i32
+  br %r109 %block_138 %block_142
+@block_138
+  jmp %block_138
+  %r111 = call %lm_box_string %str_const_134 : i64
+  %r112 = call %lm_str_concat %r105 %r111 : i8*
+  jmp %block_155
+@block_142
+  %r113 = call %lm_box_string %str_const_135 : i64
+  %r114 = ceq %r26 %r113 : i32
+  br %r114 %block_145 %block_149
+@block_145
+  jmp %block_145
+  %r116 = call %lm_box_string %str_const_136 : i64
+  %r117 = call %lm_str_concat %r112 %r116 : i8*
+  jmp %block_154
+@block_149
+  %r118 = call %lm_box_string %str_const_137 : i64
+  %r119 = call %lm_str_concat %r117 %r118 : i8*
+  %r120 = call %lm_str_concat %r119 %r26 : i8*
+  jmp %block_154
+@block_154
+  jmp %block_155
+@block_155
+  jmp %block_156
+@block_156
+  jmp %block_157
+@block_157
+  jmp %block_158
+@block_158
+  jmp %block_159
+@block_159
+  jmp %block_160
+@block_160
+  jmp %block_161
+@block_161
+  jmp %block_162
+@block_162
+  jmp %block_163
+@block_163
+  jmp %block_164
+@block_164
+  jmp %block_165
+@block_165
+  jmp %block_166
+@block_166
+  jmp %block_167
+@block_167
+  %r123 = add 1 25 : i64
+  jmp %block_179
+@block_172
+  %r124 = call %lm_str_concat %r120 %r10 : i8*
+  %r127 = add %r123 9 : i64
+  jmp %block_179
+@block_179
+  jmp %block_5
+@block_180
+  ret %r124
+}
+
+function std.url.url.build(i64, i64, i64, i64, i64, i64) {
+@entry
+@block_0
+  %r6 = call %lm_box_string %str_const_138 : i64
+  %r7 = alloc 16 : i64
+  call %std.url.url.URL.init %r7 %r6
+  %6 = add %r7 0 : i64
+  store %r7 %6
+  %8 = add %r7 0 : i64
+  store %1 %8
+  %10 = add %r7 0 : i64
+  store %5 %10
+  %12 = add %r7 0 : i64
+  store %4 %12
+  %14 = add %r7 0 : i64
+  store %r6 %14
+  %16 = add %r7 0 : i64
+  store %0 %16
+  %r11 = call %lm_box_string %str_const_139 : i64
+  %r12 = cne %1 %r11 : i32
+  %18 = add %r7 0 : i64
+  store %2 %18
+  ret %r7
+}
+
+function std.url.query.split_str(i64, i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  %r5 = call %lm_box_string %str_const_140 : i64
+  jmp %block_6
+@block_6
+  call %lm_list_len %0
+  %r8 = cslt 1 %r7 : i32
+  br %r8 %block_9 %block_32
+@block_9
+  jmp %block_9
+  %r12 = add 1 9 : i64
+  call %substring %0 1 %r12
+  %r14 = ceq %r13 %1 : i32
+  br %r14 %block_15 %block_19
+@block_15
+  jmp %block_15
+  call %lm_list_append %r2 %r5
+  %r18 = call %lm_box_string %str_const_141 : i64
+  jmp %block_27
+@block_19
+  %r21 = add 1 9 : i64
+  call %substring %0 1 %r21
+  %r23 = call %lm_to_string %r22 : i8*
+  %r24 = call %lm_str_concat %r18 %r23 : i8*
+  jmp %block_27
+@block_27
+  %r27 = add 1 9 : i64
+  jmp %block_6
+@block_32
+  call %lm_list_append %r2 %r24
+  ret %r2
+}
+
+function std.url.url.normalize_path(i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  %r4 = call %lm_box_string %str_const_142 : i64
+  call %std.url.url.split_str %0 %r4
+  jmp %block_8
+@block_8
+  call %lm_list_len %r5
+  %r9 = cslt 1 %r8 : i32
+  br %r9 %block_11 %block_58
+@block_11
+  jmp %block_11
+  call %lm_list_get %r5 1
+  %r14 = call %lm_box_string %str_const_143 : i64
+  %r15 = ceq %r11 %r14 : i32
+  br %r15 %block_21 %block_17
+@block_17
+  jmp %block_17
+  %r16 = call %lm_box_string %str_const_144 : i64
+  %r17 = ceq %r11 %r16 : i32
+  jmp %block_21
+@block_21
+  br %r17 %block_22 %block_23
+@block_22
+  jmp %block_22
+  jmp %block_53
+@block_23
+  %r19 = call %lm_box_string %str_const_145 : i64
+  %r20 = ceq %r11 %r19 : i32
+  br %r20 %block_26 %block_50
+@block_26
+  jmp %block_26
+  call %lm_list_len %r1
+  %r24 = csgt %r22 1 : i32
+  br %r24 %block_30 %block_49
+@block_30
+  jmp %block_30
+  call %lm_list_new 0
+  jmp %block_35
+@block_35
+  call %lm_list_len %r1
+  sub %r30 9
+  %r33 = cslt 1 %r32 : i32
+  br %r33 %block_40 %block_47
+@block_40
+  jmp %block_40
+  call %lm_list_get %r1 1
+  call %lm_list_append %r26 %r35
+  %r40 = add 1 9 : i64
+  jmp %block_35
+@block_47
+  jmp %block_49
+@block_49
+  jmp %block_52
+@block_50
+  call %lm_list_append %r26 %r11
+  jmp %block_52
+@block_52
+  jmp %block_53
+@block_53
+  %r45 = add 1 9 : i64
+  jmp %block_8
+@block_58
+  %r46 = call %lm_box_string %str_const_146 : i64
+  call %lm_list_len %0
+  %r50 = csgt %r48 1 : i32
+  br %r50 %block_64 %block_71
+@block_64
+  jmp %block_64
+  call %substring %0 1 9
+  %r54 = call %lm_box_string %str_const_147 : i64
+  %r55 = ceq %r53 %r54 : i32
+  jmp %block_71
+@block_71
+  br %r55 %block_72 %block_75
+@block_72
+  jmp %block_72
+  %r57 = call %lm_box_string %str_const_148 : i64
+  jmp %block_75
+@block_75
+  jmp %block_77
+@block_77
+  call %lm_list_len %r26
+  %r60 = cslt 1 %r59 : i32
+  br %r60 %block_80 %block_95
+@block_80
+  jmp %block_80
+  %r63 = csgt 1 1 : i32
+  br %r63 %block_83 %block_87
+@block_83
+  jmp %block_83
+  %r65 = call %lm_box_string %str_const_149 : i64
+  %r66 = call %lm_str_concat %r57 %r65 : i8*
+  jmp %block_87
+@block_87
+  call %lm_list_get %r26 1
+  %r68 = call %lm_str_concat %r66 %r67 : i8*
+  %r71 = add 1 9 : i64
+  jmp %block_77
+@block_95
+  ret %r68
+}
+
+function std.url.query.QueryParams.has(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.url.index_of(i64, i64) {
+@entry
+@block_0
+  jmp %block_2
+@block_2
+  call %lm_list_len %0
+  call %lm_list_len %1
+  sub %r3 %r4
+  %r6 = csle 1 %r5 : i32
+  br %r6 %block_7 %block_19
+@block_7
+  jmp %block_7
+  call %lm_list_len %1
+  call %lm_list_len %1
+  %r10 = add 1 %r9 : i64
+  call %substring %0 1 %r10
+  %r12 = ceq %r11 %1 : i32
+  br %r12 %block_13 %block_14
+@block_13
+  jmp %block_13
+  ret 1
+@block_14
+  %r16 = add 1 9 : i64
+  jmp %block_2
+@block_19
+  %r18 = neg 9 : i64
+  ret %r18
+}
+
+function std.url.url.substring(i64, i64, i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  %r6 = csgt %r5 %r3 : i32
+  br %r6 %block_5 %block_7
+@block_5
+  jmp %block_5
+  jmp %block_7
+@block_7
+  %r9 = cslt %1 1 : i32
+  br %r9 %block_10 %block_12
+@block_10
+  jmp %block_10
+  %r11 = call %lm_box_string %str_const_150 : i64
+  ret %r11
+@block_12
+  %r12 = csge %1 %r3 : i32
+  br %r12 %block_14 %block_16
+@block_14
+  jmp %block_14
+  %r14 = call %lm_box_string %str_const_151 : i64
+  ret %r14
+@block_16
+  call %substring %0 %1 %r3
+  ret %r15
+}
+
+function std.url.url.__init__() {
+@entry
+  ret 0
+}
+
+function std.url.query.QueryParams.get_all(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.QueryParams.to_string(i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.QueryParams.remove(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.QueryParams.init(i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.parse(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.url.query.QueryParams.init %r1
+  %r4 = call %lm_box_string %str_const_152 : i64
+  %r5 = ceq %0 %r4 : i32
+  br %r5 %block_6 %block_7
+@block_6
+  jmp %block_6
+  ret %r1
+@block_7
+  %r7 = call %lm_box_string %str_const_153 : i64
+  call %std.url.query.split_str %0 %r7
+  jmp %block_12
+@block_12
+  call %lm_list_len %r8
+  %r12 = cslt 1 %r11 : i32
+  br %r12 %block_15 %block_50
+@block_15
+  jmp %block_15
+  call %lm_list_get %r8 1
+  %r16 = call %lm_box_string %str_const_154 : i64
+  %r17 = cne %r14 %r16 : i32
+  br %r17 %block_20 %block_45
+@block_20
+  jmp %block_20
+  %r19 = call %lm_box_string %str_const_155 : i64
+  call %std.url.query.index_of %r14 %r19
+  %r23 = neg 9 : i64
+  %r24 = cne %r20 %r23 : i32
+  br %r24 %block_27 %block_40
+@block_27
+  jmp %block_27
+  call %substring %r14 1 %r20
+  call %std.encoding.percent.decode %r27
+  add %r20 9
+  call %lm_list_len %r14
+  call %substring %r14 %r32 %r33
+  call %std.encoding.percent.decode %r34
+  call %std.url.query.QueryParams.add %r1 %r28 %r35
+  jmp %block_44
+@block_40
+  call %std.encoding.percent.decode %r14
+  %r39 = call %lm_box_string %str_const_156 : i64
+  call %std.url.query.QueryParams.add %r1 %r38 %r39
+  jmp %block_44
+@block_44
+  jmp %block_45
+@block_45
+  %r43 = add 1 9 : i64
+  jmp %block_12
+@block_50
+  ret %r1
+}
+
+function std.url.builder.URLBuilder.set_password(i64, i64) {
+@entry
+  ret 0
+}
+
+function test_parsing() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_157 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_158 : i64
+  call %std.url.index.URL %r2
+  %r4 = cast %r3 : i8*
+  %0 = add %r4 0 : i8*
+  %r6 = load %0 : i32
+  %r7 = call %lm_box_string %str_const_159 : i64
+  %r8 = ceq %r6 %r7 : i32
+  %r9 = call %lm_box_string %str_const_160 : i64
+  call %lm_assert %r8 %r9
+  %1 = add %r4 0 : i8*
+  %r11 = load %1 : i32
+  %r12 = call %lm_box_string %str_const_161 : i64
+  %r13 = ceq %r11 %r12 : i32
+  %r14 = call %lm_box_string %str_const_162 : i64
+  call %lm_assert %r13 %r14
+  %2 = add %r4 0 : i8*
+  %r16 = load %2 : i32
+  %r18 = ceq %r16 641 : i32
+  %r19 = call %lm_box_string %str_const_163 : i64
+  call %lm_assert %r18 %r19
+  %3 = add %r4 0 : i8*
+  %r21 = load %3 : i32
+  %r22 = call %lm_box_string %str_const_164 : i64
+  %r23 = ceq %r21 %r22 : i32
+  %r24 = call %lm_box_string %str_const_165 : i64
+  call %lm_assert %r23 %r24
+  %4 = add %r4 0 : i8*
+  %r26 = load %4 : i32
+  %r27 = call %lm_box_string %str_const_166 : i64
+  %r28 = ceq %r26 %r27 : i32
+  %r29 = call %lm_box_string %str_const_167 : i64
+  call %lm_assert %r28 %r29
+  %5 = add %r4 0 : i8*
+  %r31 = load %5 : i32
+  %r32 = call %lm_box_string %str_const_168 : i64
+  %r33 = ceq %r31 %r32 : i32
+  %r34 = call %lm_box_string %str_const_169 : i64
+  call %lm_assert %r33 %r34
+  %6 = add %r4 0 : i8*
+  %r36 = load %6 : i32
+  %r38 = ceq %r36 18 : i32
+  %r39 = call %lm_box_string %str_const_170 : i64
+  call %lm_assert %r38 %r39
+  %r41 = call %lm_box_string %str_const_171 : i64
+  call %std.url.index.URL %r41
+  %r43 = cast %r42 : i8*
+  %7 = add %r43 0 : i8*
+  %r45 = load %7 : i32
+  %r46 = call %lm_box_string %str_const_172 : i64
+  %r47 = ceq %r45 %r46 : i32
+  %r48 = call %lm_box_string %str_const_173 : i64
+  call %lm_assert %r47 %r48
+  %8 = add %r43 0 : i8*
+  %r50 = load %8 : i32
+  %r51 = call %lm_box_string %str_const_174 : i64
+  %r52 = ceq %r50 %r51 : i32
+  %r53 = call %lm_box_string %str_const_175 : i64
+  call %lm_assert %r52 %r53
+  %9 = add %r43 0 : i8*
+  %r55 = load %9 : i32
+  %r57 = ceq %r55 67545 : i32
+  %r58 = call %lm_box_string %str_const_176 : i64
+  call %lm_assert %r57 %r58
+  %10 = add %r43 0 : i8*
+  %r60 = load %10 : i32
+  %r61 = call %lm_box_string %str_const_177 : i64
+  %r62 = ceq %r60 %r61 : i32
+  %r63 = call %lm_box_string %str_const_178 : i64
+  call %lm_assert %r62 %r63
+  %r65 = call %lm_box_string %str_const_179 : i64
+  call %std.url.index.URL %r65
+  %r67 = cast %r66 : i8*
+  %11 = add %r67 0 : i8*
+  %r69 = load %11 : i32
+  %r70 = call %lm_box_string %str_const_180 : i64
+  %r71 = ceq %r69 %r70 : i32
+  %r72 = call %lm_box_string %str_const_181 : i64
+  call %lm_assert %r71 %r72
+  %12 = add %r67 0 : i8*
+  %r74 = load %12 : i32
+  %r75 = call %lm_box_string %str_const_182 : i64
+  %r76 = ceq %r74 %r75 : i32
+  %r77 = call %lm_box_string %str_const_183 : i64
+  call %lm_assert %r76 %r77
+  %13 = add %r67 0 : i8*
+  %r79 = load %13 : i32
+  %r80 = call %lm_box_string %str_const_184 : i64
+  %r81 = ceq %r79 %r80 : i32
+  %r82 = call %lm_box_string %str_const_185 : i64
+  call %lm_assert %r81 %r82
+  %14 = add %r67 0 : i8*
+  %r84 = load %14 : i32
+  %r85 = call %lm_box_string %str_const_186 : i64
+  %r86 = ceq %r84 %r85 : i32
+  %r87 = call %lm_box_string %str_const_187 : i64
+  call %lm_assert %r86 %r87
+  %15 = add %r67 0 : i8*
+  %r89 = load %15 : i32
+  %r90 = call %lm_box_string %str_const_188 : i64
+  %r91 = ceq %r89 %r90 : i32
+  %r92 = call %lm_box_string %str_const_189 : i64
+  call %lm_assert %r91 %r92
+  %r94 = call %lm_box_string %str_const_190 : i64
+  call %std.url.index.URL %r94
+  %r96 = cast %r95 : i8*
+  %16 = add %r96 0 : i8*
+  %r98 = load %16 : i32
+  %r99 = call %lm_box_string %str_const_191 : i64
+  %r100 = ceq %r98 %r99 : i32
+  %r101 = call %lm_box_string %str_const_192 : i64
+  call %lm_assert %r100 %r101
+  %17 = add %r96 0 : i8*
+  %r103 = load %17 : i32
+  %r104 = call %lm_box_string %str_const_193 : i64
+  %r105 = ceq %r103 %r104 : i32
+  %r106 = call %lm_box_string %str_const_194 : i64
+  call %lm_assert %r105 %r106
+  %18 = add %r96 0 : i8*
+  %r108 = load %18 : i32
+  %r110 = ceq %r108 64641 : i32
+  %r111 = call %lm_box_string %str_const_195 : i64
+  call %lm_assert %r110 %r111
+  %r113 = call %lm_box_string %str_const_196 : i64
+  call %std.url.url.URL.resolve %r4 %r113
+  add %r114 0
+  %r117 = load %19 : i32
+  %r119 = call %lm_box_string %str_const_197 : i64
+  %r118 = call %lm_rt_str_format %r119 %r117 : i64
+  call %lm_print_int %r118
+  add %r114 0
+  %r121 = load %20 : i32
+  %r123 = call %lm_box_string %str_const_198 : i64
+  %r122 = call %lm_rt_str_format %r123 %r121 : i64
+  call %lm_print_int %r122
+  add %r114 0
+  %r125 = load %21 : i32
+  %r127 = call %lm_box_string %str_const_199 : i64
+  %r126 = call %lm_rt_str_format %r127 %r125 : i64
+  call %lm_print_int %r126
+  add %r114 0
+  %r129 = load %22 : i32
+  %r130 = call %lm_box_string %str_const_200 : i64
+  %r131 = ceq %r129 %r130 : i32
+  %r132 = call %lm_box_string %str_const_201 : i64
+  call %lm_assert %r131 %r132
+  add %r114 0
+  %r134 = load %23 : i32
+  %r135 = call %lm_box_string %str_const_202 : i64
+  %r136 = ceq %r134 %r135 : i32
+  %r137 = call %lm_box_string %str_const_203 : i64
+  call %lm_assert %r136 %r137
+  add %r114 0
+  %r139 = load %24 : i32
+  %r140 = call %lm_box_string %str_const_204 : i64
+  %r141 = ceq %r139 %r140 : i32
+  %r142 = call %lm_box_string %str_const_205 : i64
+  call %lm_assert %r141 %r142
+  add %r114 0
+  %r144 = load %25 : i32
+  %r145 = call %lm_box_string %str_const_206 : i64
+  %r146 = ceq %r144 %r145 : i32
+  %r147 = call %lm_box_string %str_const_207 : i64
+  call %lm_assert %r146 %r147
+  add %r114 0
+  %r149 = load %26 : i32
+  %r150 = call %lm_box_string %str_const_208 : i64
+  %r151 = ceq %r149 %r150 : i32
+  %r152 = call %lm_box_string %str_const_209 : i64
+  call %lm_assert %r151 %r152
+  call %std.url.url.URL.origin %r4
+  %r155 = call %lm_box_string %str_const_210 : i64
+  %r156 = ceq %r154 %r155 : i32
+  %r157 = call %lm_box_string %str_const_211 : i64
+  call %lm_assert %r156 %r157
+  call %std.url.url.URL.origin %r43
+  %r160 = call %lm_box_string %str_const_212 : i64
+  %r161 = ceq %r159 %r160 : i32
+  %r162 = call %lm_box_string %str_const_213 : i64
+  call %lm_assert %r161 %r162
+  %r164 = call %lm_box_string %str_const_214 : i64
+  call %lm_print_int %r164
+  ret 9
+}
+
+function std.url.builder.URLBuilder.set_host(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.builder.URLBuilder.set_port(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.QueryParams.get(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.builder.URLBuilder.set_fragment(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.query.index_of(i64, i64) {
+@entry
+@block_0
+  jmp %block_2
+@block_2
+  call %lm_list_len %0
+  call %lm_list_len %1
+  sub %r3 %r4
+  %r6 = csle 1 %r5 : i32
+  br %r6 %block_7 %block_19
+@block_7
+  jmp %block_7
+  call %lm_list_len %1
+  call %lm_list_len %1
+  %r10 = add 1 %r9 : i64
+  call %substring %0 1 %r10
+  %r12 = ceq %r11 %1 : i32
+  br %r12 %block_13 %block_14
+@block_13
+  jmp %block_13
+  ret 1
+@block_14
+  %r16 = add 1 9 : i64
+  jmp %block_2
+@block_19
+  %r18 = neg 9 : i64
+  ret %r18
+}
+
+function std.url.builder.URLBuilder.set_username(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.url.builder.URLBuilder.build(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_list_len(i64) {
+}
+
+function substring(i64, i64, i64) {
+}
+
+function lm_str_concat(i8*, i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_to_string(i64) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_rt_str_format(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}

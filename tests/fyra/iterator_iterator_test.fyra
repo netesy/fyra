@@ -1,0 +1,287 @@
+global %str_const_0 = "twice"
+global %str_const_1 = "even"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.iterator.__init__
+  call %main
+  ret 0
+}
+
+function std.iterator.cycle(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.iterator.CycleIterator.init %r1 %0
+  ret %r1
+}
+
+function std.iterator.chunk(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.iterator.ChunkIterator.init %r2 %0 %1
+  ret %r2
+}
+
+function std.iterator.filter(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.iterator.FilterIterator.init %r2 %0 %1
+  ret %r2
+}
+
+function std.iterator.iterator(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.iterator.ListIterator.init %r1 %0
+  ret %r1
+}
+
+function std.iterator.collect(i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  jmp %block_5
+@block_5
+  %r6 = cne 0 2 : i32
+  br %r6 %block_8 %block_12
+@block_8
+  jmp %block_8
+  call %lm_list_append %r1 0
+  jmp %block_5
+@block_12
+  ret %r1
+}
+
+function std.iterator.PeekableIterator.peek(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.CycleIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChunkIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChunkIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.StepByIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChainIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.MapIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.SkipIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.PeekableIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.MapIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.__init__() {
+@entry
+  ret 0
+}
+
+function std.iterator.ZipIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChainIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.TakeIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.map(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.iterator.MapIterator.init %r2 %0 %1
+  ret %r2
+}
+
+function std.iterator.ListIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.EnumerateIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.PeekableIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function twice(i64) {
+@entry
+@block_0
+  %r2 = mul %0 17 : i64
+  ret %r2
+}
+
+function even(i64) {
+@entry
+@block_0
+  %r2 = rem %0 17 : i64
+  %r4 = ceq %r2 1 : i32
+  ret %r4
+}
+
+function std.iterator.CycleIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.FilterIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ZipIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.StepByIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function main() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %lm_list_append %r0 9
+  call %lm_list_append %r0 17
+  call %lm_list_append %r0 25
+  call %std.iterator.iterator %r0
+  %r11 = cne 0 9 : i32
+  br %r11 %block_13 %block_15
+@block_13
+  jmp %block_13
+  ret 9
+@block_15
+  call %lm_list_new 0
+  call %lm_list_append %r14 9
+  call %lm_list_append %r14 17
+  call %std.iterator.iterator %r14
+  %r20 = call %lm_box_string %str_const_0 : i64
+  call %std.iterator.map %r19 %r20
+  call %std.iterator.collect %r21
+  call %lm_list_get %r23 9
+  %r28 = cne %r26 33 : i32
+  br %r28 %block_31 %block_33
+@block_31
+  jmp %block_31
+  ret 17
+@block_33
+  call %lm_list_new 0
+  call %lm_list_append %r31 9
+  call %lm_list_append %r31 17
+  call %lm_list_append %r31 25
+  call %std.iterator.iterator %r31
+  %r39 = call %lm_box_string %str_const_1 : i64
+  call %std.iterator.filter %r38 %r39
+  %r44 = cne 0 17 : i32
+  br %r44 %block_48 %block_50
+@block_48
+  jmp %block_48
+  ret 25
+@block_50
+  call %lm_list_new 0
+  call %lm_list_append %r47 9
+  call %lm_list_append %r47 17
+  call %lm_list_append %r47 25
+  call %std.iterator.iterator %r47
+  call %std.iterator.chunk %r54 17
+  call %lm_list_new 0
+  call %lm_list_append %r60 41
+  call %std.iterator.cycle %r60
+  %r67 = cne 0 41 : i32
+  br %r67 %block_72 %block_74
+@block_72
+  jmp %block_72
+  ret 33
+@block_74
+  ret 1
+}
+
+function std.iterator.TakeIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.SkipIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ListIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.FilterIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.EnumerateIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}
+
+function lm_list_len(i64) {
+}

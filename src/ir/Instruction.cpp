@@ -33,7 +33,7 @@ static void printValue(std::ostream& os, Value* v) {
 }
 
 void Instruction::print(std::ostream& os) const {
-    if (!getName().empty()) {
+    if (!getName().empty() && getType() && !getType()->isVoidTy()) {
         os << "%" << getName() << " = ";
     }
 
@@ -133,13 +133,16 @@ void Instruction::print(std::ostream& os) const {
         if (operand) printValue(os, operand->get());
         else os << "null_use";
     }
+    if (getType() && !getType()->isVoidTy()) {
+        os << " : " << getType()->toString();
+    }
 }
 
 SyscallInstruction::SyscallInstruction(Type* ty, const std::vector<Value*>& operands, SyscallId id, BasicBlock* parent)
     : Instruction(ty, Syscall, operands, parent), id(id) {}
 
 void SyscallInstruction::print(std::ostream& os) const {
-    if (!getName().empty()) {
+    if (!getName().empty() && getType() && !getType()->isVoidTy()) {
         os << "%" << getName() << " = ";
     }
     os << "syscall";
@@ -154,6 +157,9 @@ void SyscallInstruction::print(std::ostream& os) const {
         if (i < getOperands().size() - 1) os << ", ";
     }
     os << ")";
+    if (getType() && !getType()->isVoidTy()) {
+        os << " : " << getType()->toString();
+    }
 }
 
 ExternCallInstruction::ExternCallInstruction(Type* ty, const std::vector<Value*>& operands, const std::string& capability, BasicBlock* parent)
@@ -165,7 +171,7 @@ ExternCallInstruction::ExternCallInstruction(Type* ty, const std::vector<Value*>
 }
 
 void ExternCallInstruction::print(std::ostream& os) const {
-    if (!getName().empty()) {
+    if (!getName().empty() && getType() && !getType()->isVoidTy()) {
         os << "%" << getName() << " = ";
     }
     os << "extern " << capability << "(";
@@ -178,6 +184,9 @@ void ExternCallInstruction::print(std::ostream& os) const {
         if (i < getOperands().size() - 1) os << ", ";
     }
     os << ")";
+    if (getType() && !getType()->isVoidTy()) {
+        os << " : " << getType()->toString();
+    }
 }
 
 } // namespace ir

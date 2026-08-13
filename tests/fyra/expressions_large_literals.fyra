@@ -1,0 +1,183 @@
+global %str_const_0 = "=== Large Literal Tests ==="
+global %str_const_1 = "---------Large literal test:------------"
+global %str_const_2 = "Max I64:"
+global %str_const_3 = "Max U64:"
+global %str_const_4 = "Large Float:"
+global %str_const_5 = "Max i64 should be 9223372036854775807"
+global %str_const_6 = "Max u64 should be 18446744073709551615"
+global %str_const_7 = "Large float should be 1.7976931348623157e+308"
+global %str_const_8 = "-------Small literal test:-----------"
+global %str_const_9 = "Small Float:"
+global %str_const_10 = "Tiny Float:"
+global %str_const_11 = "Small float should be 2.2250738585072014e-308"
+global %str_const_12 = "Tiny float should be 1e-100"
+global %str_const_13 = "------Negative large literal test: -------"
+global %str_const_14 = "Negative Large I64:"
+global %str_const_15 = "Negative Large Float:"
+global %str_const_16 = "Positive large integer should be 123456789"
+global %str_const_17 = "Negative large integer should be -123456789"
+global %str_const_18 = "Negative large float should be -1.7976931348623157e+308"
+global %str_const_19 = "------Arithmetic with large literals:------"
+global %str_const_20 = "Sum large:"
+global %str_const_21 = "Diff large:"
+global %str_const_22 = "Product large:"
+global %str_const_23 = "Sum of large integers should work"
+global %str_const_24 = "Product of large integers should work"
+global %str_const_25 = "------Comparisons with large literals:----"
+global %str_const_26 = "maxI64 > posLarge:"
+global %str_const_27 = "negLarge < posLarge:"
+global %str_const_28 = "largeFloat > 0.0:"
+global %str_const_29 = "maxI64 should be greater than posLarge"
+global %str_const_30 = "negLarge should be less than posLarge"
+global %str_const_31 = "largeFloat should be greater than 0.0"
+global %str_const_32 = "=== Large Literal Tests Complete ==="
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r5 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r5
+  %r7 = call %lm_box_string %str_const_2 : i64
+  call %lm_print_int %r7 2
+  %r9 = call %lm_box_string %str_const_3 : i64
+  call %lm_print_int %r9 2
+  %r11 = call %lm_box_string %str_const_4 : i64
+  call %lm_print_int %r11 2
+  %r14 = ceq 2 2 : i32
+  %r15 = call %lm_box_string %str_const_5 : i64
+  call %lm_assert %r14 %r15
+  %r18 = ceq 2 2 : i32
+  %r20 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r18 %r20
+  %r23 = ceq 2 2 : i32
+  %r24 = call %lm_box_string %str_const_7 : i64
+  call %lm_assert %r23 %r24
+  %r28 = call %lm_box_string %str_const_8 : i64
+  call %lm_print_int %r28
+  %r30 = call %lm_box_string %str_const_9 : i64
+  call %lm_print_int %r30 2
+  %r32 = call %lm_box_string %str_const_10 : i64
+  call %lm_print_int %r32 2
+  %r35 = ceq 2 2 : i32
+  %r36 = call %lm_box_string %str_const_11 : i64
+  call %lm_assert %r35 %r36
+  %r39 = ceq 2 2 : i32
+  %r40 = call %lm_box_string %str_const_12 : i64
+  call %lm_assert %r39 %r40
+  %r44 = neg 987654313 : i64
+  %r47 = neg 2 : i64
+  %r49 = call %lm_box_string %str_const_13 : i64
+  call %lm_print_int %r49
+  %r51 = call %lm_box_string %str_const_14 : i64
+  call %lm_print_int %r51 %r44
+  %r53 = call %lm_box_string %str_const_15 : i64
+  call %lm_print_int %r53 %r47
+  %r56 = ceq 987654313 987654313 : i32
+  %r57 = call %lm_box_string %str_const_16 : i64
+  call %lm_assert %r56 %r57
+  %r60 = neg 987654313 : i64
+  %r61 = ceq %r44 %r60 : i32
+  %r62 = call %lm_box_string %str_const_17 : i64
+  call %lm_assert %r61 %r62
+  %r65 = neg 2 : i64
+  %r66 = ceq %r47 %r65 : i32
+  %r67 = call %lm_box_string %str_const_18 : i64
+  call %lm_assert %r66 %r67
+  %r71 = add 987654313 7012345689 : i64
+  %r73 = sub 2 987654313 : i64
+  %r76 = mul 987654313 8001 : i64
+  %r78 = call %lm_box_string %str_const_19 : i64
+  call %lm_print_int %r78
+  %r80 = call %lm_box_string %str_const_20 : i64
+  call %lm_print_int %r80 %r71
+  %r82 = call %lm_box_string %str_const_21 : i64
+  call %lm_print_int %r82 %r73
+  %r84 = call %lm_box_string %str_const_22 : i64
+  call %lm_print_int %r84 %r76
+  %r87 = ceq %r71 8000000001 : i32
+  %r88 = call %lm_box_string %str_const_23 : i64
+  call %lm_assert %r87 %r88
+  %r91 = ceq %r76 987654312001 : i32
+  %r92 = call %lm_box_string %str_const_24 : i64
+  call %lm_assert %r91 %r92
+  %r94 = csgt 2 987654313 : i32
+  %r96 = cslt %r44 987654313 : i32
+  %r99 = csgt 2 2 : i32
+  %r101 = call %lm_box_string %str_const_25 : i64
+  call %lm_print_int %r101
+  %r103 = call %lm_box_string %str_const_26 : i64
+  call %lm_print_int %r103 %r94
+  %r105 = call %lm_box_string %str_const_27 : i64
+  call %lm_print_int %r105 %r96
+  %r107 = call %lm_box_string %str_const_28 : i64
+  call %lm_print_int %r107 %r99
+  %r110 = ceq %r94 18 : i32
+  %r111 = call %lm_box_string %str_const_29 : i64
+  call %lm_assert %r110 %r111
+  %r114 = ceq %r96 18 : i32
+  %r115 = call %lm_box_string %str_const_30 : i64
+  call %lm_assert %r114 %r115
+  %r118 = ceq %r99 18 : i32
+  %r119 = call %lm_box_string %str_const_31 : i64
+  call %lm_assert %r118 %r119
+  %r121 = call %lm_box_string %str_const_32 : i64
+  call %lm_print_int %r121
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}

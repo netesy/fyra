@@ -19,6 +19,24 @@ void Function::addParameter(std::unique_ptr<Parameter> p) {
 }
 
 void Function::print(std::ostream& os) const {
+    int unnamed_counter = 0;
+    // Pre-pass to name all unnamed instructions
+    
+    for (const auto& param : parameters) {
+        if (param && param->getName().empty()) {
+            param->setName(std::to_string(unnamed_counter++));
+        }
+    }
+    
+    for (const auto& bb : basicBlocks) {
+        if (bb) {
+            for (const auto& inst : bb->getInstructions()) {
+                if (inst && inst->getName().empty()) {
+                    inst->setName(std::to_string(unnamed_counter++));
+                }
+            }
+        }
+    }
     os << "function " << getName() << "(";
     bool first = true;
     for (const auto& param : parameters) {

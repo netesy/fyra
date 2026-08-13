@@ -1,0 +1,222 @@
+global %str_const_0 = "=== Option Type Tests ==="
+global %str_const_1 = "
+--- Test 1: Basic Option Types ---"
+global %str_const_2 = "
+--- Test 2: Option-like Union Types ---"
+global %str_const_3 = "None"
+global %str_const_4 = "hello"
+global %str_const_5 = "Maybe int (value): %s"
+global %str_const_6 = "Maybe string (value): %s"
+global %str_const_7 = "None representation: %s"
+global %str_const_8 = "
+--- Test 3: Optional Parameter Simulation ---"
+global %str_const_9 = "Alice"
+global %str_const_10 = "
+--- Test 4: Option-like Return Types ---"
+global %str_const_11 = "Search result (found): %s"
+global %str_const_12 = "Search result (not found): %s"
+global %str_const_13 = "
+--- Test 5: Chained Optional Operations ---"
+global %str_const_14 = "Chain result 1: %s"
+global %str_const_15 = "Chain result 2: %s"
+global %str_const_16 = "
+--- Test 6: Error Handling Compatibility ---"
+global %str_const_17 = "Safe divide (success): %s"
+global %str_const_18 = "Safe divide (error): %s"
+global %str_const_19 = "
+--- Test 7: Nested Option-like Types ---"
+global %str_const_20 = "nested"
+global %str_const_21 = "Nested option 1: %s"
+global %str_const_22 = "Nested option 2: %s"
+global %str_const_23 = "Nested option 3: %s"
+global %str_const_24 = "
+=== Option Type Tests Complete ==="
+global %str_const_25 = "division by zero"
+global %str_const_26 = "too small"
+global %str_const_27 = "Hello, %s!"
+global %str_const_28 = "Hello, stranger!"
+global %str_const_29 = "not found"
+global %str_minus = "-"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r2
+  %r4 = call %lm_box_string %str_const_2 : i64
+  call %lm_print_int %r4
+  %r6 = call %lm_box_string %str_const_3 : i64
+  %r8 = call %lm_box_string %str_const_4 : i64
+  %r10 = call %lm_box_string %str_const_5 : i64
+  %r9 = call %lm_rt_str_format %r10 337 : i64
+  call %lm_print_int %r9
+  %r13 = call %lm_box_string %str_const_6 : i64
+  %r12 = call %lm_rt_str_format %r13 %r8 : i64
+  call %lm_print_int %r12
+  %r16 = call %lm_box_string %str_const_7 : i64
+  %r15 = call %lm_rt_str_format %r16 %r6 : i64
+  call %lm_print_int %r15
+  %r18 = call %lm_box_string %str_const_8 : i64
+  call %lm_print_int %r18
+  %r20 = call %lm_box_string %str_const_9 : i64
+  call %greetOptional %r20
+  %r22 = call %lm_box_string %str_const_10 : i64
+  call %lm_print_int %r22
+  call %findInArray 41
+  %r28 = neg 9 : i64
+  call %findInArray %r28
+  %r32 = call %lm_box_string %str_const_11 : i64
+  %r31 = call %lm_rt_str_format %r32 %r25 : i64
+  call %lm_print_int %r31
+  %r35 = call %lm_box_string %str_const_12 : i64
+  %r34 = call %lm_rt_str_format %r35 %r29 : i64
+  call %lm_print_int %r34
+  %r37 = call %lm_box_string %str_const_13 : i64
+  call %lm_print_int %r37
+  call %chainOptional 121
+  call %chainOptional 41
+  %r46 = call %lm_box_string %str_const_14 : i64
+  %r45 = call %lm_rt_str_format %r46 %r40 : i64
+  call %lm_print_int %r45
+  %r49 = call %lm_box_string %str_const_15 : i64
+  %r48 = call %lm_rt_str_format %r49 %r43 : i64
+  call %lm_print_int %r48
+  %r51 = call %lm_box_string %str_const_16 : i64
+  call %lm_print_int %r51
+  call %safeDivide 81 17
+  call %safeDivide 81 1
+  %r62 = call %lm_box_string %str_const_17 : i64
+  %r61 = call %lm_rt_str_format %r62 %r55 : i64
+  call %lm_print_int %r61
+  %r65 = call %lm_box_string %str_const_18 : i64
+  %r64 = call %lm_rt_str_format %r65 %r59 : i64
+  call %lm_print_int %r64
+  %r67 = call %lm_box_string %str_const_19 : i64
+  call %lm_print_int %r67
+  %r70 = call %lm_box_string %str_const_20 : i64
+  %r73 = call %lm_box_string %str_const_21 : i64
+  %r72 = call %lm_rt_str_format %r73 337 : i64
+  call %lm_print_int %r72
+  %r76 = call %lm_box_string %str_const_22 : i64
+  %r75 = call %lm_rt_str_format %r76 %r70 : i64
+  call %lm_print_int %r75
+  %r79 = call %lm_box_string %str_const_23 : i64
+  %r78 = call %lm_rt_str_format %r79 18 : i64
+  call %lm_print_int %r78
+  %r81 = call %lm_box_string %str_const_24 : i64
+  call %lm_print_int %r81
+  ret 0
+}
+
+function safeDivide(i64, i64) {
+@entry
+@block_0
+  %r3 = cne %1 1 : i32
+  br %r3 %block_3 %block_5
+@block_3
+  jmp %block_3
+  %r5 = div %0 %1 : i64
+  ret %r5
+@block_5
+  %r6 = call %lm_box_string %str_const_25 : i64
+  ret %r6
+}
+
+function chainOptional(i64) {
+@entry
+@block_0
+  call %processOptional %0
+  ret %r1
+}
+
+function processOptional(i64) {
+@entry
+@block_0
+  %r2 = csgt %0 81 : i32
+  br %r2 %block_3 %block_6
+@block_3
+  jmp %block_3
+  %r5 = mul %0 17 : i64
+  ret %r5
+@block_6
+  %r6 = call %lm_box_string %str_const_26 : i64
+  ret %r6
+}
+
+function greetOptional(i64) {
+@entry
+@block_0
+  %r1 = cne %0 1 : i32
+  br %r1 %block_3 %block_7
+@block_3
+  jmp %block_3
+  %r4 = call %lm_box_string %str_const_27 : i64
+  %r3 = call %lm_rt_str_format %r4 %0 : i64
+  call %lm_print_int %r3
+  jmp %block_10
+@block_7
+  %r6 = call %lm_box_string %str_const_28 : i64
+  call %lm_print_int %r6
+  jmp %block_10
+@block_10
+  ret 0
+}
+
+function findInArray(i64) {
+@entry
+@block_0
+  %r2 = csgt %0 1 : i32
+  br %r2 %block_3 %block_4
+@block_3
+  jmp %block_3
+  ret 0
+@block_4
+  %r4 = call %lm_box_string %str_const_29 : i64
+  ret %r4
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_rt_str_format(i64, i64) {
+}

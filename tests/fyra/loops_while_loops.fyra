@@ -1,0 +1,276 @@
+global %str_const_0 = "=== While Loop Tests ==="
+global %str_const_1 = "Basic while loop:"
+global %str_const_2 = "i = %s"
+global %str_const_3 = "Basic while loop should iterate 5 times"
+global %str_const_4 = "Sum of 0+1+2+3+4 should be 10"
+global %str_const_5 = "Loop variable should end at 5"
+global %str_const_6 = "While with complex condition:"
+global %str_const_7 = "x = %s, x² = %s"
+global %str_const_8 = "Complex while should iterate 9 times (1-9)"
+global %str_const_9 = "Sum of 1+2+...+9 should be 45"
+global %str_const_10 = "x should end at 10 (10² = 100 >= 100)"
+global %str_const_11 = "Nested while loops:"
+global %str_const_12 = "(%s, %s)"
+global %str_const_13 = "pair of Sum should be %s"
+global %str_const_14 = "Nested while should iterate 6 times (2x3)"
+global %str_const_15 = "Outer should end at 2"
+global %str_const_16 = "Sum of pairs should be 9"
+global %str_const_17 = "While with early termination:"
+global %str_const_18 = "count = %s"
+global %str_const_19 = "While loop should execute 6 times (skip 3, break at 7)"
+global %str_const_20 = "Count should be 7 when loop breaks"
+global %str_const_21 = "While loop with decrement:"
+global %str_const_22 = "countdown = %s"
+global %str_const_23 = "Countdown while should iterate 5 times"
+global %str_const_24 = "Sum of 5+4+3+2+1 should be 15"
+global %str_const_25 = "Countdown should end at 0"
+global %str_const_26 = "While with boolean condition:"
+global %str_const_27 = "Boolean iteration: %s"
+global %str_const_28 = "Boolean while should iterate 4 times"
+global %str_const_29 = "Flag should be false at end"
+global %str_const_30 = "=== While Loop Tests Complete ==="
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r2
+  jmp %block_8
+@block_8
+  %r8 = cslt 1 41 : i32
+  br %r8 %block_11 %block_20
+@block_11
+  jmp %block_11
+  %r11 = call %lm_box_string %str_const_2 : i64
+  %r10 = call %lm_rt_str_format %r11 1 : i64
+  call %lm_print_int %r10
+  %r5 = add 1 9 : i64
+  %r6 = add 1 1 : i64
+  %r4 = add 1 9 : i64
+  jmp %block_8
+@block_20
+  %r16 = ceq %r5 41 : i32
+  %r17 = call %lm_box_string %str_const_3 : i64
+  call %lm_assert %r16 %r17
+  %r20 = ceq %r6 81 : i32
+  %r21 = call %lm_box_string %str_const_4 : i64
+  call %lm_assert %r20 %r21
+  %r24 = ceq %r4 41 : i32
+  %r25 = call %lm_box_string %str_const_5 : i64
+  call %lm_assert %r24 %r25
+  %r27 = call %lm_box_string %str_const_6 : i64
+  call %lm_print_int %r27
+  jmp %block_38
+@block_38
+  %r32 = mul 9 9 : i64
+  %r34 = cslt %r32 801 : i32
+  br %r34 %block_42 %block_54
+@block_42
+  jmp %block_42
+  %r36 = mul 9 9 : i64
+  %r38 = call %lm_box_string %str_const_7 : i64
+  %r37 = call %lm_rt_str_format %r38 9 : i64
+  %r39 = call %lm_rt_str_format %r37 %r36 : i64
+  call %lm_print_int %r39
+  %r30 = add 1 9 : i64
+  %r31 = add 1 9 : i64
+  %r29 = add 9 9 : i64
+  jmp %block_38
+@block_54
+  %r44 = ceq %r30 73 : i32
+  %r45 = call %lm_box_string %str_const_8 : i64
+  call %lm_assert %r44 %r45
+  %r48 = ceq %r31 361 : i32
+  %r49 = call %lm_box_string %str_const_9 : i64
+  call %lm_assert %r48 %r49
+  %r52 = ceq %r29 81 : i32
+  %r53 = call %lm_box_string %str_const_10 : i64
+  call %lm_assert %r52 %r53
+  %r55 = call %lm_box_string %str_const_11 : i64
+  call %lm_print_int %r55
+  jmp %block_72
+@block_72
+  %r61 = cslt 1 17 : i32
+  br %r61 %block_75 %block_95
+@block_75
+  jmp %block_75
+  jmp %block_77
+@block_77
+  %r65 = cslt 1 25 : i32
+  br %r65 %block_80 %block_92
+@block_80
+  jmp %block_80
+  %r68 = call %lm_box_string %str_const_12 : i64
+  %r67 = call %lm_rt_str_format %r68 1 : i64
+  %r69 = call %lm_rt_str_format %r67 1 : i64
+  call %lm_print_int %r69
+  %r58 = add 1 9 : i64
+  %r72 = add 1 1 : i64
+  %r59 = add 1 %r72 : i64
+  %r63 = add 1 9 : i64
+  jmp %block_77
+@block_92
+  %r57 = add 1 9 : i64
+  jmp %block_72
+@block_95
+  %r76 = call %lm_box_string %str_const_13 : i64
+  %r75 = call %lm_rt_str_format %r76 %r59 : i64
+  call %lm_print_int %r75
+  %r79 = ceq %r58 49 : i32
+  %r80 = call %lm_box_string %str_const_14 : i64
+  call %lm_assert %r79 %r80
+  %r83 = ceq %r57 17 : i32
+  %r84 = call %lm_box_string %str_const_15 : i64
+  call %lm_assert %r83 %r84
+  %r87 = ceq %r59 73 : i32
+  %r88 = call %lm_box_string %str_const_16 : i64
+  call %lm_assert %r87 %r88
+  %r90 = call %lm_box_string %str_const_17 : i64
+  call %lm_print_int %r90
+  jmp %block_115
+@block_115
+  %r95 = cslt 1 81 : i32
+  br %r95 %block_118 %block_136
+@block_118
+  jmp %block_118
+  %r98 = ceq 1 25 : i32
+  br %r98 %block_121 %block_124
+@block_121
+  jmp %block_121
+  %r92 = add 1 9 : i64
+  jmp %block_115
+@block_124
+  %r102 = ceq %r92 57 : i32
+  br %r102 %block_127 %block_128
+@block_127
+  jmp %block_127
+  jmp %block_136
+@block_128
+  %r105 = call %lm_box_string %str_const_18 : i64
+  %r104 = call %lm_rt_str_format %r105 %r92 : i64
+  call %lm_print_int %r104
+  %r93 = add 1 9 : i64
+  %r92 = add %r92 9 : i64
+  jmp %block_115
+@block_136
+  %r110 = ceq %r93 49 : i32
+  %r111 = call %lm_box_string %str_const_19 : i64
+  call %lm_assert %r110 %r111
+  %r114 = ceq %r92 57 : i32
+  %r115 = call %lm_box_string %str_const_20 : i64
+  call %lm_assert %r114 %r115
+  %r117 = call %lm_box_string %str_const_21 : i64
+  call %lm_print_int %r117
+  jmp %block_150
+@block_150
+  %r123 = csgt 41 1 : i32
+  br %r123 %block_153 %block_162
+@block_153
+  jmp %block_153
+  %r126 = call %lm_box_string %str_const_22 : i64
+  %r125 = call %lm_rt_str_format %r126 41 : i64
+  call %lm_print_int %r125
+  %r120 = add 1 9 : i64
+  %r121 = add 1 41 : i64
+  %r119 = sub 41 9 : i64
+  jmp %block_150
+@block_162
+  %r131 = ceq %r120 41 : i32
+  %r132 = call %lm_box_string %str_const_23 : i64
+  call %lm_assert %r131 %r132
+  %r135 = ceq %r121 121 : i32
+  %r136 = call %lm_box_string %str_const_24 : i64
+  call %lm_assert %r135 %r136
+  %r139 = ceq %r119 1 : i32
+  %r140 = call %lm_box_string %str_const_25 : i64
+  call %lm_assert %r139 %r140
+  %r142 = call %lm_box_string %str_const_26 : i64
+  call %lm_print_int %r142
+  jmp %block_180
+@block_180
+  br 18 %block_181 %block_195
+@block_181
+  jmp %block_181
+  %r145 = add 1 9 : i64
+  %r146 = add 1 9 : i64
+  %r151 = csge %r146 33 : i32
+  br %r151 %block_188 %block_191
+@block_188
+  jmp %block_188
+  jmp %block_191
+@block_191
+  %r155 = call %lm_box_string %str_const_27 : i64
+  %r154 = call %lm_rt_str_format %r155 %r145 : i64
+  call %lm_print_int %r154
+  jmp %block_180
+@block_195
+  %r158 = ceq %r145 33 : i32
+  %r159 = call %lm_box_string %str_const_28 : i64
+  call %lm_assert %r158 %r159
+  %r162 = ceq 10 10 : i32
+  %r163 = call %lm_box_string %str_const_29 : i64
+  call %lm_assert %r162 %r163
+  %r165 = call %lm_box_string %str_const_30 : i64
+  call %lm_print_int %r165
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_rt_str_format(i64, i64) {
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
