@@ -82,7 +82,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string inputFile = argv[1];
+    std::string inputFile;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if ((arg == "-o" || arg == "--target") && i + 1 < argc) {
+            i++;
+        } else if (!arg.empty() && arg[0] != '-') {
+            inputFile = arg;
+            break;
+        }
+    }
     std::string outputFile = get_arg(argc, argv, "-o");
     std::string targetTriple = get_arg(argc, argv, "--target");
     if (targetTriple.empty()) targetTriple = "x64-linux-bin"; // Default

@@ -83,7 +83,28 @@ void TargetABIRegistry::registerABI(const std::string& targetName,
 
 const ABISpecification* TargetABIRegistry::getABISpec(const std::string& targetName) const {
     auto it = abiSpecs_.find(targetName);
-    return (it != abiSpecs_.end()) ? it->second.get() : nullptr;
+    if (it != abiSpecs_.end()) return it->second.get();
+    if (targetName.find("linux") != std::string::npos) {
+        auto it2 = abiSpecs_.find("linux");
+        if (it2 != abiSpecs_.end()) return it2->second.get();
+    }
+    if (targetName.find("windows") != std::string::npos) {
+        auto it2 = abiSpecs_.find("windows");
+        if (it2 != abiSpecs_.end()) return it2->second.get();
+    }
+    if (targetName.find("aarch64") != std::string::npos) {
+        auto it2 = abiSpecs_.find("aarch64");
+        if (it2 != abiSpecs_.end()) return it2->second.get();
+    }
+    if (targetName.find("wasm") != std::string::npos) {
+        auto it2 = abiSpecs_.find("wasm32");
+        if (it2 != abiSpecs_.end()) return it2->second.get();
+    }
+    if (targetName.find("riscv") != std::string::npos) {
+        auto it2 = abiSpecs_.find("riscv64");
+        if (it2 != abiSpecs_.end()) return it2->second.get();
+    }
+    return nullptr;
 }
 
 ValidationResult TargetABIRegistry::validateABI(const std::string& targetName, 
