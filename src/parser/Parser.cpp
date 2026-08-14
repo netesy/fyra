@@ -324,8 +324,14 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
 
 void Parser::parseBasicBlock(ir::Function* func) {
     std::string labelName = currentToken.value; getNextToken();
-    ir::BasicBlock* bb = labelMap.count(labelName) ? labelMap[labelName] : builder.createBasicBlock(labelName, func);
-    labelMap[labelName] = bb;
+    ir::BasicBlock* bb = nullptr;
+    if (labelMap.count(labelName)) {
+        bb = labelMap[labelName];
+        func->moveBasicBlockToBack(bb);
+    } else {
+        bb = builder.createBasicBlock(labelName, func);
+        labelMap[labelName] = bb;
+    }
     builder.setInsertPoint(bb);
     while (currentToken.type != TokenType::Label && currentToken.type != TokenType::RCurly && currentToken.type != TokenType::Eof) {
         if (parseInstruction(bb) == nullptr) {

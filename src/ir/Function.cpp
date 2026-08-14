@@ -14,6 +14,17 @@ void Function::addBasicBlock(std::unique_ptr<BasicBlock> bb) {
     basicBlocks.push_back(std::move(bb));
 }
 
+void Function::moveBasicBlockToBack(BasicBlock* bb) {
+    for (auto it = basicBlocks.begin(); it != basicBlocks.end(); ++it) {
+        if (it->get() == bb) {
+            std::unique_ptr<BasicBlock> ptr = std::move(*it);
+            basicBlocks.erase(it);
+            basicBlocks.push_back(std::move(ptr));
+            break;
+        }
+    }
+}
+
 void Function::addParameter(std::unique_ptr<Parameter> p) {
     parameters.push_back(std::move(p));
 }

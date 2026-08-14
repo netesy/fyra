@@ -1,5 +1,6 @@
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
+#include "ir/Validator.h"
 #include "target/artifact/executable/elf.hh"
 #include "target/artifact/executable/pe.hh"
 #include "target/artifact/executable/macho.hh"
@@ -164,6 +165,18 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::cout << "--- Parsing complete. ---\n" << std::flush;
+
+    // Validate IR Correctness
+    std::cout << "--- Validating IR correctness ---\n" << std::flush;
+    std::vector<std::string> irErrors;
+    if (!ir::Validator::validateModule(*module, irErrors)) {
+        std::cerr << "IR Validation Failed! Detected " << irErrors.size() << " errors:\n";
+        for (const auto& err : irErrors) {
+            std::cerr << "  - " << err << "\n";
+        }
+        return 1;
+    }
+    std::cout << "--- IR Validation Successful! ---\n" << std::flush;
 
     // 2. Run Optimization Pipeline
     std::cout << "--- Running Optimization Pipeline (-O" << optimizationLevel << ") ---\n" << std::flush;

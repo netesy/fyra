@@ -437,7 +437,20 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
     std::string al = (abi == X64ABI::SystemV) ? "%al" : "al";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
-        std::string set; switch(i.getOpcode()){case ir::Instruction::Ceq:set="sete";break;case ir::Instruction::Cne:set="setne";break;case ir::Instruction::Cslt:set="setl";break;case ir::Instruction::Csle:set="setle";break;case ir::Instruction::Csgt:set="setg";break;case ir::Instruction::Csge:set="setge";break;default:set="sete";break;}
+        std::string set;
+        switch (i.getOpcode()) {
+            case ir::Instruction::Ceq:  set = "sete"; break;
+            case ir::Instruction::Cne:  set = "setne"; break;
+            case ir::Instruction::Cslt: set = "setl"; break;
+            case ir::Instruction::Csle: set = "setle"; break;
+            case ir::Instruction::Csgt: set = "setg"; break;
+            case ir::Instruction::Csge: set = "setge"; break;
+            case ir::Instruction::Cult: set = "setb"; break;
+            case ir::Instruction::Cule: set = "setbe"; break;
+            case ir::Instruction::Cugt: set = "seta"; break;
+            case ir::Instruction::Cuge: set = "setae"; break;
+            default:                    set = "sete"; break;
+        }
         *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
         *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
         *os << "  " << set << " " << al << "\n";
@@ -448,13 +461,77 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
         cg.getAssembler().emitBytes({0x48, 0x39, 0xC8});
-        uint8_t s = 0x94; switch(i.getOpcode()){case ir::Instruction::Ceq:s=0x94;break;case ir::Instruction::Cne:s=0x95;break;case ir::Instruction::Cslt:s=0x9C;break;case ir::Instruction::Csle:s=0x9E;break;case ir::Instruction::Csgt:s=0x9F;break;case ir::Instruction::Csge:s=0x9D;break;default:s=0x94;break;}
+        uint8_t s = 0x94;
+        switch (i.getOpcode()) {
+            case ir::Instruction::Ceq:  s = 0x94; break;
+            case ir::Instruction::Cne:  s = 0x95; break;
+            case ir::Instruction::Cslt: s = 0x9C; break;
+            case ir::Instruction::Csle: s = 0x9E; break;
+            case ir::Instruction::Csgt: s = 0x9F; break;
+            case ir::Instruction::Csge: s = 0x9D; break;
+            case ir::Instruction::Cult: s = 0x92; break;
+            case ir::Instruction::Cule: s = 0x96; break;
+            case ir::Instruction::Cugt: s = 0x97; break;
+            case ir::Instruction::Cuge: s = 0x93; break;
+            default:                    s = 0x94; break;
+        }
         cg.getAssembler().emitBytes({0x0F, s, 0xC0, 0x48, 0x0F, 0xB6, 0xC0});
         emitStoreResult(cg, i, 0);
     }
 }
 
-void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* from, const ir::Type* to) {}
+void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* from, const ir::Type* to) {
+    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
+    std::string srcOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string destOp = cg.getValueAsOperand(&i);
+
+    if (auto* os = cg.getTextStream()) {
+        ir::Instruction::Opcode op = i.getOpcode();
+        if (op == ir::Instruction::ExtUB) {
+            *os << "  movzbq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtUH) {
+            *os << "  movzwq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtUW) {
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  movl " << eax << ", " << eax << "\n"; // Zero-extends %eax to %rax
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtSB) {
+            *os << "  movsbq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtSH) {
+            *os << "  movswq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtSW) {
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  cltq\n"; // Sign-extends %eax to %rax
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else {
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        }
+    } else {
+        auto& as = cg.getAssembler();
+        ir::Instruction::Opcode op = i.getOpcode();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        if (op == ir::Instruction::ExtUB) {
+            as.emitBytes({0x0F, 0xB6, 0xC0}); // movzbl eax, al
+        } else if (op == ir::Instruction::ExtUH) {
+            as.emitBytes({0x0F, 0xB7, 0xC0}); // movzwl eax, ax
+        } else if (op == ir::Instruction::ExtUW) {
+            as.emitBytes({0x89, 0xC0});       // mov eax, eax
+        } else if (op == ir::Instruction::ExtSB) {
+            as.emitBytes({0x48, 0x0F, 0xBE, 0xC0}); // movsbq rax, al
+        } else if (op == ir::Instruction::ExtSH) {
+            as.emitBytes({0x48, 0x0F, 0xBF, 0xC0}); // movswq rax, ax
+        } else if (op == ir::Instruction::ExtSW) {
+            as.emitBytes({0x48, 0x63, 0xC0});       // movslq rax, eax
+        }
+        emitStoreResult(cg, i, 0);
+    }
+}
 void X64Architecture::emitVAStart(CodeGen& cg, ir::Instruction& i) {}
 void X64Architecture::emitVAArg(CodeGen& cg, ir::Instruction& i) {}
 

@@ -234,6 +234,25 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Csle: case ir::Instruction::Csgt: case ir::Instruction::Csge:
         case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
         case ir::Instruction::Cuge: targetInfo->emitCmp(*this, instr); break;
+        case ir::Instruction::ExtUB:
+        case ir::Instruction::ExtUH:
+        case ir::Instruction::ExtUW:
+        case ir::Instruction::ExtSB:
+        case ir::Instruction::ExtSH:
+        case ir::Instruction::ExtSW:
+        case ir::Instruction::ExtS:
+        case ir::Instruction::TruncD:
+        case ir::Instruction::SWtoF:
+        case ir::Instruction::UWtoF:
+        case ir::Instruction::DToSI:
+        case ir::Instruction::DToUI:
+        case ir::Instruction::SToSI:
+        case ir::Instruction::SToUI:
+        case ir::Instruction::Sltof:
+        case ir::Instruction::Ultof:
+        case ir::Instruction::Cast:
+            targetInfo->emitCast(*this, instr, instr.getOperands()[0]->get()->getType(), instr.getType());
+            break;
         default: break;
     }
 }
@@ -337,12 +356,16 @@ void CodeGen::emitDataSection() {
                     else if (ci->getType()->getSize() == 2) *os << "  .short " << ci->getValue() << "\n";
                     else if (ci->getType()->getSize() == 4) *os << "  .long " << ci->getValue() << "\n";
                     else *os << "  .quad " << ci->getValue() << "\n";
+                } else if (auto* cs = dynamic_cast<ir::ConstantString*>(init)) {
+                    *os << "  .string \"" << cs->getValue() << "\"\n";
                 } else if (auto* ca = dynamic_cast<ir::ConstantArray*>(init)) {
                     for (auto* elem : ca->getValues()) {
                         if (auto* eci = dynamic_cast<ir::ConstantInt*>(elem)) {
                              if (eci->getType()->getSize() == 1) *os << "  .byte " << eci->getValue() << "\n";
                              else if (eci->getType()->getSize() == 4) *os << "  .long " << eci->getValue() << "\n";
                              else *os << "  .quad " << eci->getValue() << "\n";
+                        } else if (auto* ecs = dynamic_cast<ir::ConstantString*>(elem)) {
+                             *os << "  .string \"" << ecs->getValue() << "\"\n";
                         }
                     }
                 }
@@ -406,12 +429,22 @@ void CodeGen::emitDataSection() {
                     else if (ci->getType()->getSize() == 2) rodataAssembler->emitWord(ci->getValue());
                     else if (ci->getType()->getSize() == 4) rodataAssembler->emitDWord(ci->getValue());
                     else rodataAssembler->emitQWord(ci->getValue());
+                } else if (auto* cs = dynamic_cast<ir::ConstantString*>(init)) {
+                    for (char c : cs->getValue()) {
+                        rodataAssembler->emitByte(c);
+                    }
+                    rodataAssembler->emitByte(0); // Null terminator
                 } else if (auto* ca = dynamic_cast<ir::ConstantArray*>(init)) {
                     for (auto* elem : ca->getValues()) {
                         if (auto* eci = dynamic_cast<ir::ConstantInt*>(elem)) {
                              if (eci->getType()->getSize() == 1) rodataAssembler->emitByte(eci->getValue());
                              else if (eci->getType()->getSize() == 4) rodataAssembler->emitDWord(eci->getValue());
                              else rodataAssembler->emitQWord(eci->getValue());
+                        } else if (auto* ecs = dynamic_cast<ir::ConstantString*>(elem)) {
+                             for (char c : ecs->getValue()) {
+                                 rodataAssembler->emitByte(c);
+                             }
+                             rodataAssembler->emitByte(0);
                         }
                     }
                 }

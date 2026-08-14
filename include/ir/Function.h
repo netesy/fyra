@@ -22,6 +22,7 @@ public:
     const std::list<std::unique_ptr<BasicBlock>>& getBasicBlocks() const { return basicBlocks; }
 
     void addBasicBlock(std::unique_ptr<BasicBlock> bb);
+    void moveBasicBlockToBack(BasicBlock* bb);
 
     // Stack frame management
     int getStackFrameSize() const { return stackFrameSize; }
