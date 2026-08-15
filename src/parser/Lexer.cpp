@@ -68,6 +68,7 @@ Token Lexer::getNextToken() {
         static const std::map<std::string, TokenType> keywords = {
             {"function", TokenType::Keyword}, {"export", TokenType::Keyword},
             {"data", TokenType::Keyword}, {"type", TokenType::Keyword},
+            {"global", TokenType::Keyword},
             // Types
             {"w", TokenType::Keyword}, {"l", TokenType::Keyword},
             {"s", TokenType::Keyword}, {"d", TokenType::Keyword},
@@ -161,7 +162,7 @@ Token Lexer::getNextToken() {
 
     if (lastChar == '$' || lastChar == '%' || lastChar == '@' || lastChar == ':') {
         char sigil = lastChar;
-        if (isalpha(input.peek()) || input.peek() == '_') {
+        if (isalnum(input.peek()) || input.peek() == '_') {
              std::string identifier;
              lastChar = getChar();
              identifier += lastChar;
@@ -221,6 +222,7 @@ Token Lexer::getNextToken() {
         case '=': return {TokenType::Equal, "=", currentLine};
         case ':': return {TokenType::Colon, ":", currentLine}; // Note: also a sigil prefix
         case '+': return {TokenType::Plus, "+", currentLine};
+        case '*': return {TokenType::Unknown, "*", currentLine};
     }
 
     return {TokenType::Unknown, std::string(1, thisChar), currentLine};

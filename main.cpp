@@ -170,6 +170,7 @@ int main(int argc, char** argv) {
     auto error_reporter = std::make_shared<transforms::ErrorReporter>(std::cerr, false);
     
     for (auto& func : module->getFunctions()) {
+        if (func->getBasicBlocks().empty()) continue;
         transforms::CFGBuilder::run(*func);
         transforms::DominatorTree domTree; domTree.run(*func);
         transforms::DominanceFrontier domFrontier; domFrontier.run(*func, domTree);
@@ -217,7 +218,11 @@ int main(int argc, char** argv) {
     if (!error_reporter->hasCriticalErrors()) {
         if (desc->arch != target::Arch::WASM32) {
             std::cout << "--- Running Register Allocation... ---\n" << std::flush;
-            for (auto& func : module->getFunctions()) { transforms::RegAllocRewriter rewriter; rewriter.run(*func); }
+            for (auto& func : module->getFunctions()) {
+                if (func->getBasicBlocks().empty()) continue;
+                transforms::RegAllocRewriter rewriter;
+                rewriter.run(*func);
+            }
             std::cout << "--- Register Allocation complete. ---\n" << std::flush;
         }
     } else {

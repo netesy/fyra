@@ -32,6 +32,7 @@ std::unique_ptr<ir::Module> Parser::parseModule() {
             if (currentToken.value == "export" || currentToken.value == "function") parseFunction();
             else if (currentToken.value == "type") parseType();
             else if (currentToken.value == "data") parseData();
+            else if (currentToken.value == "global") parseGlobal();
             else getNextToken();
         } else if (currentToken.type == TokenType::Extern) {
             getNextToken(); std::string capability = currentToken.value;
@@ -62,7 +63,7 @@ void Parser::parseFunction() {
     if (currentToken.value == "export") { isExported = true; getNextToken(); }
     if (currentToken.type != TokenType::Keyword || currentToken.value != "function") return;
     getNextToken();
-    if (currentToken.type != TokenType::Global) return;
+    if (currentToken.type != TokenType::Global && currentToken.type != TokenType::Identifier) return;
     std::string funcName = currentToken.value;
     getNextToken();
 
@@ -76,15 +77,20 @@ void Parser::parseFunction() {
 
     if (currentToken.type == TokenType::LParen) {
         getNextToken();
+        int paramIndex = 0;
         while (currentToken.type != TokenType::RParen && currentToken.type != TokenType::Eof) {
             if (currentToken.type == TokenType::Ellipsis) { isVariadic = true; getNextToken(); break; }
-            if (currentToken.type != TokenType::Temporary) break;
-            std::string pName = currentToken.value;
-            paramNames.push_back(pName);
-            getNextToken();
-            if (currentToken.type != TokenType::Colon) break;
-            getNextToken();
-            paramTypes.push_back(parseIRType());
+            if (currentToken.type == TokenType::Temporary) {
+                std::string pName = currentToken.value;
+                paramNames.push_back(pName);
+                getNextToken();
+                if (currentToken.type == TokenType::Colon) getNextToken();
+                paramTypes.push_back(parseIRType());
+            } else {
+                paramNames.push_back(std::to_string(paramIndex));
+                paramTypes.push_back(parseIRType());
+            }
+            paramIndex++;
             if (currentToken.type == TokenType::Comma) getNextToken();
             else break;
         }
@@ -327,6 +333,13 @@ void Parser::parseBasicBlock(ir::Function* func) {
     ir::BasicBlock* bb = labelMap.count(labelName) ? labelMap[labelName] : builder.createBasicBlock(labelName, func);
     labelMap[labelName] = bb;
     builder.setInsertPoint(bb);
+
+    if (placeholders.count(labelName)) {
+        ir::Value* ph = placeholders[labelName];
+        ph->replaceAllUsesWith(bb);
+        placeholders.erase(labelName);
+        valueMap.erase(labelName);
+    }
     while (currentToken.type != TokenType::Label && currentToken.type != TokenType::RCurly && currentToken.type != TokenType::Eof) {
         if (parseInstruction(bb) == nullptr) {
              if (currentToken.type == TokenType::Eof || currentToken.type == TokenType::RCurly || currentToken.type == TokenType::Label) break;
@@ -352,9 +365,14 @@ ir::Instruction* Parser::parseCallInstruction(ir::Type* retType) {
 }
 
 ir::Value* Parser::parseValue() {
-    if (currentToken.type == TokenType::Keyword) {
+    if (currentToken.value == "null") {
+        getNextToken();
+        return new ir::Constant(context->getVoidType());
+    }
+    if (currentToken.type == TokenType::Keyword || currentToken.type == TokenType::Identifier) {
         std::string k = currentToken.value;
-        if (k == "w" || k == "l" || k == "s" || k == "d") {
+        if (k == "w" || k == "l" || k == "s" || k == "d" ||
+            k == "i64" || k == "i32" || k == "i16" || k == "i8" || k == "i1" || k == "void") {
             ir::Type* ty = parseIRType();
             ir::Value* val = parseValue();
             if (!val) return nullptr;
@@ -370,6 +388,8 @@ ir::Value* Parser::parseValue() {
     }
     if (currentToken.type == TokenType::Temporary) {
         std::string n = currentToken.value; getNextToken();
+        for (auto& gv : module->getGlobalVariables()) if (gv->getName() == n) return gv.get();
+        for (auto& f : module->getFunctions()) if (f->getName() == n) return f.get();
         if (valueMap.count(n)) {
             return valueMap[n];
         }
@@ -417,12 +437,27 @@ ir::Type* Parser::parseIRType() {
         if (currentToken.type == TokenType::RCurly) getNextToken();
         return context->getStructTypeFromElements(elements);
     }
-    if (currentToken.type == TokenType::Keyword) {
-        std::string v = currentToken.value; getNextToken();
-        if (v == "w") return context->getIntegerType(32);
-        if (v == "l") return context->getIntegerType(64);
-        if (v == "s") return context->getFloatType();
-        if (v == "d") return context->getDoubleType();
+    if (currentToken.type == TokenType::Keyword || currentToken.type == TokenType::Identifier) {
+        std::string v = currentToken.value;
+        ir::Type* baseType = nullptr;
+        if (v == "w") { baseType = context->getIntegerType(32); getNextToken(); }
+        else if (v == "l") { baseType = context->getIntegerType(64); getNextToken(); }
+        else if (v == "s") { baseType = context->getFloatType(); getNextToken(); }
+        else if (v == "d") { baseType = context->getDoubleType(); getNextToken(); }
+        else if (v.rfind("i64", 0) == 0) { baseType = context->getIntegerType(64); getNextToken(); }
+        else if (v.rfind("i32", 0) == 0) { baseType = context->getIntegerType(32); getNextToken(); }
+        else if (v.rfind("i16", 0) == 0) { baseType = context->getIntegerType(16); getNextToken(); }
+        else if (v.rfind("i8", 0) == 0) { baseType = context->getIntegerType(8); getNextToken(); }
+        else if (v.rfind("i1", 0) == 0) { baseType = context->getIntegerType(1); getNextToken(); }
+        else if (v == "void") { baseType = context->getVoidType(); getNextToken(); }
+
+        if (baseType) {
+            while (currentToken.value == "*") {
+                baseType = context->getPointerType(baseType);
+                getNextToken();
+            }
+            return baseType;
+        }
     }
     return context->getVoidType();
 }
@@ -444,6 +479,24 @@ void Parser::parseData() {
     getNextToken();
     auto* arrayType = context->getArrayType(context->getIntegerType(8), constants.size());
     auto* initializer = ir::ConstantArray::get(static_cast<ir::ArrayType*>(arrayType), constants);
+    module->addGlobalVariable(std::make_unique<ir::GlobalVariable>(arrayType, name, initializer, false, ""));
+}
+
+void Parser::parseGlobal() {
+    getNextToken(); // consume 'global'
+    if (currentToken.type != TokenType::Temporary && currentToken.type != TokenType::Global) return;
+    std::string name = currentToken.value;
+    getNextToken(); // consume %name or $name
+    consume(TokenType::Equal, "Expected =");
+    if (currentToken.type != TokenType::StringLiteral) {
+        consume(TokenType::StringLiteral, "Expected string literal");
+        return;
+    }
+    std::string value = currentToken.value;
+    getNextToken(); // consume string literal
+
+    auto* arrayType = context->getArrayType(context->getIntegerType(8), value.size() + 1);
+    auto* initializer = context->getConstantString(value);
     module->addGlobalVariable(std::make_unique<ir::GlobalVariable>(arrayType, name, initializer, false, ""));
 }
 

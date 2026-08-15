@@ -86,6 +86,18 @@ bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) 
                     }
                 }
             }
+            for (auto& inst_ptr : bb->getInstructions()) {
+                if (inst_ptr) {
+                    inst_ptr->replaceAllUsesWith(nullptr);
+                }
+            }
+            for (auto* pred : bb->getPredecessors()) {
+                pred->removeSuccessor(bb);
+            }
+            for (auto* succ : bb->getSuccessors()) {
+                succ->removePredecessor(bb);
+            }
+            bb->replaceAllUsesWith(nullptr);
             it = blocks.erase(it);
             changed = true;
             unreachable_blocks_removed_++;

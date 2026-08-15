@@ -59,3 +59,4 @@ void Module::print(std::ostream& os) const {
         os << "\n";
     }
 }
+} // namespace ir

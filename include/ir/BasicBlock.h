@@ -27,6 +27,10 @@ public:
     const std::vector<BasicBlock*>& getSuccessors() const { return successors; }
     void addPredecessor(BasicBlock* pred);
     void addSuccessor(BasicBlock* succ);
+    void removePredecessor(BasicBlock* pred);
+    void removeSuccessor(BasicBlock* succ);
+    void clearPredecessors() { predecessors.clear(); }
+    void clearSuccessors() { successors.clear(); }
 
     void removeInstructions(const std::vector<Instruction*>& to_remove);
 

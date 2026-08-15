@@ -82,7 +82,23 @@ void TargetABIRegistry::registerABI(const std::string& targetName,
 }
 
 const ABISpecification* TargetABIRegistry::getABISpec(const std::string& targetName) const {
-    auto it = abiSpecs_.find(targetName);
+    std::string normalized = targetName;
+    if (normalized.find("linux") != std::string::npos) {
+        normalized = "linux";
+    } else if (normalized.find("windows") != std::string::npos || normalized.find("win64") != std::string::npos) {
+        normalized = "windows";
+    } else if (normalized.find("aarch64") != std::string::npos) {
+        normalized = "aarch64";
+    } else if (normalized.find("wasm") != std::string::npos) {
+        normalized = "wasm32";
+    } else if (normalized.find("riscv") != std::string::npos) {
+        normalized = "riscv64";
+    }
+    auto it = abiSpecs_.find(normalized);
+    if (it != abiSpecs_.end()) {
+        return it->second.get();
+    }
+    it = abiSpecs_.find(targetName);
     return (it != abiSpecs_.end()) ? it->second.get() : nullptr;
 }
 

@@ -32,7 +32,8 @@ public:
     void addGlobalVariable(std::unique_ptr<GlobalVariable> gv);
     const std::list<std::unique_ptr<GlobalVariable>>& getGlobalVariables() const { return globalVariables; }
 
-    void addType(const std::string& name, Type* type);\n    void print(std::ostream& os) const;
+    void addType(const std::string& name, Type* type);
+    void print(std::ostream& os) const;
     Type* getType(const std::string& name) const;
 
     const std::string& getSourceFilename() const { return sourceFilename; }

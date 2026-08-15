@@ -25,6 +25,6 @@ void LoopInvariantCodeMotion::hoistInvariantInstructions(Loop& loop) {}
 bool LoopInvariantCodeMotion::dominatesAllExits(ir::Instruction* instr, const Loop& loop) { return true; }
 bool LoopInvariantCodeMotion::isExecutedOnAllPaths(ir::Instruction* instr, const Loop& loop) { return true; }
 bool LoopInvariantCodeMotion::isTerminator(ir::Instruction* instr) { return false; }
-bool LoopInvariantCodeMotion::performTransformation(ir::Function& func) { return true; }
+bool LoopInvariantCodeMotion::performTransformation(ir::Function& func) { return false; }
 bool LoopInvariantCodeMotion::validatePreconditions(ir::Function& func) { return true; }
 }
