@@ -93,12 +93,9 @@ bool ControlFlowSimplification::eliminateUnreachableBlocks(ir::Function& func) {
         ir::BasicBlock* curr = worklist.back();
         worklist.pop_back();
         
-        if (!curr || curr->getInstructions().empty()) continue;
-        ir::Instruction* term = curr->getInstructions().back().get();
-        
-        for (auto& op : term->getOperands()) {
-            if (!op) continue;
-            if (auto* next = dynamic_cast<ir::BasicBlock*>(op->get())) {
+        if (!curr) continue;
+        for (auto* next : curr->getSuccessors()) {
+            if (next) {
                 if (reachable.insert(next).second) {
                     worklist.push_back(next);
                 }
@@ -129,6 +126,18 @@ bool ControlFlowSimplification::eliminateUnreachableBlocks(ir::Function& func) {
                     }
                 }
             }
+            for (auto& inst_ptr : bb->getInstructions()) {
+                if (inst_ptr) {
+                    inst_ptr->replaceAllUsesWith(nullptr);
+                }
+            }
+            for (auto* pred : bb->getPredecessors()) {
+                pred->removeSuccessor(bb);
+            }
+            for (auto* succ : bb->getSuccessors()) {
+                succ->removePredecessor(bb);
+            }
+            bb->replaceAllUsesWith(nullptr);
             it = blocks.erase(it);
             changed = true;
             unconditional_branches_eliminated_++;

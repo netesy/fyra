@@ -96,6 +96,7 @@ void CodeGen::emit(bool forExecutable) {
 }
 
 void CodeGen::emitFunction(ir::Function& func) {
+    if (func.getBasicBlocks().empty()) return;
     currentFunction = &func;
     stackOffsets.clear();
     if (targetInfo->getName() == "wasm32" && !os) {
@@ -106,7 +107,7 @@ void CodeGen::emitFunction(ir::Function& func) {
         assembler = std::move(oldAsm);
     } else {
         if (os) {
-            *os << "\n" << func.getName() << ":\n";
+            *os << "\n.globl " << func.getName() << "\n" << func.getName() << ":\n";
         } else if (assembler) {
             SymbolInfo func_sym;
             func_sym.name = func.getName();
@@ -346,8 +347,10 @@ void CodeGen::emitDataSection() {
         }
         for (auto& gv : module.getGlobalVariables()) {
             size_t align = gv->getType()->getSize();
-            if (align > 8) align = 8;
-            if (align == 0) align = 1;
+            if (align >= 8) align = 8;
+            else if (align >= 4) align = 4;
+            else if (align >= 2) align = 2;
+            else align = 1;
             *os << ".align " << align << "\n";
             *os << gv->getName() << ":\n";
             if (auto* init = gv->getInitializer()) {
@@ -415,8 +418,10 @@ void CodeGen::emitDataSection() {
         }
         for (auto& gv : module.getGlobalVariables()) {
             size_t align = gv->getType()->getSize();
-            if (align > 8) align = 8;
-            if (align == 0) align = 1;
+            if (align >= 8) align = 8;
+            else if (align >= 4) align = 4;
+            else if (align >= 2) align = 2;
+            else align = 1;
             uint64_t offset = rodataAssembler->getCodeSize();
             while (offset % align != 0) {
                 rodataAssembler->emitByte(0);

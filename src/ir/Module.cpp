@@ -1,6 +1,5 @@
 #include "ir/Module.h"
 #include "ir/Type.h"
-#include <iostream>
 
 namespace ir {
 
@@ -41,6 +40,10 @@ Type* Module::getType(const std::string& name) const {
     return nullptr;
 }
 
+} // namespace ir
+#include <iostream>
+namespace ir {
+
 void Module::print(std::ostream& os) const {
     for (const auto& gv : globalVariables) {
         os << "global %" << gv->getName() << " = ";
@@ -56,5 +59,4 @@ void Module::print(std::ostream& os) const {
         os << "\n";
     }
 }
-
 } // namespace ir

@@ -82,29 +82,24 @@ void TargetABIRegistry::registerABI(const std::string& targetName,
 }
 
 const ABISpecification* TargetABIRegistry::getABISpec(const std::string& targetName) const {
-    auto it = abiSpecs_.find(targetName);
-    if (it != abiSpecs_.end()) return it->second.get();
-    if (targetName.find("linux") != std::string::npos) {
-        auto it2 = abiSpecs_.find("linux");
-        if (it2 != abiSpecs_.end()) return it2->second.get();
+    std::string normalized = targetName;
+    if (normalized.find("linux") != std::string::npos) {
+        normalized = "linux";
+    } else if (normalized.find("windows") != std::string::npos || normalized.find("win64") != std::string::npos) {
+        normalized = "windows";
+    } else if (normalized.find("aarch64") != std::string::npos) {
+        normalized = "aarch64";
+    } else if (normalized.find("wasm") != std::string::npos) {
+        normalized = "wasm32";
+    } else if (normalized.find("riscv") != std::string::npos) {
+        normalized = "riscv64";
     }
-    if (targetName.find("windows") != std::string::npos) {
-        auto it2 = abiSpecs_.find("windows");
-        if (it2 != abiSpecs_.end()) return it2->second.get();
+    auto it = abiSpecs_.find(normalized);
+    if (it != abiSpecs_.end()) {
+        return it->second.get();
     }
-    if (targetName.find("aarch64") != std::string::npos) {
-        auto it2 = abiSpecs_.find("aarch64");
-        if (it2 != abiSpecs_.end()) return it2->second.get();
-    }
-    if (targetName.find("wasm") != std::string::npos) {
-        auto it2 = abiSpecs_.find("wasm32");
-        if (it2 != abiSpecs_.end()) return it2->second.get();
-    }
-    if (targetName.find("riscv") != std::string::npos) {
-        auto it2 = abiSpecs_.find("riscv64");
-        if (it2 != abiSpecs_.end()) return it2->second.get();
-    }
-    return nullptr;
+    it = abiSpecs_.find(targetName);
+    return (it != abiSpecs_.end()) ? it->second.get() : nullptr;
 }
 
 ValidationResult TargetABIRegistry::validateABI(const std::string& targetName, 
