@@ -28,6 +28,7 @@ private:
     void parseFunction();
     void parseData();
     void parseType();
+    void parseGlobal();
     ir::Type* parseType_actual();
     std::vector<ir::Type*> parseStructElements();
 

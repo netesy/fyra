@@ -1,0 +1,188 @@
+global %str_const_0 = "Alice"
+global %str_const_1 = "alice@example.com"
+global %str_const_2 = "default"
+global %str_const_3 = "Hello, Alice"
+global %str_const_4 = "Frame method should work correctly"
+global %str_const_5 = "Frame method should work: 10 + 20 = 30"
+global %str_const_6 = "Frame default value should work"
+global %str_const_7 = "Frame default value should work"
+global %str_const_8 = "Frame method should work: 5 + 3 = 8"
+global %str_const_9 = "Frame init should work correctly"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = alloc 16 : i64
+  %r1 = call %lm_box_string %str_const_0 : i64
+  %0 = add %r0 0 : i64
+  store %r0 %0
+  %2 = add %r0 0 : i64
+  store %r1 %2
+  %r3 = call %lm_box_string %str_const_1 : i64
+  %4 = add %r0 0 : i64
+  store 241 %4
+  call %Person.greet %r0
+  call %lm_print_int %r5
+  %r9 = alloc 16 : i64
+  call %Point.init %r9 81 161
+  call %Point.distance %r9
+  call %lm_print_int %r12
+  %r14 = alloc 16 : i64
+  %6 = add %r14 0 : i64
+  store %r0 %6
+  %8 = add %r14 0 : i64
+  store %r1 %8
+  %r17 = call %lm_box_string %str_const_2 : i64
+  %10 = add %r14 0 : i64
+  store 241 %10
+  %12 = add %r14 0 : i64
+  %r19 = load %12 : i32
+  call %lm_print_int %r19
+  %13 = add %r14 0 : i64
+  %r21 = load %13 : i32
+  call %lm_print_int %r21
+  %r23 = alloc 16 : i64
+  call %Calculator.add %r23 41 25
+  call %lm_print_int %r27
+  %r30 = alloc 16 : i64
+  call %Resource.init %r30 985
+  call %Person.greet %r0
+  %r34 = call %lm_box_string %str_const_3 : i64
+  %r35 = ceq %r33 %r34 : i32
+  %r36 = call %lm_box_string %str_const_4 : i64
+  call %lm_assert %r35 %r36
+  call %Point.distance %r9
+  %r40 = ceq %r38 241 : i32
+  %r41 = call %lm_box_string %str_const_5 : i64
+  call %lm_assert %r40 %r41
+  %14 = add %r14 0 : i64
+  %r43 = load %14 : i32
+  %r45 = ceq %r43 10 : i32
+  %r46 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r45 %r46
+  %15 = add %r14 0 : i64
+  %r48 = load %15 : i32
+  %r50 = ceq %r48 241 : i32
+  %r51 = call %lm_box_string %str_const_7 : i64
+  call %lm_assert %r50 %r51
+  call %Calculator.add %r23 41 25
+  %r57 = ceq %r55 65 : i32
+  %r58 = call %lm_box_string %str_const_8 : i64
+  call %lm_assert %r57 %r58
+  %16 = add %r30 0 : i64
+  %r60 = load %16 : i32
+  %r62 = ceq %r60 985 : i32
+  %r63 = call %lm_box_string %str_const_9 : i64
+  call %lm_assert %r62 %r63
+  ret 0
+}
+
+function Calculator.subtract(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function Resource.deinit(i64) {
+@entry
+  ret 0
+}
+
+function Point.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function Person.greet(i64) {
+@entry
+  ret 0
+}
+
+function Calculator.add(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function BankAccount.deposit(i64, i64) {
+@entry
+  ret 0
+}
+
+function Resource.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function Calculator.multiply(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function Person.birthday(i64) {
+@entry
+  ret 0
+}
+
+function BankAccount.calculateInterest(i64) {
+@entry
+  ret 0
+}
+
+function Point.distance(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(void) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  neg %0
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}

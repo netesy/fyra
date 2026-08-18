@@ -1,0 +1,471 @@
+global %str_const_0 = " === First - Class Function Tests === "
+global %str_const_1 = "
+ --- Test 1: Functions as Variables --- "
+global %str_const_2 = "add"
+global %str_const_3 = "multiply"
+global %str_const_4 = "addFunc(3, 4) = %s"
+global %str_const_5 = "multFunc(3, 4) = %s"
+global %str_const_6 = "Function stored in variable should work correctly"
+global %str_const_7 = "Function stored in variable should work correctly"
+global %str_const_8 = "
+ --- Test 2: Functions as Parameters --- "
+global %str_const_9 = "add"
+global %str_const_10 = "multiply"
+global %str_const_11 = "applyOperation(6, 7, add) = %s"
+global %str_const_12 = "applyOperation(6, 7, multiply) = %s"
+global %str_const_13 = "Function passed as parameter should work correctly"
+global %str_const_14 = "Function passed as parameter should work correctly"
+global %str_const_15 = "
+ --- Test 3: Functions Returning Functions --- "
+global %str_const_16 = "addFive(3) = %s"
+global %str_const_17 = "addTen(7) = %s"
+global %str_const_18 = "Function returning function should work correctly"
+global %str_const_19 = "Function returning function should work correctly"
+global %str_const_20 = "
+ --- Test 4: Lambda Expressions --- "
+global %str_const_21 = "__lambda_8"
+global %str_const_22 = "__lambda_9"
+global %str_const_23 = "doubler(5) = %s"
+global %str_const_24 = "tripler(5) = %s"
+global %str_const_25 = "Lambda expression should work correctly"
+global %str_const_26 = "Lambda expression should work correctly"
+global %str_const_27 = "
+ --- Test 5: Function Composition --- "
+global %str_const_28 = "increment"
+global %str_const_29 = "square"
+global %str_const_30 = "square"
+global %str_const_31 = "increment"
+global %str_const_32 = "squareThenIncrement(4) = %s"
+global %str_const_33 = "incrementThenSquare(4) = %s"
+global %str_const_34 = "Function composition should work: (4^2)+1 = 17"
+global %str_const_35 = "Function composition should work: (4+1)^2 = 25"
+global %str_const_36 = "
+ --- Test 6: Function Collections --- "
+global %str_const_37 = "func1(5) = %s"
+global %str_const_38 = "func2(5) = %s"
+global %str_const_39 = "func3(5) = %s"
+global %str_const_40 = "Function from tuple should work: 5+1 = 6"
+global %str_const_41 = "Function from tuple should work: 5*2 = 10"
+global %str_const_42 = "Function from tuple should work: 5*5 = 25"
+global %str_const_43 = "
+ --- Test 7: Conditional Function Selection --- "
+global %str_const_44 = "addOp(3, 4) = %s"
+global %str_const_45 = "multOp(3, 4) = %s"
+global %str_const_46 = "Conditional function selection should return add function"
+global %str_const_47 = "Conditional function selection should return multiply function"
+global %str_const_48 = "
+ --- Test 8: Function Factory --- "
+global %str_const_49 = "Result"
+global %str_const_50 = "Value"
+global %str_const_51 = "Result: 20"
+global %str_const_52 = "Function factory should work correctly"
+global %str_const_53 = "Value: 15"
+global %str_const_54 = "Function factory should work correctly"
+global %str_const_55 = "
+ === First - Class Function Tests Complete === "
+global %str_const_56 = "__lambda_7"
+global %str_const_57 = "__lambda_5"
+global %str_const_58 = "__lambda_6"
+global %str_const_59 = "__lambda_0"
+global %str_const_60 = "%s: %s"
+global %str_const_61 = "__lambda_1"
+global %str_const_62 = "__lambda_2"
+global %str_const_63 = "__lambda_3"
+global %str_const_64 = "__lambda_4"
+global %str_minus = "-"
+global %nl = "
+"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r2
+  %r4 = call %lm_box_string %str_const_2 : i64
+  %r6 = call %lm_box_string %str_const_3 : i64
+  %r10 = call %r4 25 33 : i64
+  %r14 = call %r6 25 33 : i64
+  %r17 = call %lm_box_string %str_const_4 : i64
+  %r16 = call %lm_rt_str_format %r17 %r10 : i64
+  call %lm_print_int %r16
+  %r20 = call %lm_box_string %str_const_5 : i64
+  %r19 = call %lm_rt_str_format %r20 %r14 : i64
+  call %lm_print_int %r19
+  %r23 = ceq %r10 57 : i32
+  %r24 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r23 %r24
+  %r27 = ceq %r14 97 : i32
+  %r28 = call %lm_box_string %str_const_7 : i64
+  call %lm_assert %r27 %r28
+  %r30 = call %lm_box_string %str_const_8 : i64
+  call %lm_print_int %r30
+  %r34 = call %lm_box_string %str_const_9 : i64
+  call %applyOperation 49 57 %r34
+  %r39 = call %lm_box_string %str_const_10 : i64
+  call %applyOperation 49 57 %r39
+  %r43 = call %lm_box_string %str_const_11 : i64
+  %r42 = call %lm_rt_str_format %r43 %r35 : i64
+  call %lm_print_int %r42
+  %r46 = call %lm_box_string %str_const_12 : i64
+  %r45 = call %lm_rt_str_format %r46 %r40 : i64
+  call %lm_print_int %r45
+  %r49 = ceq %r35 105 : i32
+  %r50 = call %lm_box_string %str_const_13 : i64
+  call %lm_assert %r49 %r50
+  %r53 = ceq %r40 337 : i32
+  %r54 = call %lm_box_string %str_const_14 : i64
+  call %lm_assert %r53 %r54
+  %r56 = call %lm_box_string %str_const_15 : i64
+  call %lm_print_int %r56
+  call %createAdder 41
+  call %createAdder 81
+  %r65 = call %r59 25 : i64
+  %r68 = call %r62 57 : i64
+  %r71 = call %lm_box_string %str_const_16 : i64
+  %r70 = call %lm_rt_str_format %r71 %r65 : i64
+  call %lm_print_int %r70
+  %r74 = call %lm_box_string %str_const_17 : i64
+  %r73 = call %lm_rt_str_format %r74 %r68 : i64
+  call %lm_print_int %r73
+  %r77 = ceq %r65 65 : i32
+  %r78 = call %lm_box_string %str_const_18 : i64
+  call %lm_assert %r77 %r78
+  %r81 = ceq %r68 137 : i32
+  %r82 = call %lm_box_string %str_const_19 : i64
+  call %lm_assert %r81 %r82
+  %r84 = call %lm_box_string %str_const_20 : i64
+  call %lm_print_int %r84
+  %r87 = call %lm_box_string %str_const_21 : i64
+  %r90 = call %lm_box_string %str_const_22 : i64
+  %r93 = call %r87 41 : i64
+  %r96 = call %r90 41 : i64
+  %r99 = call %lm_box_string %str_const_23 : i64
+  %r98 = call %lm_rt_str_format %r99 %r93 : i64
+  call %lm_print_int %r98
+  %r102 = call %lm_box_string %str_const_24 : i64
+  %r101 = call %lm_rt_str_format %r102 %r96 : i64
+  call %lm_print_int %r101
+  %r105 = ceq %r93 81 : i32
+  %r106 = call %lm_box_string %str_const_25 : i64
+  call %lm_assert %r105 %r106
+  %r109 = ceq %r96 121 : i32
+  %r110 = call %lm_box_string %str_const_26 : i64
+  call %lm_assert %r109 %r110
+  %r112 = call %lm_box_string %str_const_27 : i64
+  call %lm_print_int %r112
+  %r114 = call %lm_box_string %str_const_28 : i64
+  %r115 = call %lm_box_string %str_const_29 : i64
+  call %compose %r114 %r115
+  %r118 = call %lm_box_string %str_const_30 : i64
+  %r119 = call %lm_box_string %str_const_31 : i64
+  call %compose %r118 %r119
+  %r123 = call %r116 33 : i64
+  %r126 = call %r120 33 : i64
+  %r129 = call %lm_box_string %str_const_32 : i64
+  %r128 = call %lm_rt_str_format %r129 %r123 : i64
+  call %lm_print_int %r128
+  %r132 = call %lm_box_string %str_const_33 : i64
+  %r131 = call %lm_rt_str_format %r132 %r126 : i64
+  call %lm_print_int %r131
+  %r135 = ceq %r123 137 : i32
+  %r136 = call %lm_box_string %str_const_34 : i64
+  call %lm_assert %r135 %r136
+  %r139 = ceq %r126 201 : i32
+  %r140 = call %lm_box_string %str_const_35 : i64
+  call %lm_assert %r139 %r140
+  %r142 = call %lm_box_string %str_const_36 : i64
+  call %lm_print_int %r142
+  call %createFunctionSet
+  %r152 = call 0 41 : i64
+  %r155 = call 0 41 : i64
+  %r158 = call 0 41 : i64
+  %r161 = call %lm_box_string %str_const_37 : i64
+  %r160 = call %lm_rt_str_format %r161 %r152 : i64
+  call %lm_print_int %r160
+  %r164 = call %lm_box_string %str_const_38 : i64
+  %r163 = call %lm_rt_str_format %r164 %r155 : i64
+  call %lm_print_int %r163
+  %r167 = call %lm_box_string %str_const_39 : i64
+  %r166 = call %lm_rt_str_format %r167 %r158 : i64
+  call %lm_print_int %r166
+  %r170 = ceq %r152 49 : i32
+  %r171 = call %lm_box_string %str_const_40 : i64
+  call %lm_assert %r170 %r171
+  %r174 = ceq %r155 81 : i32
+  %r175 = call %lm_box_string %str_const_41 : i64
+  call %lm_assert %r174 %r175
+  %r178 = ceq %r158 201 : i32
+  %r179 = call %lm_box_string %str_const_42 : i64
+  call %lm_assert %r178 %r179
+  %r181 = call %lm_box_string %str_const_43 : i64
+  call %lm_print_int %r181
+  call %selectOperation 18
+  call %selectOperation 10
+  %r191 = call %r184 25 33 : i64
+  %r195 = call %r187 25 33 : i64
+  %r198 = call %lm_box_string %str_const_44 : i64
+  %r197 = call %lm_rt_str_format %r198 %r191 : i64
+  call %lm_print_int %r197
+  %r201 = call %lm_box_string %str_const_45 : i64
+  %r200 = call %lm_rt_str_format %r201 %r195 : i64
+  call %lm_print_int %r200
+  %r204 = ceq %r191 57 : i32
+  %r205 = call %lm_box_string %str_const_46 : i64
+  call %lm_assert %r204 %r205
+  %r208 = ceq %r195 97 : i32
+  %r209 = call %lm_box_string %str_const_47 : i64
+  call %lm_assert %r208 %r209
+  %r211 = call %lm_box_string %str_const_48 : i64
+  call %lm_print_int %r211
+  %r213 = call %lm_box_string %str_const_49 : i64
+  call %createProcessor %r213 17
+  %r217 = call %lm_box_string %str_const_50 : i64
+  call %createProcessor %r217 41
+  %r222 = call %r215 81 : i8*
+  %r225 = call %r219 25 : i8*
+  call %lm_print_str %r222
+  call %lm_print_str %r225
+  %r229 = call %lm_box_string %str_const_51 : i64
+  %r230 = ceq %r222 %r229 : i32
+  %r231 = call %lm_box_string %str_const_52 : i64
+  call %lm_assert %r230 %r231
+  %r233 = call %lm_box_string %str_const_53 : i64
+  %r234 = ceq %r225 %r233 : i32
+  %r235 = call %lm_box_string %str_const_54 : i64
+  call %lm_assert %r234 %r235
+  %r237 = call %lm_box_string %str_const_55 : i64
+  call %lm_print_int %r237
+  ret 0
+}
+
+function createProcessor(i64, i64) {
+@entry
+@block_0
+  %r3 = call %lm_box_string %str_const_56 : i64
+  ret 0
+}
+
+function __lambda_8(i64) {
+@entry
+@block_0
+  %r2 = mul %0 17 : i64
+  ret %r2
+}
+
+function selectOperation(i64) {
+@entry
+@block_0
+  br %0 %block_1 %block_4
+@block_1
+  jmp %block_1
+  %r3 = call %lm_box_string %str_const_57 : i64
+  ret %r3
+@block_4
+  %r5 = call %lm_box_string %str_const_58 : i64
+  ret %r5
+}
+
+function __lambda_5(i64, i64) {
+@entry
+@block_0
+  %r2 = add %0 %1 : i64
+  ret %r2
+}
+
+function __lambda_6(i64, i64) {
+@entry
+@block_0
+  %r2 = mul %0 %1 : i64
+  ret %r2
+}
+
+function __lambda_0(i64) {
+@entry
+@block_0
+  %r6 = add %0 0 : i64
+  ret %r6
+}
+
+function increment(i64) {
+@entry
+@block_0
+  %r3 = add %0 9 : i64
+  ret %r3
+}
+
+function multiply(i64, i64) {
+@entry
+@block_0
+  %r2 = mul %0 %1 : i64
+  ret %r2
+}
+
+function __lambda_1(i64) {
+@entry
+@block_0
+  %r6 = call 0 %0 : i64
+  %r7 = call 0 %r6 : i64
+  ret %r7
+}
+
+function __lambda_4(i64) {
+@entry
+@block_0
+  %r1 = mul %0 %0 : i64
+  ret %r1
+}
+
+function __lambda_9(i64) {
+@entry
+@block_0
+  %r2 = mul %0 25 : i64
+  ret %r2
+}
+
+function __lambda_2(i64) {
+@entry
+@block_0
+  %r3 = add %0 9 : i64
+  ret %r3
+}
+
+function add(i64, i64) {
+@entry
+@block_0
+  %r2 = add %0 %1 : i64
+  ret %r2
+}
+
+function applyOperation(i64, i64, i64) {
+@entry
+@block_0
+  %r3 = call %2 %0 %1 : i64
+  ret %r3
+}
+
+function createAdder(i64) {
+@entry
+@block_0
+  %r2 = call %lm_box_string %str_const_59 : i64
+  ret 0
+}
+
+function __lambda_7(i64) {
+@entry
+@block_0
+  %r4 = mul %0 0 : i64
+  %r9 = call %lm_box_string %str_const_60 : i64
+  %r8 = call %lm_rt_str_format %r9 0 : i64
+  %r10 = call %lm_rt_str_format %r8 %r4 : i64
+  ret %r10
+}
+
+function compose(i64, i64) {
+@entry
+@block_0
+  %r3 = call %lm_box_string %str_const_61 : i64
+  ret 0
+}
+
+function square(i64) {
+@entry
+@block_0
+  %r1 = mul %0 %0 : i64
+  ret %r1
+}
+
+function __lambda_3(i64) {
+@entry
+@block_0
+  %r2 = mul %0 17 : i64
+  ret %r2
+}
+
+function createFunctionSet() {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_62 : i64
+  %r4 = call %lm_box_string %str_const_63 : i64
+  %r7 = call %lm_box_string %str_const_64 : i64
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_rt_str_format(i64, i64) {
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_print_str(i8*) {
+@entry
+  %1 = alloc 8 : i64
+  store 0 %1
+  jmp %loop
+@loop
+  %4 = load %1 : i32
+  %5 = add %0 %4 : i8*
+  %6 = loadub %5 : i32
+  %7 = ceq %6 0 : i32
+  %8 = add %4 1 : i32
+  store %8 %1
+  br %7 %done %loop
+@done
+  %11 = load %1 : i32
+  %12 = sub %11 1 : i32
+  %13 = extern io.write(i64 1, i8* %0, i32 %12) : i64
+  %14 = extern io.write(i64 1, i8* %nl, i64 1) : i64
+  ret null
+}

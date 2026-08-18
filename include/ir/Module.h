@@ -33,6 +33,7 @@ public:
     const std::list<std::unique_ptr<GlobalVariable>>& getGlobalVariables() const { return globalVariables; }
 
     void addType(const std::string& name, Type* type);
+    void print(std::ostream& os) const;
     Type* getType(const std::string& name) const;
 
     const std::string& getSourceFilename() const { return sourceFilename; }

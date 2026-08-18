@@ -34,6 +34,14 @@ void BasicBlock::addSuccessor(BasicBlock* succ) {
     }
 }
 
+void BasicBlock::removePredecessor(BasicBlock* pred) {
+    predecessors.erase(std::remove(predecessors.begin(), predecessors.end(), pred), predecessors.end());
+}
+
+void BasicBlock::removeSuccessor(BasicBlock* succ) {
+    successors.erase(std::remove(successors.begin(), successors.end(), succ), successors.end());
+}
+
 void BasicBlock::removeInstructions(const std::vector<Instruction*>& to_remove) {
     for (auto* instr : to_remove) {
         if (instr->getParent() == this) {

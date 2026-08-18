@@ -186,7 +186,12 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
 void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        if (!i.getOperands().empty()) *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        if (!i.getOperands().empty()) {
+            if (abi == X64ABI::Windows)
+                *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+            else
+                *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        }
         *os << "  jmp " << i.getParent()->getParent()->getName() << "_epilogue" << "\n";
     } else {
         if (!i.getOperands().empty()) emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -200,9 +205,30 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  addq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
+        if (abi == X64ABI::Windows) {
+            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
+            else *os << "  mov " << rax << ", " << op0 << "\n";
+            
+            if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << rax << ", rdx\n";
+            else *os << "  add " << rax << ", " << op1 << "\n";
+            
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
+            else *os << "  movq " << op0 << ", " << rax << "\n";
+            
+            if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  addq %rdx, " << rax << "\n";
+            else *os << "  addq " << op1 << ", " << rax << "\n";
+            
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -214,9 +240,18 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  subq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  sub " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  subq " << op1 << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -228,9 +263,18 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  imulq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  imul " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  imulq " << op1 << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -243,11 +287,22 @@ void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  cqto\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  idivq " << rcx << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  cqo\n";
+            *os << "  mov " << rcx << ", " << op1 << "\n";
+            *os << "  idiv " << rcx << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  cqto\n";
+            *os << "  movq " << op1 << ", " << rcx << "\n";
+            *os << "  idivq " << rcx << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         cg.getAssembler().emitBytes({0x48, 0x99});
@@ -262,11 +317,22 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
     std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
     std::string rdx = (abi == X64ABI::SystemV) ? "%rdx" : "rdx";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  cqto\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  idivq " << rcx << "\n";
-        *os << "  movq " << rdx << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  cqo\n";
+            *os << "  mov " << rcx << ", " << op1 << "\n";
+            *os << "  idiv " << rcx << "\n";
+            *os << "  mov " << dst << ", " << rdx << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  cqto\n";
+            *os << "  movq " << op1 << ", " << rcx << "\n";
+            *os << "  idivq " << rcx << "\n";
+            *os << "  movq " << rdx << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         cg.getAssembler().emitBytes({0x48, 0x99});
@@ -279,9 +345,18 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  andq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  and " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  andq " << op1 << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -293,9 +368,18 @@ void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  orq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  or " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  orq " << op1 << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -307,9 +391,18 @@ void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  xorq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  xor " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  xorq " << op1 << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -369,9 +462,17 @@ void X64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  negq " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  neg " << rax << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  negq " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         cg.getAssembler().emitBytes({0x48, 0xF7, 0xD8});
@@ -382,9 +483,17 @@ void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  notq " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  not " << rax << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  notq " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         cg.getAssembler().emitBytes({0x48, 0xF7, 0xD0});
@@ -395,8 +504,15 @@ void X64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << op0 << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << dst << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitStoreResult(cg, i, 0);
@@ -406,18 +522,49 @@ void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
 void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
-        for (size_t j = 1; j < std::min(i.getOperands().size(), maxArgs + 1); ++j) {
-            *os << "  movq " << cg.getValueAsOperand(i.getOperands()[j]->get()) << ", " << getRegisterName(integerArgRegs[j-1], i.getOperands()[j]->get()->getType()) << "\n";
+        for (size_t j = 1; j < i.getOperands().size(); ++j) {
+            ir::Value* argVal = i.getOperands()[j]->get();
+            bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
+                               (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
+            if (j <= maxArgs) {
+                std::string reg = getRegisterName(integerArgRegs[j-1], argVal->getType());
+                if (argIsGlobal && abi == X64ABI::Windows) {
+                    *os << "  lea " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                } else if (argIsGlobal && abi == X64ABI::SystemV) {
+                    *os << "  leaq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                } else {
+                    if (abi == X64ABI::Windows)
+                        *os << "  mov " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                    else
+                        *os << "  movq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                }
+            } else if (abi == X64ABI::Windows) {
+                // Stack arg (5th+): load into rax then store at [rsp + (j-1)*8]
+                size_t stackOff = (j - 1) * 8;
+                if (argIsGlobal) {
+                    *os << "  lea rax, " << cg.getValueAsOperand(argVal) << "\n";
+                } else {
+                    *os << "  mov rax, " << cg.getValueAsOperand(argVal) << "\n";
+                }
+                *os << "  mov [rsp + " << stackOff << "], rax\n";
+            }
         }
         *os << "  call " << i.getOperands()[0]->get()->getName() << "\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
-            *os << "  movq " << getRegisterName("rax", i.getType()) << ", " << cg.getValueAsOperand(&i) << "\n";
+            // Intel syntax: store rax → stack slot  (dst, src order)
+            *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
         }
     } else {
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
-        for (size_t j = 1; j < std::min(i.getOperands().size(), maxArgs + 1); ++j) {
-            uint8_t r = getArchRegIndex(integerArgRegs[j-1]);
-            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), r);
+        for (size_t j = 1; j < i.getOperands().size(); ++j) {
+            if (j <= maxArgs) {
+                uint8_t r = getArchRegIndex(integerArgRegs[j-1]);
+                emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), r);
+            } else if (abi == X64ABI::Windows) {
+                emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), 0); // Load to RAX
+                uint8_t offset = (uint8_t)((j - 1) * 8);
+                cg.getAssembler().emitBytes({0x48, 0x89, 0x44, 0x24, offset}); // mov [rsp + offset], rax
+            }
         }
         cg.getAssembler().emitByte(0xE8);
         uint64_t off = cg.getAssembler().getCodeSize();
@@ -437,24 +584,108 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
     std::string al = (abi == X64ABI::SystemV) ? "%al" : "al";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
-        std::string set; switch(i.getOpcode()){case ir::Instruction::Ceq:set="sete";break;case ir::Instruction::Cne:set="setne";break;case ir::Instruction::Cslt:set="setl";break;case ir::Instruction::Csle:set="setle";break;case ir::Instruction::Csgt:set="setg";break;case ir::Instruction::Csge:set="setge";break;default:set="sete";break;}
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-        *os << "  " << set << " " << al << "\n";
-        if (abi == X64ABI::SystemV) *os << "  movzbq " << al << ", " << rax << "\n";
-        else *os << "  movzx " << eax << ", " << al << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        std::string set;
+        switch (i.getOpcode()) {
+            case ir::Instruction::Ceq:  set = "sete"; break;
+            case ir::Instruction::Cne:  set = "setne"; break;
+            case ir::Instruction::Cslt: set = "setl"; break;
+            case ir::Instruction::Csle: set = "setle"; break;
+            case ir::Instruction::Csgt: set = "setg"; break;
+            case ir::Instruction::Csge: set = "setge"; break;
+            case ir::Instruction::Cult: set = "setb"; break;
+            case ir::Instruction::Cule: set = "setbe"; break;
+            case ir::Instruction::Cugt: set = "seta"; break;
+            case ir::Instruction::Cuge: set = "setae"; break;
+            default:                    set = "sete"; break;
+        }
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+            *os << "  cmp " << rax << ", " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+            *os << "  " << set << " " << al << "\n";
+            *os << "  movzx " << eax << ", " << al << "\n";
+            *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
+            *os << "  " << set << " " << al << "\n";
+            *os << "  movzbq " << al << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
         cg.getAssembler().emitBytes({0x48, 0x39, 0xC8});
-        uint8_t s = 0x94; switch(i.getOpcode()){case ir::Instruction::Ceq:s=0x94;break;case ir::Instruction::Cne:s=0x95;break;case ir::Instruction::Cslt:s=0x9C;break;case ir::Instruction::Csle:s=0x9E;break;case ir::Instruction::Csgt:s=0x9F;break;case ir::Instruction::Csge:s=0x9D;break;default:s=0x94;break;}
+        uint8_t s = 0x94;
+        switch (i.getOpcode()) {
+            case ir::Instruction::Ceq:  s = 0x94; break;
+            case ir::Instruction::Cne:  s = 0x95; break;
+            case ir::Instruction::Cslt: s = 0x9C; break;
+            case ir::Instruction::Csle: s = 0x9E; break;
+            case ir::Instruction::Csgt: s = 0x9F; break;
+            case ir::Instruction::Csge: s = 0x9D; break;
+            case ir::Instruction::Cult: s = 0x92; break;
+            case ir::Instruction::Cule: s = 0x96; break;
+            case ir::Instruction::Cugt: s = 0x97; break;
+            case ir::Instruction::Cuge: s = 0x93; break;
+            default:                    s = 0x94; break;
+        }
         cg.getAssembler().emitBytes({0x0F, s, 0xC0, 0x48, 0x0F, 0xB6, 0xC0});
         emitStoreResult(cg, i, 0);
     }
 }
 
-void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* from, const ir::Type* to) {}
+void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* from, const ir::Type* to) {
+    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
+    std::string srcOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string destOp = cg.getValueAsOperand(&i);
+
+    if (auto* os = cg.getTextStream()) {
+        ir::Instruction::Opcode op = i.getOpcode();
+        if (op == ir::Instruction::ExtUB) {
+            *os << "  movzbq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtUH) {
+            *os << "  movzwq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtUW) {
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  movl " << eax << ", " << eax << "\n"; // Zero-extends %eax to %rax
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtSB) {
+            *os << "  movsbq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtSH) {
+            *os << "  movswq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else if (op == ir::Instruction::ExtSW) {
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  cltq\n"; // Sign-extends %eax to %rax
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        } else {
+            *os << "  movq " << srcOp << ", " << rax << "\n";
+            *os << "  movq " << rax << ", " << destOp << "\n";
+        }
+    } else {
+        auto& as = cg.getAssembler();
+        ir::Instruction::Opcode op = i.getOpcode();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        if (op == ir::Instruction::ExtUB) {
+            as.emitBytes({0x0F, 0xB6, 0xC0}); // movzbl eax, al
+        } else if (op == ir::Instruction::ExtUH) {
+            as.emitBytes({0x0F, 0xB7, 0xC0}); // movzwl eax, ax
+        } else if (op == ir::Instruction::ExtUW) {
+            as.emitBytes({0x89, 0xC0});       // mov eax, eax
+        } else if (op == ir::Instruction::ExtSB) {
+            as.emitBytes({0x48, 0x0F, 0xBE, 0xC0}); // movsbq rax, al
+        } else if (op == ir::Instruction::ExtSH) {
+            as.emitBytes({0x48, 0x0F, 0xBF, 0xC0}); // movswq rax, ax
+        } else if (op == ir::Instruction::ExtSW) {
+            as.emitBytes({0x48, 0x63, 0xC0});       // movslq rax, eax
+        }
+        emitStoreResult(cg, i, 0);
+    }
+}
 void X64Architecture::emitVAStart(CodeGen& cg, ir::Instruction& i) {}
 void X64Architecture::emitVAArg(CodeGen& cg, ir::Instruction& i) {}
 
@@ -497,7 +728,12 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov rax, " << op << "\n";
             }
         } else {
-            *os << "  movq " << op << ", " << rax << "\n";
+            // Load address of pointer slot into rax, then dereference
+            if (abi == X64ABI::Windows) {
+                *os << "  mov " << rax << ", " << op << "\n";
+            } else {
+                *os << "  movq " << op << ", " << rax << "\n";
+            }
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << (isSigned ? "  movsbq (%rax), %rax\n" : "  movzbq (%rax), %rax\n");
                 else if (size == 2) *os << (isSigned ? "  movswq (%rax), %rax\n" : "  movzwq (%rax), %rax\n");
@@ -510,7 +746,11 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov rax, [rax]\n";
             }
         }
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        // Store result
+        if (abi == X64ABI::Windows)
+            *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
+        else
+            *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
     } else {
         auto& as = cg.getAssembler(); emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
         if (size == 1) as.emitBytes({0x48, 0x0F, (uint8_t)(isSigned ? 0xBE : 0xB6), 0x00});
@@ -522,7 +762,6 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
-    std::cout << "[DEBUG emitStore] instr: " << i.getName() << " op0: " << (i.getOperands()[0]->get() ? i.getOperands()[0]->get()->getName() : "null") << " op1: " << (i.getOperands()[1]->get() ? i.getOperands()[1]->get()->getName() : "null") << std::endl;
     uint8_t size = 8;
     switch(i.getOpcode()) {
         case ir::Instruction::Storeb: size = 1; break;
@@ -544,7 +783,16 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     std::string ax = (abi == X64ABI::SystemV) ? "%ax" : "ax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        // Load value-to-store into rax
+        bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
+                           (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        if (abi == X64ABI::Windows) {
+            if (isGlobalVal) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+            else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        } else {
+            if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        }
         std::string op = cg.getValueAsOperand(i.getOperands()[1]->get());
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
         if (isGlobal) {
@@ -560,7 +808,11 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov " << op << ", rax\n";
             }
         } else {
-            *os << "  movq " << op << ", " << rdx << "\n";
+            // op = stack operand holding the pointer address — load it into rdx
+            if (abi == X64ABI::Windows)
+                *os << "  mov " << rdx << ", " << op << "\n";
+            else
+                *os << "  movq " << op << ", " << rdx << "\n";
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << "  movb " << al << ", (" << rdx << ")\n";
                 else if (size == 2) *os << "  movw " << ax << ", (" << rdx << ")\n";
@@ -642,7 +894,10 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             std::string destOp = cg.getValueAsOperand(phi);
             std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
             *os << "  popq " << rax << "\n";
-            *os << "  movq " << rax << ", " << destOp << "\n";
+            if (abi == X64ABI::Windows)
+                *os << "  mov " << destOp << ", " << rax << "\n";
+            else
+                *os << "  movq " << rax << ", " << destOp << "\n";
         } else {
             auto& as = cg.getAssembler();
             as.emitByte(0x58);
@@ -657,8 +912,13 @@ void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
     auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
 
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  testq " << rax << ", " << rax << "\n";
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+            *os << "  test " << rax << ", " << rax << "\n";
+        } else {
+            *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            *os << "  testq " << rax << ", " << rax << "\n";
+        }
 
         std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
         std::string falseLabel = cg.getTargetInfo()->getBBLabel(targetFalse);
@@ -779,6 +1039,14 @@ void X64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const Oper
         return;
     }
     cg.getTargetInfo()->emitDomainCapability(cg, i, *spec);
+
+    if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
+        if (auto* os = cg.getTextStream()) {
+            *os << "  mov " << formatStackOperand(cg.getStackOffsets()[&i]) << ", rax\n";
+        } else {
+            // Assembler output unsupported here
+        }
+    }
 }
 
 void X64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {
@@ -804,19 +1072,29 @@ void X64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const 
 
 void X64Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {
     if (auto* os = cg.getTextStream()) {
-        if (abi == X64ABI::Windows) {
-            *os << "  subq $32, %rsp\n";
-            static const char* winRegs[] = {"rcx", "rdx", "r8", "r9"};
-            for (size_t i = 0; i < std::min(args.size(), (size_t)4); ++i) {
-                *os << "  movq " << cg.getValueAsOperand(args[i]) << ", " << getRegisterName(winRegs[i], args[i]->getType()) << "\n";
+        auto emitArg = [&](ir::Value* arg, const std::string& reg) {
+            bool isGlobal = dynamic_cast<ir::GlobalVariable*>(arg) != nullptr;
+            std::string op = cg.getValueAsOperand(arg);
+            if (isGlobal) {
+                if (abi == X64ABI::Windows)
+                    *os << "  lea " << reg << ", " << op << "\n";
+                else
+                    *os << "  leaq " << op << ", " << reg << "\n";
+            } else {
+                *os << "  movq " << op << ", " << reg << "\n";
             }
+        };
+        if (abi == X64ABI::Windows) {
+            *os << "  sub rsp, 32\n";
+            static const char* winRegs[] = {"rcx", "rdx", "r8", "r9"};
+            for (size_t i = 0; i < std::min(args.size(), (size_t)4); ++i)
+                emitArg(args[i], getRegisterName(winRegs[i], args[i]->getType()));
             *os << "  call " << name << "\n";
-            *os << "  addq $32, %rsp\n";
+            *os << "  add rsp, 32\n";
         } else {
             static const char* sysvRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
-            for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
-                *os << "  movq " << cg.getValueAsOperand(args[i]) << ", " << getRegisterName(sysvRegs[i], args[i]->getType()) << "\n";
-            }
+            for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i)
+                emitArg(args[i], getRegisterName(sysvRegs[i], args[i]->getType()));
             *os << "  call " << name << "\n";
         }
     } else {
@@ -849,6 +1127,11 @@ std::string X64Architecture::formatStackOperand(int offset) const {
 std::string X64Architecture::formatGlobalOperand(const std::string& name) const {
     if (abi == X64ABI::SystemV) return name + "(%rip)";
     return "[rel " + name + "]";
+}
+
+std::string X64Architecture::formatConstant(const ir::ConstantInt* C) const {
+    if (abi == X64ABI::Windows) return std::to_string(C->getValue());
+    return "$" + std::to_string(C->getValue());
 }
 
 bool X64Architecture::isCallerSaved(const std::string& reg) const { return callerSaved.count(reg) && callerSaved.at(reg); }

@@ -1,0 +1,288 @@
+global %str_const_0 = "=== Basic Function Tests ==="
+global %str_const_1 = "
+--- Test 1: Simple Functions ---"
+global %str_const_2 = "sayHello() did not execute correctly"
+global %str_const_3 = "
+--- Test 2: Functions with Parameters ---"
+global %str_const_4 = "add(5, 3) should return 8"
+global %str_const_5 = "add(5, 3) = %s"
+global %str_const_6 = "
+--- Test 3: String Parameters ---"
+global %str_const_7 = "Alice"
+global %str_const_8 = "Bob"
+global %str_const_9 = "Hello, Alice!"
+global %str_const_10 = "Greeting Alice failed"
+global %str_const_11 = "Hello, Bob!"
+global %str_const_12 = "Greeting Bob failed"
+global %str_const_13 = "
+--- Test 4: Return Values ---"
+global %str_const_14 = "square(4) should be 16"
+global %str_const_15 = "square(7) should be 49"
+global %str_const_16 = "square(4) = %s"
+global %str_const_17 = "square(7) = %s"
+global %str_const_18 = "
+--- Test 5: Local Variables ---"
+global %str_const_19 = "calculate(3, 4) returned wrong value"
+global %str_const_20 = "calculate(3, 4) = %s"
+global %str_const_21 = "
+--- Test 6: Recursion ---"
+global %str_const_22 = "factorial(5) should be 120"
+global %str_const_23 = "factorial(5) = %s"
+global %str_const_24 = "
+--- Test 7: Multiple Functions ---"
+global %str_const_25 = "subtract(10, 3) should be 7"
+global %str_const_26 = "multiply(6, 7) should be 42"
+global %str_const_27 = "isEven(8) should be true"
+global %str_const_28 = "isEven(9) should be false"
+global %str_const_29 = "subtract(10, 3) = %s"
+global %str_const_30 = "multiply(6, 7) = %s"
+global %str_const_31 = "isEven(8) = %s"
+global %str_const_32 = "isEven(9) = %s"
+global %str_const_33 = "
+=== Basic Function Tests Complete ==="
+global %str_const_34 = "Hello, %s!"
+global %str_const_35 = "Hello from function!"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r2
+  call %sayHello
+  %r6 = call %lm_box_string %str_const_2 : i64
+  call %lm_assert %r4 %r6
+  %r8 = call %lm_box_string %str_const_3 : i64
+  call %lm_print_int %r8
+  call %add 41 25
+  %r15 = ceq %r12 65 : i32
+  %r16 = call %lm_box_string %str_const_4 : i64
+  call %lm_assert %r15 %r16
+  %r19 = call %lm_box_string %str_const_5 : i64
+  %r18 = call %lm_rt_str_format %r19 %r12 : i64
+  call %lm_print_int %r18
+  %r21 = call %lm_box_string %str_const_6 : i64
+  call %lm_print_int %r21
+  %r23 = call %lm_box_string %str_const_7 : i64
+  call %greet %r23
+  %r26 = call %lm_box_string %str_const_8 : i64
+  call %greet %r26
+  %r29 = call %lm_box_string %str_const_9 : i64
+  %r30 = ceq %r24 %r29 : i32
+  %r31 = call %lm_box_string %str_const_10 : i64
+  call %lm_assert %r30 %r31
+  %r33 = call %lm_box_string %str_const_11 : i64
+  %r34 = ceq %r27 %r33 : i32
+  %r35 = call %lm_box_string %str_const_12 : i64
+  call %lm_assert %r34 %r35
+  call %lm_print_int %r24
+  call %lm_print_int %r27
+  %r39 = call %lm_box_string %str_const_13 : i64
+  call %lm_print_int %r39
+  call %square 33
+  call %square 57
+  %r48 = ceq %r42 129 : i32
+  %r49 = call %lm_box_string %str_const_14 : i64
+  call %lm_assert %r48 %r49
+  %r52 = ceq %r45 393 : i32
+  %r53 = call %lm_box_string %str_const_15 : i64
+  call %lm_assert %r52 %r53
+  %r56 = call %lm_box_string %str_const_16 : i64
+  %r55 = call %lm_rt_str_format %r56 %r42 : i64
+  call %lm_print_int %r55
+  %r59 = call %lm_box_string %str_const_17 : i64
+  %r58 = call %lm_rt_str_format %r59 %r45 : i64
+  call %lm_print_int %r58
+  %r61 = call %lm_box_string %str_const_18 : i64
+  call %lm_print_int %r61
+  call %calculate 25 33
+  %r71 = add 25 33 : i64
+  %r74 = mul 25 33 : i64
+  %r75 = mul %r71 %r74 : i64
+  %r76 = ceq %r65 %r75 : i32
+  %r77 = call %lm_box_string %str_const_19 : i64
+  call %lm_assert %r76 %r77
+  %r80 = call %lm_box_string %str_const_20 : i64
+  %r79 = call %lm_rt_str_format %r80 %r65 : i64
+  call %lm_print_int %r79
+  %r82 = call %lm_box_string %str_const_21 : i64
+  call %lm_print_int %r82
+  call %factorial 41
+  %r88 = ceq %r85 961 : i32
+  %r89 = call %lm_box_string %str_const_22 : i64
+  call %lm_assert %r88 %r89
+  %r92 = call %lm_box_string %str_const_23 : i64
+  %r91 = call %lm_rt_str_format %r92 %r85 : i64
+  call %lm_print_int %r91
+  %r94 = call %lm_box_string %str_const_24 : i64
+  call %lm_print_int %r94
+  call %subtract 81 25
+  %r100 = ceq %r98 57 : i32
+  %r101 = call %lm_box_string %str_const_25 : i64
+  call %lm_assert %r100 %r101
+  call %multiply 49 57
+  %r107 = ceq %r105 337 : i32
+  %r108 = call %lm_box_string %str_const_26 : i64
+  call %lm_assert %r107 %r108
+  call %isEven 65
+  %r112 = call %lm_box_string %str_const_27 : i64
+  call %lm_assert %r111 %r112
+  call %isEven 73
+  %r116 = cne %r115 18 : i32
+  %r118 = call %lm_box_string %str_const_28 : i64
+  call %lm_assert %r116 %r118
+  call %subtract 81 25
+  %r124 = call %lm_box_string %str_const_29 : i64
+  %r123 = call %lm_rt_str_format %r124 %r122 : i64
+  call %lm_print_int %r123
+  call %multiply 49 57
+  %r130 = call %lm_box_string %str_const_30 : i64
+  %r129 = call %lm_rt_str_format %r130 %r128 : i64
+  call %lm_print_int %r129
+  call %isEven 65
+  %r135 = call %lm_box_string %str_const_31 : i64
+  %r134 = call %lm_rt_str_format %r135 %r133 : i64
+  call %lm_print_int %r134
+  call %isEven 73
+  %r140 = call %lm_box_string %str_const_32 : i64
+  %r139 = call %lm_rt_str_format %r140 %r138 : i64
+  call %lm_print_int %r139
+  %r142 = call %lm_box_string %str_const_33 : i64
+  call %lm_print_int %r142
+  ret 0
+}
+
+function subtract(i64, i64) {
+@entry
+@block_0
+  %r2 = sub %0 %1 : i64
+  ret %r2
+}
+
+function factorial(i64) {
+@entry
+@block_0
+  %r2 = csle %0 9 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  ret 9
+@block_5
+  %r6 = sub %0 9 : i64
+  call %factorial %r6
+  %r8 = mul %0 %r7 : i64
+  ret %r8
+}
+
+function square(i64) {
+@entry
+@block_0
+  %r1 = mul %0 %0 : i64
+  ret %r1
+}
+
+function greet(i64) {
+@entry
+@block_0
+  %r2 = call %lm_box_string %str_const_34 : i64
+  %r1 = call %lm_rt_str_format %r2 %0 : i64
+  ret %r1
+}
+
+function add(i64, i64) {
+@entry
+@block_0
+  %r2 = add %0 %1 : i64
+  ret %r2
+}
+
+function sayHello() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_35 : i64
+  call %lm_print_int %r0
+  ret 18
+}
+
+function multiply(i64, i64) {
+@entry
+@block_0
+  %r2 = mul %0 %1 : i64
+  ret %r2
+}
+
+function calculate(i64, i64) {
+@entry
+@block_0
+  %r2 = add %0 %1 : i64
+  %r4 = mul %0 %1 : i64
+  %r6 = mul %r2 %r4 : i64
+  ret %r6
+}
+
+function isEven(i64) {
+@entry
+@block_0
+  %r2 = rem %0 17 : i64
+  %r4 = ceq %r2 1 : i32
+  ret %r4
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(void, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_rt_str_format(i64, i64) {
+}

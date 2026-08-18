@@ -1,0 +1,176 @@
+global %str_const_0 = "=== Literal Value Tests ==="
+global %str_const_1 = "Integers:"
+global %str_const_2 = "Integer literal 0 should be 0"
+global %str_const_3 = "Integer literal 42 should be 42"
+global %str_const_4 = "Integer literal -17 should be -17"
+global %str_const_5 = "Integer literal 999999 should be 999999"
+global %str_const_6 = "Floats:"
+global %str_const_7 = ""
+global %str_const_8 = "Float literal 0.0 should be 0.0"
+global %str_const_9 = "Float literal 3.14159 should be 3.14159"
+global %str_const_10 = "Float literal -2.71828 should be -2.71828"
+global %str_const_11 = "Float literal 1.23e-14 should be 1.23e-14"
+global %str_const_12 = ""
+global %str_const_13 = "Empty string should be empty"
+global %str_const_14 = "Strings:"
+global %str_const_15 = "Hello, World!"
+global %str_const_16 = ""
+global %str_const_17 = "Special chars:
+	\""
+global %str_const_18 = "Hello, World!"
+global %str_const_19 = "String literal should match"
+global %str_const_20 = ""
+global %str_const_21 = "Empty string should be empty"
+global %str_const_22 = "Special chars:
+	\""
+global %str_const_23 = "Special chars string should match"
+global %str_const_24 = "Booleans:"
+global %str_const_25 = "Boolean literal true should be true"
+global %str_const_26 = "Boolean literal false should be false"
+global %str_const_27 = "Nil:"
+global %str_const_28 = "Nil literal should be nil"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r2
+  %r7 = neg 137 : i64
+  %r11 = ceq 1 1 : i32
+  %r12 = call %lm_box_string %str_const_2 : i64
+  call %lm_assert %r11 %r12
+  %r15 = ceq 337 337 : i32
+  %r16 = call %lm_box_string %str_const_3 : i64
+  call %lm_assert %r15 %r16
+  %r19 = neg 137 : i64
+  %r20 = ceq %r7 %r19 : i32
+  %r21 = call %lm_box_string %str_const_4 : i64
+  call %lm_assert %r20 %r21
+  %r24 = ceq 7999993 7999993 : i32
+  %r25 = call %lm_box_string %str_const_5 : i64
+  call %lm_assert %r24 %r25
+  call %lm_print_int 1
+  call %lm_print_int 337
+  call %lm_print_int %r7
+  call %lm_print_int 7999993
+  %r31 = call %lm_box_string %str_const_6 : i64
+  call %lm_print_int %r31
+  %r36 = neg 2 : i64
+  %r39 = call %lm_box_string %str_const_7 : i64
+  %r41 = ceq 2 2 : i32
+  %r42 = call %lm_box_string %str_const_8 : i64
+  call %lm_assert %r41 %r42
+  %r45 = ceq 2 2 : i32
+  %r46 = call %lm_box_string %str_const_9 : i64
+  call %lm_assert %r45 %r46
+  %r49 = neg 2 : i64
+  %r50 = ceq %r36 %r49 : i32
+  %r51 = call %lm_box_string %str_const_10 : i64
+  call %lm_assert %r50 %r51
+  %r54 = ceq 2 2 : i32
+  %r55 = call %lm_box_string %str_const_11 : i64
+  call %lm_assert %r54 %r55
+  %r57 = call %lm_box_string %str_const_12 : i64
+  %r58 = ceq %r39 %r57 : i32
+  %r59 = call %lm_box_string %str_const_13 : i64
+  call %lm_assert %r58 %r59
+  call %lm_print_int 2
+  call %lm_print_int 2
+  call %lm_print_int %r36
+  call %lm_print_int 2
+  call %lm_print_int %r39
+  %r66 = call %lm_box_string %str_const_14 : i64
+  call %lm_print_int %r66
+  %r68 = call %lm_box_string %str_const_15 : i64
+  %r69 = call %lm_box_string %str_const_16 : i64
+  %r70 = call %lm_box_string %str_const_17 : i64
+  %r71 = call %lm_box_string %str_const_18 : i64
+  %r72 = ceq %r68 %r71 : i32
+  %r73 = call %lm_box_string %str_const_19 : i64
+  call %lm_assert %r72 %r73
+  %r75 = call %lm_box_string %str_const_20 : i64
+  %r76 = ceq %r69 %r75 : i32
+  %r77 = call %lm_box_string %str_const_21 : i64
+  call %lm_assert %r76 %r77
+  %r79 = call %lm_box_string %str_const_22 : i64
+  %r80 = ceq %r70 %r79 : i32
+  %r81 = call %lm_box_string %str_const_23 : i64
+  call %lm_assert %r80 %r81
+  call %lm_print_int %r68
+  call %lm_print_int %r69
+  call %lm_print_int %r70
+  %r86 = call %lm_box_string %str_const_24 : i64
+  call %lm_print_int %r86
+  %r91 = ceq 18 18 : i32
+  %r92 = call %lm_box_string %str_const_25 : i64
+  call %lm_assert %r91 %r92
+  %r95 = ceq 10 10 : i32
+  %r96 = call %lm_box_string %str_const_26 : i64
+  call %lm_assert %r95 %r96
+  call %lm_print_int 18
+  call %lm_print_int 10
+  %r100 = call %lm_box_string %str_const_27 : i64
+  call %lm_print_int %r100
+  %r104 = ceq 2 2 : i32
+  %r105 = call %lm_box_string %str_const_28 : i64
+  call %lm_assert %r104 %r105
+  call %lm_print_int 2
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}

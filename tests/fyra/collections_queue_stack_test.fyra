@@ -1,0 +1,810 @@
+global %str_const_0 = "Queue length should be 2"
+global %str_const_1 = "Peek should return 1"
+global %str_const_2 = "Dequeue should return 1"
+global %str_const_3 = "Dequeue should return 2"
+global %str_const_4 = "Dequeue on empty queue should return nil"
+global %str_const_5 = "Stack length should be 2"
+global %str_const_6 = "Peek should return 2"
+global %str_const_7 = "Pop should return 2"
+global %str_const_8 = "Pop should return 1"
+global %str_const_9 = "Pop on empty stack should return nil"
+global %str_const_10 = "BitSet should contain bit 10"
+global %str_const_11 = "BitSet should contain bit 20"
+global %str_const_12 = "BitSet should not contain bit 15"
+global %str_const_13 = "BitSet count should be 2"
+global %str_const_14 = "BitSet should not contain bit 10 after unset"
+global %str_const_15 = "Iterator should return bit 20"
+global %str_const_16 = "Iterator should be exhausted"
+global %str_const_17 = "Queue/Stack/BitSet tests passed!"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.collections.queue.__init__
+  call %main
+  ret 0
+}
+
+function std.collections.queue.__init__() {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.iterator(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.get_size(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.get(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.contains(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.toggle(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.get(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.RingBuffer.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.remove(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.collect(i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  jmp %block_5
+@block_5
+  %r6 = cne 0 2 : i32
+  br %r6 %block_8 %block_12
+@block_8
+  jmp %block_8
+  call %lm_list_append %r1 0
+  jmp %block_5
+@block_12
+  ret %r1
+}
+
+function std.collections.vector.Vector.push(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.cycle(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.iterator.CycleIterator.init %r1 %0
+  ret %r1
+}
+
+function std.iterator.filter(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.iterator.FilterIterator.init %r2 %0 %1
+  ret %r2
+}
+
+function std.iterator.iterator(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.iterator.ListIterator.init %r1 %0
+  ret %r1
+}
+
+function std.collections.vector.Vector.append(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ListIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.CycleIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChunkIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.PeekableIterator.peek(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChunkIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.MapIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.StepByIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet._mask(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.pop(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.pop_front(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.SkipIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ListIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Queue.peek(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue._sift_up(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSetIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector._copy_without(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.length(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.size(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.PeekableIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.MapIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.SkipIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.len(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.chunk(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.iterator.ChunkIterator.init %r2 %0 %1
+  ret %r2
+}
+
+function std.collections.vector.Vector.size(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.map(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.iterator.MapIterator.init %r2 %0 %1
+  ret %r2
+}
+
+function std.collections.vector.__init__() {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector._grow_for(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ZipIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.iterator(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Queue.init(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.is_empty(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.TakeIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue._sift_down(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.push_back(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.init(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.set(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.EnumerateIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.CycleIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.unset(i64, i64) {
+@entry
+  ret 0
+}
+
+function main() {
+@entry
+@block_0
+  %r0 = alloc 16 : i64
+  call %std.collections.queue.Queue.init %r0
+  call %std.collections.queue.Queue.enqueue %r0 9
+  call %std.collections.queue.Queue.enqueue %r0 17
+  call %std.collections.queue.Queue.length %r0
+  %r9 = ceq %r7 17 : i32
+  %r10 = call %lm_box_string %str_const_0 : i64
+  call %lm_assert %r9 %r10
+  call %std.collections.queue.Queue.peek %r0
+  %r14 = ceq %r12 9 : i32
+  %r15 = call %lm_box_string %str_const_1 : i64
+  call %lm_assert %r14 %r15
+  call %std.collections.queue.Queue.dequeue %r0
+  %r19 = ceq %r17 9 : i32
+  %r20 = call %lm_box_string %str_const_2 : i64
+  call %lm_assert %r19 %r20
+  call %std.collections.queue.Queue.dequeue %r0
+  %r24 = ceq %r22 17 : i32
+  %r25 = call %lm_box_string %str_const_3 : i64
+  call %lm_assert %r24 %r25
+  call %std.collections.queue.Queue.dequeue %r0
+  %r29 = ceq %r27 2 : i32
+  %r30 = call %lm_box_string %str_const_4 : i64
+  call %lm_assert %r29 %r30
+  %r32 = alloc 16 : i64
+  call %std.collections.queue.Stack.init %r32
+  call %std.collections.queue.Stack.push %r32 9
+  call %std.collections.queue.Stack.push %r32 17
+  call %std.collections.queue.Stack.length %r32
+  %r41 = ceq %r39 17 : i32
+  %r42 = call %lm_box_string %str_const_5 : i64
+  call %lm_assert %r41 %r42
+  call %std.collections.queue.Stack.peek %r32
+  %r46 = ceq %r44 17 : i32
+  %r47 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r46 %r47
+  call %std.collections.queue.Stack.pop %r32
+  %r51 = ceq %r49 17 : i32
+  %r52 = call %lm_box_string %str_const_7 : i64
+  call %lm_assert %r51 %r52
+  call %std.collections.queue.Stack.pop %r32
+  %r56 = ceq %r54 9 : i32
+  %r57 = call %lm_box_string %str_const_8 : i64
+  call %lm_assert %r56 %r57
+  call %std.collections.queue.Stack.pop %r32
+  %r61 = ceq %r59 2 : i32
+  %r62 = call %lm_box_string %str_const_9 : i64
+  call %lm_assert %r61 %r62
+  %r65 = alloc 16 : i64
+  call %std.collections.queue.BitSet.init %r65 801
+  call %std.collections.queue.BitSet.toggle %r65 81
+  call %std.collections.queue.BitSet.toggle %r65 161
+  call %std.collections.queue.BitSet.contains %r65 81
+  %r74 = call %lm_box_string %str_const_10 : i64
+  call %lm_assert %r73 %r74
+  call %std.collections.queue.BitSet.contains %r65 161
+  %r78 = call %lm_box_string %str_const_11 : i64
+  call %lm_assert %r77 %r78
+  call %std.collections.queue.BitSet.contains %r65 121
+  %r82 = cne %r81 18 : i32
+  %r84 = call %lm_box_string %str_const_12 : i64
+  call %lm_assert %r82 %r84
+  call %std.collections.queue.BitSet.count %r65
+  %r88 = ceq %r86 17 : i32
+  %r89 = call %lm_box_string %str_const_13 : i64
+  call %lm_assert %r88 %r89
+  call %std.collections.queue.BitSet.unset %r65 81
+  call %std.collections.queue.BitSet.contains %r65 81
+  %r95 = cne %r94 18 : i32
+  %r97 = call %lm_box_string %str_const_14 : i64
+  call %lm_assert %r95 %r97
+  call %std.collections.queue.BitSet.iterator %r65
+  call %std.collections.queue.BitSetIterator.next %r99
+  %r103 = ceq %r101 161 : i32
+  %r104 = call %lm_box_string %str_const_15 : i64
+  call %lm_assert %r103 %r104
+  call %std.collections.queue.BitSetIterator.next %r99
+  %r108 = ceq %r106 2 : i32
+  %r109 = call %lm_box_string %str_const_16 : i64
+  call %lm_assert %r108 %r109
+  %r111 = call %lm_box_string %str_const_17 : i64
+  call %lm_print_int %r111
+  ret 1
+}
+
+function std.collections.queue.BitSet.count(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.remove(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChainIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.peek(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.TakeIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.peek_back(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Queue.dequeue(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.FilterIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.PeekableIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.set(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.RingBuffer.pop(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.insert(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.EnumerateIterator.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.RingBuffer.length(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.len(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.FilterIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.length(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ZipIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.ChainIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.reserve(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.clear(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.iterator(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.insert(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.pop(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.VectorIterator.next(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet._word_value(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.VectorIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.peek_front(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.push_front(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Stack.init(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.pop_back(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Deque.init(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.StepByIterator.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.push(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.pop(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.resize(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.len(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.length(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.iterator(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.len(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.RingBuffer.push(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Queue.enqueue(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.length(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.RingBuffer.len(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.Vector.resize(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.RingBuffer.size(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.size(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Queue.len(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.push(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.peek(i64) {
+@entry
+  ret 0
+}
+
+function std.iterator.__init__() {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.remove(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue._compare(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.PriorityQueue.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.vector.ArrayList.get(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Stack.push(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Stack.pop(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Queue.length(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet._valid(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Stack.peek(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Stack.len(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.Stack.length(i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet._set_word(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.collections.queue.BitSet.set(i64, i64) {
+@entry
+  ret 0
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}
+
+function lm_list_len(i64) {
+}

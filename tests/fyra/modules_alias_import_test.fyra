@@ -1,0 +1,223 @@
+global %str_const_0 = "=== Alias Import Test ==="
+global %str_const_1 = "Test 2.1: Access aliased module variable"
+global %str_const_2 = "PI = %s"
+global %str_const_3 = "Module alias should provide access to variables"
+global %str_const_4 = "Test 2.2: Call aliased module function"
+global %str_const_5 = "5 squared = %s"
+global %str_const_6 = "Module alias should provide access to functions"
+global %str_const_7 = "Test 2.3: Call complex aliased function"
+global %str_const_8 = "Test 2.4: Call recursive function through alias"
+global %str_const_9 = "5! = %s"
+global %str_const_10 = "Module alias should provide access to recursive functions: 5! = 120"
+global %str_const_11 = "=== Alias Import Test Complete ==="
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  call %tests.modules.math_module.__init__
+  %r3 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r3
+  %r7 = call %lm_box_string %str_const_2 : i64
+  %r6 = call %lm_rt_str_format %r7 0 : i64
+  call %lm_print_int %r6
+  %r11 = ceq 0 2 : i32
+  %r12 = call %lm_box_string %str_const_3 : i64
+  call %lm_assert %r11 %r12
+  %r14 = call %lm_box_string %str_const_4 : i64
+  call %lm_print_int %r14
+  call %tests.modules.math_module.square 41
+  %r20 = call %lm_box_string %str_const_5 : i64
+  %r19 = call %lm_rt_str_format %r20 %r17 : i64
+  call %lm_print_int %r19
+  %r23 = ceq %r17 201 : i32
+  %r24 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r23 %r24
+  %r26 = call %lm_box_string %str_const_7 : i64
+  call %lm_print_int %r26
+  %r28 = call %lm_box_string %str_const_8 : i64
+  call %lm_print_int %r28
+  call %tests.modules.math_module.factorial 41
+  %r34 = call %lm_box_string %str_const_9 : i64
+  %r33 = call %lm_rt_str_format %r34 %r31 : i64
+  call %lm_print_int %r33
+  %r37 = ceq %r31 961 : i32
+  %r38 = call %lm_box_string %str_const_10 : i64
+  call %lm_assert %r37 %r38
+  %r40 = call %lm_box_string %str_const_11 : i64
+  call %lm_print_int %r40
+  ret 0
+}
+
+function tests.modules.math_module.is_prime(i64) {
+@entry
+@block_0
+  %r2 = csle %0 9 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  ret 10
+@block_5
+  %r6 = ceq %0 17 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  ret 18
+@block_10
+  call %tests.modules.math_module.is_even %0
+  %r10 = cne %r9 1 : i32
+  br %r10 %block_14 %block_16
+@block_14
+  jmp %block_14
+  ret 10
+@block_16
+  jmp %block_18
+@block_18
+  %r14 = mul 25 25 : i64
+  %r15 = csle %r14 %0 : i32
+  br %r15 %block_21 %block_30
+@block_21
+  jmp %block_21
+  %r17 = rem %0 25 : i64
+  %r19 = ceq %r17 1 : i32
+  br %r19 %block_25 %block_27
+@block_25
+  jmp %block_25
+  ret 10
+@block_27
+  %r13 = add 25 17 : i64
+  jmp %block_18
+@block_30
+  ret 18
+}
+
+function tests.modules.math_module.is_odd(i64) {
+@entry
+@block_0
+  call %tests.modules.math_module.is_even %0
+  %r2 = cne %r1 18 : i32
+  ret %r2
+}
+
+function tests.modules.math_module.is_even(i64) {
+@entry
+@block_0
+  %r2 = rem %0 17 : i64
+  %r4 = ceq %r2 1 : i32
+  ret %r4
+}
+
+function tests.modules.math_module.subtract(i64, i64) {
+@entry
+@block_0
+  %r2 = sub %0 %1 : i64
+  ret %r2
+}
+
+function tests.modules.math_module.factorial(i64) {
+@entry
+@block_0
+  %r2 = csle %0 9 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  ret 9
+@block_5
+  %r6 = sub %0 9 : i64
+  call %tests.modules.math_module.factorial %r6
+  %r8 = mul %0 %r7 : i64
+  ret %r8
+}
+
+function tests.modules.math_module.cube(i64) {
+@entry
+@block_0
+  %r1 = mul %0 %0 : i64
+  %r2 = mul %r1 %0 : i64
+  ret %r2
+}
+
+function tests.modules.math_module.multiply(i64, i64) {
+@entry
+@block_0
+  %r2 = mul %0 %1 : i64
+  ret %r2
+}
+
+function tests.modules.math_module.add(i64, i64) {
+@entry
+@block_0
+  %r2 = add %0 %1 : i64
+  ret %r2
+}
+
+function tests.modules.math_module.__init__() {
+@entry
+  ret 0
+}
+
+function tests.modules.math_module.square(i64) {
+@entry
+@block_0
+  %r1 = mul %0 %0 : i64
+  ret %r1
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_rt_str_format(i64, i64) {
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}

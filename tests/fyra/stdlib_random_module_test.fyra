@@ -1,0 +1,745 @@
+global %str_const_0 = "=== Random Module Test Suite ==="
+global %str_const_1 = "Random frame test failed"
+global %str_const_2 = "Distributions test failed"
+global %str_const_3 = "Random helpers test failed"
+global %str_const_4 = "All random tests passed successfully."
+global %str_const_5 = "Testing Random Frame..."
+global %str_const_6 = "next_int failed"
+global %str_const_7 = "next_float failed"
+global %str_const_8 = "next_bool failed"
+global %str_const_9 = "range_int failed"
+global %str_const_10 = "range_float failed"
+global %str_const_11 = "next_bytes failed"
+global %str_const_12 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+global %str_const_13 = "next_string failed"
+global %str_const_14 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+global %str_const_15 = "Testing Distributions..."
+global %str_const_16 = "Uniform sample failed"
+global %str_const_17 = "Testing Random Helpers..."
+global %str_const_18 = "random_int helper failed"
+global %str_const_19 = "random_float helper failed"
+global %str_const_20 = "random_bool helper failed"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.random.index.__init__
+  call %main
+  ret 0
+}
+
+function std.random.index.__init__() {
+@entry
+  ret 0
+}
+
+function std.random.index.random_string(i64) {
+@entry
+@block_0
+  call %std.random.random.random_string %0
+  ret %r1
+}
+
+function std.random.index.random_int(i64, i64) {
+@entry
+@block_0
+  call %std.random.random.random_int %0 %1
+  ret %r2
+}
+
+function std.random.index.Random(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  call %std.random.random.Random.init %r1 %0
+  ret %r1
+}
+
+function std.random.distributions.__init__() {
+@entry
+  ret 0
+}
+
+function std.random.distributions.Uniform.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.__init__() {
+@entry
+  ret 0
+}
+
+function std.random.random.random_bool() {
+@entry
+@block_0
+  call %std.random.random.Random.next_bool 0
+  ret %r1
+}
+
+function std.random.random.random_float(i64, i64) {
+@entry
+@block_0
+  call %std.random.random.Random.range_float 0 %0 %1
+  ret %r3
+}
+
+function std.random.random.SecureRandom.next_bytes(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.SecureRandom.next_float(i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.SecureRandom.next_int(i64) {
+@entry
+  ret 0
+}
+
+function std.random.distributions.Uniform.sample(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.Random.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.Random.next_string(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.Random.next_bytes(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.Random.range_int(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.index.Uniform(i64, i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.random.distributions.Uniform.init %r2 %0 %1
+  ret %r2
+}
+
+function main() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  call %test_random_frame
+  %r4 = ceq %r2 9 : i32
+  %r5 = call %lm_box_string %str_const_1 : i64
+  call %lm_assert %r4 %r5
+  call %test_distributions
+  %r9 = ceq %r7 9 : i32
+  %r10 = call %lm_box_string %str_const_2 : i64
+  call %lm_assert %r9 %r10
+  call %test_random_helpers
+  %r14 = ceq %r12 9 : i32
+  %r15 = call %lm_box_string %str_const_3 : i64
+  call %lm_assert %r14 %r15
+  %r17 = call %lm_box_string %str_const_4 : i64
+  call %lm_print_int %r17
+  ret 1
+}
+
+function std.resource.Resource._handle(i64) {
+@entry
+  ret 0
+}
+
+function test_random_frame() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_5 : i64
+  call %lm_print_int %r0
+  call %std.random.index.Random 987654313
+  %r4 = cast %r3 : i8*
+  call %std.random.random.Random.next_int %r4
+  %r9 = cne %r6 1 : i32
+  %r10 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r9 %r10
+  call %std.random.random.Random.next_float %r4
+  %r16 = csge %r12 2 : i32
+  br %r16 %block_18 %block_22
+@block_18
+  jmp %block_18
+  %r18 = csle %r12 2 : i32
+  jmp %block_22
+@block_22
+  %r19 = call %lm_box_string %str_const_7 : i64
+  call %lm_assert %r18 %r19
+  call %std.random.random.Random.next_bool %r4
+  %r25 = ceq %r21 18 : i32
+  br %r25 %block_34 %block_30
+@block_30
+  jmp %block_30
+  %r27 = ceq %r21 10 : i32
+  jmp %block_34
+@block_34
+  %r28 = call %lm_box_string %str_const_8 : i64
+  call %lm_assert %r27 %r28
+  call %std.random.random.Random.range_int %r4 9 81
+  %r36 = csge %r32 9 : i32
+  br %r36 %block_44 %block_48
+@block_44
+  jmp %block_44
+  %r38 = cslt %r32 81 : i32
+  jmp %block_48
+@block_48
+  %r39 = call %lm_box_string %str_const_9 : i64
+  call %lm_assert %r38 %r39
+  call %std.random.random.Random.range_float %r4 2 2
+  %r47 = csge %r43 2 : i32
+  br %r47 %block_58 %block_62
+@block_58
+  jmp %block_58
+  %r49 = csle %r43 2 : i32
+  jmp %block_62
+@block_62
+  %r50 = call %lm_box_string %str_const_10 : i64
+  call %lm_assert %r49 %r50
+  call %std.random.random.Random.next_bytes %r4 41
+  call %lm_list_len %r53
+  %r57 = ceq %r55 41 : i32
+  %r58 = call %lm_box_string %str_const_11 : i64
+  call %lm_assert %r57 %r58
+  %r61 = call %lm_box_string %str_const_12 : i64
+  call %std.random.random.Random.next_string %r4 41 %r61
+  call %lm_list_len %r62
+  %r66 = ceq %r64 41 : i32
+  %r67 = call %lm_box_string %str_const_13 : i64
+  call %lm_assert %r66 %r67
+  ret 9
+}
+
+function std.resource.Connector.connect(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Accepter.accept(i64) {
+@entry
+  ret 0
+}
+
+function std.random.index.SecureRandom() {
+@entry
+@block_0
+  %r0 = alloc 16 : i64
+  call %std.random.random.SecureRandom.init %r0
+  ret 0
+}
+
+function std.resource.Resource.close(i64) {
+@entry
+  ret 0
+}
+
+function std.random.index.random_float(i64, i64) {
+@entry
+@block_0
+  call %std.random.random.random_float %0 %1
+  ret %r2
+}
+
+function std.resource.ResourceWriter.write(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create(i64, i64) {
+@entry
+@block_0
+  call %std.internal.runtime.create %0 %1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_6 %block_8
+@block_6
+  jmp %block_6
+  %r8 = call %lm_error_new %0 : i8*
+  ret %r8
+@block_8
+  %r10 = alloc 16 : i64
+  call %std.resource.Resource.init %r10 %r2 %0
+  ret %r10
+}
+
+function std.random.random.Random.range_float(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.random_string(i64) {
+@entry
+@block_0
+  %r2 = call %lm_box_string %str_const_14 : i64
+  call %std.random.random.Random.next_string 0 %0 %r2
+  ret %r3
+}
+
+function std.resource.create_socket() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.Resource.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.SecureRandom.init(i64) {
+@entry
+  ret 0
+}
+
+function std.internal.runtime.call(i64, i64, i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.resource.create_udp_socket() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.random.random.random_bytes(i64) {
+@entry
+@block_0
+  call %std.random.random.Random.next_bytes 0 %0
+  ret %r2
+}
+
+function std.internal.runtime.create(i64, i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.resource.Pollable.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Poller.poll(i64) {
+@entry
+  ret 0
+}
+
+function std.random.index.random_bool() {
+@entry
+@block_0
+  call %std.random.random.random_bool
+  ret 0
+}
+
+function std.random.random.Random.next_bool(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Resource.is_open(i64) {
+@entry
+  ret 0
+}
+
+function std.internal.runtime.__init__() {
+@entry
+  ret 0
+}
+
+function std.resource.ResourceReader.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.internal.runtime.destroy(i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.resource.ResourceWriter.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Pollable.poll(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Poller.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Connector.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Binder.bind(i64, i64) {
+@entry
+  ret 0
+}
+
+function test_distributions() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_15 : i64
+  call %lm_print_int %r0
+  call %std.random.index.Random 987654313
+  %r4 = cast %r3 : i8*
+  call %std.random.index.Uniform 2 2
+  %r9 = cast %r8 : i8*
+  call %std.random.distributions.Uniform.sample %r9 %r4
+  %r15 = csge %r11 2 : i32
+  br %r15 %block_17 %block_21
+@block_17
+  jmp %block_17
+  %r17 = csle %r11 2 : i32
+  jmp %block_21
+@block_21
+  %r18 = call %lm_box_string %str_const_16 : i64
+  call %lm_assert %r17 %r18
+  ret 9
+}
+
+function std.resource.create_hash_engine() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.Binder.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Listener.listen(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Listener.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Accepter.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.ResourceReader.read(i64, i64) {
+@entry
+  ret 0
+}
+
+function test_random_helpers() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_17 : i64
+  call %lm_print_int %r0
+  call %std.random.index.random_int 9 81
+  %r8 = csge %r4 9 : i32
+  br %r8 %block_10 %block_14
+@block_10
+  jmp %block_10
+  %r10 = cslt %r4 81 : i32
+  jmp %block_14
+@block_14
+  %r11 = call %lm_box_string %str_const_18 : i64
+  call %lm_assert %r10 %r11
+  call %std.random.index.random_float 2 2
+  %r19 = csge %r15 2 : i32
+  br %r19 %block_24 %block_28
+@block_24
+  jmp %block_24
+  %r21 = csle %r15 2 : i32
+  jmp %block_28
+@block_28
+  %r22 = call %lm_box_string %str_const_19 : i64
+  call %lm_assert %r21 %r22
+  call %std.random.index.random_bool
+  %r28 = ceq %r24 18 : i32
+  br %r28 %block_40 %block_36
+@block_36
+  jmp %block_36
+  %r30 = ceq %r24 10 : i32
+  jmp %block_40
+@block_40
+  %r31 = call %lm_box_string %str_const_20 : i64
+  call %lm_assert %r30 %r31
+  ret 9
+}
+
+function std.resource.create_dns_resolver() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.random.index.random_bytes(i64) {
+@entry
+@block_0
+  call %std.random.random.random_bytes %0
+  ret %r1
+}
+
+function std.resource.create_websocket() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.open_file(i64, i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r3
+  %r7 = neg 9 : i64
+  %r8 = ceq %r4 %r7 : i32
+  br %r8 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r10 = call %lm_error_new %0 : i8*
+  ret %r10
+@block_10
+  call %lm_list_new 0
+  call %lm_list_append %r12 %0
+  call %lm_list_append %r12 %1
+  call %std.internal.runtime.call %r4 0 %r12
+  %r18 = cne %r15 18 : i32
+  br %r18 %block_19 %block_22
+@block_19
+  jmp %block_19
+  call %std.internal.runtime.destroy %r4
+  %r21 = call %lm_error_new %0 : i8*
+  ret %r21
+@block_22
+  %r24 = alloc 16 : i64
+  call %std.resource.Resource.init %r24 %r4 0
+  ret %r24
+}
+
+function std.resource.create_entropy() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.random.random.random_int(i64, i64) {
+@entry
+@block_0
+  call %std.random.random.Random.range_int 0 %0 %1
+  ret %r3
+}
+
+function std.resource.adopt_socket(i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.resource.Resource.init %r2 %0 0
+  ret %r2
+}
+
+function std.resource.create_fs_resource() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource._call(i64, i64, i64) {
+@entry
+@block_0
+  call %std.internal.runtime.call %0 %1 %2
+  ret %r3
+}
+
+function std.resource.__init__() {
+@entry
+  ret 0
+}
+
+function std.random.random.Random.next_int(i64) {
+@entry
+  ret 0
+}
+
+function std.random.random.Random.next_float(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_list_len(void) {
+}
+
+function lm_error_new(i64) {
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}

@@ -41,3 +41,22 @@ Type* Module::getType(const std::string& name) const {
 }
 
 } // namespace ir
+#include <iostream>
+namespace ir {
+
+void Module::print(std::ostream& os) const {
+    for (const auto& gv : globalVariables) {
+        os << "global %" << gv->getName() << " = ";
+        if (auto* cs = dynamic_cast<ConstantString*>(gv->getInitializer())) {
+            os << "\"" << cs->getValue() << "\"";
+        } else {
+            os << "unsupported_global";
+        }
+        os << "\n";
+    }
+    for (const auto& func : functions) {
+        func->print(os);
+        os << "\n";
+    }
+}
+} // namespace ir

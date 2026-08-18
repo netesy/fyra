@@ -14,11 +14,40 @@ void Function::addBasicBlock(std::unique_ptr<BasicBlock> bb) {
     basicBlocks.push_back(std::move(bb));
 }
 
+void Function::moveBasicBlockToBack(BasicBlock* bb) {
+    for (auto it = basicBlocks.begin(); it != basicBlocks.end(); ++it) {
+        if (it->get() == bb) {
+            std::unique_ptr<BasicBlock> ptr = std::move(*it);
+            basicBlocks.erase(it);
+            basicBlocks.push_back(std::move(ptr));
+            break;
+        }
+    }
+}
+
 void Function::addParameter(std::unique_ptr<Parameter> p) {
     parameters.push_back(std::move(p));
 }
 
 void Function::print(std::ostream& os) const {
+    int unnamed_counter = 0;
+    // Pre-pass to name all unnamed instructions
+    
+    for (const auto& param : parameters) {
+        if (param && param->getName().empty()) {
+            param->setName(std::to_string(unnamed_counter++));
+        }
+    }
+    
+    for (const auto& bb : basicBlocks) {
+        if (bb) {
+            for (const auto& inst : bb->getInstructions()) {
+                if (inst && inst->getName().empty()) {
+                    inst->setName(std::to_string(unnamed_counter++));
+                }
+            }
+        }
+    }
     os << "function " << getName() << "(";
     bool first = true;
     for (const auto& param : parameters) {

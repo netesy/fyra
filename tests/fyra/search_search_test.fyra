@@ -1,0 +1,287 @@
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.search.__init__
+  call %main
+  ret 0
+}
+
+function std.search.__init__() {
+@entry
+  ret 0
+}
+
+function std.search.equal_range(i64, i64) {
+@entry
+@block_0
+  call %std.search.lower_bound %0 %1
+  call %std.search.upper_bound %0 %1
+  ret 0
+}
+
+function std.search.interpolation_search(i64, i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  sub %r3 9
+  jmp %block_6
+@block_6
+  %r9 = csle 1 %r5 : i32
+  br %r9 %block_9 %block_13
+@block_9
+  jmp %block_9
+  call %lm_list_get %0 1
+  %r11 = csge %1 %r10 : i32
+  jmp %block_13
+@block_13
+  br %r11 %block_15 %block_19
+@block_15
+  jmp %block_15
+  call %lm_list_get %0 %r5
+  %r13 = csle %1 %r12 : i32
+  jmp %block_19
+@block_19
+  br %r13 %block_20 %block_64
+@block_20
+  jmp %block_20
+  %r15 = ceq 1 %r5 : i32
+  br %r15 %block_22 %block_29
+@block_22
+  jmp %block_22
+  call %lm_list_get %0 1
+  %r18 = ceq %r17 %1 : i32
+  br %r18 %block_25 %block_26
+@block_25
+  jmp %block_25
+  ret 1
+@block_26
+  %r21 = neg 9 : i64
+  ret %r21
+@block_29
+  call %lm_list_get %0 1
+  %r23 = sub %1 %r22 : i64
+  sub %r5 1
+  %r25 = mul %r23 %r24 : i64
+  call %lm_list_get %0 %r5
+  call %lm_list_get %0 1
+  sub %r26 %r27
+  %r29 = div %r25 %r28 : i64
+  call %lm_list_get %0 1
+  %r31 = sub %1 %r30 : i64
+  sub %r5 1
+  %r33 = mul %r31 %r32 : i64
+  call %lm_list_get %0 %r5
+  call %lm_list_get %0 1
+  sub %r34 %r35
+  %r37 = div %r33 %r36 : i64
+  %r38 = add 1 %r37 : i64
+  call %lm_list_get %0 %r38
+  %r41 = ceq %r40 %1 : i32
+  br %r41 %block_50 %block_51
+@block_50
+  jmp %block_50
+  ret %r38
+@block_51
+  call %lm_list_get %0 %r38
+  %r44 = cslt %r43 %1 : i32
+  br %r44 %block_54 %block_59
+@block_54
+  jmp %block_54
+  %r48 = add %r38 9 : i64
+  jmp %block_63
+@block_59
+  %r50 = sub %r38 9 : i64
+  jmp %block_63
+@block_63
+  jmp %block_6
+@block_64
+  %r52 = neg 9 : i64
+  ret %r52
+}
+
+function std.search.binary_search(i64, i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  sub %r3 9
+  jmp %block_6
+@block_6
+  %r7 = csle 1 %r5 : i32
+  br %r7 %block_8 %block_29
+@block_8
+  jmp %block_8
+  %r9 = add 1 %r5 : i64
+  %r11 = div %r9 17 : i64
+  call %lm_list_get %0 %r11
+  %r14 = ceq %r13 %1 : i32
+  br %r14 %block_15 %block_16
+@block_15
+  jmp %block_15
+  ret %r11
+@block_16
+  call %lm_list_get %0 %r11
+  %r17 = cslt %r16 %1 : i32
+  br %r17 %block_19 %block_24
+@block_19
+  jmp %block_19
+  %r21 = add %r11 9 : i64
+  jmp %block_28
+@block_24
+  %r23 = sub %r11 9 : i64
+  jmp %block_28
+@block_28
+  jmp %block_6
+@block_29
+  %r25 = neg 9 : i64
+  ret %r25
+}
+
+function main() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %lm_list_append %r0 9
+  call %lm_list_append %r0 17
+  call %lm_list_append %r0 17
+  call %lm_list_append %r0 25
+  call %lm_list_append %r0 33
+  call %std.search.linear_search %r0 25
+  %r15 = cne %r13 25 : i32
+  br %r15 %block_17 %block_19
+@block_17
+  jmp %block_17
+  ret 9
+@block_19
+  call %std.search.binary_search %r0 33
+  %r21 = cne %r19 33 : i32
+  br %r21 %block_24 %block_26
+@block_24
+  jmp %block_24
+  ret 17
+@block_26
+  call %std.search.lower_bound %r0 17
+  %r27 = cne %r25 9 : i32
+  br %r27 %block_31 %block_33
+@block_31
+  jmp %block_31
+  ret 25
+@block_33
+  call %std.search.upper_bound %r0 17
+  %r33 = cne %r31 25 : i32
+  br %r33 %block_38 %block_40
+@block_38
+  jmp %block_38
+  ret 33
+@block_40
+  call %std.search.equal_range %r0 17
+  call %lm_list_new 0
+  call %lm_list_append %r39 9
+  call %lm_list_append %r39 25
+  call %lm_list_append %r39 41
+  call %lm_list_append %r39 57
+  call %std.search.interpolation_search %r39 41
+  %r51 = cne %r49 17 : i32
+  br %r51 %block_57 %block_59
+@block_57
+  jmp %block_57
+  ret 41
+@block_59
+  ret 1
+}
+
+function std.search.upper_bound(i64, i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  jmp %block_4
+@block_4
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_6 %block_21
+@block_6
+  jmp %block_6
+  %r7 = add 1 %r3 : i64
+  %r9 = div %r7 17 : i64
+  call %lm_list_get %0 %r9
+  %r12 = csle %r11 %1 : i32
+  br %r12 %block_13 %block_18
+@block_13
+  jmp %block_13
+  %r16 = add %r9 9 : i64
+  jmp %block_20
+@block_18
+  jmp %block_20
+@block_20
+  jmp %block_4
+@block_21
+  ret %r16
+}
+
+function std.search.linear_search(i64, i64) {
+@entry
+@block_0
+  jmp %block_1
+@block_1
+  jmp %block_3
+@block_3
+  call %lm_list_len %0
+  %r5 = cslt 1 %r4 : i32
+  br %r5 %block_6 %block_16
+@block_6
+  jmp %block_6
+  call %lm_list_get %0 1
+  %r7 = ceq %r6 %1 : i32
+  br %r7 %block_9 %block_10
+@block_9
+  jmp %block_9
+  ret 1
+@block_10
+  jmp %block_11
+@block_11
+  %r11 = add 1 9 : i64
+  jmp %block_3
+@block_16
+  %r13 = neg 9 : i64
+  ret %r13
+}
+
+function std.search.lower_bound(i64, i64) {
+@entry
+@block_0
+  call %lm_list_len %0
+  jmp %block_4
+@block_4
+  %r5 = cslt 1 %r3 : i32
+  br %r5 %block_6 %block_21
+@block_6
+  jmp %block_6
+  %r7 = add 1 %r3 : i64
+  %r9 = div %r7 17 : i64
+  call %lm_list_get %0 %r9
+  %r12 = cslt %r11 %1 : i32
+  br %r12 %block_13 %block_18
+@block_13
+  jmp %block_13
+  %r16 = add %r9 9 : i64
+  jmp %block_20
+@block_18
+  jmp %block_20
+@block_20
+  jmp %block_4
+@block_21
+  ret %r16
+}
+
+function lm_list_len(i64) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}

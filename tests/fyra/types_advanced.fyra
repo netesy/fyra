@@ -1,0 +1,383 @@
+global %str_const_0 = "=== Advanced Type Tests ==="
+global %str_const_1 = "
+--- Test 1: Complex Type Alias Chains ---"
+global %str_const_2 = "Base ID: %s"
+global %str_const_3 = "User ID: %s"
+global %str_const_4 = "Admin ID: %s"
+global %str_const_5 = "Super Admin ID: %s"
+global %str_const_6 = "
+--- Test 2: Union Type Combinations ---"
+global %str_const_7 = "text"
+global %str_const_8 = "All types 1 (int): %s"
+global %str_const_9 = "All types 2 (float): %s"
+global %str_const_10 = "All types 3 (str): %s"
+global %str_const_11 = "All types 4 (bool): %s"
+global %str_const_12 = "
+--- Test 3: Function Parameter Compatibility ---"
+global %str_const_13 = "hello"
+global %str_const_14 = "Format output 1: %s"
+global %str_const_15 = "Format output 2: %s"
+global %str_const_16 = "
+--- Test 4: Recursive-like Type Structures ---"
+global %str_const_17 = "leaf"
+global %str_const_18 = "Node 1: %s"
+global %str_const_19 = "Node 2: %s"
+global %str_const_20 = "
+--- Test 5: Type Inference with Unions ---"
+global %str_const_21 = "test"
+global %str_const_22 = "Infer 1: %s"
+global %str_const_23 = "Infer 2: %s"
+global %str_const_24 = "Infer 3: %s"
+global %str_const_25 = "
+--- Test 6: Union Return Types ---"
+global %str_const_26 = "Process 1: %s"
+global %str_const_27 = "Process 2: %s"
+global %str_const_28 = "Process 3: %s"
+global %str_const_29 = "
+--- Test 7: Complex Type Alias Unions ---"
+global %str_const_30 = "combined"
+global %str_const_31 = "Combined 1 (int): %s"
+global %str_const_32 = "Combined 2 (str): %s"
+global %str_const_33 = "Combined 3 (bool): %s"
+global %str_const_34 = "Combined 4 (float): %s"
+global %str_const_35 = "
+--- Test 8: Type System Stress Test ---"
+global %str_const_36 = "stress"
+global %str_const_37 = "Stress 1: %s"
+global %str_const_38 = "Stress 2: %s"
+global %str_const_39 = "Stress 3: %s"
+global %str_const_40 = "Stress 4: %s"
+global %str_const_41 = "
+--- Test 9: Typed Collections (Lists) ---"
+global %str_const_42 = "hello"
+global %str_const_43 = "world"
+global %str_const_44 = "test"
+global %str_const_45 = "Numbers: %s"
+global %str_const_46 = "Words: %s"
+global %str_const_47 = "Flags: %s"
+global %str_const_48 = "Scores: %s"
+global %str_const_49 = "
+--- Test 10: Typed Collections (Dictionaries) ---"
+global %str_const_50 = "Alice"
+global %str_const_51 = "Bob"
+global %str_const_52 = "Charlie"
+global %str_const_53 = "First"
+global %str_const_54 = "Second"
+global %str_const_55 = "Third"
+global %str_const_56 = "Age map: %s"
+global %str_const_57 = "Price map: %s"
+global %str_const_58 = "Name map: %s"
+global %str_const_59 = "
+--- Test 11: Nested Collections ---"
+global %str_const_60 = "Alice"
+global %str_const_61 = "Bob"
+global %str_const_62 = "Matrix: %s"
+global %str_const_63 = "Student grades: %s"
+global %str_const_64 = "
+--- Test 12: Structural Types ---"
+global %str_const_65 = "Structural types defined successfully"
+global %str_const_66 = "
+=== Advanced Type Tests Complete ==="
+global %str_const_67 = "processed"
+global %str_const_68 = "Type inferred for: %s"
+global %str_const_69 = "Formatted: %s"
+global %str_minus = "-"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r0
+  %r2 = call %lm_box_string %str_const_1 : i64
+  call %lm_print_int %r2
+  %r9 = call %lm_box_string %str_const_2 : i64
+  %r8 = call %lm_rt_str_format %r9 8001 : i64
+  call %lm_print_int %r8
+  %r12 = call %lm_box_string %str_const_3 : i64
+  %r11 = call %lm_rt_str_format %r12 16001 : i64
+  call %lm_print_int %r11
+  %r15 = call %lm_box_string %str_const_4 : i64
+  %r14 = call %lm_rt_str_format %r15 24001 : i64
+  call %lm_print_int %r14
+  %r18 = call %lm_box_string %str_const_5 : i64
+  %r17 = call %lm_rt_str_format %r18 32001 : i64
+  call %lm_print_int %r17
+  %r20 = call %lm_box_string %str_const_6 : i64
+  call %lm_print_int %r20
+  %r24 = call %lm_box_string %str_const_7 : i64
+  %r27 = call %lm_box_string %str_const_8 : i64
+  %r26 = call %lm_rt_str_format %r27 337 : i64
+  call %lm_print_int %r26
+  %r30 = call %lm_box_string %str_const_9 : i64
+  %r29 = call %lm_rt_str_format %r30 2 : i64
+  call %lm_print_int %r29
+  %r33 = call %lm_box_string %str_const_10 : i64
+  %r32 = call %lm_rt_str_format %r33 %r24 : i64
+  call %lm_print_int %r32
+  %r36 = call %lm_box_string %str_const_11 : i64
+  %r35 = call %lm_rt_str_format %r36 18 : i64
+  call %lm_print_int %r35
+  %r38 = call %lm_box_string %str_const_12 : i64
+  call %lm_print_int %r38
+  %r41 = call %lm_box_string %str_const_13 : i64
+  call %formatInput 985
+  call %formatInput %r41
+  %r47 = call %lm_box_string %str_const_14 : i64
+  %r46 = call %lm_rt_str_format %r47 %r42 : i64
+  call %lm_print_int %r46
+  %r50 = call %lm_box_string %str_const_15 : i64
+  %r49 = call %lm_rt_str_format %r50 %r44 : i64
+  call %lm_print_int %r49
+  %r52 = call %lm_box_string %str_const_16 : i64
+  call %lm_print_int %r52
+  %r55 = call %lm_box_string %str_const_17 : i64
+  %r57 = call %lm_box_string %str_const_18 : i64
+  %r56 = call %lm_rt_str_format %r57 801 : i64
+  call %lm_print_int %r56
+  %r60 = call %lm_box_string %str_const_19 : i64
+  %r59 = call %lm_rt_str_format %r60 %r55 : i64
+  call %lm_print_int %r59
+  %r62 = call %lm_box_string %str_const_20 : i64
+  call %lm_print_int %r62
+  call %inferType 337
+  %r67 = call %lm_box_string %str_const_21 : i64
+  call %inferType %r67
+  call %inferType 18
+  %r74 = call %lm_box_string %str_const_22 : i64
+  %r73 = call %lm_rt_str_format %r74 %r65 : i64
+  call %lm_print_int %r73
+  %r77 = call %lm_box_string %str_const_23 : i64
+  %r76 = call %lm_rt_str_format %r77 %r68 : i64
+  call %lm_print_int %r76
+  %r80 = call %lm_box_string %str_const_24 : i64
+  %r79 = call %lm_rt_str_format %r80 %r71 : i64
+  call %lm_print_int %r79
+  %r82 = call %lm_box_string %str_const_25 : i64
+  call %lm_print_int %r82
+  call %processData 9
+  call %processData 17
+  call %processData 25
+  %r94 = call %lm_box_string %str_const_26 : i64
+  %r93 = call %lm_rt_str_format %r94 %r85 : i64
+  call %lm_print_int %r93
+  %r97 = call %lm_box_string %str_const_27 : i64
+  %r96 = call %lm_rt_str_format %r97 %r88 : i64
+  call %lm_print_int %r96
+  %r100 = call %lm_box_string %str_const_28 : i64
+  %r99 = call %lm_rt_str_format %r100 %r91 : i64
+  call %lm_print_int %r99
+  %r102 = call %lm_box_string %str_const_29 : i64
+  call %lm_print_int %r102
+  %r105 = call %lm_box_string %str_const_30 : i64
+  %r109 = call %lm_box_string %str_const_31 : i64
+  %r108 = call %lm_rt_str_format %r109 985 : i64
+  call %lm_print_int %r108
+  %r112 = call %lm_box_string %str_const_32 : i64
+  %r111 = call %lm_rt_str_format %r112 %r105 : i64
+  call %lm_print_int %r111
+  %r115 = call %lm_box_string %str_const_33 : i64
+  %r114 = call %lm_rt_str_format %r115 18 : i64
+  call %lm_print_int %r114
+  %r118 = call %lm_box_string %str_const_34 : i64
+  %r117 = call %lm_rt_str_format %r118 2 : i64
+  call %lm_print_int %r117
+  %r120 = call %lm_box_string %str_const_35 : i64
+  call %lm_print_int %r120
+  %r123 = call %lm_box_string %str_const_36 : i64
+  %r127 = call %lm_box_string %str_const_37 : i64
+  %r126 = call %lm_rt_str_format %r127 7993 : i64
+  call %lm_print_int %r126
+  %r130 = call %lm_box_string %str_const_38 : i64
+  %r129 = call %lm_rt_str_format %r130 %r123 : i64
+  call %lm_print_int %r129
+  %r133 = call %lm_box_string %str_const_39 : i64
+  %r132 = call %lm_rt_str_format %r133 10 : i64
+  call %lm_print_int %r132
+  %r136 = call %lm_box_string %str_const_40 : i64
+  %r135 = call %lm_rt_str_format %r136 2 : i64
+  call %lm_print_int %r135
+  %r138 = call %lm_box_string %str_const_41 : i64
+  call %lm_print_int %r138
+  call %lm_list_new 0
+  call %lm_list_append %r140 9
+  call %lm_list_append %r140 17
+  call %lm_list_append %r140 25
+  call %lm_list_append %r140 33
+  call %lm_list_append %r140 41
+  call %lm_list_new 0
+  %r153 = call %lm_box_string %str_const_42 : i64
+  call %lm_list_append %r152 %r153
+  %r155 = call %lm_box_string %str_const_43 : i64
+  call %lm_list_append %r152 %r155
+  %r157 = call %lm_box_string %str_const_44 : i64
+  call %lm_list_append %r152 %r157
+  call %lm_list_new 0
+  call %lm_list_append %r160 18
+  call %lm_list_append %r160 10
+  call %lm_list_append %r160 18
+  call %lm_list_new 0
+  call %lm_list_append %r168 2
+  call %lm_list_append %r168 2
+  call %lm_list_append %r168 2
+  %r177 = call %lm_box_string %str_const_45 : i64
+  %r176 = call %lm_rt_str_format %r177 %r140 : i64
+  call %lm_print_int %r176
+  %r180 = call %lm_box_string %str_const_46 : i64
+  %r179 = call %lm_rt_str_format %r180 %r152 : i64
+  call %lm_print_int %r179
+  %r183 = call %lm_box_string %str_const_47 : i64
+  %r182 = call %lm_rt_str_format %r183 %r160 : i64
+  call %lm_print_int %r182
+  %r186 = call %lm_box_string %str_const_48 : i64
+  %r185 = call %lm_rt_str_format %r186 %r168 : i64
+  call %lm_print_int %r185
+  %r188 = call %lm_box_string %str_const_49 : i64
+  call %lm_print_int %r188
+  %r191 = call %lm_box_string %str_const_50 : i64
+  %r193 = call %lm_box_string %str_const_51 : i64
+  %r195 = call %lm_box_string %str_const_52 : i64
+  %r208 = call %lm_box_string %str_const_53 : i64
+  %r210 = call %lm_box_string %str_const_54 : i64
+  %r212 = call %lm_box_string %str_const_55 : i64
+  %r215 = call %lm_box_string %str_const_56 : i64
+  %r214 = call %lm_rt_str_format %r215 0 : i64
+  call %lm_print_int %r214
+  %r218 = call %lm_box_string %str_const_57 : i64
+  %r217 = call %lm_rt_str_format %r218 0 : i64
+  call %lm_print_int %r217
+  %r221 = call %lm_box_string %str_const_58 : i64
+  %r220 = call %lm_rt_str_format %r221 0 : i64
+  call %lm_print_int %r220
+  %r223 = call %lm_box_string %str_const_59 : i64
+  call %lm_print_int %r223
+  call %lm_list_new 0
+  call %lm_list_new 0
+  call %lm_list_append %r226 9
+  call %lm_list_append %r226 17
+  call %lm_list_append %r225 %r226
+  call %lm_list_new 0
+  call %lm_list_append %r232 25
+  call %lm_list_append %r232 33
+  call %lm_list_append %r225 %r232
+  call %lm_list_new 0
+  call %lm_list_append %r238 41
+  call %lm_list_append %r238 49
+  call %lm_list_append %r225 %r238
+  %r246 = call %lm_box_string %str_const_60 : i64
+  call %lm_list_new 0
+  call %lm_list_append %r247 2
+  call %lm_list_append %r247 2
+  call %lm_list_append %r247 2
+  %r254 = call %lm_box_string %str_const_61 : i64
+  call %lm_list_new 0
+  call %lm_list_append %r255 2
+  call %lm_list_append %r255 2
+  call %lm_list_append %r255 2
+  %r264 = call %lm_box_string %str_const_62 : i64
+  %r263 = call %lm_rt_str_format %r264 %r225 : i64
+  call %lm_print_int %r263
+  %r267 = call %lm_box_string %str_const_63 : i64
+  %r266 = call %lm_rt_str_format %r267 0 : i64
+  call %lm_print_int %r266
+  %r269 = call %lm_box_string %str_const_64 : i64
+  call %lm_print_int %r269
+  %r271 = call %lm_box_string %str_const_65 : i64
+  call %lm_print_int %r271
+  %r273 = call %lm_box_string %str_const_66 : i64
+  call %lm_print_int %r273
+  ret 0
+}
+
+function processData(i64) {
+@entry
+@block_0
+  %r2 = ceq %0 9 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  ret 337
+@block_5
+  %r6 = ceq %0 17 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_box_string %str_const_67 : i64
+  ret %r8
+@block_10
+  ret 18
+}
+
+function inferType(i64) {
+@entry
+@block_0
+  %r2 = call %lm_box_string %str_const_68 : i64
+  %r1 = call %lm_rt_str_format %r2 %0 : i64
+  ret %r1
+}
+
+function formatInput(i64) {
+@entry
+@block_0
+  %r2 = call %lm_box_string %str_const_69 : i64
+  %r1 = call %lm_rt_str_format %r2 %0 : i64
+  ret %r1
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_rt_str_format(i64, i64) {
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}
+
+function lm_list_len(i64) {
+}

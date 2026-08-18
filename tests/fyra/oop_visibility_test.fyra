@@ -1,0 +1,51 @@
+global %str_const_0 = "MyResource"
+global %str_const_1 = "shhh"
+global %str_const_2 = "MyResource"
+global %str_const_3 = "Public field should be accessible"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  %r0 = call %lm_box_string %str_const_0 : i64
+  %r2 = call %lm_box_string %str_const_1 : i64
+  %r3 = alloc 16 : i64
+  call %Resource.init %r3 %r0 985 %r2
+  call %Resource.print_all %r3
+  %0 = add %r3 0 : i64
+  %r7 = load %0 : i32
+  %r8 = call %lm_box_string %str_const_2 : i64
+  %r9 = ceq %r7 %r8 : i32
+  %r10 = call %lm_box_string %str_const_3 : i64
+  call %lm_assert %r9 %r10
+  ret 0
+}
+
+function Resource.secret_method(i64) {
+@entry
+  ret 0
+}
+
+function Resource.init(i64, i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function Resource.print_all(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_assert(i32, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}

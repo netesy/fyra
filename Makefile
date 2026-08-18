@@ -27,7 +27,8 @@ FYRA_COMPILER = $(BIN_DIR)/fyra_compiler
 TEST_NAMES = \
     parser codegen add sub mul div windows aarch64 riscv64 ssa float \
     functions control_flow comprehensive copy_elimination \
-    inmemory_aarch64_exec benchmark_suite sqlite_clone http_server placeholder_store
+    inmemory_aarch64_exec benchmark_suite sqlite_clone http_server placeholder_store \
+    comprehensive_correctness
 
 TEST_EXECUTABLES = \
     $(TEST_DIR)/test_parser \
@@ -49,7 +50,8 @@ TEST_EXECUTABLES = \
     $(TEST_DIR)/test_benchmark_suite \
     $(TEST_DIR)/test_sqlite_clone \
     $(TEST_DIR)/test_http_server \
-    $(TEST_DIR)/test_placeholder_store
+    $(TEST_DIR)/test_placeholder_store \
+    $(TEST_DIR)/test_comprehensive_correctness
 
 # Default target
 .PHONY: all
@@ -69,7 +71,8 @@ $(OBJ_DIR)/tests/%.o: tests/%.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Create static library
-$(FYRA_LIB): $(LIB_OBJECTS) | $(BUILD_DIR)
+$(FYRA_LIB): $(LIB_OBJECTS)
+	@mkdir -p $(dir $@)
 	ar rcs $@ $^
 
 # Include dependency files
@@ -78,21 +81,21 @@ $(FYRA_LIB): $(LIB_OBJECTS) | $(BUILD_DIR)
 
 # Build main compiler executable
 $(FYRA_COMPILER): main.cpp $(FYRA_LIB) | $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -L$(BUILD_DIR) -lfyra -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(FYRA_LIB) -o $@
 
 # Test executable build rules (Pattern Rule)
 $(TEST_DIR)/test_%: $(OBJ_DIR)/tests/test_%.o $(FYRA_LIB) | $(TEST_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -L$(BUILD_DIR) -lfyra -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(FYRA_LIB) -o $@
 
 # Exceptions for tests with unusual names or subdirectories
 $(TEST_DIR)/test_wasm_inmemory: $(OBJ_DIR)/tests/CodeGen/wasm_inmemory_test.o $(FYRA_LIB) | $(TEST_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -L$(BUILD_DIR) -lfyra -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(FYRA_LIB) -o $@
 
 $(TEST_DIR)/test_simple_wasm: $(OBJ_DIR)/tests/simple_wasm_test.o $(FYRA_LIB) | $(TEST_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -L$(BUILD_DIR) -lfyra -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(FYRA_LIB) -o $@
 
 $(TEST_DIR)/test_fibonacci_wasm: $(OBJ_DIR)/tests/fibonacci_wasm_test.o $(FYRA_LIB) | $(TEST_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -L$(BUILD_DIR) -lfyra -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(FYRA_LIB) -o $@
 
 # Special case for comprehensive and copy elimination tests (need TEST_FILE definition)
 $(OBJ_DIR)/tests/test_comprehensive.o: tests/test_comprehensive.cpp
@@ -204,3 +207,5 @@ test-simple_wasm: $(TEST_DIR)/test_simple_wasm
 	./$(TEST_DIR)/test_simple_wasm
 test-fibonacci_wasm: $(TEST_DIR)/test_fibonacci_wasm
 	./$(TEST_DIR)/test_fibonacci_wasm
+test-comprehensive_correctness: $(TEST_DIR)/test_comprehensive_correctness
+	./$(TEST_DIR)/test_comprehensive_correctness

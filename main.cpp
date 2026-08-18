@@ -1,5 +1,6 @@
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
+#include "ir/Validator.h"
 #include "target/artifact/executable/elf.hh"
 #include "target/artifact/executable/pe.hh"
 #include "target/artifact/executable/macho.hh"
@@ -81,7 +82,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string inputFile = argv[1];
+    std::string inputFile;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if ((arg == "-o" || arg == "--target") && i + 1 < argc) {
+            i++;
+        } else if (!arg.empty() && arg[0] != '-') {
+            inputFile = arg;
+            break;
+        }
+    }
     std::string outputFile = get_arg(argc, argv, "-o");
     std::string targetTriple = get_arg(argc, argv, "--target");
     if (targetTriple.empty()) targetTriple = "x64-linux-bin"; // Default
@@ -165,11 +175,24 @@ int main(int argc, char** argv) {
     }
     std::cout << "--- Parsing complete. ---\n" << std::flush;
 
+    // Validate IR Correctness
+    std::cout << "--- Validating IR correctness ---\n" << std::flush;
+    std::vector<std::string> irErrors;
+    if (!ir::Validator::validateModule(*module, irErrors)) {
+        std::cerr << "IR Validation Failed! Detected " << irErrors.size() << " errors:\n";
+        for (const auto& err : irErrors) {
+            std::cerr << "  - " << err << "\n";
+        }
+        return 1;
+    }
+    std::cout << "--- IR Validation Successful! ---\n" << std::flush;
+
     // 2. Run Optimization Pipeline
     std::cout << "--- Running Optimization Pipeline (-O" << optimizationLevel << ") ---\n" << std::flush;
     auto error_reporter = std::make_shared<transforms::ErrorReporter>(std::cerr, false);
     
     for (auto& func : module->getFunctions()) {
+        if (func->getBasicBlocks().empty()) continue;
         transforms::CFGBuilder::run(*func);
         transforms::DominatorTree domTree; domTree.run(*func);
         transforms::DominanceFrontier domFrontier; domFrontier.run(*func, domTree);
@@ -217,7 +240,11 @@ int main(int argc, char** argv) {
     if (!error_reporter->hasCriticalErrors()) {
         if (desc->arch != target::Arch::WASM32) {
             std::cout << "--- Running Register Allocation... ---\n" << std::flush;
-            for (auto& func : module->getFunctions()) { transforms::RegAllocRewriter rewriter; rewriter.run(*func); }
+            for (auto& func : module->getFunctions()) {
+                if (func->getBasicBlocks().empty()) continue;
+                transforms::RegAllocRewriter rewriter;
+                rewriter.run(*func);
+            }
             std::cout << "--- Register Allocation complete. ---\n" << std::flush;
         }
     } else {

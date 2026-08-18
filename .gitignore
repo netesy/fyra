@@ -5,6 +5,8 @@ test.wasm
 fyra_compiler
 /test_*
 *.exe
+*_exec
+*.s
 
 # IDE files
 .idea/

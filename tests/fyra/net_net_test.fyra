@@ -1,0 +1,986 @@
+global %str_const_0 = "=== Net Tests ==="
+global %str_const_1 = "127.0.0.1"
+global %str_const_2 = "valid ipv4"
+global %str_const_3 = "127.0.0.256"
+global %str_const_4 = "invalid ipv4"
+global %str_const_5 = "::1"
+global %str_const_6 = "valid ipv6"
+global %str_const_7 = "Net tests passed!"
+global %str_const_8 = "a"
+global %str_const_9 = "b"
+global %str_const_10 = "c"
+global %str_const_11 = "d"
+global %str_const_12 = "e"
+global %str_const_13 = "f"
+global %str_const_14 = "A"
+global %str_const_15 = "B"
+global %str_const_16 = "C"
+global %str_const_17 = "D"
+global %str_const_18 = "E"
+global %str_const_19 = "F"
+global %str_const_20 = "0"
+global %str_const_21 = "1"
+global %str_const_22 = "2"
+global %str_const_23 = "3"
+global %str_const_24 = "4"
+global %str_const_25 = "5"
+global %str_const_26 = "6"
+global %str_const_27 = "7"
+global %str_const_28 = "8"
+global %str_const_29 = "9"
+global %str_const_30 = ""
+global %str_const_31 = ""
+global %str_const_32 = ""
+global %str_const_33 = ""
+global %str_const_34 = "ERR"
+global %str_const_35 = ""
+global %str_const_36 = "ERR"
+global %str_const_37 = ""
+global %str_const_38 = ""
+global %str_const_39 = ""
+global %str_const_40 = "ERR"
+global %str_const_41 = ""
+global %str_const_42 = ""
+global %str_const_43 = "ERR"
+global %str_minus = "-"
+global %assert_fail = "Assertion failed
+"
+function __top_level_wrapper__() {
+@entry
+@block_0
+  call %std.net.dns.__init__
+  %r1 = call %lm_box_string %str_const_0 : i64
+  call %lm_print_int %r1
+  %r3 = alloc 16 : i64
+  %r5 = call %lm_box_string %str_const_1 : i64
+  call %std.net.dns.DNS.is_ipv4 %r3 %r5
+  %r7 = call %lm_box_string %str_const_2 : i64
+  call %lm_assert %r6 %r7
+  %r9 = call %lm_box_string %str_const_3 : i64
+  call %std.net.dns.DNS.is_ipv4 %r3 %r9
+  %r11 = cne %r10 18 : i32
+  %r13 = call %lm_box_string %str_const_4 : i64
+  call %lm_assert %r11 %r13
+  %r15 = call %lm_box_string %str_const_5 : i64
+  call %std.net.dns.DNS.is_ipv6 %r3 %r15
+  %r17 = call %lm_box_string %str_const_6 : i64
+  call %lm_assert %r16 %r17
+  %r19 = call %lm_box_string %str_const_7 : i64
+  call %lm_print_int %r19
+  ret 0
+}
+
+function std.net.dns.__init__() {
+@entry
+  ret 0
+}
+
+function std.net.dns.is_hex_digit(i64) {
+@entry
+@block_0
+  call %std.net.dns.is_digit %0
+  %r2 = cne %r1 1 : i32
+  br %r2 %block_4 %block_6
+@block_4
+  jmp %block_4
+  ret 18
+@block_6
+  %r10 = call %lm_box_string %str_const_8 : i64
+  %r11 = ceq %0 %r10 : i32
+  br %r11 %block_14 %block_10
+@block_10
+  jmp %block_10
+  %r12 = call %lm_box_string %str_const_9 : i64
+  %r13 = ceq %0 %r12 : i32
+  jmp %block_14
+@block_14
+  br %r13 %block_20 %block_16
+@block_16
+  jmp %block_16
+  %r14 = call %lm_box_string %str_const_10 : i64
+  %r15 = ceq %0 %r14 : i32
+  jmp %block_20
+@block_20
+  br %r15 %block_26 %block_22
+@block_22
+  jmp %block_22
+  %r16 = call %lm_box_string %str_const_11 : i64
+  %r17 = ceq %0 %r16 : i32
+  jmp %block_26
+@block_26
+  br %r17 %block_32 %block_28
+@block_28
+  jmp %block_28
+  %r18 = call %lm_box_string %str_const_12 : i64
+  %r19 = ceq %0 %r18 : i32
+  jmp %block_32
+@block_32
+  br %r19 %block_38 %block_34
+@block_34
+  jmp %block_34
+  %r20 = call %lm_box_string %str_const_13 : i64
+  %r21 = ceq %0 %r20 : i32
+  jmp %block_38
+@block_38
+  br %r21 %block_39 %block_41
+@block_39
+  jmp %block_39
+  ret 18
+@block_41
+  %r29 = call %lm_box_string %str_const_14 : i64
+  %r30 = ceq %0 %r29 : i32
+  br %r30 %block_49 %block_45
+@block_45
+  jmp %block_45
+  %r31 = call %lm_box_string %str_const_15 : i64
+  %r32 = ceq %0 %r31 : i32
+  jmp %block_49
+@block_49
+  br %r32 %block_55 %block_51
+@block_51
+  jmp %block_51
+  %r33 = call %lm_box_string %str_const_16 : i64
+  %r34 = ceq %0 %r33 : i32
+  jmp %block_55
+@block_55
+  br %r34 %block_61 %block_57
+@block_57
+  jmp %block_57
+  %r35 = call %lm_box_string %str_const_17 : i64
+  %r36 = ceq %0 %r35 : i32
+  jmp %block_61
+@block_61
+  br %r36 %block_67 %block_63
+@block_63
+  jmp %block_63
+  %r37 = call %lm_box_string %str_const_18 : i64
+  %r38 = ceq %0 %r37 : i32
+  jmp %block_67
+@block_67
+  br %r38 %block_73 %block_69
+@block_69
+  jmp %block_69
+  %r39 = call %lm_box_string %str_const_19 : i64
+  %r40 = ceq %0 %r39 : i32
+  jmp %block_73
+@block_73
+  br %r40 %block_74 %block_76
+@block_74
+  jmp %block_74
+  ret 18
+@block_76
+  ret 10
+}
+
+function std.net.dns.is_digit(i64) {
+@entry
+@block_0
+  %r1 = call %lm_box_string %str_const_20 : i64
+  %r2 = ceq %0 %r1 : i32
+  br %r2 %block_3 %block_5
+@block_3
+  jmp %block_3
+  ret 18
+@block_5
+  %r5 = call %lm_box_string %str_const_21 : i64
+  %r6 = ceq %0 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  ret 18
+@block_10
+  %r9 = call %lm_box_string %str_const_22 : i64
+  %r10 = ceq %0 %r9 : i32
+  br %r10 %block_13 %block_15
+@block_13
+  jmp %block_13
+  ret 18
+@block_15
+  %r13 = call %lm_box_string %str_const_23 : i64
+  %r14 = ceq %0 %r13 : i32
+  br %r14 %block_18 %block_20
+@block_18
+  jmp %block_18
+  ret 18
+@block_20
+  %r17 = call %lm_box_string %str_const_24 : i64
+  %r18 = ceq %0 %r17 : i32
+  br %r18 %block_23 %block_25
+@block_23
+  jmp %block_23
+  ret 18
+@block_25
+  %r21 = call %lm_box_string %str_const_25 : i64
+  %r22 = ceq %0 %r21 : i32
+  br %r22 %block_28 %block_30
+@block_28
+  jmp %block_28
+  ret 18
+@block_30
+  %r25 = call %lm_box_string %str_const_26 : i64
+  %r26 = ceq %0 %r25 : i32
+  br %r26 %block_33 %block_35
+@block_33
+  jmp %block_33
+  ret 18
+@block_35
+  %r29 = call %lm_box_string %str_const_27 : i64
+  %r30 = ceq %0 %r29 : i32
+  br %r30 %block_38 %block_40
+@block_38
+  jmp %block_38
+  ret 18
+@block_40
+  %r33 = call %lm_box_string %str_const_28 : i64
+  %r34 = ceq %0 %r33 : i32
+  br %r34 %block_43 %block_45
+@block_43
+  jmp %block_43
+  ret 18
+@block_45
+  %r37 = call %lm_box_string %str_const_29 : i64
+  %r38 = ceq %0 %r37 : i32
+  br %r38 %block_48 %block_50
+@block_48
+  jmp %block_48
+  ret 18
+@block_50
+  ret 10
+}
+
+function std.net.dns.split_string(i64, i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  %r4 = call %lm_box_string %str_const_30 : i64
+  jmp %block_5
+@block_5
+  call %lm_list_len %0
+  %r7 = cslt 1 %r6 : i32
+  br %r7 %block_8 %block_36
+@block_8
+  jmp %block_8
+  %r11 = add 1 9 : i64
+  call %substring %0 1 %r11
+  %r13 = ceq %r12 %1 : i32
+  br %r13 %block_14 %block_23
+@block_14
+  jmp %block_14
+  call %lm_list_new 0
+  call %lm_list_append %r15 %r4
+  call %lm_list_new 0
+  call %lm_list_append %r17 %r4
+  add %r2 %r17
+  %r20 = call %lm_box_string %str_const_31 : i64
+  jmp %block_31
+@block_23
+  %r23 = add 1 9 : i64
+  call %substring %0 1 %r23
+  %r25 = call %lm_to_string %r24 : i8*
+  %r26 = call %lm_str_concat %r20 %r25 : i8*
+  jmp %block_31
+@block_31
+  %r29 = add 1 9 : i64
+  jmp %block_5
+@block_36
+  call %lm_list_new 0
+  call %lm_list_append %r30 %r26
+  call %lm_list_new 0
+  call %lm_list_append %r32 %r26
+  add %r19 %r32
+  ret %r34
+}
+
+function std.net.dns.DNS.is_ipv4(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.net.dns.DNS.resolve(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.net.dns.Resolver.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.__init__() {
+@entry
+  ret 0
+}
+
+function std.core.ok_bool(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_32 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %r3 = call %lm_box_string %str_const_33 : i64
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r5 = cne %0 1 : i32
+  br %r5 %block_9 %block_16
+@block_9
+  jmp %block_9
+  %r7 = alloc 16 : i64
+  %7 = add %r7 0 : i64
+  store %0 %7
+  %9 = add %r7 0 : i64
+  store %r1 %9
+  %11 = add %r7 0 : i64
+  store %r2 %11
+  ret %r7
+@block_16
+  %r10 = alloc 16 : i64
+  %14 = add %r10 0 : i64
+  store %0 %14
+  %16 = add %r10 0 : i64
+  store %r1 %16
+  %18 = add %r10 0 : i64
+  store %r2 %18
+  ret %r10
+}
+
+function std.core.err_str(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_34 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r4 = alloc 16 : i64
+  %5 = add %r4 0 : i64
+  store %0 %5
+  %r6 = call %lm_box_string %str_const_35 : i64
+  %7 = add %r4 0 : i64
+  store %r1 %7
+  %9 = add %r4 0 : i64
+  store %r2 %9
+  ret %r4
+}
+
+function std.core.make_err_str(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_36 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r4 = alloc 16 : i64
+  %5 = add %r4 0 : i64
+  store %0 %5
+  %r6 = call %lm_box_string %str_const_37 : i64
+  %7 = add %r4 0 : i64
+  store %r1 %7
+  %9 = add %r4 0 : i64
+  store %r2 %9
+  ret %r4
+}
+
+function std.core.ok_str(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_38 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %r3 = call %lm_box_string %str_const_39 : i64
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r5 = alloc 16 : i64
+  %5 = add %r5 0 : i64
+  store %0 %5
+  %7 = add %r5 0 : i64
+  store %r1 %7
+  %9 = add %r5 0 : i64
+  store %r2 %9
+  ret %r5
+}
+
+function std.core.make_err_int(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_40 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r4 = alloc 16 : i64
+  %5 = add %r4 0 : i64
+  store %0 %5
+  %7 = add %r4 0 : i64
+  store %r1 %7
+  %9 = add %r4 0 : i64
+  store %r2 %9
+  ret %r4
+}
+
+function std.core.some_str(i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.net.dns.DNS.is_ipv6(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.some_int(i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.core.ResultStr.map_err(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultStr.map(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultStr.unwrap(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultStr.is_ok(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultInt.map(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultStr.is_err(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultInt.unwrap(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultInt.is_err(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultInt.is_ok(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.ResourceWriter.write(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Resource._handle(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Resource.close(i64) {
+@entry
+  ret 0
+}
+
+function std.core.OptionStr.is_none(i64) {
+@entry
+  ret 0
+}
+
+function std.net.dns.Resolver.resolve(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.ResourceReader.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create(i64, i64) {
+@entry
+@block_0
+  call %std.internal.runtime.create %0 %1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_6 %block_8
+@block_6
+  jmp %block_6
+  %r8 = call %lm_error_new %0 : i8*
+  ret %r8
+@block_8
+  %r10 = alloc 16 : i64
+  call %std.resource.Resource.init %r10 %r2 %0
+  ret %r10
+}
+
+function std.resource.ResourceWriter.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.internal.runtime.destroy(i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.core.OptionInt.unwrap_or(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Resource.init(i64, i64, i64) {
+@entry
+  ret 0
+}
+
+function std.internal.runtime.call(i64, i64, i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.internal.runtime.create(i64, i64) {
+@entry
+@block_0
+  ret 0
+}
+
+function std.net.dns.DNS.resolve_or_passthrough(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Pollable.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Poller.poll(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultStr.unwrap_or(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.ResultInt.map_err(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Pollable.poll(i64) {
+@entry
+  ret 0
+}
+
+function std.core.ok_int(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_41 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %r3 = call %lm_box_string %str_const_42 : i64
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r5 = alloc 16 : i64
+  %5 = add %r5 0 : i64
+  store %0 %5
+  %7 = add %r5 0 : i64
+  store %r1 %7
+  %9 = add %r5 0 : i64
+  store %r2 %9
+  ret %r5
+}
+
+function std.resource.Resource.is_open(i64) {
+@entry
+  ret 0
+}
+
+function std.internal.runtime.__init__() {
+@entry
+  ret 0
+}
+
+function std.resource.Poller.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Connector.connect(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Accepter.accept(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create_socket() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.core.ResultInt.unwrap_or(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Connector.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Binder.bind(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create_hash_engine() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.Binder.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.OptionStr.unwrap(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Listener.listen(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Listener.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.Accepter.init(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.core.OptionStr.unwrap_or(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.ResourceReader.read(i64, i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create_dns_resolver() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.create_websocket() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.open_file(i64, i64) {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r3
+  %r7 = neg 9 : i64
+  %r8 = ceq %r4 %r7 : i32
+  br %r8 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r10 = call %lm_error_new %0 : i8*
+  ret %r10
+@block_10
+  call %lm_list_new 0
+  call %lm_list_append %r12 %0
+  call %lm_list_append %r12 %1
+  call %std.internal.runtime.call %r4 0 %r12
+  %r18 = cne %r15 18 : i32
+  br %r18 %block_19 %block_22
+@block_19
+  jmp %block_19
+  call %std.internal.runtime.destroy %r4
+  %r21 = call %lm_error_new %0 : i8*
+  ret %r21
+@block_22
+  %r24 = alloc 16 : i64
+  call %std.resource.Resource.init %r24 %r4 0
+  ret %r24
+}
+
+function std.resource.create_entropy() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource.adopt_socket(i64) {
+@entry
+@block_0
+  %r2 = alloc 16 : i64
+  call %std.resource.Resource.init %r2 %0 0
+  ret %r2
+}
+
+function std.core.err_int(i64) {
+@entry
+@block_0
+  %r1 = alloc 16 : i64
+  %r2 = call %lm_box_string %str_const_43 : i64
+  %1 = add %r1 0 : i64
+  store %0 %1
+  %3 = add %r1 0 : i64
+  store %r1 %3
+  %r4 = alloc 16 : i64
+  %5 = add %r4 0 : i64
+  store %0 %5
+  %7 = add %r4 0 : i64
+  store %r1 %7
+  %9 = add %r4 0 : i64
+  store %r2 %9
+  ret %r4
+}
+
+function std.core.OptionInt.unwrap(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create_fs_resource() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.resource._call(i64, i64, i64) {
+@entry
+@block_0
+  call %std.internal.runtime.call %0 %1 %2
+  ret %r3
+}
+
+function std.resource.__init__() {
+@entry
+  ret 0
+}
+
+function std.core.OptionStr.is_some(i64) {
+@entry
+  ret 0
+}
+
+function std.core.OptionInt.is_some(i64) {
+@entry
+  ret 0
+}
+
+function std.resource.create_udp_socket() {
+@entry
+@block_0
+  call %lm_list_new 0
+  call %std.internal.runtime.create 0 %r1
+  %r5 = neg 9 : i64
+  %r6 = ceq %r2 %r5 : i32
+  br %r6 %block_8 %block_10
+@block_8
+  jmp %block_8
+  %r8 = call %lm_error_new 0 : i8*
+  ret %r8
+@block_10
+  %r11 = alloc 16 : i64
+  call %std.resource.Resource.init %r11 %r2 0
+  ret %r11
+}
+
+function std.core.OptionInt.is_none(i64) {
+@entry
+  ret 0
+}
+
+function lm_box_string(i8*) {
+}
+
+function lm_print_int(i64) {
+@entry
+  %1 = alloc 32 : i64
+  %2 = add %1 31 : i64
+  storeb 10 %2
+  %4 = alloc 8 : i64
+  %5 = alloc 8 : i64
+  store %2 %5
+  %7 = cslt %0 0 : i32
+  br %7 %neg %abs
+@neg
+  %9 = extern io.write(i64 1, i8* %str_minus, i64 1) : i64
+  %10 = neg %0 : i64
+  store %10 %4
+  jmp %loop
+@abs
+  store %0 %4
+  jmp %loop
+@loop
+  %15 = load %4 : i32
+  %16 = div %15 10 : i32
+  %17 = rem %15 10 : i32
+  %18 = add %17 48 : i32
+  %19 = load %5 : i32
+  %20 = sub %19 1 : i32
+  %21 = cast %18 : i8
+  storeb %21 %20
+  store %16 %4
+  store %20 %5
+  %25 = cuge %16 1 : i32
+  br %25 %loop %done
+@done
+  %27 = load %5 : i32
+  %28 = add %1 32 : i64
+  %29 = sub %28 %27 : i64
+  %30 = extern io.write(i64 1, i32 %27, i64 %29) : i64
+  ret null
+}
+
+function lm_assert(void, i64) {
+@entry
+  br %0 %pass %fail
+@fail
+  %3 = extern io.write(i64 1, i8* %assert_fail, i64 17) : i64
+  %4 = extern process.exit(i64 1) : i64
+  ret null
+@pass
+  ret null
+}
+
+function lm_list_new(i64) {
+}
+
+function lm_list_len(i64) {
+}
+
+function substring(i64, i64, i64) {
+}
+
+function lm_list_append(i64, i64) {
+}
+
+function lm_to_string(i64) {
+}
+
+function lm_str_concat(i8*, i8*) {
+}
+
+function lm_error_new(i64) {
+}
+
+function lm_list_get(i64, i64) {
+}
+
+function lm_list_set(i64, i64, i64) {
+}

@@ -80,8 +80,18 @@ public:
         std::set<std::string> defined;
         for (auto const& s : symbols_in) defined.insert(s.name);
         for (auto const& r : relocs_in) {
-            if (defined.find(r.symbolName) == defined.end() && r.symbolName == "ExitProcess") {
-                addImport("kernel32.dll", "ExitProcess");
+            if (defined.find(r.symbolName) == defined.end()) {
+                if (r.symbolName == "ExitProcess") {
+                    addImport("kernel32.dll", "ExitProcess");
+                } else if (r.symbolName == "_write") {
+                    addImport("msvcrt.dll", "_write");
+                } else if (r.symbolName == "GetStdHandle") {
+                    addImport("kernel32.dll", "GetStdHandle");
+                } else if (r.symbolName == "WriteFile") {
+                    addImport("kernel32.dll", "WriteFile");
+                } else if (r.symbolName == "VirtualAlloc") {
+                    addImport("kernel32.dll", "VirtualAlloc");
+                }
             }
         }
 
@@ -93,6 +103,7 @@ public:
             s.virtualSize = s.data.size(); s.rawDataSize = align(s.data.size(), fileAlignment_);
             if (s.name == ".text" || s.name == "CODE") s.characteristics = 0x60000020;
             else if (s.name == ".data" || s.name == "DATA") s.characteristics = 0xC0000040;
+            else if (s.name == ".bss" || s.name == "BSS") s.characteristics = 0xC0000080;
             else s.characteristics = 0x40000040;
             sections_.push_back(s);
             currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
@@ -241,8 +252,8 @@ private:
         uint32_t sig = 0x00004550; f.write((char*)&sig, 4);
         FileHeader fh = { (uint16_t)machine_, (uint16_t)sections_.size(), (uint32_t)time(0), 0, 0, (uint16_t)sizeof(OptionalHeader64), 0x22 };
         f.write((char*)&fh, sizeof(fh));
-        OptionalHeader64 oh = { 0x20b, 0, 0, 0, 0, 0, entryPoint_, 0x1000, baseAddress_, sectionAlignment_, fileAlignment_, 6, 0, 0, 0, 6, 0, 0, align(imgSize, sectionAlignment_), headSize, 0, subsystem_, 0x8160, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16, {{0, 0}} };
-        if (importDirectoryRVA_) { oh.dataDirectory[1] = { importDirectoryRVA_, (uint32_t)(imports_.size() * sizeof(ImportDescriptor)) }; }
+        OptionalHeader64 oh = { 0x20b, 0, 0, 0, 0, 0, entryPoint_, 0x1000, baseAddress_, sectionAlignment_, fileAlignment_, 6, 0, 0, 0, 6, 0, 0, align(imgSize, sectionAlignment_), headSize, 0, subsystem_, 0x8100, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16, {{0, 0}} };
+        if (importDirectoryRVA_) { oh.dataDirectory[1] = { importDirectoryRVA_, (uint32_t)((imports_.size() + 1) * sizeof(ImportDescriptor)) }; }
         f.write((char*)&oh, sizeof(oh));
     }
 
