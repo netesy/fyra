@@ -30,7 +30,93 @@ void emitStoreExternResult(CodeGen& cg, ir::Instruction& instr, const Architectu
 }
 
 bool LinuxOS::supportsCapability(const CapabilitySpec& spec) const {
-    return true;
+    switch (spec.id) {
+        case CapabilityId::IO_READ:
+        case CapabilityId::IO_WRITE:
+        case CapabilityId::IO_OPEN:
+        case CapabilityId::IO_CLOSE:
+        case CapabilityId::IO_SEEK:
+        case CapabilityId::IO_STAT:
+        case CapabilityId::IO_FLUSH:
+        case CapabilityId::FS_OPEN:
+        case CapabilityId::FS_CREATE:
+        case CapabilityId::FS_STAT:
+        case CapabilityId::FS_REMOVE:
+        case CapabilityId::FS_RENAME:
+        case CapabilityId::FS_MKDIR:
+        case CapabilityId::FS_RMDIR:
+        case CapabilityId::MEMORY_ALLOC:
+        case CapabilityId::MEMORY_FREE:
+        case CapabilityId::MEMORY_MAP:
+        case CapabilityId::MEMORY_PROTECT:
+        case CapabilityId::MEMORY_USAGE:
+        case CapabilityId::PROCESS_EXIT:
+        case CapabilityId::PROCESS_ABORT:
+        case CapabilityId::PROCESS_SLEEP:
+        case CapabilityId::PROCESS_SPAWN:
+        case CapabilityId::PROCESS_ARGS:
+        case CapabilityId::PROCESS_GETPID:
+        case CapabilityId::THREAD_SPAWN:
+        case CapabilityId::THREAD_JOIN:
+        case CapabilityId::THREAD_DETACH:
+        case CapabilityId::THREAD_YIELD:
+        case CapabilityId::THREAD_GETID:
+        case CapabilityId::SYNC_MUTEX_LOCK:
+        case CapabilityId::SYNC_MUTEX_UNLOCK:
+        case CapabilityId::SYNC_ATOMIC_ADD:
+        case CapabilityId::SYNC_ATOMIC_SUB:
+        case CapabilityId::SYNC_ATOMIC_CAS:
+        case CapabilityId::TIME_NOW:
+        case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::TIME_SLEEP:
+        case CapabilityId::EVENT_POLL:
+        case CapabilityId::EVENT_CREATE:
+        case CapabilityId::EVENT_MODIFY:
+        case CapabilityId::EVENT_CLOSE:
+        case CapabilityId::NET_SOCKET:
+        case CapabilityId::NET_CONNECT:
+        case CapabilityId::NET_LISTEN:
+        case CapabilityId::NET_ACCEPT:
+        case CapabilityId::NET_SEND:
+        case CapabilityId::NET_RECV:
+        case CapabilityId::NET_CLOSE:
+        case CapabilityId::NET_BIND:
+        case CapabilityId::IPC_SEND:
+        case CapabilityId::IPC_RECV:
+        case CapabilityId::IPC_CONNECT:
+        case CapabilityId::IPC_LISTEN:
+        case CapabilityId::ENV_GET:
+        case CapabilityId::ENV_SET:
+        case CapabilityId::ENV_LIST:
+        case CapabilityId::SYSTEM_INFO:
+        case CapabilityId::SYSTEM_REBOOT:
+        case CapabilityId::SYSTEM_SHUTDOWN:
+        case CapabilityId::SIGNAL_SEND:
+        case CapabilityId::SIGNAL_REGISTER:
+        case CapabilityId::SIGNAL_WAIT:
+        case CapabilityId::RANDOM_U64:
+        case CapabilityId::RANDOM_BYTES:
+        case CapabilityId::ERROR_GET:
+        case CapabilityId::ERROR_STR:
+        case CapabilityId::DEBUG_LOG:
+        case CapabilityId::DEBUG_BREAK:
+        case CapabilityId::DEBUG_TRACE:
+        case CapabilityId::MODULE_LOAD:
+        case CapabilityId::MODULE_UNLOAD:
+        case CapabilityId::MODULE_GETSYM:
+        case CapabilityId::TTY_ISATTY:
+        case CapabilityId::TTY_GETSIZE:
+        case CapabilityId::TTY_SETMODE:
+        case CapabilityId::SECURITY_CHMOD:
+        case CapabilityId::SECURITY_CHOWN:
+        case CapabilityId::SECURITY_GETUID:
+        case CapabilityId::GPU_COMPUTE:
+        case CapabilityId::GPU_MALLOC:
+        case CapabilityId::GPU_MEMCPY:
+            return true;
+        default:
+            return false;
+    }
 }
 
 void LinuxOS::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
@@ -128,6 +214,15 @@ void LinuxOS::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const Capa
             case CapabilityId::SYNC_MUTEX_UNLOCK:
                 *os << "  # mutex.unlock portable stub\n";
                 break;
+            case CapabilityId::SYNC_ATOMIC_ADD:
+                *os << "  # atomic.add portable stub\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_SUB:
+                *os << "  # atomic.sub portable stub\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_CAS:
+                *os << "  # atomic.cas portable stub\n";
+                break;
             default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
@@ -175,6 +270,10 @@ void LinuxOS::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const Capab
 void LinuxOS::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
     if (spec.id == CapabilityId::IPC_SEND) { emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_WRITE, "io.write", CapabilityDomain::IO, 3, 3, true, true}, arch); return; }
     if (spec.id == CapabilityId::IPC_RECV) { emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_READ, "io.read", CapabilityDomain::IO, 3, 3, true, true}, arch); return; }
+    if (spec.id == CapabilityId::IPC_CONNECT || spec.id == CapabilityId::IPC_LISTEN) {
+        if (auto* os = cg.getTextStream()) *os << "  # ipc portable stub\n";
+        return;
+    }
     cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec);
 }
 
@@ -286,7 +385,16 @@ void LinuxOS::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void LinuxOS::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& s, ArchitectureInfo& a) const {
-     cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s);
+    if (auto* os = cg.getTextStream()) {
+        switch (s.id) {
+            case CapabilityId::GPU_COMPUTE:
+            case CapabilityId::GPU_MALLOC:
+            case CapabilityId::GPU_MEMCPY:
+                *os << "  # gpu portable stub\n";
+                break;
+            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s); return;
+        }
+    }
 }
 
 void LinuxOS::emitHeader(CodeGen& cg) {

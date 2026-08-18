@@ -17,7 +17,6 @@ std::vector<ir::Value*> getArgValues(ir::Instruction& instr) {
 }
 
 bool WindowsOS::supportsCapability(const CapabilitySpec& spec) const {
-    if (spec.domain == CapabilityDomain::GPU) return true;
     switch (spec.id) {
         case CapabilityId::IO_READ:
         case CapabilityId::IO_WRITE:
@@ -30,42 +29,77 @@ bool WindowsOS::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::FS_CREATE:
         case CapabilityId::FS_STAT:
         case CapabilityId::FS_REMOVE:
+        case CapabilityId::FS_RENAME:
+        case CapabilityId::FS_MKDIR:
+        case CapabilityId::FS_RMDIR:
         case CapabilityId::MEMORY_ALLOC:
         case CapabilityId::MEMORY_FREE:
         case CapabilityId::MEMORY_MAP:
         case CapabilityId::MEMORY_PROTECT:
+        case CapabilityId::MEMORY_USAGE:
         case CapabilityId::PROCESS_EXIT:
         case CapabilityId::PROCESS_ABORT:
         case CapabilityId::PROCESS_SLEEP:
         case CapabilityId::PROCESS_SPAWN:
         case CapabilityId::PROCESS_ARGS:
+        case CapabilityId::PROCESS_GETPID:
         case CapabilityId::THREAD_SPAWN:
         case CapabilityId::THREAD_JOIN:
+        case CapabilityId::THREAD_DETACH:
+        case CapabilityId::THREAD_YIELD:
+        case CapabilityId::THREAD_GETID:
         case CapabilityId::SYNC_MUTEX_LOCK:
         case CapabilityId::SYNC_MUTEX_UNLOCK:
+        case CapabilityId::SYNC_ATOMIC_ADD:
+        case CapabilityId::SYNC_ATOMIC_SUB:
+        case CapabilityId::SYNC_ATOMIC_CAS:
         case CapabilityId::TIME_NOW:
         case CapabilityId::TIME_MONOTONIC:
+        case CapabilityId::TIME_SLEEP:
         case CapabilityId::EVENT_POLL:
+        case CapabilityId::EVENT_CREATE:
+        case CapabilityId::EVENT_MODIFY:
+        case CapabilityId::EVENT_CLOSE:
         case CapabilityId::NET_SOCKET:
         case CapabilityId::NET_CONNECT:
         case CapabilityId::NET_LISTEN:
         case CapabilityId::NET_ACCEPT:
         case CapabilityId::NET_SEND:
         case CapabilityId::NET_RECV:
+        case CapabilityId::NET_CLOSE:
+        case CapabilityId::NET_BIND:
         case CapabilityId::IPC_SEND:
         case CapabilityId::IPC_RECV:
+        case CapabilityId::IPC_CONNECT:
+        case CapabilityId::IPC_LISTEN:
         case CapabilityId::ENV_GET:
         case CapabilityId::ENV_SET:
         case CapabilityId::ENV_LIST:
         case CapabilityId::SYSTEM_INFO:
+        case CapabilityId::SYSTEM_REBOOT:
+        case CapabilityId::SYSTEM_SHUTDOWN:
         case CapabilityId::SIGNAL_SEND:
         case CapabilityId::SIGNAL_REGISTER:
+        case CapabilityId::SIGNAL_WAIT:
         case CapabilityId::RANDOM_U64:
+        case CapabilityId::RANDOM_BYTES:
         case CapabilityId::ERROR_GET:
+        case CapabilityId::ERROR_STR:
         case CapabilityId::DEBUG_LOG:
+        case CapabilityId::DEBUG_BREAK:
+        case CapabilityId::DEBUG_TRACE:
         case CapabilityId::MODULE_LOAD:
+        case CapabilityId::MODULE_UNLOAD:
+        case CapabilityId::MODULE_GETSYM:
         case CapabilityId::TTY_ISATTY:
+        case CapabilityId::TTY_GETSIZE:
+        case CapabilityId::TTY_SETMODE:
         case CapabilityId::SECURITY_CHMOD:
+        case CapabilityId::SECURITY_CHOWN:
+        case CapabilityId::SECURITY_GETUID:
+        case CapabilityId::GPU_COMPUTE:
+        case CapabilityId::GPU_MALLOC:
+        case CapabilityId::GPU_MEMCPY:
             return true;
         default:
             return false;
@@ -171,6 +205,9 @@ void WindowsOS::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const Capa
         case CapabilityId::FS_CREATE: func = "CreateFileA"; break;
         case CapabilityId::FS_STAT: func = "GetFileAttributesExA"; break;
         case CapabilityId::FS_REMOVE: func = "DeleteFileA"; break;
+        case CapabilityId::FS_RENAME: func = "MoveFileA"; break;
+        case CapabilityId::FS_MKDIR: func = "CreateDirectoryA"; break;
+        case CapabilityId::FS_RMDIR: func = "RemoveDirectoryA"; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
@@ -225,6 +262,11 @@ void WindowsOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const 
         return;
     }
 
+    if (spec.id == CapabilityId::MEMORY_USAGE) {
+        if (auto* os = cg.getTextStream()) *os << "  # memory.usage stub\n";
+        return;
+    }
+
     std::string func;
     switch (spec.id) {
         case CapabilityId::MEMORY_MAP: func = "MapViewOfFile"; break;
@@ -243,6 +285,7 @@ void WindowsOS::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const
         case CapabilityId::PROCESS_SLEEP: func = "Sleep"; break;
         case CapabilityId::PROCESS_SPAWN: func = "CreateProcessA"; break;
         case CapabilityId::PROCESS_ARGS: func = "GetCommandLineA"; break;
+        case CapabilityId::PROCESS_GETPID: func = "GetCurrentProcessId"; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
@@ -253,6 +296,9 @@ void WindowsOS::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const 
     switch (spec.id) {
         case CapabilityId::THREAD_SPAWN: func = "CreateThread"; break;
         case CapabilityId::THREAD_JOIN: func = "WaitForSingleObject"; break;
+        case CapabilityId::THREAD_DETACH: func = "CloseHandle"; break;
+        case CapabilityId::THREAD_YIELD: func = "SwitchToThread"; break;
+        case CapabilityId::THREAD_GETID: func = "GetCurrentThreadId"; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
@@ -260,13 +306,23 @@ void WindowsOS::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const 
 
 void WindowsOS::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
     if (auto* os = cg.getTextStream()) {
-        if (spec.id == CapabilityId::SYNC_MUTEX_LOCK) {
-            *os << "  # mutex.lock portable stub\n";
-        } else if (spec.id == CapabilityId::SYNC_MUTEX_UNLOCK) {
-            *os << "  # mutex.unlock portable stub\n";
-        } else {
-            cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec);
-            return;
+        switch (spec.id) {
+            case CapabilityId::SYNC_MUTEX_LOCK:
+                *os << "  # mutex.lock portable stub\n";
+                break;
+            case CapabilityId::SYNC_MUTEX_UNLOCK:
+                *os << "  # mutex.unlock portable stub\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_ADD:
+                *os << "  # atomic.add portable stub\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_SUB:
+                *os << "  # atomic.sub portable stub\n";
+                break;
+            case CapabilityId::SYNC_ATOMIC_CAS:
+                *os << "  # atomic.cas portable stub\n";
+                break;
+            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
         }
     }
 }
@@ -276,14 +332,22 @@ void WindowsOS::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const Ca
     switch (spec.id) {
         case CapabilityId::TIME_NOW: func = "GetSystemTimeAsFileTime"; break;
         case CapabilityId::TIME_MONOTONIC: func = "QueryPerformanceCounter"; break;
+        case CapabilityId::TIME_SLEEP: func = "Sleep"; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::EVENT_POLL) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "WaitForMultipleObjects", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::EVENT_POLL: func = "WaitForMultipleObjects"; break;
+        case CapabilityId::EVENT_CREATE: func = "CreateEventA"; break;
+        case CapabilityId::EVENT_MODIFY: func = "SetEvent"; break;
+        case CapabilityId::EVENT_CLOSE: func = "CloseHandle"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
@@ -295,6 +359,8 @@ void WindowsOS::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const Cap
         case CapabilityId::NET_ACCEPT: func = "accept"; break;
         case CapabilityId::NET_SEND: func = "send"; break;
         case CapabilityId::NET_RECV: func = "recv"; break;
+        case CapabilityId::NET_CLOSE: func = "closesocket"; break;
+        case CapabilityId::NET_BIND: func = "bind"; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
@@ -307,6 +373,10 @@ void WindowsOS::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const Cap
     }
     if (spec.id == CapabilityId::IPC_RECV) {
         emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_READ, "io.read", CapabilityDomain::IO, 3, 3, true, true}, arch);
+        return;
+    }
+    if (spec.id == CapabilityId::IPC_CONNECT || spec.id == CapabilityId::IPC_LISTEN) {
+        if (auto* os = cg.getTextStream()) *os << "  # ipc portable stub\n";
         return;
     }
     cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec);
@@ -324,11 +394,21 @@ void WindowsOS::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const Cap
 }
 
 void WindowsOS::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::SYSTEM_INFO) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "GetSystemInfo", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::SYSTEM_INFO: func = "GetSystemInfo"; break;
+        case CapabilityId::SYSTEM_REBOOT:
+        case CapabilityId::SYSTEM_SHUTDOWN: func = "ExitWindowsEx"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    if (spec.id == CapabilityId::SIGNAL_WAIT) {
+        if (auto* os = cg.getTextStream()) *os << "  # signal.wait stub\n";
+        return;
+    }
     std::string func;
     switch (spec.id) {
         case CapabilityId::SIGNAL_SEND: func = "GenerateConsoleCtrlEvent"; break;
@@ -339,37 +419,78 @@ void WindowsOS::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void WindowsOS::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::RANDOM_U64) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
+    if (spec.id != CapabilityId::RANDOM_U64 && spec.id != CapabilityId::RANDOM_BYTES) {
+        cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec);
+        return;
+    }
     arch.emitNativeLibraryCall(cg, "BCryptGenRandom", getArgValues(instr));
 }
 
 void WindowsOS::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::ERROR_GET) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "GetLastError", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::ERROR_GET: func = "GetLastError"; break;
+        case CapabilityId::ERROR_STR: func = "FormatMessageA"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::DEBUG_LOG) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "OutputDebugStringA", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::DEBUG_LOG: func = "OutputDebugStringA"; break;
+        case CapabilityId::DEBUG_BREAK: func = "DebugBreak"; break;
+        case CapabilityId::DEBUG_TRACE: func = "OutputDebugStringA"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::MODULE_LOAD) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "LoadLibraryA", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::MODULE_LOAD: func = "LoadLibraryA"; break;
+        case CapabilityId::MODULE_UNLOAD: func = "FreeLibrary"; break;
+        case CapabilityId::MODULE_GETSYM: func = "GetProcAddress"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitTTYCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::TTY_ISATTY) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "GetConsoleMode", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::TTY_ISATTY: func = "GetConsoleMode"; break;
+        case CapabilityId::TTY_GETSIZE: func = "GetConsoleScreenBufferInfo"; break;
+        case CapabilityId::TTY_SETMODE: func = "SetConsoleMode"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id != CapabilityId::SECURITY_CHMOD) { cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return; }
-    arch.emitNativeLibraryCall(cg, "_chmod", getArgValues(instr));
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::SECURITY_CHMOD: func = "_chmod"; break;
+        case CapabilityId::SECURITY_CHOWN: func = "SetFileSecurityA"; break;
+        case CapabilityId::SECURITY_GETUID: func = "GetUserNameA"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& s, ArchitectureInfo& a) const {
-     cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s);
+    if (auto* os = cg.getTextStream()) {
+        switch (s.id) {
+            case CapabilityId::GPU_COMPUTE:
+            case CapabilityId::GPU_MALLOC:
+            case CapabilityId::GPU_MEMCPY:
+                *os << "  # gpu portable stub\n";
+                break;
+            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s); return;
+        }
+    }
 }
 
 void WindowsOS::emitHeader(CodeGen& cg) {
