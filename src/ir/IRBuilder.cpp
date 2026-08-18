@@ -525,7 +525,8 @@ Instruction* IRBuilder::createJnz(Value* cond, Value* targetTrue, Value* targetF
 }
 
 Instruction* IRBuilder::createAlloc(Value* size, Type* type) {
-    auto instr = std::make_unique<Instruction>(context->getIntegerType(64), Instruction::Alloc, std::vector<Value*>{size}, insertPoint);
+    Type* ptrType = PointerType::get(*context, type);
+    auto instr = std::make_unique<Instruction>(ptrType, Instruction::Alloc, std::vector<Value*>{size}, insertPoint);
     Instruction* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -557,7 +558,14 @@ Instruction* IRBuilder::createStore(Value* value, Value* ptr) {
 }
 
 Instruction* IRBuilder::createLoad(Value* ptr) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getIntegerType(32), Instruction::Load, {ptr}, insertPoint));
+    Type* elementType = nullptr;
+    if (auto* ptrType = dynamic_cast<PointerType*>(ptr->getType())) {
+        elementType = ptrType->getElementType();
+    }
+    if (!elementType) {
+        elementType = context->getIntegerType(64);
+    }
+    auto instr = std::unique_ptr<Instruction>(new Instruction(elementType, Instruction::Load, {ptr}, insertPoint));
     Instruction* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -591,14 +599,23 @@ PhiNode* IRBuilder::createPhi(Type* type, unsigned numOperands, Instruction* all
 }
 
 Instruction* IRBuilder::createCall(Value* callee, const std::vector<Value*>& args, Type* retType) {
-    Type* returnType = retType ? retType : context->getVoidType();
+    Type* returnType = retType;
+    if (!returnType) {
+        if (auto* fn = dynamic_cast<Function*>(callee)) {
+            returnType = fn->getType();
+        } else if (auto* ft = dynamic_cast<FunctionType*>(callee->getType())) {
+            returnType = ft->getReturnType();
+        } else {
+            returnType = context->getVoidType();
+        }
+    }
     std::vector<Value*> all_operands;
     all_operands.push_back(callee);
     all_operands.insert(all_operands.end(), args.begin(), args.end());
     auto instr = std::unique_ptr<Instruction>(new Instruction(returnType, Instruction::Call, all_operands, insertPoint));
     Instruction* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
-    insertPoint->addInstruction(std::move(instr));
+    insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
 }
 

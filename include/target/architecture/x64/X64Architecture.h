@@ -70,6 +70,8 @@ public:
 
     std::string formatStackOperand(int offset) const override;
     std::string formatGlobalOperand(const std::string& name) const override;
+    std::string formatConstant(const ir::ConstantInt* C) const override;
+    std::string getImmediatePrefix() const override { return (abi == X64ABI::Windows) ? "" : "$"; }
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
     bool isReserved(const std::string& reg) const override;
