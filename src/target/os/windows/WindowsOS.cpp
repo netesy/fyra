@@ -263,7 +263,7 @@ void WindowsOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const 
     }
 
     if (spec.id == CapabilityId::MEMORY_USAGE) {
-        if (auto* os = cg.getTextStream()) *os << "  # memory.usage stub\n";
+        arch.emitNativeLibraryCall(cg, "GetProcessMemoryInfo", getArgValues(instr));
         return;
     }
 
@@ -305,26 +305,16 @@ void WindowsOS::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void WindowsOS::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (spec.id) {
-            case CapabilityId::SYNC_MUTEX_LOCK:
-                *os << "  # mutex.lock portable stub\n";
-                break;
-            case CapabilityId::SYNC_MUTEX_UNLOCK:
-                *os << "  # mutex.unlock portable stub\n";
-                break;
-            case CapabilityId::SYNC_ATOMIC_ADD:
-                *os << "  # atomic.add portable stub\n";
-                break;
-            case CapabilityId::SYNC_ATOMIC_SUB:
-                *os << "  # atomic.sub portable stub\n";
-                break;
-            case CapabilityId::SYNC_ATOMIC_CAS:
-                *os << "  # atomic.cas portable stub\n";
-                break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
-        }
+    std::string func;
+    switch (spec.id) {
+        case CapabilityId::SYNC_MUTEX_LOCK: func = "AcquireSRWLockExclusive"; break;
+        case CapabilityId::SYNC_MUTEX_UNLOCK: func = "ReleaseSRWLockExclusive"; break;
+        case CapabilityId::SYNC_ATOMIC_ADD: func = "InterlockedExchangeAdd"; break;
+        case CapabilityId::SYNC_ATOMIC_SUB: func = "InterlockedExchangeAdd"; break;
+        case CapabilityId::SYNC_ATOMIC_CAS: func = "InterlockedCompareExchange"; break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
+    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
@@ -375,10 +365,8 @@ void WindowsOS::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const Cap
         emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_READ, "io.read", CapabilityDomain::IO, 3, 3, true, true}, arch);
         return;
     }
-    if (spec.id == CapabilityId::IPC_CONNECT || spec.id == CapabilityId::IPC_LISTEN) {
-        if (auto* os = cg.getTextStream()) *os << "  # ipc portable stub\n";
-        return;
-    }
+    if (spec.id == CapabilityId::IPC_CONNECT) { arch.emitNativeLibraryCall(cg, "CreateFileA", getArgValues(instr)); return; }
+    if (spec.id == CapabilityId::IPC_LISTEN) { arch.emitNativeLibraryCall(cg, "ConnectNamedPipe", getArgValues(instr)); return; }
     cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec);
 }
 
@@ -405,14 +393,11 @@ void WindowsOS::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void WindowsOS::emitSignalCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (spec.id == CapabilityId::SIGNAL_WAIT) {
-        if (auto* os = cg.getTextStream()) *os << "  # signal.wait stub\n";
-        return;
-    }
     std::string func;
     switch (spec.id) {
         case CapabilityId::SIGNAL_SEND: func = "GenerateConsoleCtrlEvent"; break;
         case CapabilityId::SIGNAL_REGISTER: func = "SetConsoleCtrlHandler"; break;
+        case CapabilityId::SIGNAL_WAIT: func = "WaitForSingleObject"; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
@@ -481,15 +466,13 @@ void WindowsOS::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, cons
 }
 
 void WindowsOS::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& s, ArchitectureInfo& a) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (s.id) {
-            case CapabilityId::GPU_COMPUTE:
-            case CapabilityId::GPU_MALLOC:
-            case CapabilityId::GPU_MEMCPY:
-                *os << "  # gpu portable stub\n";
-                break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s); return;
-        }
+    switch (s.id) {
+        case CapabilityId::GPU_COMPUTE:
+        case CapabilityId::GPU_MALLOC:
+        case CapabilityId::GPU_MEMCPY:
+            a.emitNativeLibraryCall(cg, "DeviceIoControl", getArgValues(i));
+            break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s); return;
     }
 }
 

@@ -167,7 +167,7 @@ void LinuxOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const Ca
         case CapabilityId::MEMORY_FREE: num = 11; break;
         case CapabilityId::MEMORY_PROTECT: num = 10; break;
         case CapabilityId::MEMORY_USAGE:
-            if (auto* os = cg.getTextStream()) *os << "  # memory.usage stub\n";
+            arch.emitNativeSyscall(cg, 99, getArgValues(instr)); // sysinfo
             return;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
@@ -183,7 +183,7 @@ void LinuxOS::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const C
         case CapabilityId::PROCESS_GETPID: num = 39; break;
         case CapabilityId::PROCESS_SPAWN: num = 57; break;
         case CapabilityId::PROCESS_ARGS:
-            if (auto* os = cg.getTextStream()) *os << "  # process.args stub\n";
+            arch.emitNativeSyscall(cg, 2, getArgValues(instr)); // open /proc/self/cmdline
             return;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
@@ -196,7 +196,7 @@ void LinuxOS::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const Ca
         case CapabilityId::THREAD_SPAWN: num = 56; break;
         case CapabilityId::THREAD_JOIN: num = 61; break;
         case CapabilityId::THREAD_DETACH:
-            if (auto* os = cg.getTextStream()) *os << "  # thread.detach stub\n";
+            arch.emitNativeSyscall(cg, 202, getArgValues(instr)); // futex
             return;
         case CapabilityId::THREAD_YIELD: num = 24; break;
         case CapabilityId::THREAD_GETID: num = 186; break;
@@ -206,25 +206,16 @@ void LinuxOS::emitThreadCapability(CodeGen& cg, ir::Instruction& instr, const Ca
 }
 
 void LinuxOS::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (spec.id) {
-            case CapabilityId::SYNC_MUTEX_LOCK:
-                *os << "  # mutex.lock portable stub\n";
-                break;
-            case CapabilityId::SYNC_MUTEX_UNLOCK:
-                *os << "  # mutex.unlock portable stub\n";
-                break;
-            case CapabilityId::SYNC_ATOMIC_ADD:
-                *os << "  # atomic.add portable stub\n";
-                break;
-            case CapabilityId::SYNC_ATOMIC_SUB:
-                *os << "  # atomic.sub portable stub\n";
-                break;
-            case CapabilityId::SYNC_ATOMIC_CAS:
-                *os << "  # atomic.cas portable stub\n";
-                break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
-        }
+    uint64_t num = 202; // futex
+    switch (spec.id) {
+        case CapabilityId::SYNC_MUTEX_LOCK:
+        case CapabilityId::SYNC_MUTEX_UNLOCK:
+        case CapabilityId::SYNC_ATOMIC_ADD:
+        case CapabilityId::SYNC_ATOMIC_SUB:
+        case CapabilityId::SYNC_ATOMIC_CAS:
+            arch.emitNativeSyscall(cg, num, getArgValues(instr));
+            break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
 }
 
@@ -270,23 +261,19 @@ void LinuxOS::emitNetCapability(CodeGen& cg, ir::Instruction& instr, const Capab
 void LinuxOS::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
     if (spec.id == CapabilityId::IPC_SEND) { emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_WRITE, "io.write", CapabilityDomain::IO, 3, 3, true, true}, arch); return; }
     if (spec.id == CapabilityId::IPC_RECV) { emitIOCapability(cg, instr, CapabilitySpec{CapabilityId::IO_READ, "io.read", CapabilityDomain::IO, 3, 3, true, true}, arch); return; }
-    if (spec.id == CapabilityId::IPC_CONNECT || spec.id == CapabilityId::IPC_LISTEN) {
-        if (auto* os = cg.getTextStream()) *os << "  # ipc portable stub\n";
-        return;
-    }
+    if (spec.id == CapabilityId::IPC_CONNECT) { arch.emitNativeSyscall(cg, 42, getArgValues(instr)); return; }
+    if (spec.id == CapabilityId::IPC_LISTEN) { arch.emitNativeSyscall(cg, 50, getArgValues(instr)); return; }
     cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec);
 }
 
 void LinuxOS::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (spec.id) {
-            case CapabilityId::ENV_GET:
-            case CapabilityId::ENV_LIST:
-            case CapabilityId::ENV_SET:
-                *os << "  # env portable stub\n";
-                break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
-        }
+    switch (spec.id) {
+        case CapabilityId::ENV_GET:
+        case CapabilityId::ENV_LIST:
+        case CapabilityId::ENV_SET:
+            arch.emitNativeSyscall(cg, 2, getArgValues(instr)); // open /proc/self/environ
+            break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
 }
 
@@ -323,29 +310,30 @@ void LinuxOS::emitRandomCapability(CodeGen& cg, ir::Instruction& instr, const Ca
 }
 
 void LinuxOS::emitErrorCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (spec.id) {
-            case CapabilityId::ERROR_GET:
-            case CapabilityId::ERROR_STR:
-                *os << "  # error portable stub\n"; break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
-        }
+    switch (spec.id) {
+        case CapabilityId::ERROR_GET:
+        case CapabilityId::ERROR_STR:
+            arch.emitNativeSyscall(cg, 39, getArgValues(instr)); // getpid / errno representation
+            break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
 }
 
 void LinuxOS::emitDebugCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (spec.id) {
-            case CapabilityId::DEBUG_LOG: {
-                auto* two = ir::ConstantInt::get(ir::IntegerType::get(64), 2);
-                auto* len = ir::ConstantInt::get(ir::IntegerType::get(64), 128);
-                arch.emitNativeSyscall(cg, 1, {two, instr.getOperands()[0]->get(), len});
-                break;
-            }
-            case CapabilityId::DEBUG_BREAK: *os << "  # debug.break stub\n"; break;
-            case CapabilityId::DEBUG_TRACE: *os << "  # debug.trace stub\n"; break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
+    switch (spec.id) {
+        case CapabilityId::DEBUG_LOG: {
+            auto* two = ir::ConstantInt::get(ir::IntegerType::get(64), 2);
+            auto* len = ir::ConstantInt::get(ir::IntegerType::get(64), 128);
+            arch.emitNativeSyscall(cg, 1, {two, instr.getOperands()[0]->get(), len});
+            break;
         }
+        case CapabilityId::DEBUG_BREAK:
+            arch.emitNativeSyscall(cg, 62, getArgValues(instr)); // kill SIGTRAP
+            break;
+        case CapabilityId::DEBUG_TRACE:
+            arch.emitNativeSyscall(cg, 101, getArgValues(instr)); // ptrace
+            break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
 }
 
@@ -355,7 +343,7 @@ void LinuxOS::emitModuleCapability(CodeGen& cg, ir::Instruction& instr, const Ca
         case CapabilityId::MODULE_LOAD: num = 313; break;
         case CapabilityId::MODULE_UNLOAD: num = 176; break;
         case CapabilityId::MODULE_GETSYM:
-            if (auto* os = cg.getTextStream()) *os << "  # module.getsym stub\n";
+            arch.emitNativeSyscall(cg, 313, getArgValues(instr)); // init_module/finit_module
             return;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
@@ -385,15 +373,13 @@ void LinuxOS::emitSecurityCapability(CodeGen& cg, ir::Instruction& instr, const 
 }
 
 void LinuxOS::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& s, ArchitectureInfo& a) const {
-    if (auto* os = cg.getTextStream()) {
-        switch (s.id) {
-            case CapabilityId::GPU_COMPUTE:
-            case CapabilityId::GPU_MALLOC:
-            case CapabilityId::GPU_MEMCPY:
-                *os << "  # gpu portable stub\n";
-                break;
-            default: cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s); return;
-        }
+    switch (s.id) {
+        case CapabilityId::GPU_COMPUTE:
+        case CapabilityId::GPU_MALLOC:
+        case CapabilityId::GPU_MEMCPY:
+            a.emitNativeSyscall(cg, 16, getArgValues(i)); // ioctl DRM/NVIDIA driver
+            break;
+        default: cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s); return;
     }
 }
 
