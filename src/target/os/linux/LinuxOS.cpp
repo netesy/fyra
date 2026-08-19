@@ -175,11 +175,14 @@ void LinuxOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const Ca
 }
 
 void LinuxOS::emitProcessCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    if (spec.id == CapabilityId::PROCESS_SLEEP) {
+        arch.emitNativeLibraryCall(cg, "sleep", getArgValues(instr));
+        return;
+    }
     uint64_t num = 0;
     switch (spec.id) {
         case CapabilityId::PROCESS_EXIT: num = 60; break;
         case CapabilityId::PROCESS_ABORT: num = 62; break; // Simplified
-        case CapabilityId::PROCESS_SLEEP: num = 35; break;
         case CapabilityId::PROCESS_GETPID: num = 39; break;
         case CapabilityId::PROCESS_SPAWN: num = 57; break;
         case CapabilityId::PROCESS_ARGS:
@@ -220,11 +223,14 @@ void LinuxOS::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const Capa
 }
 
 void LinuxOS::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    if (spec.id == CapabilityId::TIME_SLEEP) {
+        arch.emitNativeLibraryCall(cg, "sleep", getArgValues(instr));
+        return;
+    }
     uint64_t num = 0;
     switch (spec.id) {
         case CapabilityId::TIME_NOW: num = 228; break;
         case CapabilityId::TIME_MONOTONIC: num = 228; break;
-        case CapabilityId::TIME_SLEEP: num = 35; break;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeSyscall(cg, num, getArgValues(instr));

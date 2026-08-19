@@ -333,8 +333,10 @@ void CodeGen::deallocateRegister(const std::string&) {}
 void CodeGen::emitTargetSpecificHeader() {
     targetInfo->emitHeader(*this);
     if (os) {
-        if (targetInfo->getName() == "x86_64") *os << ".att_syntax prefix\n";
-        else if (targetInfo->getName() == "win64") *os << ".intel_syntax noprefix\n";
+        if (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win64") != std::string::npos)
+            *os << ".intel_syntax noprefix\n";
+        else if (targetInfo->getName() == "x86_64")
+            *os << ".att_syntax prefix\n";
     }
 }
 void CodeGen::emitDataSection() {

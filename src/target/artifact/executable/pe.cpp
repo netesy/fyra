@@ -79,18 +79,33 @@ public:
         // 1. Identify Imports
         std::set<std::string> defined;
         for (auto const& s : symbols_in) defined.insert(s.name);
+        std::set<std::string> imported_set;
         for (auto const& r : relocs_in) {
-            if (defined.find(r.symbolName) == defined.end()) {
-                if (r.symbolName == "ExitProcess") {
-                    addImport("kernel32.dll", "ExitProcess");
-                } else if (r.symbolName == "_write") {
-                    addImport("msvcrt.dll", "_write");
-                } else if (r.symbolName == "GetStdHandle") {
-                    addImport("kernel32.dll", "GetStdHandle");
-                } else if (r.symbolName == "WriteFile") {
-                    addImport("kernel32.dll", "WriteFile");
-                } else if (r.symbolName == "VirtualAlloc") {
-                    addImport("kernel32.dll", "VirtualAlloc");
+            if (defined.find(r.symbolName) == defined.end() && !imported_set.count(r.symbolName)) {
+                imported_set.insert(r.symbolName);
+                std::string sym = r.symbolName;
+                if (sym == "Sleep" || sym == "ExitProcess" || sym == "GetStdHandle" || sym == "WriteFile" ||
+                    sym == "VirtualAlloc" || sym == "VirtualFree" || sym == "VirtualProtect" ||
+                    sym == "CreateFileA" || sym == "DeleteFileA" || sym == "MoveFileA" ||
+                    sym == "GetFileAttributesExA" || sym == "CreateDirectoryA" || sym == "RemoveDirectoryA" ||
+                    sym == "GetCommandLineA" || sym == "GetCurrentProcessId" || sym == "GetLastError" ||
+                    sym == "FormatMessageA" || sym == "CreateThread" || sym == "WaitForSingleObject" ||
+                    sym == "CloseHandle" || sym == "SwitchToThread" || sym == "GetCurrentThreadId" ||
+                    sym == "AcquireSRWLockExclusive" || sym == "ReleaseSRWLockExclusive" ||
+                    sym == "InterlockedExchangeAdd" || sym == "InterlockedCompareExchange" ||
+                    sym == "GetSystemTimeAsFileTime" || sym == "QueryPerformanceCounter" ||
+                    sym == "OutputDebugStringA" || sym == "DebugBreak" || sym == "LoadLibraryA" ||
+                    sym == "FreeLibrary" || sym == "GetProcAddress" || sym == "GetConsoleMode" ||
+                    sym == "GetConsoleScreenBufferInfo" || sym == "SetConsoleMode" || sym == "_chmod" ||
+                    sym == "SetFileSecurityA" || sym == "GetUserNameA") {
+                    addImport("kernel32.dll", sym);
+                } else if (sym == "BCryptGenRandom") {
+                    addImport("bcrypt.dll", sym);
+                } else if (sym == "socket" || sym == "connect" || sym == "listen" || sym == "accept" ||
+                           sym == "send" || sym == "recv" || sym == "closesocket" || sym == "bind") {
+                    addImport("ws2_32.dll", sym);
+                } else {
+                    addImport("msvcrt.dll", sym);
                 }
             }
         }

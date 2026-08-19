@@ -598,15 +598,23 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             case ir::Instruction::Cuge: set = "setae"; break;
             default:                    set = "sete"; break;
         }
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-            *os << "  cmp " << rax << ", " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+            if (isGlobal0) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+            else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+            if (isGlobal1) *os << "  lea rdx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  cmp " << rax << ", rdx\n";
+            else *os << "  cmp " << rax << ", " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
             *os << "  " << set << " " << al << "\n";
             *os << "  movzx " << eax << ", " << al << "\n";
             *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
         } else {
-            *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
+            if (isGlobal0) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            if (isGlobal1) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %rdx\n  cmpq %rdx, " << rax << "\n";
+            else *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
             *os << "  " << set << " " << al << "\n";
             *os << "  movzbq " << al << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
@@ -1042,9 +1050,10 @@ void X64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const Oper
 
     if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
         if (auto* os = cg.getTextStream()) {
-            *os << "  mov " << formatStackOperand(cg.getStackOffsets()[&i]) << ", rax\n";
-        } else {
-            // Assembler output unsupported here
+            if (abi == X64ABI::SystemV)
+                *os << "  movq %rax, " << formatStackOperand(cg.getStackOffsets()[&i]) << "\n";
+            else
+                *os << "  mov " << formatStackOperand(cg.getStackOffsets()[&i]) << ", rax\n";
         }
     }
 }
@@ -1055,7 +1064,17 @@ void X64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const 
         *os << "  movq $" << syscallNum << ", " << rax << "\n";
         static const char* sysregs[] = {"rdi", "rsi", "rdx", "r10", "r8", "r9"};
         for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
-            *os << "  movq " << cg.getValueAsOperand(args[i]) << ", " << getRegisterName(sysregs[i], args[i]->getType()) << "\n";
+            bool isGlobal = dynamic_cast<ir::GlobalVariable*>(args[i]) != nullptr;
+            std::string reg = getRegisterName(sysregs[i], args[i]->getType());
+            std::string op = cg.getValueAsOperand(args[i]);
+            if (isGlobal) {
+                if (abi == X64ABI::Windows)
+                    *os << "  lea " << reg << ", " << op << "\n";
+                else
+                    *os << "  leaq " << op << ", " << reg << "\n";
+            } else {
+                *os << "  movq " << op << ", " << reg << "\n";
+            }
         }
         *os << "  syscall\n";
     } else {

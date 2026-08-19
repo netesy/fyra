@@ -526,19 +526,20 @@ bool ElfGenerator::Impl::applyRelocations() {
 
         auto sym_it = symbols_.find(reloc.symbolName);
         if (sym_it == symbols_.end()) {
-            // Check for local label: search for SectionName_LabelName
             std::string localName = reloc.sectionName + "_" + reloc.symbolName;
             sym_it = symbols_.find(localName);
             if (sym_it == symbols_.end()) {
-                // Try funcName_labelName
-                Section* s = findSection(reloc.sectionName);
-                if (s) {
-                    // This is a bit of a hack, we don't easily know the function name here
-                    // In Fyra, labels are often prefixed with function name in textual asm,
-                    // but in in-memory cg, they might just be the label name.
-                }
-                lastError_ = "Relocation against unknown symbol " + reloc.symbolName;
-                return false;
+                // Synthesize external runtime symbol
+                Symbol synthetic;
+                synthetic.name = reloc.symbolName;
+                synthetic.value = 0;
+                synthetic.size = 0;
+                synthetic.type = STT_NOTYPE;
+                synthetic.binding = STB_GLOBAL;
+                synthetic.sectionName = "*UND*";
+                synthetic.isDefined = false;
+                symbols_[reloc.symbolName] = synthetic;
+                sym_it = symbols_.find(reloc.symbolName);
             }
         }
         Symbol& symbol = sym_it->second;
