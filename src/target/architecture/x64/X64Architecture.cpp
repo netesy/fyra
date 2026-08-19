@@ -10,6 +10,7 @@
 #include "ir/PhiNode.h"
 #include <iostream>
 #include <ostream>
+#include <cstring>
 
 namespace target {
 
@@ -87,7 +88,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
         int current_offset = -48;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType() && instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
         int stack_alloc = std::abs(current_offset + 40);
         if ((stack_alloc + 48 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 48 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
@@ -119,7 +120,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
         int current_offset = -64;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType() && instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
         int stack_alloc = std::abs(current_offset + 56) + 32; // Shadow space
         if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
@@ -290,16 +291,24 @@ void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
+            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
+            else *os << "  mov " << rax << ", " << op0 << "\n";
             *os << "  cqo\n";
-            *os << "  mov " << rcx << ", " << op1 << "\n";
+            if (isGlobal1) *os << "  lea " << rcx << ", " << op1 << "\n";
+            else *os << "  mov " << rcx << ", " << op1 << "\n";
             *os << "  idiv " << rcx << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
+            else *os << "  movq " << op0 << ", " << rax << "\n";
             *os << "  cqto\n";
-            *os << "  movq " << op1 << ", " << rcx << "\n";
+            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcx << "\n";
+            else *os << "  movq " << op1 << ", " << rcx << "\n";
             *os << "  idivq " << rcx << "\n";
             *os << "  movq " << rax << ", " << dst << "\n";
         }
@@ -320,16 +329,24 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
+                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
+            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
+            else *os << "  mov " << rax << ", " << op0 << "\n";
             *os << "  cqo\n";
-            *os << "  mov " << rcx << ", " << op1 << "\n";
+            if (isGlobal1) *os << "  lea " << rcx << ", " << op1 << "\n";
+            else *os << "  mov " << rcx << ", " << op1 << "\n";
             *os << "  idiv " << rcx << "\n";
             *os << "  mov " << dst << ", " << rdx << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
+            else *os << "  movq " << op0 << ", " << rax << "\n";
             *os << "  cqto\n";
-            *os << "  movq " << op1 << ", " << rcx << "\n";
+            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcx << "\n";
+            else *os << "  movq " << op1 << ", " << rcx << "\n";
             *os << "  idivq " << rcx << "\n";
             *os << "  movq " << rdx << ", " << dst << "\n";
         }
@@ -574,50 +591,132 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
     }
 }
 
-void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {}
-void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {}
-void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {}
-void X64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {}
+void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  movsd xmm0, " << op0 << "\n";
+            *os << "  addsd xmm0, " << op1 << "\n";
+            *os << "  movsd " << dst << ", xmm0\n";
+        } else {
+            *os << "  movsd " << op0 << ", %xmm0\n";
+            *os << "  addsd " << op1 << ", %xmm0\n";
+            *os << "  movsd %xmm0, " << dst << "\n";
+        }
+    }
+}
+
+void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  movsd xmm0, " << op0 << "\n";
+            *os << "  subsd xmm0, " << op1 << "\n";
+            *os << "  movsd " << dst << ", xmm0\n";
+        } else {
+            *os << "  movsd " << op0 << ", %xmm0\n";
+            *os << "  subsd " << op1 << ", %xmm0\n";
+            *os << "  movsd %xmm0, " << dst << "\n";
+        }
+    }
+}
+
+void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  movsd xmm0, " << op0 << "\n";
+            *os << "  mulsd xmm0, " << op1 << "\n";
+            *os << "  movsd " << dst << ", xmm0\n";
+        } else {
+            *os << "  movsd " << op0 << ", %xmm0\n";
+            *os << "  mulsd " << op1 << ", %xmm0\n";
+            *os << "  movsd %xmm0, " << dst << "\n";
+        }
+    }
+}
+
+void X64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+        if (abi == X64ABI::Windows) {
+            *os << "  movsd xmm0, " << op0 << "\n";
+            *os << "  divsd xmm0, " << op1 << "\n";
+            *os << "  movsd " << dst << ", xmm0\n";
+        } else {
+            *os << "  movsd " << op0 << ", %xmm0\n";
+            *os << "  divsd " << op1 << ", %xmm0\n";
+            *os << "  movsd %xmm0, " << dst << "\n";
+        }
+    }
+}
 
 void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string al = (abi == X64ABI::SystemV) ? "%al" : "al";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
+    bool isFloatCmp = (i.getOpcode() == ir::Instruction::Ceqf || i.getOpcode() == ir::Instruction::Cnef ||
+                       i.getOpcode() == ir::Instruction::Clt  || i.getOpcode() == ir::Instruction::Cle ||
+                       i.getOpcode() == ir::Instruction::Cgt  || i.getOpcode() == ir::Instruction::Cge);
     if (auto* os = cg.getTextStream()) {
         std::string set;
         switch (i.getOpcode()) {
-            case ir::Instruction::Ceq:  set = "sete"; break;
-            case ir::Instruction::Cne:  set = "setne"; break;
+            case ir::Instruction::Ceq:  case ir::Instruction::Ceqf: set = "sete"; break;
+            case ir::Instruction::Cne:  case ir::Instruction::Cnef: set = "setne"; break;
             case ir::Instruction::Cslt: set = "setl"; break;
+            case ir::Instruction::Cult: case ir::Instruction::Clt: set = "setb"; break;
             case ir::Instruction::Csle: set = "setle"; break;
+            case ir::Instruction::Cule: case ir::Instruction::Cle: set = "setbe"; break;
             case ir::Instruction::Csgt: set = "setg"; break;
+            case ir::Instruction::Cugt: case ir::Instruction::Cgt: set = "seta"; break;
             case ir::Instruction::Csge: set = "setge"; break;
-            case ir::Instruction::Cult: set = "setb"; break;
-            case ir::Instruction::Cule: set = "setbe"; break;
-            case ir::Instruction::Cugt: set = "seta"; break;
-            case ir::Instruction::Cuge: set = "setae"; break;
+            case ir::Instruction::Cuge: case ir::Instruction::Cge: set = "setae"; break;
             default:                    set = "sete"; break;
         }
-        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
-                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
-        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
-                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
-        if (abi == X64ABI::Windows) {
-            if (isGlobal0) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-            else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-            if (isGlobal1) *os << "  lea rdx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  cmp " << rax << ", rdx\n";
-            else *os << "  cmp " << rax << ", " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
-            *os << "  " << set << " " << al << "\n";
-            *os << "  movzx " << eax << ", " << al << "\n";
-            *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
+        if (isFloatCmp) {
+            if (abi == X64ABI::Windows) {
+                *os << "  movsd xmm0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+                *os << "  ucomisd xmm0, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+                *os << "  " << set << " " << al << "\n";
+                *os << "  movzx " << eax << ", " << al << "\n";
+                *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
+            } else {
+                *os << "  movsd " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
+                *os << "  ucomisd " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
+                *os << "  " << set << " " << al << "\n";
+                *os << "  movzbq " << al << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+            }
         } else {
-            if (isGlobal0) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            if (isGlobal1) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %rdx\n  cmpq %rdx, " << rax << "\n";
-            else *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
-            *os << "  " << set << " " << al << "\n";
-            *os << "  movzbq " << al << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+            bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
+                             (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+            bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
+                             (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
+            if (abi == X64ABI::Windows) {
+                if (isGlobal0) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+                else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+                if (isGlobal1) *os << "  lea rdx, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  cmp " << rax << ", rdx\n";
+                else *os << "  cmp " << rax << ", " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+                *os << "  " << set << " " << al << "\n";
+                *os << "  movzx " << eax << ", " << al << "\n";
+                *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
+            } else {
+                if (isGlobal0) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+                else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+                if (isGlobal1) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %rdx\n  cmpq %rdx, " << rax << "\n";
+                else *os << "  cmpq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rax << "\n";
+                *os << "  " << set << " " << al << "\n";
+                *os << "  movzbq " << al << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -625,12 +724,12 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
         cg.getAssembler().emitBytes({0x48, 0x39, 0xC8});
         uint8_t s = 0x94;
         switch (i.getOpcode()) {
-            case ir::Instruction::Ceq:  s = 0x94; break;
-            case ir::Instruction::Cne:  s = 0x95; break;
-            case ir::Instruction::Cslt: s = 0x9C; break;
-            case ir::Instruction::Csle: s = 0x9E; break;
-            case ir::Instruction::Csgt: s = 0x9F; break;
-            case ir::Instruction::Csge: s = 0x9D; break;
+            case ir::Instruction::Ceq:  case ir::Instruction::Ceqf: s = 0x94; break;
+            case ir::Instruction::Cne:  case ir::Instruction::Cnef: s = 0x95; break;
+            case ir::Instruction::Cslt: case ir::Instruction::Clt:  s = 0x9C; break;
+            case ir::Instruction::Csle: case ir::Instruction::Cle:  s = 0x9E; break;
+            case ir::Instruction::Csgt: case ir::Instruction::Cgt:  s = 0x9F; break;
+            case ir::Instruction::Csge: case ir::Instruction::Cge:  s = 0x9D; break;
             case ir::Instruction::Cult: s = 0x92; break;
             case ir::Instruction::Cule: s = 0x96; break;
             case ir::Instruction::Cugt: s = 0x97; break;
@@ -859,10 +958,10 @@ void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
             *os << "  addq $" << alignedSize << ", " << rax << "\n";
             *os << "  movq " << rax << ", heap_ptr(%rip)\n";
         } else {
-            *os << "  mov rax, [rel heap_ptr]\n";
+            *os << "  mov rax, [rip + heap_ptr]\n";
             *os << "  mov " << formatStackOperand(pointerOffset) << ", rax\n";
             *os << "  add rax, " << alignedSize << "\n";
-            *os << "  mov [rel heap_ptr], rax\n";
+            *os << "  mov [rip + heap_ptr], rax\n";
         }
     } else {
         auto& as = cg.getAssembler(); ir::GlobalValue hp_val(cg.module.getContext()->getVoidType(), "heap_ptr"); emitLoadValue(cg, as, &hp_val, 0);
@@ -888,8 +987,13 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
         if (auto* os = cg.getTextStream()) {
             std::string srcOp = cg.getValueAsOperand(incomingVal);
             std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-            *os << "  movq " << srcOp << ", " << rax << "\n";
-            *os << "  pushq " << rax << "\n";
+            if (abi == X64ABI::Windows) {
+                *os << "  mov rax, " << srcOp << "\n";
+                *os << "  push rax\n";
+            } else {
+                *os << "  movq " << srcOp << ", " << rax << "\n";
+                *os << "  pushq " << rax << "\n";
+            }
         } else {
             auto& as = cg.getAssembler();
             emitLoadValue(cg, as, incomingVal, 0);
@@ -901,7 +1005,10 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
         if (auto* os = cg.getTextStream()) {
             std::string destOp = cg.getValueAsOperand(phi);
             std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-            *os << "  popq " << rax << "\n";
+            if (abi == X64ABI::Windows)
+                *os << "  pop " << rax << "\n";
+            else
+                *os << "  popq " << rax << "\n";
             if (abi == X64ABI::Windows)
                 *os << "  mov " << destOp << ", " << rax << "\n";
             else
@@ -1011,18 +1118,22 @@ void X64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) {
     if (abi == X64ABI::SystemV) {
-        auto* si = dynamic_cast<ir::SyscallInstruction*>(&i);
-        ir::SyscallId sid = si ? si->getSyscallId() : ir::SyscallId::None;
         if (auto* os = cg.getTextStream()) {
-            if (sid != ir::SyscallId::None) *os << "  movq $" << osInfo.getSyscallNumber(sid) << ", %rax\n";
-            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %rax\n";
+            ir::SyscallId sid = ir::SyscallId::None;
+            auto* si = dynamic_cast<ir::SyscallInstruction*>(&i);
+            if (si) sid = si->getSyscallId();
+            if (sid != ir::SyscallId::None) {
+                *os << "  movq $" << static_cast<uint64_t>(sid) << ", %rax\n";
+            } else if (!i.getOperands().empty()) {
+                *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %rax\n";
+            }
             size_t startArg = (sid != ir::SyscallId::None) ? 0 : 1;
             for (size_t j = startArg; j < i.getOperands().size(); ++j) {
                 size_t argIdx = (sid != ir::SyscallId::None) ? j + 1 : j; std::string dest;
                 switch(argIdx) { case 1: dest = "%rdi"; break; case 2: dest = "%rsi"; break; case 3: dest = "%rdx"; break; case 4: dest = "%r10"; break; case 5: dest = "%r8"; break; case 6: dest = "%r9"; break; }
                 if (!dest.empty()) *os << "  movq " << cg.getValueAsOperand(i.getOperands()[j]->get()) << ", " << dest << "\n";
             }
-            *os << "  syscall\n"; if (i.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  movq %rax, " << cg.getValueAsOperand(&i) << "\n";
+            *os << "  syscall\n"; if (i.getType() && i.getType()->getTypeID() != ir::Type::VoidTyID) *os << "  movq %rax, " << cg.getValueAsOperand(&i) << "\n";
         }
     } else {
         auto* si = dynamic_cast<ir::SyscallInstruction*>(&i);
@@ -1048,7 +1159,7 @@ void X64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const Oper
     }
     cg.getTargetInfo()->emitDomainCapability(cg, i, *spec);
 
-    if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
+    if (i.getType() && i.getType()->getTypeID() != ir::Type::VoidTyID) {
         if (auto* os = cg.getTextStream()) {
             if (abi == X64ABI::SystemV)
                 *os << "  movq %rax, " << formatStackOperand(cg.getStackOffsets()[&i]) << "\n";
@@ -1145,12 +1256,20 @@ std::string X64Architecture::formatStackOperand(int offset) const {
 
 std::string X64Architecture::formatGlobalOperand(const std::string& name) const {
     if (abi == X64ABI::SystemV) return name + "(%rip)";
-    return "[rel " + name + "]";
+    return "[rip + " + name + "]";
 }
 
 std::string X64Architecture::formatConstant(const ir::ConstantInt* C) const {
     if (abi == X64ABI::Windows) return std::to_string(C->getValue());
     return "$" + std::to_string(C->getValue());
+}
+
+std::string X64Architecture::formatConstant(const ir::ConstantFP* C) const {
+    uint64_t bits = 0;
+    double val = C->getValue();
+    std::memcpy(&bits, &val, sizeof(double));
+    if (abi == X64ABI::Windows) return std::to_string(bits);
+    return "$" + std::to_string(bits);
 }
 
 bool X64Architecture::isCallerSaved(const std::string& reg) const { return callerSaved.count(reg) && callerSaved.at(reg); }
@@ -1179,6 +1298,12 @@ void X64Architecture::emitRegMem(asm_::Assembler& as, uint8_t rex, uint8_t opcod
 void X64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& as, ir::Value* v, uint8_t regIdx) {
     if (!v) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(0); return; }
     if (auto* ci = dynamic_cast<ir::ConstantInt*>(v)) { uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(ci->getValue()); }
+    else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(v)) {
+        uint64_t bits = 0;
+        double val = cfp->getValue();
+        std::memcpy(&bits, &val, sizeof(double));
+        uint8_t rex = (regIdx >= 8) ? 0x49 : 0x48; as.emitByte(rex); as.emitByte(0xB8 + (regIdx & 7)); as.emitQWord(bits);
+    }
     else if (v->getName() == "__heap_ptr" || v->getName() == "heap_ptr") {
         uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; as.emitByte(rex); as.emitByte(0x8B); as.emitByte(0x05 | ((regIdx & 7) << 3));
         uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, v->getName(), ".text"});

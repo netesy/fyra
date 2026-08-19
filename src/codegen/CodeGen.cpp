@@ -83,7 +83,7 @@ void CodeGen::emit(bool forExecutable) {
         for (auto& bb : func->getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getOpcode() == ir::Instruction::Alloc) usesHeap = true;
-                if (instr->getOpcode() == ir::Instruction::Neg && instr->getType()->isFloatingPoint()) usesFPNeg = true;
+                if (instr->getOpcode() == ir::Instruction::Neg && instr->getType() && instr->getType()->isFloatingPoint()) usesFPNeg = true;
             }
         }
     }
@@ -136,34 +136,33 @@ void CodeGen::emitFunction(ir::Function& func) {
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
     if (os) {
-        *os << targetInfo->getBBLabel(&bb) << ":\n";
+        *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
     } else if (assembler) {
-        // Register basic block as a symbol for binary emission
         SymbolInfo bb_sym;
-        bb_sym.name = targetInfo->getBBLabel(&bb);
+        bb_sym.name = bb.getParent()->getName() + "_" + bb.getName();
         bb_sym.sectionName = ".text";
         bb_sym.value = assembler->getCodeSize();
         bb_sym.type = 0; // STT_NOTYPE
-        bb_sym.binding = 1; // STB_GLOBAL
+        bb_sym.binding = 0; // STB_LOCAL
         addSymbol(bb_sym);
     }
-    auto isCompareOpcode = [](ir::Instruction::Opcode opcode) {
-        switch (opcode) {
+
+    auto isCompareOpcode = [](ir::Instruction::Opcode op) {
+        switch (op) {
             case ir::Instruction::Ceq:
             case ir::Instruction::Cne:
-            case ir::Instruction::Cslt:
             case ir::Instruction::Csle:
-            case ir::Instruction::Csgt:
+            case ir::Instruction::Cslt:
             case ir::Instruction::Csge:
-            case ir::Instruction::Cult:
+            case ir::Instruction::Csgt:
             case ir::Instruction::Cule:
-            case ir::Instruction::Cugt:
+            case ir::Instruction::Cult:
             case ir::Instruction::Cuge:
+            case ir::Instruction::Cugt:
             case ir::Instruction::Ceqf:
             case ir::Instruction::Cnef:
-            case ir::Instruction::Clt:
             case ir::Instruction::Cle:
-            case ir::Instruction::Cgt:
+            case ir::Instruction::Clt:
             case ir::Instruction::Cge:
             case ir::Instruction::Co:
             case ir::Instruction::Cuo:
@@ -234,7 +233,9 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Ceq: case ir::Instruction::Cne: case ir::Instruction::Cslt:
         case ir::Instruction::Csle: case ir::Instruction::Csgt: case ir::Instruction::Csge:
         case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
-        case ir::Instruction::Cuge: targetInfo->emitCmp(*this, instr); break;
+        case ir::Instruction::Cuge: case ir::Instruction::Ceqf: case ir::Instruction::Cnef:
+        case ir::Instruction::Clt: case ir::Instruction::Cle: case ir::Instruction::Cgt:
+        case ir::Instruction::Cge: targetInfo->emitCmp(*this, instr); break;
         case ir::Instruction::ExtUB:
         case ir::Instruction::ExtUH:
         case ir::Instruction::ExtUW:
@@ -274,6 +275,7 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     }
 
     if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
+    if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) return targetInfo->formatConstant(cfp);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();

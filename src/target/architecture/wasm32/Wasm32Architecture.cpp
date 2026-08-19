@@ -135,6 +135,7 @@ std::string Wasm32Architecture::getWasmType(const ir::Type* type) const {
 std::string Wasm32Architecture::formatStackOperand(int o) const { return "(local.get " + std::to_string(o) + ")"; }
 std::string Wasm32Architecture::formatGlobalOperand(const std::string& n) const { return n; }
 std::string Wasm32Architecture::formatConstant(const ir::ConstantInt* C) const { return getWasmType(C->getType()) + ".const " + std::to_string(C->getValue()); }
+std::string Wasm32Architecture::formatConstant(const ir::ConstantFP* C) const { return getWasmType(C->getType()) + ".const " + std::to_string(C->getValue()); }
 
 void Wasm32Architecture::emitTypeSection(CodeGen& cg) {
     auto& assembler = cg.getAssembler(); assembler.emitByte(codegen::wasm::WasmSection::TYPE);

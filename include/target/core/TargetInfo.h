@@ -134,6 +134,7 @@ public:
     virtual std::string getVectorRegister(const std::string& baseReg, unsigned width) const;
     virtual std::string getVectorInstruction(const std::string& baseInstr, const SIMDContext& ctx) const;
     virtual std::string formatConstant(const ir::ConstantInt* C) const;
+    virtual std::string formatConstant(const ir::ConstantFP* C) const;
     virtual std::string formatStackOperand(int offset) const = 0;
     virtual std::string formatGlobalOperand(const std::string& name) const = 0;
     virtual std::string getImmediatePrefix() const { return "$"; }

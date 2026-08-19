@@ -130,8 +130,13 @@ void WindowsOS::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Capa
             else if (args.size() > 1)
                 *os << "  mov rdx, " << cg.getValueAsOperand(args[1]) << "\n";
             // arg3: len (DWORD — truncate i64 to eax then move to r8d)
-            if (args.size() > 2)
-                *os << "  mov r8d, dword ptr " << cg.getValueAsOperand(args[2]) << "\n";
+            if (args.size() > 2) {
+                if (dynamic_cast<ir::ConstantInt*>(args[2])) {
+                    *os << "  mov r8d, " << cg.getValueAsOperand(args[2]) << "\n";
+                } else {
+                    *os << "  mov r8d, dword ptr " << cg.getValueAsOperand(args[2]) << "\n";
+                }
+            }
             // arg4: &bytes_written — pointer into our extra stack space (offset 40)
             *os << "  lea r9, [rsp + 40]\n";
             // arg5 (stack slot 0): NULL overlap handle (must be at [rsp + 32])
