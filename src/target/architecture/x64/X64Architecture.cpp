@@ -1165,6 +1165,8 @@ void X64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const Oper
                 *os << "  movq %rax, " << formatStackOperand(cg.getStackOffsets()[&i]) << "\n";
             else
                 *os << "  mov " << formatStackOperand(cg.getStackOffsets()[&i]) << ", rax\n";
+        } else {
+            emitStoreResult(cg, i, 0);
         }
     }
 }
