@@ -394,7 +394,7 @@ void LinuxOS::emitHeader(CodeGen& cg) {
         *os << ".section .rodata\n.Lproc_environ:\n  .string \"/proc/self/environ\"\n";
         *os << ".Lproc_cmdline:\n  .string \"/proc/self/cmdline\"\n";
         *os << ".section .data\n.align 8\nheap_ptr:\n  .quad __fyra_heap\n";
-        *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 1048576\n";
+        *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 67108864\n";
         *os << ".text\n";
     }
 }

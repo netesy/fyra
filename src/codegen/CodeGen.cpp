@@ -346,7 +346,7 @@ void CodeGen::emitDataSection() {
     if (os) {
         *os << "\n.data\n";
         if (usesHeap) {
-            *os << ".align 16\n__heap_base:\n  .zero 1048576\n";
+            *os << ".align 16\n__heap_base:\n  .zero 67108864\n";
             *os << ".align 8\n__heap_ptr:\n  .quad __heap_base\n";
         }
         for (auto& gv : module.getGlobalVariables()) {
@@ -388,13 +388,13 @@ void CodeGen::emitDataSection() {
                 rodataAssembler->emitByte(0);
                 heap_base_offset = rodataAssembler->getCodeSize();
             }
-            for(int i=0; i<1048576; ++i) rodataAssembler->emitByte(0);
+            for(int i=0; i<67108864; ++i) rodataAssembler->emitByte(0);
             
             SymbolInfo hb_sym;
             hb_sym.name = "__fyra_heap";
             hb_sym.sectionName = ".data";
             hb_sym.value = heap_base_offset;
-            hb_sym.size = 1048576;
+            hb_sym.size = 67108864;
             hb_sym.binding = 1;
             addSymbol(hb_sym);
 
