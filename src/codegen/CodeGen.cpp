@@ -382,18 +382,11 @@ void CodeGen::emitDataSection() {
         }
     } else if (rodataAssembler) {
         if (usesHeap) {
-            // Consistent naming: heap_ptr and __fyra_heap
-            uint64_t heap_base_offset = rodataAssembler->getCodeSize();
-            while (heap_base_offset % 16 != 0) {
-                rodataAssembler->emitByte(0);
-                heap_base_offset = rodataAssembler->getCodeSize();
-            }
-            for(int i=0; i<67108864; ++i) rodataAssembler->emitByte(0);
-            
+            // Place __fyra_heap in .bss (NOBITS) so zero bytes are allocated by loader, not written to ELF file
             SymbolInfo hb_sym;
             hb_sym.name = "__fyra_heap";
-            hb_sym.sectionName = ".data";
-            hb_sym.value = heap_base_offset;
+            hb_sym.sectionName = ".bss";
+            hb_sym.value = 0;
             hb_sym.size = 67108864;
             hb_sym.binding = 1;
             addSymbol(hb_sym);

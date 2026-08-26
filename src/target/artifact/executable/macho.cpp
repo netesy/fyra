@@ -109,11 +109,22 @@ public:
                 return false;
             }
 
+            // Calculate .bss size
+            uint64_t bss_size = sections_data.count(".bss") ? sections_data.at(".bss").size() : 0;
+            for (auto const& sym : symbols_in) {
+                if (sym.sectionName == ".bss" || sym.sectionName == "__bss") {
+                    bss_size = std::max(bss_size, sym.value + sym.size);
+                }
+            }
+
+            uint32_t data_nsects = (sections_data.count(".data") ? 1 : 0) + (bss_size > 0 ? 1 : 0);
+            if (data_nsects == 0) data_nsects = 1;
+
             // Mach-O segments: __PAGEZERO, __TEXT, __DATA, LC_MAIN, LC_SYMTAB
             uint32_t ncmds = 5;
             uint32_t sizeofcmds = sizeof(segment_command_64) + // __PAGEZERO
                                   (sizeof(segment_command_64) + sizeof(section_64) * 2) + // __TEXT (__text, __const)
-                                  (sizeof(segment_command_64) + sizeof(section_64)) + // __DATA (__data)
+                                  (sizeof(segment_command_64) + sizeof(section_64) * data_nsects) + // __DATA (__data, __bss)
                                   sizeof(entry_point_command) +
                                   sizeof(symtab_command);
 
@@ -187,11 +198,11 @@ public:
 
             // 3. __DATA
             uint64_t data_sects_size = sections_data.count(".data") ? sections_data.at(".data").size() : 0;
-            uint64_t data_vmsize = (data_sects_size + 0xFFF) & ~0xFFFULL;
+            uint64_t data_vmsize = (data_sects_size + bss_size + 0xFFF) & ~0xFFFULL;
 
             segment_command_64 data_seg = {};
             data_seg.cmd = LC_SEGMENT_64;
-            data_seg.cmdsize = sizeof(segment_command_64) + sizeof(section_64);
+            data_seg.cmdsize = sizeof(segment_command_64) + sizeof(section_64) * data_nsects;
             strcpy(data_seg.segname, "__DATA");
             data_seg.vmaddr = currentVMAddr;
             data_seg.vmsize = data_vmsize;
@@ -199,7 +210,7 @@ public:
             data_seg.filesize = data_sects_size;
             data_seg.maxprot = VM_PROT_READ | VM_PROT_WRITE;
             data_seg.initprot = VM_PROT_READ | VM_PROT_WRITE;
-            data_seg.nsects = 1;
+            data_seg.nsects = data_nsects;
             file.write(reinterpret_cast<const char*>(&data_seg), sizeof(data_seg));
 
             section_64 data_sect = {};
@@ -207,9 +218,21 @@ public:
             strcpy(data_sect.segname, "__DATA");
             data_sect.addr = currentVMAddr;
             data_sect.size = data_sects_size;
-            data_sect.offset = currentFileOff;
+            data_sect.offset = (data_sects_size > 0) ? (uint32_t)currentFileOff : 0;
             data_sect.align = 3;
             file.write(reinterpret_cast<const char*>(&data_sect), sizeof(data_sect));
+
+            if (bss_size > 0) {
+                section_64 bss_sect = {};
+                strcpy(bss_sect.sectname, "__bss");
+                strcpy(bss_sect.segname, "__DATA");
+                bss_sect.addr = currentVMAddr + data_sects_size;
+                bss_sect.size = bss_size;
+                bss_sect.offset = 0;
+                bss_sect.align = 4;
+                bss_sect.flags = 0x1; // S_ZEROFILL
+                file.write(reinterpret_cast<const char*>(&bss_sect), sizeof(bss_sect));
+            }
 
             currentFileOff += (data_sects_size + 0xFFF) & ~0xFFFULL;
             currentVMAddr += data_vmsize;

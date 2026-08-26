@@ -112,14 +112,47 @@ public:
 
         // 2. Layout Sections
         uint32_t currentRva = sectionAlignment_;
+        uint32_t bssVirtualSize = 0;
+        if (sections_in.count(".bss")) {
+            bssVirtualSize = (uint32_t)sections_in.at(".bss").size();
+        }
+        for (auto const& sym : symbols_in) {
+            if (sym.sectionName == ".bss" || sym.sectionName == "BSS") {
+                bssVirtualSize = std::max(bssVirtualSize, (uint32_t)(sym.value + sym.size));
+            }
+        }
+
+        bool bssAdded = false;
         for (auto const& entry : sections_in) {
+            if (entry.first == ".bss" || entry.first == "BSS") {
+                if (bssVirtualSize == 0 && entry.second.empty()) continue;
+                Section s; s.name = entry.first; s.virtualAddress = currentRva;
+                s.virtualSize = std::max((uint32_t)entry.second.size(), bssVirtualSize);
+                s.data = entry.second;
+                s.rawDataSize = 0;
+                s.rawDataPointer = 0;
+                s.characteristics = 0xC0000080; // IMAGE_SCN_CNT_UNINITIALIZED_DATA | READ | WRITE
+                sections_.push_back(s);
+                currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
+                bssAdded = true;
+                continue;
+            }
             if (entry.second.empty()) continue;
             Section s; s.name = entry.first; s.data = entry.second; s.virtualAddress = currentRva;
             s.virtualSize = s.data.size(); s.rawDataSize = align(s.data.size(), fileAlignment_);
             if (s.name == ".text" || s.name == "CODE") s.characteristics = 0x60000020;
             else if (s.name == ".data" || s.name == "DATA") s.characteristics = 0xC0000040;
-            else if (s.name == ".bss" || s.name == "BSS") s.characteristics = 0xC0000080;
             else s.characteristics = 0x40000040;
+            sections_.push_back(s);
+            currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
+        }
+
+        if (!bssAdded && bssVirtualSize > 0) {
+            Section s; s.name = ".bss"; s.virtualAddress = currentRva;
+            s.virtualSize = bssVirtualSize;
+            s.rawDataSize = 0;
+            s.rawDataPointer = 0;
+            s.characteristics = 0xC0000080;
             sections_.push_back(s);
             currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
         }
@@ -162,7 +195,14 @@ public:
         // 6. Finalize Layout
         uint32_t headerSize = align(sizeof(DOSHeader) + 64 + 4 + sizeof(FileHeader) + sizeof(OptionalHeader64) + sections_.size() * sizeof(SectionHeader), fileAlignment_);
         uint32_t currentFilePos = headerSize;
-        for (auto& s : sections_) { s.rawDataPointer = currentFilePos; currentFilePos += s.rawDataSize; }
+        for (auto& s : sections_) {
+            if (s.rawDataSize > 0) {
+                s.rawDataPointer = currentFilePos;
+                currentFilePos += s.rawDataSize;
+            } else {
+                s.rawDataPointer = 0;
+            }
+        }
 
         // 7. Write File
         std::ofstream file(outputPath, std::ios::binary); if (!file.is_open()) return false;
@@ -267,7 +307,13 @@ private:
         uint32_t sig = 0x00004550; f.write((char*)&sig, 4);
         FileHeader fh = { (uint16_t)machine_, (uint16_t)sections_.size(), (uint32_t)time(0), 0, 0, (uint16_t)sizeof(OptionalHeader64), 0x22 };
         f.write((char*)&fh, sizeof(fh));
-        OptionalHeader64 oh = { 0x20b, 0, 0, 0, 0, 0, entryPoint_, 0x1000, baseAddress_, sectionAlignment_, fileAlignment_, 6, 0, 0, 0, 6, 0, 0, align(imgSize, sectionAlignment_), headSize, 0, subsystem_, 0x8100, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16, {{0, 0}} };
+        uint32_t uninitSize = 0;
+        for (auto const& s : sections_) {
+            if (s.name == ".bss" || s.name == "BSS" || (s.characteristics & 0x80)) {
+                uninitSize += s.virtualSize;
+            }
+        }
+        OptionalHeader64 oh = { 0x20b, 0, 0, 0, 0, uninitSize, entryPoint_, 0x1000, baseAddress_, sectionAlignment_, fileAlignment_, 6, 0, 0, 0, 6, 0, 0, align(imgSize, sectionAlignment_), headSize, 0, subsystem_, 0x8100, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16, {{0, 0}} };
         if (importDirectoryRVA_) { oh.dataDirectory[1] = { importDirectoryRVA_, (uint32_t)((imports_.size() + 1) * sizeof(ImportDescriptor)) }; }
         f.write((char*)&oh, sizeof(oh));
     }
@@ -282,6 +328,7 @@ private:
 
     void writeSectionData(std::ofstream& f) {
         for (auto const& s : sections_) {
+            if (s.rawDataSize == 0 || s.rawDataPointer == 0) continue;
             f.seekp(s.rawDataPointer); f.write((char*)s.data.data(), s.data.size());
             std::vector<char> pad(s.rawDataSize - s.data.size(), 0); f.write(pad.data(), pad.size());
         }

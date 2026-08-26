@@ -288,6 +288,19 @@ bool ElfGenerator::Impl::generateFromCode(const std::map<std::string, std::vecto
         s.sectionName = sym_in.sectionName;
         s.isDefined = (s.sectionName != "*UND*");
         symbols_[s.name] = s;
+
+        // If a symbol is defined in .bss, ensure the .bss section exists in sections_
+        if (s.isDefined && s.sectionName == ".bss" && sections_.find(".bss") == sections_.end()) {
+            Section bss;
+            bss.name = ".bss";
+            bss.size = s.value + s.size;
+            bss.addralign = 8;
+            std::memset(&bss.header, 0, sizeof(SectionHeader64));
+            sections_[".bss"] = bss;
+            sectionOrder_.push_back(".bss");
+        } else if (s.isDefined && s.sectionName == ".bss") {
+            sections_[".bss"].size = std::max(sections_[".bss"].size, s.value + s.size);
+        }
     }
 
     relocations_.clear();
