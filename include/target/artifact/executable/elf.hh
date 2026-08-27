@@ -92,6 +92,12 @@ public:
     void setMachine(uint16_t machine);
 
     /**
+     * @brief Enables or disables symbol/metadata stripping.
+     * @param strip If true, omits .symtab and .strtab from the generated ELF file.
+     */
+    void setStrip(bool strip);
+
+    /**
      * @brief Retrieves the last error message.
      * @return A string containing the last error, or an empty string if no error occurred.
      */

@@ -125,11 +125,32 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
             if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
-            int j = 0; for (auto& param : func.getParameters()) { if (j < 4) *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", " << integerArgRegs[j] << "\n"; j++; }
+            int j = 0;
+            for (auto& param : func.getParameters()) {
+                if (j < 4) {
+                    *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", " << integerArgRegs[j] << "\n";
+                } else {
+                    int paramStackOff = 16 + (j - 1) * 8;
+                    *os << "  mov rax, [rbp + " << paramStackOff << "]\n";
+                    *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", rax\n";
+                }
+                j++;
+            }
         } else {
             auto& as = cg.getAssembler();
             if (stack_alloc > 0) { if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); } }
-            int j = 0; for (auto& param : func.getParameters()) { if (j < 4) { uint8_t r = getArchRegIndex(integerArgRegs[j]); emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]); } j++; }
+            int j = 0;
+            for (auto& param : func.getParameters()) {
+                if (j < 4) {
+                    uint8_t r = getArchRegIndex(integerArgRegs[j]);
+                    emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]);
+                } else {
+                    uint8_t paramStackOff = (uint8_t)(16 + (j - 1) * 8);
+                    emitRegMem(as, 0x48, 0x8B, 0, paramStackOff);
+                    emitRegMem(as, 0x48, 0x89, 0, cg.getStackOffsets()[param.get()]);
+                }
+                j++;
+            }
         }
     }
 }
@@ -537,6 +558,10 @@ void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
+    ir::Value* calleeVal = i.getOperands()[0]->get();
+    bool isDirectCall = (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+
     if (auto* os = cg.getTextStream()) {
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
         for (size_t j = 1; j < i.getOperands().size(); ++j) {
@@ -566,7 +591,17 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
                 *os << "  mov [rsp + " << stackOff << "], rax\n";
             }
         }
-        *os << "  call " << i.getOperands()[0]->get()->getName() << "\n";
+        if (isDirectCall) {
+            *os << "  call " << calleeVal->getName() << "\n";
+        } else {
+            if (abi == X64ABI::Windows) {
+                *os << "  mov rax, " << cg.getValueAsOperand(calleeVal) << "\n";
+                *os << "  call rax\n";
+            } else {
+                *os << "  movq " << cg.getValueAsOperand(calleeVal) << ", %rax\n";
+                *os << "  call *%rax\n";
+            }
+        }
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
             // Intel syntax: store rax → stack slot  (dst, src order)
             *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
@@ -583,10 +618,15 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
                 cg.getAssembler().emitBytes({0x48, 0x89, 0x44, 0x24, offset}); // mov [rsp + offset], rax
             }
         }
-        cg.getAssembler().emitByte(0xE8);
-        uint64_t off = cg.getAssembler().getCodeSize();
-        cg.getAssembler().emitDWord(0);
-        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, i.getOperands()[0]->get()->getName(), ".text"});
+        if (isDirectCall) {
+            cg.getAssembler().emitByte(0xE8);
+            uint64_t off = cg.getAssembler().getCodeSize();
+            cg.getAssembler().emitDWord(0);
+            cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, calleeVal->getName(), ".text"});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), calleeVal, 0); // RAX
+            cg.getAssembler().emitBytes({0xFF, 0xD0});         // call rax
+        }
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) emitStoreResult(cg, i, 0);
     }
 }
@@ -605,6 +645,15 @@ void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
             *os << "  addsd " << op1 << ", %xmm0\n";
             *os << "  movsd %xmm0, " << dst << "\n";
         }
+    } else {
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0); // RAX
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 1); // RCX
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC0}); // movq xmm0, rax
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC9}); // movq xmm1, rcx
+        as.emitBytes({0xF2, 0x0F, 0x58, 0xC1});       // addsd xmm0, xmm1
+        as.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
+        emitStoreResult(cg, i, 0);
     }
 }
 
@@ -622,6 +671,15 @@ void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
             *os << "  subsd " << op1 << ", %xmm0\n";
             *os << "  movsd %xmm0, " << dst << "\n";
         }
+    } else {
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 1);
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC0}); // movq xmm0, rax
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC9}); // movq xmm1, rcx
+        as.emitBytes({0xF2, 0x0F, 0x5C, 0xC1});       // subsd xmm0, xmm1
+        as.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
+        emitStoreResult(cg, i, 0);
     }
 }
 
@@ -639,6 +697,15 @@ void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
             *os << "  mulsd " << op1 << ", %xmm0\n";
             *os << "  movsd %xmm0, " << dst << "\n";
         }
+    } else {
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 1);
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC0}); // movq xmm0, rax
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC9}); // movq xmm1, rcx
+        as.emitBytes({0xF2, 0x0F, 0x59, 0xC1});       // mulsd xmm0, xmm1
+        as.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
+        emitStoreResult(cg, i, 0);
     }
 }
 
@@ -656,6 +723,15 @@ void X64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {
             *os << "  divsd " << op1 << ", %xmm0\n";
             *os << "  movsd %xmm0, " << dst << "\n";
         }
+    } else {
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 1);
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC0}); // movq xmm0, rax
+        as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC9}); // movq xmm1, rcx
+        as.emitBytes({0xF2, 0x0F, 0x5E, 0xC1});       // divsd xmm0, xmm1
+        as.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
+        emitStoreResult(cg, i, 0);
     }
 }
 
@@ -719,17 +795,24 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             }
         }
     } else {
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0x39, 0xC8});
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 1);
+        if (isFloatCmp) {
+            as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC0}); // movq xmm0, rax
+            as.emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC9}); // movq xmm1, rcx
+            as.emitBytes({0x66, 0x0F, 0x2E, 0xC1});       // ucomisd xmm0, xmm1
+        } else {
+            as.emitBytes({0x48, 0x39, 0xC8});            // cmp rax, rcx
+        }
         uint8_t s = 0x94;
         switch (i.getOpcode()) {
             case ir::Instruction::Ceq:  case ir::Instruction::Ceqf: s = 0x94; break;
             case ir::Instruction::Cne:  case ir::Instruction::Cnef: s = 0x95; break;
-            case ir::Instruction::Cslt: case ir::Instruction::Clt:  s = 0x9C; break;
-            case ir::Instruction::Csle: case ir::Instruction::Cle:  s = 0x9E; break;
-            case ir::Instruction::Csgt: case ir::Instruction::Cgt:  s = 0x9F; break;
-            case ir::Instruction::Csge: case ir::Instruction::Cge:  s = 0x9D; break;
+            case ir::Instruction::Cslt: case ir::Instruction::Clt:  s = (isFloatCmp ? 0x92 : 0x9C); break;
+            case ir::Instruction::Csle: case ir::Instruction::Cle:  s = (isFloatCmp ? 0x96 : 0x9E); break;
+            case ir::Instruction::Csgt: case ir::Instruction::Cgt:  s = (isFloatCmp ? 0x97 : 0x9F); break;
+            case ir::Instruction::Csge: case ir::Instruction::Cge:  s = (isFloatCmp ? 0x93 : 0x9D); break;
             case ir::Instruction::Cult: s = 0x92; break;
             case ir::Instruction::Cule: s = 0x96; break;
             case ir::Instruction::Cugt: s = 0x97; break;
@@ -749,7 +832,15 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
 
     if (auto* os = cg.getTextStream()) {
         ir::Instruction::Opcode op = i.getOpcode();
-        if (op == ir::Instruction::ExtUB) {
+        if (op == ir::Instruction::Sltof || op == ir::Instruction::SWtoF || op == ir::Instruction::UWtoF || op == ir::Instruction::Ultof) {
+            if (abi == X64ABI::Windows) {
+                *os << "  cvtsi2sd xmm0, " << srcOp << "\n";
+                *os << "  movsd " << destOp << ", xmm0\n";
+            } else {
+                *os << "  cvtsi2sd " << srcOp << ", %xmm0\n";
+                *os << "  movsd %xmm0, " << destOp << "\n";
+            }
+        } else if (op == ir::Instruction::ExtUB) {
             *os << "  movzbq " << srcOp << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUH) {
@@ -777,7 +868,10 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
         auto& as = cg.getAssembler();
         ir::Instruction::Opcode op = i.getOpcode();
         emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
-        if (op == ir::Instruction::ExtUB) {
+        if (op == ir::Instruction::Sltof || op == ir::Instruction::SWtoF || op == ir::Instruction::UWtoF || op == ir::Instruction::Ultof) {
+            as.emitBytes({0xF2, 0x48, 0x0F, 0x2A, 0xC0}); // cvtsi2sd xmm0, rax
+            as.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
+        } else if (op == ir::Instruction::ExtUB) {
             as.emitBytes({0x0F, 0xB6, 0xC0}); // movzbl eax, al
         } else if (op == ir::Instruction::ExtUH) {
             as.emitBytes({0x0F, 0xB7, 0xC0}); // movzwl eax, ax

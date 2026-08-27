@@ -110,54 +110,72 @@ public:
             }
         }
 
-        // 2. Layout Sections
-        uint32_t currentRva = sectionAlignment_;
-        uint32_t bssVirtualSize = 0;
-        if (sections_in.count(".bss")) {
-            bssVirtualSize = (uint32_t)sections_in.at(".bss").size();
-        }
+        // 2. Build initial section objects & symbol extent map
+        std::map<std::string, uint32_t> symbolExtents;
         for (auto const& sym : symbols_in) {
-            if (sym.sectionName == ".bss" || sym.sectionName == "BSS") {
-                bssVirtualSize = std::max(bssVirtualSize, (uint32_t)(sym.value + sym.size));
-            }
+            symbolExtents[sym.sectionName] = std::max(symbolExtents[sym.sectionName], (uint32_t)(sym.value + sym.size));
         }
 
-        bool bssAdded = false;
         for (auto const& entry : sections_in) {
-            if (entry.first == ".bss" || entry.first == "BSS") {
-                if (bssVirtualSize == 0 && entry.second.empty()) continue;
-                Section s; s.name = entry.first; s.virtualAddress = currentRva;
-                s.virtualSize = std::max((uint32_t)entry.second.size(), bssVirtualSize);
-                s.data = entry.second;
-                s.rawDataSize = 0;
-                s.rawDataPointer = 0;
-                s.characteristics = 0xC0000080; // IMAGE_SCN_CNT_UNINITIALIZED_DATA | READ | WRITE
-                sections_.push_back(s);
-                currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
-                bssAdded = true;
-                continue;
-            }
-            if (entry.second.empty()) continue;
-            Section s; s.name = entry.first; s.data = entry.second; s.virtualAddress = currentRva;
-            s.virtualSize = s.data.size(); s.rawDataSize = align(s.data.size(), fileAlignment_);
+            if (entry.first == ".bss" || entry.first == "BSS") continue;
+            if (entry.second.empty() && symbolExtents[entry.first] == 0) continue;
+            Section s; s.name = entry.first; s.data = entry.second;
             if (s.name == ".text" || s.name == "CODE") s.characteristics = 0x60000020;
             else if (s.name == ".data" || s.name == "DATA") s.characteristics = 0xC0000040;
             else s.characteristics = 0x40000040;
             sections_.push_back(s);
+        }
+
+        // Add .bss if needed
+        uint32_t bssExt = symbolExtents[".bss"] ? symbolExtents[".bss"] : symbolExtents["BSS"];
+        if (bssExt > 0 || sections_in.count(".bss") || sections_in.count("BSS")) {
+            uint32_t bssSize = bssExt;
+            if (sections_in.count(".bss")) bssSize = std::max(bssSize, (uint32_t)sections_in.at(".bss").size());
+            if (sections_in.count("BSS")) bssSize = std::max(bssSize, (uint32_t)sections_in.at("BSS").size());
+            if (bssSize > 0) {
+                Section s; s.name = ".bss"; s.virtualSize = bssSize;
+                s.rawDataSize = 0; s.rawDataPointer = 0;
+                s.characteristics = 0xC0000080; // IMAGE_SCN_CNT_UNINITIALIZED_DATA | READ | WRITE
+                sections_.push_back(s);
+            }
+        }
+
+        // 3. Import Section (.idata) preparation
+        if (!imports_.empty()) {
+            // We will place .idata later when RVAs are computed
+        }
+
+        // 4. Trampolines for Imports (append to .text BEFORE assigning RVAs)
+        Section* textSec = findSection(".text");
+        if (!textSec && !sections_.empty() && (sections_[0].characteristics & 0x20)) {
+            textSec = &sections_[0];
+        }
+        if (textSec && !imports_.empty()) {
+            for (auto const& mod : imports_) {
+                for (size_t i = 0; i < mod.second.size(); ++i) {
+                    uint32_t trampolinePos = textSec->data.size();
+                    textSec->data.push_back(0xFF); textSec->data.push_back(0x25);
+                    textSec->data.resize(textSec->data.size() + 4, 0);
+                    PEGenerator::Symbol s; s.name = mod.second[i]; s.value = trampolinePos; s.sectionName = textSec->name;
+                    importedSymbols_.push_back(s);
+                }
+            }
+        }
+
+        // 5. Finalize Section RVAs and Sizes
+        uint32_t currentRva = sectionAlignment_;
+        for (auto& s : sections_) {
+            s.virtualAddress = currentRva;
+            s.virtualSize = std::max((uint32_t)s.data.size(), symbolExtents[s.name]);
+            if (s.data.size() < s.virtualSize) s.data.resize(s.virtualSize, 0);
+            if (s.characteristics & 0x80) { // Uninitialized data
+                s.rawDataSize = 0;
+            } else {
+                s.rawDataSize = align(s.virtualSize, fileAlignment_);
+            }
             currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
         }
 
-        if (!bssAdded && bssVirtualSize > 0) {
-            Section s; s.name = ".bss"; s.virtualAddress = currentRva;
-            s.virtualSize = bssVirtualSize;
-            s.rawDataSize = 0;
-            s.rawDataPointer = 0;
-            s.characteristics = 0xC0000080;
-            sections_.push_back(s);
-            currentRva = align(currentRva + s.virtualSize, sectionAlignment_);
-        }
-
-        // 3. Import Section (.idata)
         if (!imports_.empty()) {
             Section idata; idata.name = ".idata"; idata.characteristics = 0xC0000040;
             idata.virtualAddress = currentRva; importDirectoryRVA_ = idata.virtualAddress;
@@ -165,34 +183,28 @@ public:
             idata.virtualSize = idata.data.size(); idata.rawDataSize = align(idata.virtualSize, fileAlignment_);
             sections_.push_back(idata);
             currentRva = align(currentRva + idata.virtualSize, sectionAlignment_);
-        }
 
-        // 4. Trampolines for Imports
-        Section* textSec = findSection(".text");
-        if (textSec && !imports_.empty()) {
-            for (auto const& mod : imports_) {
-                for (size_t i = 0; i < mod.second.size(); ++i) {
-                    uint32_t iatRva = importDirectoryRVA_ + modIatOffsets_[mod.first] + (is64Bit_ ? i * 8 : i * 4);
-                    uint32_t trampolinePos = textSec->data.size();
-                    textSec->data.push_back(0xFF); textSec->data.push_back(0x25);
-                    textSec->data.resize(textSec->data.size() + 4, 0);
-                    uint32_t nextInstrRva = textSec->virtualAddress + trampolinePos + 6;
-                    int32_t rel = (int32_t)iatRva - (int32_t)nextInstrRva;
-                    std::memcpy(textSec->data.data() + trampolinePos + 2, &rel, 4);
-                    PEGenerator::Symbol s; s.name = mod.second[i]; s.value = trampolinePos; s.sectionName = ".text";
-                    importedSymbols_.push_back(s);
+            // Now fixup trampoline jump offsets inside textSec using finalized importDirectoryRVA_
+            if (textSec) {
+                size_t symIdx = 0;
+                for (auto const& mod : imports_) {
+                    for (size_t i = 0; i < mod.second.size(); ++i) {
+                        uint32_t iatRva = importDirectoryRVA_ + modIatOffsets_[mod.first] + (is64Bit_ ? i * 8 : i * 4);
+                        uint32_t trampolinePos = importedSymbols_[symIdx++].value;
+                        uint32_t nextInstrRva = textSec->virtualAddress + trampolinePos + 6;
+                        int32_t rel = (int32_t)iatRva - (int32_t)nextInstrRva;
+                        std::memcpy(textSec->data.data() + trampolinePos + 2, &rel, 4);
+                    }
                 }
             }
-            textSec->virtualSize = textSec->data.size();
-            textSec->rawDataSize = align(textSec->virtualSize, fileAlignment_);
         }
 
-        // 5. Relocations
+        // 6. Relocations
         std::vector<PEGenerator::Symbol> allSymbols = symbols_in;
         allSymbols.insert(allSymbols.end(), importedSymbols_.begin(), importedSymbols_.end());
         processRelocations(relocs_in, allSymbols);
 
-        // 6. Finalize Layout
+        // 7. Finalize File Layout Pointers
         uint32_t headerSize = align(sizeof(DOSHeader) + 64 + 4 + sizeof(FileHeader) + sizeof(OptionalHeader64) + sections_.size() * sizeof(SectionHeader), fileAlignment_);
         uint32_t currentFilePos = headerSize;
         for (auto& s : sections_) {
@@ -204,7 +216,7 @@ public:
             }
         }
 
-        // 7. Write File
+        // 8. Write File
         std::ofstream file(outputPath, std::ios::binary); if (!file.is_open()) return false;
         writeDOSHeader(file); writeNTHeaders(file, headerSize, currentRva); writeSectionHeaders(file); writeSectionData(file);
         return true;
@@ -305,15 +317,26 @@ private:
 
     void writeNTHeaders(std::ofstream& f, uint32_t headSize, uint32_t imgSize) {
         uint32_t sig = 0x00004550; f.write((char*)&sig, 4);
-        FileHeader fh = { (uint16_t)machine_, (uint16_t)sections_.size(), (uint32_t)time(0), 0, 0, (uint16_t)sizeof(OptionalHeader64), 0x22 };
+        FileHeader fh = { (uint16_t)machine_, (uint16_t)sections_.size(), (uint32_t)time(0), 0, 0, (uint16_t)sizeof(OptionalHeader64), 0x0023 };
         f.write((char*)&fh, sizeof(fh));
         uint32_t uninitSize = 0;
+        uint32_t sizeOfCode = 0;
+        uint32_t sizeOfInitData = 0;
+        uint32_t baseOfCode = 0;
         for (auto const& s : sections_) {
             if (s.name == ".bss" || s.name == "BSS" || (s.characteristics & 0x80)) {
                 uninitSize += s.virtualSize;
             }
+            if (s.characteristics & 0x20) {
+                sizeOfCode += s.rawDataSize;
+                if (baseOfCode == 0) baseOfCode = s.virtualAddress;
+            }
+            if (s.characteristics & 0x40) {
+                sizeOfInitData += s.rawDataSize;
+            }
         }
-        OptionalHeader64 oh = { 0x20b, 0, 0, 0, 0, uninitSize, entryPoint_, 0x1000, baseAddress_, sectionAlignment_, fileAlignment_, 6, 0, 0, 0, 6, 0, 0, align(imgSize, sectionAlignment_), headSize, 0, subsystem_, 0x8100, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16, {{0, 0}} };
+        if (baseOfCode == 0) baseOfCode = 0x1000;
+        OptionalHeader64 oh = { 0x20b, 0, 0, sizeOfCode, sizeOfInitData, uninitSize, entryPoint_, baseOfCode, baseAddress_, sectionAlignment_, fileAlignment_, 6, 0, 0, 0, 6, 0, 0, align(imgSize, sectionAlignment_), headSize, 0, subsystem_, 0x8100, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16, {{0, 0}} };
         if (importDirectoryRVA_) { oh.dataDirectory[1] = { importDirectoryRVA_, (uint32_t)((imports_.size() + 1) * sizeof(ImportDescriptor)) }; }
         f.write((char*)&oh, sizeof(oh));
     }
