@@ -88,7 +88,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
         int current_offset = -48;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType() && instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
         int stack_alloc = std::abs(current_offset + 40);
         if ((stack_alloc + 48 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 48 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
@@ -120,7 +120,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
         int current_offset = -64;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType() && instr->getType()->getTypeID() != ir::Type::VoidTyID) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } } }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
         int stack_alloc = std::abs(current_offset + 56) + 32; // Shadow space
         if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
@@ -130,7 +130,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                 if (j < 4) {
                     *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", " << integerArgRegs[j] << "\n";
                 } else {
-                    int paramStackOff = 16 + (j - 1) * 8;
+                    int paramStackOff = 16 + j * 8;
                     *os << "  mov rax, [rbp + " << paramStackOff << "]\n";
                     *os << "  mov " << formatStackOperand(cg.getStackOffsets()[param.get()]) << ", rax\n";
                 }
@@ -145,7 +145,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                     uint8_t r = getArchRegIndex(integerArgRegs[j]);
                     emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]);
                 } else {
-                    uint8_t paramStackOff = (uint8_t)(16 + (j - 1) * 8);
+                    uint8_t paramStackOff = (uint8_t)(16 + j * 8);
                     emitRegMem(as, 0x48, 0x8B, 0, paramStackOff);
                     emitRegMem(as, 0x48, 0x89, 0, cg.getStackOffsets()[param.get()]);
                 }
