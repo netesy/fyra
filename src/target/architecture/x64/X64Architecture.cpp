@@ -89,11 +89,23 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         int current_offset = -48;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
         for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
-        int stack_alloc = std::abs(current_offset + 40);
-        if ((stack_alloc + 48 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 48 + 8) % 16);
+        int stack_alloc = std::abs(current_offset + 48);
+        if (stack_alloc % 16 != 0) stack_alloc += (16 - (stack_alloc % 16));
         if (auto* os = cg.getTextStream()) {
             if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
-            int j = 0; for (auto& param : func.getParameters()) { if (j < 6) *os << "  movq %" << integerArgRegs[j] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n"; j++; }
+            size_t i_idx = 0, f_idx = 0;
+            for (auto& param : func.getParameters()) {
+                bool isF = param->getType() && (param->getType()->isFloatTy() || param->getType()->isDoubleTy());
+                if (isF) {
+                    if (f_idx < floatArgRegs.size()) {
+                        *os << "  movsd %" << floatArgRegs[f_idx++] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n";
+                    }
+                } else {
+                    if (i_idx < integerArgRegs.size()) {
+                        *os << "  movq %" << integerArgRegs[i_idx++] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n";
+                    }
+                }
+            }
         } else {
             auto& as = cg.getAssembler();
             if (stack_alloc > 0) {
@@ -563,24 +575,37 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
                          (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
 
     if (auto* os = cg.getTextStream()) {
-        size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
+        size_t int_idx = 0, float_idx = 0;
         for (size_t j = 1; j < i.getOperands().size(); ++j) {
             ir::Value* argVal = i.getOperands()[j]->get();
+            bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
             bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
                                (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
-            if (j <= maxArgs) {
-                std::string reg = getRegisterName(integerArgRegs[j-1], argVal->getType());
-                if (argIsGlobal && abi == X64ABI::Windows) {
-                    *os << "  lea " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
-                } else if (argIsGlobal && abi == X64ABI::SystemV) {
-                    *os << "  leaq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
-                } else {
+            if (isFloat) {
+                if (float_idx < floatArgRegs.size()) {
+                    std::string reg = floatArgRegs[float_idx++];
                     if (abi == X64ABI::Windows)
-                        *os << "  mov " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                        *os << "  movsd " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
                     else
-                        *os << "  movq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                        *os << "  movsd " << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
                 }
-            } else if (abi == X64ABI::Windows) {
+            } else {
+                size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
+                if (int_idx < maxArgs) {
+                    std::string reg = getRegisterName(integerArgRegs[int_idx++], argVal->getType());
+                    if (argIsGlobal && abi == X64ABI::Windows) {
+                        *os << "  lea " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                    } else if (argIsGlobal && abi == X64ABI::SystemV) {
+                        *os << "  leaq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                    } else {
+                        if (abi == X64ABI::Windows)
+                            *os << "  mov " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                        else
+                            *os << "  movq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                    }
+                }
+            }
+            if (false) if (abi == X64ABI::Windows) {
                 // Stack arg (5th+): load into rax then store at [rsp + (j-1)*8]
                 size_t stackOff = (j - 1) * 8;
                 if (argIsGlobal) {
@@ -939,6 +964,7 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
                 if (size == 1) *os << (isSigned ? "  movsbq (%rax), %rax\n" : "  movzbq (%rax), %rax\n");
                 else if (size == 2) *os << (isSigned ? "  movswq (%rax), %rax\n" : "  movzwq (%rax), %rax\n");
                 else if (size == 4) *os << (isSigned ? "  movslq (%rax), %rax\n" : "  movl (%rax), %eax\n");
+                else if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) *os << "  movsd (%rax), %xmm0\n";
                 else *os << "  movq (%rax), %rax\n";
             } else {
                 if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr [rax]\n" : "  movzx rax, byte ptr [rax]\n");
@@ -948,7 +974,12 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             }
         }
         // Store result
-        if (abi == X64ABI::Windows)
+        if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
+            if (abi == X64ABI::Windows)
+                *os << "  movsd " << cg.getValueAsOperand(&i) << ", xmm0\n";
+            else
+                *os << "  movsd %xmm0, " << cg.getValueAsOperand(&i) << "\n";
+        } else if (abi == X64ABI::Windows)
             *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
         else
             *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
