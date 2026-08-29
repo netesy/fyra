@@ -363,6 +363,12 @@ void CodeGen::emitDataSection() {
                     else if (ci->getType()->getSize() == 2) *os << "  .short " << ci->getValue() << "\n";
                     else if (ci->getType()->getSize() == 4) *os << "  .long " << ci->getValue() << "\n";
                     else *os << "  .quad " << ci->getValue() << "\n";
+                } else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(init)) {
+                    uint64_t bits = 0;
+                    double val = cfp->getValue();
+                    std::memcpy(&bits, &val, sizeof(double));
+                    if (cfp->getType()->getSize() == 4) *os << "  .long " << (uint32_t)bits << "\n";
+                    else *os << "  .quad " << bits << "\n";
                 } else if (auto* cs = dynamic_cast<ir::ConstantString*>(init)) {
                     *os << "  .string \"" << cs->getValue() << "\"\n";
                 } else if (auto* ca = dynamic_cast<ir::ConstantArray*>(init)) {
@@ -371,6 +377,12 @@ void CodeGen::emitDataSection() {
                              if (eci->getType()->getSize() == 1) *os << "  .byte " << eci->getValue() << "\n";
                              else if (eci->getType()->getSize() == 4) *os << "  .long " << eci->getValue() << "\n";
                              else *os << "  .quad " << eci->getValue() << "\n";
+                        } else if (auto* ecfp = dynamic_cast<ir::ConstantFP*>(elem)) {
+                             uint64_t bits = 0;
+                             double val = ecfp->getValue();
+                             std::memcpy(&bits, &val, sizeof(double));
+                             if (ecfp->getType()->getSize() == 4) *os << "  .long " << (uint32_t)bits << "\n";
+                             else *os << "  .quad " << bits << "\n";
                         } else if (auto* ecs = dynamic_cast<ir::ConstantString*>(elem)) {
                              *os << "  .string \"" << ecs->getValue() << "\"\n";
                         }
@@ -431,6 +443,12 @@ void CodeGen::emitDataSection() {
                     else if (ci->getType()->getSize() == 2) rodataAssembler->emitWord(ci->getValue());
                     else if (ci->getType()->getSize() == 4) rodataAssembler->emitDWord(ci->getValue());
                     else rodataAssembler->emitQWord(ci->getValue());
+                } else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(init)) {
+                    uint64_t bits = 0;
+                    double val = cfp->getValue();
+                    std::memcpy(&bits, &val, sizeof(double));
+                    if (cfp->getType()->getSize() == 4) rodataAssembler->emitDWord((uint32_t)bits);
+                    else rodataAssembler->emitQWord(bits);
                 } else if (auto* cs = dynamic_cast<ir::ConstantString*>(init)) {
                     for (char c : cs->getValue()) {
                         rodataAssembler->emitByte(c);
@@ -442,6 +460,12 @@ void CodeGen::emitDataSection() {
                              if (eci->getType()->getSize() == 1) rodataAssembler->emitByte(eci->getValue());
                              else if (eci->getType()->getSize() == 4) rodataAssembler->emitDWord(eci->getValue());
                              else rodataAssembler->emitQWord(eci->getValue());
+                        } else if (auto* ecfp = dynamic_cast<ir::ConstantFP*>(elem)) {
+                             uint64_t bits = 0;
+                             double val = ecfp->getValue();
+                             std::memcpy(&bits, &val, sizeof(double));
+                             if (ecfp->getType()->getSize() == 4) rodataAssembler->emitDWord((uint32_t)bits);
+                             else rodataAssembler->emitQWord(bits);
                         } else if (auto* ecs = dynamic_cast<ir::ConstantString*>(elem)) {
                              for (char c : ecs->getValue()) {
                                  rodataAssembler->emitByte(c);
