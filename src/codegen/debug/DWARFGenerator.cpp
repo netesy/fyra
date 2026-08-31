@@ -306,7 +306,9 @@ void DWARFGenerator::emitDebugInfoForFunction(CodeGen& cg, std::ostream& os, con
 }
 
 void DWARFGenerator::emitDebugDirectives(std::ostream& os) {
-    os << "  .file 1 \"" << compileUnit->filename << "\"\n";
+    std::string fn = compileUnit->filename;
+    if (fn.empty()) fn = "input.fyra";
+    os << "  .file 1 \"" << fn << "\"\n";
 }
 
 // Private helper methods

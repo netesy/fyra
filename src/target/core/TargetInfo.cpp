@@ -3,6 +3,7 @@
 #include "ir/Type.h"
 #include "ir/Instruction.h"
 #include <iostream>
+#include <cstring>
 
 namespace target {
 
@@ -111,6 +112,13 @@ std::string TargetInfo::getVectorInstruction(const std::string& baseInstr, const
 
 std::string TargetInfo::formatConstant(const ir::ConstantInt* C) const {
     return getImmediatePrefix() + std::to_string(C->getValue());
+}
+
+std::string TargetInfo::formatConstant(const ir::ConstantFP* C) const {
+    uint64_t bits = 0;
+    double val = C->getValue();
+    std::memcpy(&bits, &val, sizeof(double));
+    return getImmediatePrefix() + std::to_string(bits);
 }
 
 

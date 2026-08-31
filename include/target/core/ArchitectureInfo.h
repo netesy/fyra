@@ -111,6 +111,7 @@ public:
     virtual bool isReserved(const std::string& reg) const { return false; }
     virtual std::string getRegisterName(const std::string& base, const ir::Type* type) const { return base; }
     virtual std::string formatConstant(const ir::ConstantInt* C) const;
+    virtual std::string formatConstant(const ir::ConstantFP* C) const;
 
     virtual void emitSyscall(CodeGen& cg, ir::Instruction& i, const class OperatingSystemInfo& osInfo) = 0;
     virtual void emitExternCall(CodeGen& cg, ir::Instruction& i, const class OperatingSystemInfo& osInfo) = 0;

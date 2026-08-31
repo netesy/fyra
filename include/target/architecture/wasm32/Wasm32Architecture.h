@@ -69,6 +69,7 @@ public:
     bool isCalleeSaved(const std::string& reg) const override { return false; }
     std::string getAssemblyFileExtension() const override { return ".wat"; }
     std::string formatConstant(const ir::ConstantInt* C) const override;
+    std::string formatConstant(const ir::ConstantFP* C) const override;
 
     void emitTypeSection(CodeGen& cg);
     void emitFunctionSection(CodeGen& cg);

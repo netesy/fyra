@@ -83,7 +83,7 @@ void CodeGen::emit(bool forExecutable) {
         for (auto& bb : func->getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getOpcode() == ir::Instruction::Alloc) usesHeap = true;
-                if (instr->getOpcode() == ir::Instruction::Neg && instr->getType()->isFloatingPoint()) usesFPNeg = true;
+                if (instr->getOpcode() == ir::Instruction::Neg && instr->getType() && instr->getType()->isFloatingPoint()) usesFPNeg = true;
             }
         }
     }
@@ -106,6 +106,9 @@ void CodeGen::emitFunction(ir::Function& func) {
         wasmFunctionBodies.push_back(assembler->getCode());
         assembler = std::move(oldAsm);
     } else {
+        if (debugInfoManager->isDebugEnabled() && os) {
+            debugInfoManager->beforeFunctionEmission(*this, *os, func);
+        }
         if (os) {
             *os << "\n.globl " << func.getName() << "\n" << func.getName() << ":\n";
         } else if (assembler) {
@@ -136,34 +139,33 @@ void CodeGen::emitFunction(ir::Function& func) {
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
     if (os) {
-        *os << targetInfo->getBBLabel(&bb) << ":\n";
+        *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
     } else if (assembler) {
-        // Register basic block as a symbol for binary emission
         SymbolInfo bb_sym;
-        bb_sym.name = targetInfo->getBBLabel(&bb);
+        bb_sym.name = bb.getParent()->getName() + "_" + bb.getName();
         bb_sym.sectionName = ".text";
         bb_sym.value = assembler->getCodeSize();
         bb_sym.type = 0; // STT_NOTYPE
-        bb_sym.binding = 1; // STB_GLOBAL
+        bb_sym.binding = 0; // STB_LOCAL
         addSymbol(bb_sym);
     }
-    auto isCompareOpcode = [](ir::Instruction::Opcode opcode) {
-        switch (opcode) {
+
+    auto isCompareOpcode = [](ir::Instruction::Opcode op) {
+        switch (op) {
             case ir::Instruction::Ceq:
             case ir::Instruction::Cne:
-            case ir::Instruction::Cslt:
             case ir::Instruction::Csle:
-            case ir::Instruction::Csgt:
+            case ir::Instruction::Cslt:
             case ir::Instruction::Csge:
-            case ir::Instruction::Cult:
+            case ir::Instruction::Csgt:
             case ir::Instruction::Cule:
-            case ir::Instruction::Cugt:
+            case ir::Instruction::Cult:
             case ir::Instruction::Cuge:
+            case ir::Instruction::Cugt:
             case ir::Instruction::Ceqf:
             case ir::Instruction::Cnef:
-            case ir::Instruction::Clt:
             case ir::Instruction::Cle:
-            case ir::Instruction::Cgt:
+            case ir::Instruction::Clt:
             case ir::Instruction::Cge:
             case ir::Instruction::Co:
             case ir::Instruction::Cuo:
@@ -234,7 +236,9 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Ceq: case ir::Instruction::Cne: case ir::Instruction::Cslt:
         case ir::Instruction::Csle: case ir::Instruction::Csgt: case ir::Instruction::Csge:
         case ir::Instruction::Cult: case ir::Instruction::Cule: case ir::Instruction::Cugt:
-        case ir::Instruction::Cuge: targetInfo->emitCmp(*this, instr); break;
+        case ir::Instruction::Cuge: case ir::Instruction::Ceqf: case ir::Instruction::Cnef:
+        case ir::Instruction::Clt: case ir::Instruction::Cle: case ir::Instruction::Cgt:
+        case ir::Instruction::Cge: targetInfo->emitCmp(*this, instr); break;
         case ir::Instruction::ExtUB:
         case ir::Instruction::ExtUH:
         case ir::Instruction::ExtUW:
@@ -273,7 +277,25 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
         return targetInfo->formatStackOperand(targetInfo->getStackOffset(*this, const_cast<ir::Value*>(value)));
     }
 
+    if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
+        if (currentFunction) {
+            const auto& params = currentFunction->getParameters();
+            size_t idx = 0;
+            for (auto& p : params) {
+                if (p.get() == param) break;
+                idx++;
+            }
+            if (idx < 6 && targetInfo) {
+                const auto& argRegs = targetInfo->getIntegerArgumentRegisters();
+                if (idx < argRegs.size()) {
+                    return targetInfo->getRegisterName(argRegs[idx], param->getType());
+                }
+            }
+        }
+    }
+
     if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
+    if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) return targetInfo->formatConstant(cfp);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
@@ -333,8 +355,10 @@ void CodeGen::deallocateRegister(const std::string&) {}
 void CodeGen::emitTargetSpecificHeader() {
     targetInfo->emitHeader(*this);
     if (os) {
-        if (targetInfo->getName() == "x86_64") *os << ".att_syntax prefix\n";
-        else if (targetInfo->getName() == "win64") *os << ".intel_syntax noprefix\n";
+        if (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win64") != std::string::npos)
+            *os << ".intel_syntax noprefix\n";
+        else if (targetInfo->getName() == "x86_64")
+            *os << ".att_syntax prefix\n";
     }
 }
 void CodeGen::emitDataSection() {
@@ -342,7 +366,7 @@ void CodeGen::emitDataSection() {
     if (os) {
         *os << "\n.data\n";
         if (usesHeap) {
-            *os << ".align 16\n__heap_base:\n  .zero 1048576\n";
+            *os << ".align 16\n__heap_base:\n  .zero 67108864\n";
             *os << ".align 8\n__heap_ptr:\n  .quad __heap_base\n";
         }
         for (auto& gv : module.getGlobalVariables()) {
@@ -359,6 +383,12 @@ void CodeGen::emitDataSection() {
                     else if (ci->getType()->getSize() == 2) *os << "  .short " << ci->getValue() << "\n";
                     else if (ci->getType()->getSize() == 4) *os << "  .long " << ci->getValue() << "\n";
                     else *os << "  .quad " << ci->getValue() << "\n";
+                } else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(init)) {
+                    uint64_t bits = 0;
+                    double val = cfp->getValue();
+                    std::memcpy(&bits, &val, sizeof(double));
+                    if (cfp->getType()->getSize() == 4) *os << "  .long " << (uint32_t)bits << "\n";
+                    else *os << "  .quad " << bits << "\n";
                 } else if (auto* cs = dynamic_cast<ir::ConstantString*>(init)) {
                     *os << "  .string \"" << cs->getValue() << "\"\n";
                 } else if (auto* ca = dynamic_cast<ir::ConstantArray*>(init)) {
@@ -367,6 +397,12 @@ void CodeGen::emitDataSection() {
                              if (eci->getType()->getSize() == 1) *os << "  .byte " << eci->getValue() << "\n";
                              else if (eci->getType()->getSize() == 4) *os << "  .long " << eci->getValue() << "\n";
                              else *os << "  .quad " << eci->getValue() << "\n";
+                        } else if (auto* ecfp = dynamic_cast<ir::ConstantFP*>(elem)) {
+                             uint64_t bits = 0;
+                             double val = ecfp->getValue();
+                             std::memcpy(&bits, &val, sizeof(double));
+                             if (ecfp->getType()->getSize() == 4) *os << "  .long " << (uint32_t)bits << "\n";
+                             else *os << "  .quad " << bits << "\n";
                         } else if (auto* ecs = dynamic_cast<ir::ConstantString*>(elem)) {
                              *os << "  .string \"" << ecs->getValue() << "\"\n";
                         }
@@ -378,19 +414,12 @@ void CodeGen::emitDataSection() {
         }
     } else if (rodataAssembler) {
         if (usesHeap) {
-            // Consistent naming: heap_ptr and __fyra_heap
-            uint64_t heap_base_offset = rodataAssembler->getCodeSize();
-            while (heap_base_offset % 16 != 0) {
-                rodataAssembler->emitByte(0);
-                heap_base_offset = rodataAssembler->getCodeSize();
-            }
-            for(int i=0; i<1048576; ++i) rodataAssembler->emitByte(0);
-            
+            // Place __fyra_heap in .bss (NOBITS) so zero bytes are allocated by loader, not written to ELF file
             SymbolInfo hb_sym;
             hb_sym.name = "__fyra_heap";
-            hb_sym.sectionName = ".data";
-            hb_sym.value = heap_base_offset;
-            hb_sym.size = 1048576;
+            hb_sym.sectionName = ".bss";
+            hb_sym.value = 0;
+            hb_sym.size = 67108864;
             hb_sym.binding = 1;
             addSymbol(hb_sym);
 
@@ -434,6 +463,12 @@ void CodeGen::emitDataSection() {
                     else if (ci->getType()->getSize() == 2) rodataAssembler->emitWord(ci->getValue());
                     else if (ci->getType()->getSize() == 4) rodataAssembler->emitDWord(ci->getValue());
                     else rodataAssembler->emitQWord(ci->getValue());
+                } else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(init)) {
+                    uint64_t bits = 0;
+                    double val = cfp->getValue();
+                    std::memcpy(&bits, &val, sizeof(double));
+                    if (cfp->getType()->getSize() == 4) rodataAssembler->emitDWord((uint32_t)bits);
+                    else rodataAssembler->emitQWord(bits);
                 } else if (auto* cs = dynamic_cast<ir::ConstantString*>(init)) {
                     for (char c : cs->getValue()) {
                         rodataAssembler->emitByte(c);
@@ -445,6 +480,12 @@ void CodeGen::emitDataSection() {
                              if (eci->getType()->getSize() == 1) rodataAssembler->emitByte(eci->getValue());
                              else if (eci->getType()->getSize() == 4) rodataAssembler->emitDWord(eci->getValue());
                              else rodataAssembler->emitQWord(eci->getValue());
+                        } else if (auto* ecfp = dynamic_cast<ir::ConstantFP*>(elem)) {
+                             uint64_t bits = 0;
+                             double val = ecfp->getValue();
+                             std::memcpy(&bits, &val, sizeof(double));
+                             if (ecfp->getType()->getSize() == 4) rodataAssembler->emitDWord((uint32_t)bits);
+                             else rodataAssembler->emitQWord(bits);
                         } else if (auto* ecs = dynamic_cast<ir::ConstantString*>(elem)) {
                              for (char c : ecs->getValue()) {
                                  rodataAssembler->emitByte(c);

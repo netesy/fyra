@@ -62,6 +62,7 @@ public:
     void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     void emitBr(CodeGen& cg, ir::Instruction& i) override;
     void emitJmp(CodeGen& cg, ir::Instruction& i) override;
+    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
 
     void emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
     void emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
@@ -71,6 +72,7 @@ public:
     std::string formatStackOperand(int offset) const override;
     std::string formatGlobalOperand(const std::string& name) const override;
     std::string formatConstant(const ir::ConstantInt* C) const override;
+    std::string formatConstant(const ir::ConstantFP* C) const override;
     std::string getImmediatePrefix() const override { return (abi == X64ABI::Windows) ? "" : "$"; }
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;

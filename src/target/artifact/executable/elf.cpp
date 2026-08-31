@@ -133,6 +133,7 @@ public:
     void setPageSize(uint64_t size) { pageSize_ = size; }
     void setEntryPointName(const std::string& name) { entryPointName_ = name; }
     void setMachine(uint16_t machine) { machine_ = machine; }
+    void setStrip(bool strip) { strip_ = strip; }
     std::string getLastError() const { return lastError_; }
 
 private:
@@ -200,6 +201,7 @@ private:
     std::string entryPointName_;
     uint64_t entryPointAddr_ = 0;
     uint16_t machine_ = 0;
+    bool strip_ = false;
     std::string lastError_;
 
     // Parsed data
@@ -288,6 +290,19 @@ bool ElfGenerator::Impl::generateFromCode(const std::map<std::string, std::vecto
         s.sectionName = sym_in.sectionName;
         s.isDefined = (s.sectionName != "*UND*");
         symbols_[s.name] = s;
+
+        // If a symbol is defined in .bss, ensure the .bss section exists in sections_
+        if (s.isDefined && s.sectionName == ".bss" && sections_.find(".bss") == sections_.end()) {
+            Section bss;
+            bss.name = ".bss";
+            bss.size = s.value + s.size;
+            bss.addralign = 8;
+            std::memset(&bss.header, 0, sizeof(SectionHeader64));
+            sections_[".bss"] = bss;
+            sectionOrder_.push_back(".bss");
+        } else if (s.isDefined && s.sectionName == ".bss") {
+            sections_[".bss"].size = std::max(sections_[".bss"].size, s.value + s.size);
+        }
     }
 
     relocations_.clear();
@@ -526,19 +541,20 @@ bool ElfGenerator::Impl::applyRelocations() {
 
         auto sym_it = symbols_.find(reloc.symbolName);
         if (sym_it == symbols_.end()) {
-            // Check for local label: search for SectionName_LabelName
             std::string localName = reloc.sectionName + "_" + reloc.symbolName;
             sym_it = symbols_.find(localName);
             if (sym_it == symbols_.end()) {
-                // Try funcName_labelName
-                Section* s = findSection(reloc.sectionName);
-                if (s) {
-                    // This is a bit of a hack, we don't easily know the function name here
-                    // In Fyra, labels are often prefixed with function name in textual asm,
-                    // but in in-memory cg, they might just be the label name.
-                }
-                lastError_ = "Relocation against unknown symbol " + reloc.symbolName;
-                return false;
+                // Synthesize external runtime symbol
+                Symbol synthetic;
+                synthetic.name = reloc.symbolName;
+                synthetic.value = 0;
+                synthetic.size = 0;
+                synthetic.type = STT_NOTYPE;
+                synthetic.binding = STB_GLOBAL;
+                synthetic.sectionName = "*UND*";
+                synthetic.isDefined = false;
+                symbols_[reloc.symbolName] = synthetic;
+                sym_it = symbols_.find(reloc.symbolName);
             }
         }
         Symbol& symbol = sym_it->second;
@@ -665,8 +681,10 @@ void ElfGenerator::Impl::createFinalElfStructure() {
         finalSectionIndexMap_[name] = finalSectionHeaders_.size() - 1;
     };
     add_meta_section(".shstrtab", SHT_STRTAB, 0);
-    add_meta_section(".symtab", SHT_SYMTAB, sizeof(Symbol64));
-    add_meta_section(".strtab", SHT_STRTAB, 0);
+    if (!strip_) {
+        add_meta_section(".symtab", SHT_SYMTAB, sizeof(Symbol64));
+        add_meta_section(".strtab", SHT_STRTAB, 0);
+    }
 
     // Create symbol table (values are section offsets at this point)
     finalSymbols_.push_back({}); // NULL symbol
@@ -700,10 +718,12 @@ void ElfGenerator::Impl::createFinalElfStructure() {
 
     // Finalize meta section header SIZES
     finalSectionHeaders_[findFinalSectionIndex(".shstrtab")].sh_size = shStringTable_.size();
-    finalSectionHeaders_[findFinalSectionIndex(".strtab")].sh_size = stringTable_.size();
-    finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_size = finalSymbols_.size() * sizeof(Symbol64);
-    finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_link = findFinalSectionIndex(".strtab");
-    finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_info = first_global_idx;
+    if (!strip_) {
+        finalSectionHeaders_[findFinalSectionIndex(".strtab")].sh_size = stringTable_.size();
+        finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_size = finalSymbols_.size() * sizeof(Symbol64);
+        finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_link = findFinalSectionIndex(".strtab");
+        finalSectionHeaders_[findFinalSectionIndex(".symtab")].sh_info = first_global_idx;
+    }
 }
 
 void ElfGenerator::Impl::updateSymbolValues() {
@@ -823,13 +843,21 @@ void ElfGenerator::Impl::writeSectionData(std::ofstream& file) {
     file.seekp(shstrtab.sh_offset);
     file.write(shStringTable_.c_str(), shStringTable_.size());
 
-    SectionHeader64& symtab = finalSectionHeaders_[findFinalSectionIndex(".symtab")];
-    file.seekp(symtab.sh_offset);
-    file.write(reinterpret_cast<const char*>(finalSymbols_.data()), finalSymbols_.size() * sizeof(Symbol64));
+    if (!strip_) {
+        uint16_t symtab_idx = findFinalSectionIndex(".symtab");
+        if (symtab_idx != SHN_UNDEF) {
+            SectionHeader64& symtab = finalSectionHeaders_[symtab_idx];
+            file.seekp(symtab.sh_offset);
+            file.write(reinterpret_cast<const char*>(finalSymbols_.data()), finalSymbols_.size() * sizeof(Symbol64));
+        }
 
-    SectionHeader64& strtab = finalSectionHeaders_[findFinalSectionIndex(".strtab")];
-    file.seekp(strtab.sh_offset);
-    file.write(stringTable_.c_str(), stringTable_.size());
+        uint16_t strtab_idx = findFinalSectionIndex(".strtab");
+        if (strtab_idx != SHN_UNDEF) {
+            SectionHeader64& strtab = finalSectionHeaders_[strtab_idx];
+            file.seekp(strtab.sh_offset);
+            file.write(stringTable_.c_str(), stringTable_.size());
+        }
+    }
 }
 
 bool ElfGenerator::Impl::writeExecutable(const std::string& outputFile) {
@@ -937,4 +965,5 @@ void ElfGenerator::setBaseAddress(uint64_t address) { pImpl->setBaseAddress(addr
 void ElfGenerator::setPageSize(uint64_t size) { pImpl->setPageSize(size); }
 void ElfGenerator::setEntryPointName(const std::string& name) { pImpl->setEntryPointName(name); }
 void ElfGenerator::setMachine(uint16_t machine) { pImpl->setMachine(machine); }
+void ElfGenerator::setStrip(bool strip) { pImpl->setStrip(strip); }
 std::string ElfGenerator::getLastError() const { return pImpl->getLastError(); }
