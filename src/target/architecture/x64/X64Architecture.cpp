@@ -1286,6 +1286,9 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
         ir::PhiNode* phi = it->second;
         if (auto* os = cg.getTextStream()) {
             std::string destOp = cg.getValueAsOperand(phi);
+            bool is32 = is32BitType(phi->getType());
+            std::string movOp = is32 ? "movl" : "movq";
+            std::string regRax = is32 ? "%eax" : "%rax";
             std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
             if (abi == X64ABI::Windows)
                 *os << "  pop " << rax << "\n";
@@ -1294,7 +1297,7 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             if (abi == X64ABI::Windows)
                 *os << "  mov " << destOp << ", " << rax << "\n";
             else
-                *os << "  movq " << rax << ", " << destOp << "\n";
+                *os << "  " << movOp << " " << regRax << ", " << destOp << "\n";
         } else {
             auto& as = cg.getAssembler();
             as.emitByte(0x58);
