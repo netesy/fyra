@@ -1,0 +1,44 @@
+function $test_reg_pressure_16(%a0 : w, %a1 : w, %a2 : w, %a3 : w, %a4 : w, %a5 : w, %a6 : w, %a7 : w) : w {
+@start
+    %v0 = add %a0, %a1 : w
+    %v1 = add %a2, %a3 : w
+    %v2 = add %a4, %a5 : w
+    %v3 = add %a6, %a7 : w
+    %v4 = mul %v0, %v1 : w
+    %v5 = mul %v2, %v3 : w
+    %v6 = add %v0, %v2 : w
+    %v7 = add %v1, %v3 : w
+    %s1 = add %v4, %v5 : w
+    %s2 = sub %v6, %v7 : w
+    %res = mul %s1, %s2 : w
+    ret %res : w
+}
+
+export function $main() : w {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry 1, @body %i_next : w
+    %sum = phi @entry 0, @body %sum_next : l
+    %cond = sle %i, 50000000 : w
+    jnz %cond, @body, @exit
+
+@body
+    %i1 = add %i, 1 : w
+    %i2 = add %i, 2 : w
+    %i3 = add %i, 3 : w
+    %i4 = add %i, 4 : w
+    %i5 = add %i, 5 : w
+    %i6 = add %i, 6 : w
+    %i7 = add %i, 7 : w
+    %v = call $test_reg_pressure_16(%i, %i1, %i2, %i3, %i4, %i5, %i6, %i7) : w
+    %v_ext = extsw %v : l
+    %sum_next = add %sum, %v_ext : l
+    %i_next = add %i, 1 : w
+    jmp @loop
+
+@exit
+    call $print_checksum(l %sum)
+    ret 0 : w
+}

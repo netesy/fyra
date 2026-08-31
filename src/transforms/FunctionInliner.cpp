@@ -83,7 +83,8 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
         }
 
         auto cloned = std::make_unique<ir::Instruction>(calleeInst->getType(), calleeInst->getOpcode(), clonedOps, callerBB);
-        cloned->setName(calleeInst->getName() + "_inlined");
+        static size_t inlineCounter = 0;
+        cloned->setName(calleeInst->getName() + "_inlined_" + std::to_string(inlineCounter++));
         valueMap[calleeInst] = cloned.get();
         clonedInstrs.push_back(std::move(cloned));
     }

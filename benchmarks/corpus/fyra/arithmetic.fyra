@@ -1,0 +1,95 @@
+function $test_basic_add(%a : w, %b : w) : w {
+@start
+    %res = add %a, %b : w
+    ret %res : w
+}
+
+function $test_basic_sub(%a : w, %b : w) : w {
+@start
+    %res = sub %a, %b : w
+    ret %res : w
+}
+
+function $test_basic_mul(%a : w, %b : w) : w {
+@start
+    %res = mul %a, %b : w
+    ret %res : w
+}
+
+function $test_basic_div(%a : w, %b : w) : w {
+@start
+    %res = div %a, %b : w
+    ret %res : w
+}
+
+function $test_basic_rem(%a : w, %b : w) : w {
+@start
+    %res = rem %a, %b : w
+    ret %res : w
+}
+
+function $test_mixed(%a : w, %b : w, %c : w, %d : w) : w {
+@start
+    %t1 = add %a, %b : w
+    %t2 = sub %c, %d : w
+    %res = mul %t1, %t2 : w
+    ret %res : w
+}
+
+function $test_chained(%a : w, %b : w, %c : w, %d : w) : w {
+@start
+    %p1 = mul %a, %b : w
+    %p2 = mul %c, %d : w
+    %s1 = add %p1, %p2 : w
+    %s2 = add %a, %d : w
+    %res = sub %s1, %s2 : w
+    ret %res : w
+}
+
+function $test_constant(%a : w) : w {
+@start
+    %t1 = add %a, 1 : w
+    %t2 = mul %t1, 2 : w
+    %res = sub %t2, 3 : w
+    ret %res : w
+}
+
+export function $main() : w {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry 1, @body %i_next : w
+    %sum = phi @entry 0, @body %sum_next : l
+    %cond = sle %i, 100000000 : w
+    jnz %cond, @body, @exit
+
+@body
+    %m7 = rem %i, 7 : w
+    %m11 = rem %i, 11 : w
+    %m13 = rem %i, 13 : w
+    %v1 = call $test_mixed(%i, %m7, %m11, %m13) : w
+
+    %m5 = rem %i, 5 : w
+    %m9 = rem %i, 9 : w
+    %m17 = rem %i, 17 : w
+    %m23 = rem %i, 23 : w
+    %v2 = call $test_chained(%m5, %m9, %m17, %m23) : w
+
+    %v3 = call $test_constant(%i) : w
+
+    %v1_ext = extsw %v1 : l
+    %v2_ext = extsw %v2 : l
+    %v3_ext = extsw %v3 : l
+
+    %s_a = add %sum, %v1_ext : l
+    %s_b = add %s_a, %v2_ext : l
+    %sum_next = add %s_b, %v3_ext : l
+
+    %i_next = add %i, 1 : w
+    jmp @loop
+
+@exit
+    call $print_checksum(l %sum)
+    ret 0 : w
+}

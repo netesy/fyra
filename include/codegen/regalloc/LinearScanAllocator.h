@@ -56,6 +56,7 @@ private:
     void spillAtInterval(const class LiveInterval& interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
 
     unsigned int next_stack_slot = 0;
+    std::vector<StackSlot> free_stack_slots;
     std::vector<const class LiveInterval*> active_intervals;
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;
     RegAllocStats stats;

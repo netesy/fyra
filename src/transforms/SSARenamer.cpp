@@ -96,6 +96,7 @@ void SSARenamer::renameBlock(ir::BasicBlock* bb) {
         for (auto& instr_ptr : succ->getInstructions()) {
             if (auto* phi = dynamic_cast<ir::PhiNode*>(instr_ptr.get())) {
                 ir::Instruction* var = phi->getVariable();
+                if (!var) continue; // Do not overwrite pre-existing SSA phi nodes
                 ir::Value* incoming_val = nullptr;
                 if (varStacks.count(var) && !varStacks[var].empty()) {
                     incoming_val = varStacks[var].top();

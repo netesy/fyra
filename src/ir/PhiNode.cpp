@@ -12,24 +12,29 @@ PhiNode::PhiNode(Type* ty, unsigned numOperands, Instruction* alloc, BasicBlock*
 }
 
 Value* PhiNode::getIncomingValueForBlock(BasicBlock* bb) {
-    // The operands are stored as [block1, value1, block2, value2, ...]
+    if (!bb) return nullptr;
     for (size_t i = 0; i < getOperands().size(); i += 2) {
-        if (getOperands()[i]->get() == bb) {
-            return getOperands()[i + 1]->get();
+        if (!getOperands()[i]) continue;
+        Value* predVal = getOperands()[i]->get();
+        if (predVal == bb || (predVal && predVal->getName() == bb->getName())) {
+            return (i + 1 < getOperands().size()) ? getOperands()[i + 1]->get() : nullptr;
         }
     }
     return nullptr;
 }
 
 void PhiNode::setIncomingValueForBlock(BasicBlock* bb, Value* value) {
-    // Find the operand for the block and set its value
+    if (!bb) return;
     for (size_t i = 0; i < getOperands().size(); i += 2) {
-        if (getOperands()[i]->get() == bb) {
-            getOperands()[i + 1]->set(value);
+        if (!getOperands()[i]) continue;
+        Value* predVal = getOperands()[i]->get();
+        if (predVal == bb || (predVal && predVal->getName() == bb->getName())) {
+            if (i + 1 < getOperands().size()) {
+                getOperands()[i + 1]->set(value);
+            }
             return;
         }
     }
-    // If not found, add a new entry.
     addOperand(bb);
     addOperand(value);
 }
@@ -39,10 +44,13 @@ void PhiNode::addIncoming(Value* value, BasicBlock* bb) {
 }
 
 void PhiNode::removeIncomingValue(BasicBlock* bb) {
+    if (!bb) return;
     auto& ops = getOperands();
     for (size_t i = 0; i < ops.size(); i += 2) {
-        if (ops[i]->get() == bb) {
-            ops.erase(ops.begin() + i, ops.begin() + i + 2);
+        if (!ops[i]) continue;
+        Value* predVal = ops[i]->get();
+        if (predVal == bb || (predVal && predVal->getName() == bb->getName())) {
+            ops.erase(ops.begin() + i, ops.begin() + std::min(i + 2, ops.size()));
             return;
         }
     }
