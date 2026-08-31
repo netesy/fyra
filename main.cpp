@@ -15,6 +15,7 @@
 #include "transforms/CopyElimination.h"
 #include "transforms/GVN.h"
 #include "transforms/SCCP.h"
+#include "transforms/FunctionInliner.h"
 #include "transforms/DeadInstructionElimination.h"
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/ControlFlowSimplification.h"
@@ -203,6 +204,9 @@ int main(int argc, char** argv) {
         mem2reg.run(*func);
 
         if (optimizationLevel == 0) continue;
+
+        transforms::FunctionInliner inliner;
+        inliner.runOnModule(*module);
 
         transforms::SCCP enhanced_sccp(error_reporter);
         transforms::ControlFlowSimplification cfg_simplifier(error_reporter);

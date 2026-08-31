@@ -8,7 +8,6 @@
 .text
 .globl main
 
-.globl main
 main:
   (func $main (result i32)
 main_start:

@@ -11,7 +11,7 @@ namespace transforms {
 // Define the number of available physical registers for our target
 // For x86_64 System V, we have 14 general purpose registers, 
 // but we'll reserve some for ABI and scratch purposes.
-const unsigned int NUM_PHYSICAL_REGISTERS = 8; 
+const unsigned int NUM_PHYSICAL_REGISTERS = 13;
 
 void LinearScanAllocator::run(ir::Function& func) {
     linearScan(func);
@@ -25,8 +25,10 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
     stats.numVregs = intervals.size();
     std::set<unsigned int> used_regs;
 
-    for (unsigned int i = 0; i < NUM_PHYSICAL_REGISTERS; ++i) {
-        free_registers.push_back({i});
+    // Allocate caller-saved registers (0..7) first for non-call intervals,
+    // and callee-saved registers (8..12) for higher register pressure / live intervals.
+    for (int i = (int)NUM_PHYSICAL_REGISTERS - 1; i >= 0; --i) {
+        free_registers.push_back({(unsigned int)i});
     }
 
     for (const auto& current_interval : intervals) {
