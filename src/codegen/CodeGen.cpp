@@ -106,6 +106,9 @@ void CodeGen::emitFunction(ir::Function& func) {
         wasmFunctionBodies.push_back(assembler->getCode());
         assembler = std::move(oldAsm);
     } else {
+        if (debugInfoManager->isDebugEnabled() && os) {
+            debugInfoManager->beforeFunctionEmission(*this, *os, func);
+        }
         if (os) {
             *os << "\n.globl " << func.getName() << "\n" << func.getName() << ":\n";
         } else if (assembler) {

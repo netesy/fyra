@@ -628,8 +628,10 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
             }
         }
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
-            // Intel syntax: store rax → stack slot  (dst, src order)
-            *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
+            if (abi == X64ABI::Windows)
+                *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
+            else
+                *os << "  movq %rax, " << cg.getValueAsOperand(&i) << "\n";
         }
     } else {
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
