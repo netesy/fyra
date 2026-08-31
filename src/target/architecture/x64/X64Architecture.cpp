@@ -1100,8 +1100,21 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
-        std::string op = cg.getValueAsOperand(i.getOperands()[0]->get());
-        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr;
+        ir::Value* ptrVal = i.getOperands()[0]->get();
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            // Stack slot load from RegAlloc
+            int slot_bytes = ci->getValue();
+            int rbp_offset = -8 - slot_bytes; // Stack slot position
+            std::string stackOp = formatStackOperand(rbp_offset);
+            bool is32 = is32BitType(i.getType());
+            std::string destReg = cg.getValueAsOperand(&i);
+            if (destReg.empty() || destReg[0] != '%') destReg = is32 ? "%eax" : "%rax";
+            emitMov(cg, os, stackOp, destReg, is32);
+            return;
+        }
+
+        std::string op = cg.getValueAsOperand(ptrVal);
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(ptrVal) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << op << ", " << rax << "\n";
@@ -1176,18 +1189,37 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     std::string ax = (abi == X64ABI::SystemV) ? "%ax" : "ax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
-        // Load value-to-store into rax
-        bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
-                           (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
-        if (abi == X64ABI::Windows) {
-            if (isGlobalVal) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-            else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        } else {
-            if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        ir::Value* ptrVal = i.getOperands()[1]->get();
+        ir::Value* valToStore = i.getOperands()[0]->get();
+
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            // Stack slot store from RegAlloc
+            int slot_bytes = ci->getValue();
+            int rbp_offset = -8 - slot_bytes; // Stack slot position
+            std::string stackOp = formatStackOperand(rbp_offset);
+            bool is32 = is32BitType(valToStore->getType());
+            std::string valOp = cg.getValueAsOperand(valToStore);
+            if (valOp.empty() || valOp[0] != '%') {
+                std::string tmpReg = is32 ? "%eax" : "%rax";
+                emitMov(cg, os, valOp, tmpReg, is32);
+                valOp = tmpReg;
+            }
+            emitMov(cg, os, valOp, stackOp, is32);
+            return;
         }
-        std::string op = cg.getValueAsOperand(i.getOperands()[1]->get());
-        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
+
+        // Load value-to-store into rax
+        bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(valToStore) != nullptr ||
+                           (dynamic_cast<ir::GlobalValue*>(valToStore) != nullptr && !dynamic_cast<ir::Function*>(valToStore));
+        if (abi == X64ABI::Windows) {
+            if (isGlobalVal) *os << "  lea " << rax << ", " << cg.getValueAsOperand(valToStore) << "\n";
+            else *os << "  mov " << rax << ", " << cg.getValueAsOperand(valToStore) << "\n";
+        } else {
+            if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(valToStore) << ", " << rax << "\n";
+            else *os << "  movq " << cg.getValueAsOperand(valToStore) << ", " << rax << "\n";
+        }
+        std::string op = cg.getValueAsOperand(ptrVal);
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(ptrVal) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << "  movb " << al << ", " << op << "\n";
@@ -1434,7 +1466,7 @@ bool X64Architecture::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, 
     std::string op1 = cg.getValueAsOperand(cmp.getOperands()[1]->get());
 
     if (auto* os = cg.getTextStream()) {
-        bool is32 = is32BitType(cmp.getOperands()[0]->get()->getType());
+        bool is32 = is32BitType(cmp.getOperands()[0]->get()->getType()) || is32BitType(cmp.getOperands()[1]->get()->getType());
         std::string cmpOp = is32 ? "cmpl" : "cmpq";
         std::string regRax = is32 ? "%eax" : "%rax";
         if (abi == X64ABI::Windows) {
@@ -1445,12 +1477,8 @@ bool X64Architecture::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, 
                 *os << "  cmp " << op0 << ", " << op1 << "\n";
             }
         } else {
-            if (op0[0] != '%' && op1[0] != '%') {
-                emitMov(cg, os, op0, regRax, is32);
-                *os << "  " << cmpOp << " " << op1 << ", " << regRax << "\n";
-            } else {
-                *os << "  " << cmpOp << " " << op1 << ", " << op0 << "\n";
-            }
+            emitMov(cg, os, op0, regRax, is32);
+            *os << "  " << cmpOp << " " << op1 << ", " << regRax << "\n";
         }
 
         std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
