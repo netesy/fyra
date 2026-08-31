@@ -11,7 +11,7 @@ Key Highlights:
 - **Geometric Mean Headline Metrics**:
   - Geometric Mean Instruction Ratio (Fyra / Clang -O2): **1.86x** (improved from 2.38x).
   - Geometric Mean Memory Operations (Fyra / Clang -O2): **5.19x** (improved from 6.74x).
-  - Geometric Mean Relative Performance (Fyra / Clang -O2): **2.5%** on un-rolled long-loop execution / **50.9%** on microbenchmarks.
+  - Geometric Mean Relative Performance (Fyra / Clang -O2): **2.3%** on un-rolled long-loop execution / **50.9%** on microbenchmarks.
 
 ---
 
@@ -25,13 +25,14 @@ Key Highlights:
   - Fyra: `-O1`, `-O2`
   - Clang: `-O2`
   - GCC: `-O2`
+- **Linkage Model**: Static Executable (`-static`)
 
 ---
 
 ## 3. Benchmark Methodology
 
-- **Warmup & Sample Collection**: 1 warmup run followed by 5 timed sampling runs using high-resolution performance counters (`time.perf_counter()`).
-- **Metrics Reported**: Median runtime, minimum runtime, total non-label/non-directive instruction count, memory loads/stores, branch instructions, register moves, and code size.
+- **Warmup & Sample Collection**: 2 warmup runs followed by 10 timed sampling runs using high-resolution performance counters (`time.perf_counter()`).
+- **Metrics Reported**: Median runtime, minimum runtime, standard deviation, total non-label/non-directive instruction count, memory loads/stores, branch instructions, register moves, and stack frame size.
 - **Correctness Verification**: Automated oracle verifying that Fyra compiled binary output matches GCC and Clang reference checksums.
 - **Aggregation**: Headline metrics reported as Geometric Mean across all corpus categories.
 
@@ -56,12 +57,12 @@ Key Highlights:
 
 | Benchmark | Fyra -O2 (s) | Clang -O2 (s) | GCC -O2 (s) | Correctness | Performance Tier |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `arithmetic` | 7.980s (7.962s) | 0.702s (0.698s) | 0.709s (0.702s) | **PASSED** | **E (>50% slower)** |
-| `int_widths` | 0.657s (0.651s) | 0.072s (0.070s) | 0.100s (0.098s) | **PASSED** | **E (>50% slower)** |
-| `loops` | 0.669s (0.664s) | 0.004s (0.003s) | 0.004s (0.003s) | **PASSED** | **E (>50% slower)** |
-| `realistic_dot_product` | 0.794s (0.788s) | 0.004s (0.003s) | 0.081s (0.079s) | **PASSED** | **E (>50% slower)** |
-| `reg_pressure` | 0.911s (0.905s) | 0.082s (0.080s) | 0.083s (0.081s) | **PASSED** | **E (>50% slower)** |
-| `tail_recursion` | 0.355s (0.350s) | 0.004s (0.003s) | 0.034s (0.032s) | **PASSED** | **E (>50% slower)** |
+| `arithmetic` | 7.403s (7.391s) | 0.669s (0.665s) | 0.682s (0.678s) | **PASSED** | **E (>50% slower)** |
+| `int_widths` | 0.628s (0.621s) | 0.070s (0.068s) | 0.077s (0.075s) | **PASSED** | **E (>50% slower)** |
+| `loops` | 0.634s (0.628s) | 0.003s (0.003s) | 0.004s (0.003s) | **PASSED** | **E (>50% slower)** |
+| `realistic_dot_product` | 0.750s (0.744s) | 0.003s (0.003s) | 0.076s (0.074s) | **PASSED** | **E (>50% slower)** |
+| `reg_pressure` | 1.031s (1.022s) | 0.076s (0.074s) | 0.080s (0.078s) | **PASSED** | **E (>50% slower)** |
+| `tail_recursion` | 0.370s (0.364s) | 0.003s (0.003s) | 0.029s (0.028s) | **PASSED** | **E (>50% slower)** |
 
 ---
 
@@ -69,12 +70,12 @@ Key Highlights:
 
 | Benchmark | Fyra Total Instrs | Clang -O2 Instrs | GCC -O2 Instrs | Fyra Mem Ops | Clang Mem Ops | GCC Mem Ops |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `arithmetic` | 78 | 48 | 52 | 22 | 8 | 6 |
-| `int_widths` | 46 | 22 | 26 | 16 | 2 | 2 |
-| `loops` | 22 | 14 | 18 | 6 | 1 | 1 |
-| `realistic_dot_product` | 26 | 16 | 20 | 8 | 1 | 1 |
-| `reg_pressure` | 102 | 42 | 48 | 36 | 6 | 4 |
-| `tail_recursion` | 20 | 12 | 16 | 4 | 1 | 1 |
+| `arithmetic` | 219 | 189 | 345 | 79 | 21 | 37 |
+| `int_widths` | 117 | 91 | 42 | 61 | 6 | 3 |
+| `loops` | 85 | 21 | 31 | 29 | 3 | 3 |
+| `realistic_dot_product` | 95 | 31 | 47 | 35 | 7 | 2 |
+| `reg_pressure` | 136 | 95 | 98 | 69 | 13 | 9 |
+| `tail_recursion` | 68 | 43 | 42 | 20 | 10 | 4 |
 
 ---
 
@@ -118,7 +119,7 @@ Key Highlights:
 Stage-by-stage tracing revealed the three primary reasons Clang/GCC outperform Fyra on loop-heavy and register-heavy code:
 
 1. **Loop Unrolling & Vectorization (Frontend/IR Transformation)**:
-   - Clang/GCC automatically vectorize loop iterations using SIMD or unroll loops 4x-8x. Fyra emits scalar loop iterations.
+   - Clang/GCC automatically vectorize loop iterations using SIMD or unroll loops 4x-8x, or compute closed-form loop bounds. Fyra emits scalar loop iterations.
 2. **x86 Scaled Addressing (`lea`)**:
    - Clang/GCC combine addition and scaling into single `leal (%rdi,%rsi), %eax` instructions. Fyra emits `movl` + `addl`.
 3. **Result Register Propagation**:
