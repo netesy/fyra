@@ -62,34 +62,49 @@ void X64Architecture::emitHeader(CodeGen& cg) {
 
 void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
     if (abi == X64ABI::SystemV) {
+        bool makesCalls = false;
+        for (auto& bb : func.getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                auto opc = instr->getOpcode();
+                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
+                    makesCalls = true;
+                    break;
+                }
+            }
+            if (makesCalls) break;
+        }
+
+        int current_offset = -8;
+        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
+        for (auto& bb : func.getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->getType() && !instr->getType()->isVoidTy()) {
+                    cg.getStackOffsets()[instr.get()] = current_offset;
+                    current_offset -= 8;
+                }
+            }
+        }
+        int stack_alloc = std::abs(current_offset + 8);
+
+        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && func.getParameters().empty());
+
         if (auto* os = cg.getTextStream()) {
             *os << "  .cfi_startproc\n";
-            *os << "  pushq %rbp\n";
-            *os << "  .cfi_def_cfa_offset 16\n";
-            *os << "  .cfi_offset 6, -16\n";
-            *os << "  movq %rsp, %rbp\n";
-            *os << "  .cfi_def_cfa_register 6\n";
-            *os << "  pushq %rbx\n";
-            *os << "  .cfi_offset 3, -24\n";
-            *os << "  pushq %r12\n";
-            *os << "  .cfi_offset 12, -32\n";
-            *os << "  pushq %r13\n";
-            *os << "  .cfi_offset 13, -40\n";
-            *os << "  pushq %r14\n";
-            *os << "  .cfi_offset 14, -48\n";
-            *os << "  pushq %r15\n";
-            *os << "  .cfi_offset 15, -56\n";
+            if (!isZeroFrame) {
+                *os << "  pushq %rbp\n";
+                *os << "  .cfi_def_cfa_offset 16\n";
+                *os << "  .cfi_offset 6, -16\n";
+                *os << "  movq %rsp, %rbp\n";
+                *os << "  .cfi_def_cfa_register 6\n";
+            }
         } else {
             auto& as = cg.getAssembler();
-            as.emitByte(0x55);
-            as.emitBytes({0x48, 0x89, 0xE5});
-            as.emitByte(0x53);
-            as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57});
+            if (!isZeroFrame) {
+                as.emitByte(0x55);
+                as.emitBytes({0x48, 0x89, 0xE5});
+            }
         }
-        int current_offset = -48;
-        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
-        int stack_alloc = std::abs(current_offset + 48);
+
         if (stack_alloc % 16 != 0) stack_alloc += (16 - (stack_alloc % 16));
         if (auto* os = cg.getTextStream()) {
             if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
@@ -169,11 +184,30 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 
 void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
     if (abi == X64ABI::SystemV) {
+        bool makesCalls = false;
+        for (auto& bb : func.getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                auto opc = instr->getOpcode();
+                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
+                    makesCalls = true;
+                    break;
+                }
+            }
+            if (makesCalls) break;
+        }
+
+        int current_offset = -8;
+        for (auto& param : func.getParameters()) { (void)param; current_offset -= 8; }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { (void)instr; current_offset -= 8; } }
+        int stack_alloc = std::abs(current_offset + 8);
+
+        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && func.getParameters().empty());
+
         if (auto* os = cg.getTextStream()) {
             *os << func.getName() << "_epilogue" << ":\n";
-            *os << "  leaq -40(%rbp), %rsp\n";
-            *os << "  popq %r15\n  popq %r14\n  popq %r13\n  popq %r12\n  popq %rbx\n";
-            *os << "  popq %rbp\n";
+            if (!isZeroFrame) {
+                *os << "  leave\n";
+            }
             *os << "  .cfi_def_cfa 7, 8\n";
             *os << "  ret\n";
             *os << "  .cfi_endproc\n";
@@ -187,11 +221,10 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             epilogue_sym.binding = 0; // STB_LOCAL
             cg.addSymbol(epilogue_sym);
 
-            emitRegMem(as, 0x48, 0x8D, 4, -40);
-            as.emitBytes({0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C});
-            as.emitByte(0x5B);
-            as.emitByte(0x5D);
-            as.emitByte(0xC3);
+            if (!isZeroFrame) {
+                as.emitByte(0xC9); // leave
+            }
+            as.emitByte(0xC3); // ret
         }
     } else {
         if (auto* os = cg.getTextStream()) {

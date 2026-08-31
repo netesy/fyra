@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <set>
 
 namespace transforms {
 
@@ -21,6 +22,9 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
     interval_analysis.run(func);
     const auto& intervals = interval_analysis.getIntervals();
 
+    stats.numVregs = intervals.size();
+    std::set<unsigned int> used_regs;
+
     for (unsigned int i = 0; i < NUM_PHYSICAL_REGISTERS; ++i) {
         free_registers.push_back({i});
     }
@@ -33,6 +37,7 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
         } else {
             PhysicalReg reg = free_registers.back();
             free_registers.pop_back();
+            used_regs.insert(reg.index);
             vreg_to_location_map[current_interval.getVreg()] = reg;
             active_intervals.push_back(&current_interval);
             std::sort(active_intervals.begin(), active_intervals.end(),
@@ -41,6 +46,7 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
                 });
         }
     }
+    stats.numPhysicalRegsUsed = used_regs.size();
 }
 
 void LinearScanAllocator::expireOldIntervals(int current_start_point) {
@@ -62,30 +68,23 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point) {
 }
 
 void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval) {
-    // The last interval in `active` is the one with the latest end point.
+    stats.numSpills++;
     const LiveInterval* spill_candidate = active_intervals.back();
 
     if (spill_candidate->getEnd() > current_interval.getEnd()) {
-        // Spill the candidate from the active set
         RegLocation loc = vreg_to_location_map.at(spill_candidate->getVreg());
         PhysicalReg reg = std::get<PhysicalReg>(loc);
 
-        // Assign the freed register to the current interval
         vreg_to_location_map[current_interval.getVreg()] = reg;
-
-        // Assign a stack slot to the spilled interval
         vreg_to_location_map[spill_candidate->getVreg()] = StackSlot{next_stack_slot++};
 
-        // The current interval takes the place of the spilled one in the active list
         active_intervals.pop_back();
         active_intervals.push_back(&current_interval);
         std::sort(active_intervals.begin(), active_intervals.end(),
             [](const LiveInterval* a, const LiveInterval* b) {
                 return a->getEnd() < b->getEnd();
             });
-
     } else {
-        // Spill the current interval
         vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
     }
 }

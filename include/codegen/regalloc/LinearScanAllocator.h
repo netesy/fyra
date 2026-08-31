@@ -35,6 +35,16 @@ public:
         return vreg_to_location_map;
     }
 
+    struct RegAllocStats {
+        size_t numVregs = 0;
+        size_t numPhysicalRegsUsed = 0;
+        size_t numSpills = 0;
+        size_t numReloads = 0;
+        size_t numEliminatedMoves = 0;
+    };
+
+    const RegAllocStats& getStats() const { return stats; }
+
 private:
     void linearScan(ir::Function& func);
     void expireOldIntervals(int current_start_point);
@@ -44,6 +54,7 @@ private:
     std::vector<PhysicalReg> free_registers;
     std::vector<const class LiveInterval*> active_intervals;
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;
+    RegAllocStats stats;
 };
 
 } // namespace transforms
