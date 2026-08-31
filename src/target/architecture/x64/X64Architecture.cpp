@@ -1253,16 +1253,6 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
 }
 
 void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
-    if (i.getOperands().size() >= 3) {
-        if (auto* cmpInst = dynamic_cast<ir::Instruction*>(i.getOperands()[0]->get())) {
-            if (cmpInst->getParent() == i.getParent()) {
-                if (emitCmpAndBranchFusion(cg, *cmpInst, i)) {
-                    return;
-                }
-            }
-        }
-    }
-
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
     auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
