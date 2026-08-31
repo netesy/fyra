@@ -62,6 +62,7 @@ public:
     void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     void emitBr(CodeGen& cg, ir::Instruction& i) override;
     void emitJmp(CodeGen& cg, ir::Instruction& i) override;
+    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
 
     void emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
     void emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;

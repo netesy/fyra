@@ -11,6 +11,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/SCCP.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopInvariantCodeMotion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ControlFlowSimplification.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/FunctionInliner.cpp
 )
 
 target_sources(fyra PRIVATE ${TRANSFORMS_SOURCES})

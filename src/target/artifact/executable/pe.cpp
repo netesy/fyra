@@ -184,6 +184,12 @@ public:
             sections_.push_back(idata);
             currentRva = align(currentRva + idata.virtualSize, sectionAlignment_);
 
+            // Re-acquire textSec pointer since sections_.push_back may have reallocated vector storage
+            textSec = findSection(".text");
+            if (!textSec && !sections_.empty() && (sections_[0].characteristics & 0x20)) {
+                textSec = &sections_[0];
+            }
+
             // Now fixup trampoline jump offsets inside textSec using finalized importDirectoryRVA_
             if (textSec) {
                 size_t symIdx = 0;

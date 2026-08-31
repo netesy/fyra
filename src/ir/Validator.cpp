@@ -74,8 +74,9 @@ bool Validator::validateModule(const Module& module, std::vector<std::string>& e
                     bool isGlobalVal = (dynamic_cast<GlobalValue*>(op) != nullptr);
                     bool isGlobalVar = (dynamic_cast<GlobalVariable*>(op) != nullptr);
                     bool isBB = (dynamic_cast<BasicBlock*>(op) != nullptr);
+                    bool isFunction = (dynamic_cast<Function*>(op) != nullptr);
 
-                    if (!isInstruction && !isParameter && !isConstant && !isGlobalVal && !isGlobalVar && !isBB) {
+                    if (!isInstruction && !isParameter && !isConstant && !isGlobalVal && !isGlobalVar && !isBB && !isFunction) {
                         errors.push_back("Use of undefined value '" + op->getName() + "' in instruction '" + inst->getName() + "'");
                         valid = false;
                     }

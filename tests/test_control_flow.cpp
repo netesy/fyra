@@ -29,7 +29,7 @@ int main() {
     std::cout << "Generated ASM for control_flow.fyra:\n" << generated_asm << std::endl;
 
     assert(generated_asm.find("jmp") != std::string::npos);
-    assert(generated_asm.find("jne") != std::string::npos); // br is translated to jne
+    assert(generated_asm.find("jne") != std::string::npos || generated_asm.find("jl") != std::string::npos); // br is translated to jne or fused conditional branch (jl/jne/jle)
     assert(generated_asm.find("cmp") != std::string::npos); // slt is translated to cmp
     assert(generated_asm.find("ret") != std::string::npos);
 
