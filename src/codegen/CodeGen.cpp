@@ -277,6 +277,23 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
         return targetInfo->formatStackOperand(targetInfo->getStackOffset(*this, const_cast<ir::Value*>(value)));
     }
 
+    if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
+        if (currentFunction) {
+            const auto& params = currentFunction->getParameters();
+            size_t idx = 0;
+            for (auto& p : params) {
+                if (p.get() == param) break;
+                idx++;
+            }
+            if (idx < 6 && targetInfo) {
+                const auto& argRegs = targetInfo->getIntegerArgumentRegisters();
+                if (idx < argRegs.size()) {
+                    return targetInfo->getRegisterName(argRegs[idx], param->getType());
+                }
+            }
+        }
+    }
+
     if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
     if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) return targetInfo->formatConstant(cfp);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
