@@ -290,6 +290,9 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
                 if (idx < argRegs.size()) {
                     return targetInfo->getRegisterName(argRegs[idx], param->getType());
                 }
+            } else if (targetInfo) {
+                int32_t stackOff = 16 + (idx - 6) * 8;
+                return targetInfo->formatStackOperand(stackOff);
             }
         }
     }

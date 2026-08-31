@@ -1594,6 +1594,25 @@ void X64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& as, ir::Value*
     } else if (dynamic_cast<ir::GlobalVariable*>(v) || dynamic_cast<ir::GlobalValue*>(v)) {
         uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; as.emitByte(rex); as.emitByte(0x8D); as.emitByte(0x05 | ((regIdx & 7) << 3));
         uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, v->getName(), ".text"});
+    } else if (auto* param = dynamic_cast<ir::Parameter*>(v)) {
+        size_t idx = 0;
+        if (cg.getCurrentFunction()) {
+            for (auto& p : cg.getCurrentFunction()->getParameters()) {
+                if (p.get() == param) break;
+                idx++;
+            }
+        }
+        if (idx < integerArgRegs.size()) {
+            uint8_t srcRegIdx = getArchRegIndex(integerArgRegs[idx]);
+            if (srcRegIdx != regIdx) {
+                uint8_t rex = (regIdx >= 8 || srcRegIdx >= 8) ? 0x4C : 0x48;
+                as.emitByte(rex); as.emitByte(0x89);
+                as.emitByte(0xC0 | ((srcRegIdx & 7) << 3) | (regIdx & 7));
+            }
+        } else {
+            int32_t offset = 16 + (idx - 6) * 8;
+            uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; emitRegMem(as, rex, 0x8B, regIdx & 7, offset);
+        }
     } else {
         int32_t offset = cg.getStackOffset(v); uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; emitRegMem(as, rex, 0x8B, regIdx & 7, offset);
     }

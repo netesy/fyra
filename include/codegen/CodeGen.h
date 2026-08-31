@@ -130,6 +130,7 @@ public:
     const std::vector<std::vector<uint8_t>>& getWasmFunctionBodies() const { return wasmFunctionBodies; }
     const std::map<const ir::FunctionType*, uint32_t>& getWasmTypeIndices() const { return wasmTypeIndices; }
     const std::map<const ir::Function*, uint32_t>& getWasmFunctionIndices() const { return wasmFunctionIndices; }
+    ir::Function* getCurrentFunction() const { return currentFunction; }
     const std::map<const ir::Value*, uint32_t>& getWasmLocalIndices() const { return wasmLocalIndices; }
 
     // Enhanced CodeGen configuration

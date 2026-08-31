@@ -125,6 +125,18 @@ std::string TargetInfo::formatConstant(const ir::ConstantFP* C) const {
 int32_t TargetInfo::getStackOffset(const codegen::CodeGen& cg, ir::Value* val) const {
     auto it = cg.getStackOffsets().find(val);
     if (it != cg.getStackOffsets().end()) return it->second;
+    if (auto* param = dynamic_cast<ir::Parameter*>(val)) {
+        if (cg.getCurrentFunction()) {
+            size_t idx = 0;
+            for (auto& p : cg.getCurrentFunction()->getParameters()) {
+                if (p.get() == param) break;
+                idx++;
+            }
+            if (idx >= 6) {
+                return 16 + (idx - 6) * 8;
+            }
+        }
+    }
     return 0;
 }
 
