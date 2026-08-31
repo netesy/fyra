@@ -8,6 +8,7 @@
 #include "ir/Constant.h"
 #include <map>
 #include <vector>
+#include <iostream>
 
 namespace transforms {
 
@@ -28,6 +29,7 @@ bool RegAllocRewriter::run(ir::Function& func) {
         } else if (std::holds_alternative<PhysicalReg>(location)) {
             PhysicalReg reg = std::get<PhysicalReg>(location);
             vreg->setPhysicalRegister(reg.index);
+            std::cerr << "RegAlloc: " << func.getName() << " :: " << vreg->getName() << " -> physReg " << reg.index << "\n";
         }
     }
     func.setStackFrameSize(stack_frame_size);

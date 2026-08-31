@@ -1,5 +1,6 @@
 #include "codegen/regalloc/LivenessAnalysis.h"
 #include "ir/BasicBlock.h"
+#include "ir/PhiNode.h"
 #include "ir/User.h"
 #include "ir/Use.h"
 #include <algorithm>
@@ -31,11 +32,24 @@ void LivenessAnalysis::run(ir::Function& func) {
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
             int use_site = instrNumbering[instr.get()];
-            for (auto& operand : instr->getOperands()) {
-                if (auto* op_instr = dynamic_cast<ir::Instruction*>(operand->get())) {
-                    // op_instr is a virtual register being used
-                    if (liveRanges.count(op_instr)) {
-                        liveRanges[op_instr].end = std::max(liveRanges[op_instr].end, use_site);
+            if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
+                for (size_t k = 0; k + 1 < phi->getOperands().size(); k += 2) {
+                    ir::Value* predVal = phi->getOperands()[k]->get();
+                    ir::Value* incomingVal = phi->getOperands()[k+1]->get();
+                    auto* incomingBB = dynamic_cast<ir::BasicBlock*>(predVal);
+                    if (auto* op_instr = dynamic_cast<ir::Instruction*>(incomingVal)) {
+                        if (liveRanges.count(op_instr) && incomingBB && !incomingBB->getInstructions().empty()) {
+                            int term_site = instrNumbering[incomingBB->getInstructions().back().get()];
+                            liveRanges[op_instr].end = std::max(liveRanges[op_instr].end, term_site);
+                        }
+                    }
+                }
+            } else {
+                for (auto& operand : instr->getOperands()) {
+                    if (auto* op_instr = dynamic_cast<ir::Instruction*>(operand->get())) {
+                        if (liveRanges.count(op_instr)) {
+                            liveRanges[op_instr].end = std::max(liveRanges[op_instr].end, use_site);
+                        }
                     }
                 }
             }

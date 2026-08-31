@@ -99,6 +99,7 @@ void CodeGen::emitFunction(ir::Function& func) {
     if (func.getBasicBlocks().empty()) return;
     currentFunction = &func;
     stackOffsets.clear();
+    lastStoreOp = "";
     if (targetInfo->getName() == "wasm32" && !os) {
         auto funcBodyAsm = std::make_unique<asm_::Assembler>();
         auto oldAsm = std::move(assembler); assembler = std::move(funcBodyAsm);
@@ -138,6 +139,7 @@ void CodeGen::emitFunction(ir::Function& func) {
 }
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
+    lastStoreOp = "";
     if (os) {
         *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
     } else if (assembler) {
@@ -264,6 +266,8 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
 
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (!value) return targetInfo->getImmediatePrefix() + "0";
+    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
+    if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) return targetInfo->formatConstant(cfp);
 
     // Handle physical registers and stack slots assigned by Register Allocator
     if (value->hasPhysicalRegister()) {
@@ -276,6 +280,9 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (currentFunction && currentFunction->hasStackSlot(value)) {
         return targetInfo->formatStackOperand(targetInfo->getStackOffset(*this, const_cast<ir::Value*>(value)));
     }
+
+    if (stackOffsets.count(const_cast<ir::Value*>(value)))
+        return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value)));
 
     if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
         if (currentFunction) {
@@ -296,16 +303,9 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
             }
         }
     }
-
-    if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
-    if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) return targetInfo->formatConstant(cfp);
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
-
-    // Fallback to naive stack offsets if RegAlloc wasn't used
-    if (stackOffsets.count(const_cast<ir::Value*>(value)))
-        return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value)));
 
     return "$" + value->getName();
 }

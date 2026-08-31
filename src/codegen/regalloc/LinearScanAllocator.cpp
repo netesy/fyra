@@ -28,8 +28,12 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
     std::vector<PhysicalReg> free_caller_regs;
     std::vector<PhysicalReg> free_callee_regs;
 
-    // Caller-saved registers: indices 0..7 (r10, r11, rcx, rdx, rsi, rdi, r8, r9)
-    for (int i = 7; i >= 0; --i) free_caller_regs.push_back({(unsigned int)i});
+    // Caller-saved registers: indices 0,1,4,5,6,7 (r10, r11, rsi, rdi, r8, r9)
+    // rcx (2) and rdx (3) are reserved for division/remainder and shift instructions (%cl)
+    static const std::vector<unsigned int> caller_indices = {0, 1, 4, 5, 6, 7};
+    for (auto it = caller_indices.rbegin(); it != caller_indices.rend(); ++it) {
+        free_caller_regs.push_back({*it});
+    }
     // Callee-saved registers: indices 8..12 (rbx, r12, r13, r14, r15)
     for (int i = 12; i >= 8; --i) free_callee_regs.push_back({(unsigned int)i});
 
@@ -88,7 +92,7 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
     auto it = active_intervals.begin();
     while (it != active_intervals.end()) {
         const LiveInterval* interval = *it;
-        if (interval->getEnd() >= current_start_point) {
+        if (interval->getEnd() > current_start_point) {
             return;
         }
 
