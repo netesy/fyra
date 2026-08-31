@@ -50,6 +50,31 @@ static std::string to16BitReg(const std::string& reg) {
     return reg;
 }
 
+static bool is32BitType(const ir::Type* type) {
+    if (!type) return false;
+    if (auto* it = dynamic_cast<const ir::IntegerType*>(type)) {
+        return it->getBitwidth() <= 32;
+    }
+    return false;
+}
+
+static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const std::string& dst, bool is32) {
+    if (!os) return;
+    if (src == dst) return;
+    std::string regRax = is32 ? "%eax" : "%rax";
+    if (!cg.lastStoreOp.empty() && src == cg.lastStoreOp && (dst == regRax || dst == "%rax" || dst == "%eax")) return;
+
+    std::string op = is32 ? "movl" : "movq";
+    *os << "  " << op << " " << src << ", " << dst << "\n";
+    if (!dst.empty() && dst[0] == '-') {
+        cg.lastStoreOp = dst;
+    } else if (dst == regRax || dst == "%rax" || dst == "%eax") {
+        if (src != cg.lastStoreOp) cg.lastStoreOp = "";
+    } else {
+        cg.lastStoreOp = "";
+    }
+}
+
 X64Architecture::X64Architecture(X64ABI abi) : abi(abi) {
     initRegisters();
 }
@@ -354,7 +379,9 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string rax = is32 ? "%eax" : "%rax";
+    std::string addOp = is32 ? "addl" : "addq";
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -373,12 +400,12 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
             if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else *os << "  movq " << op0 << ", " << rax << "\n";
+            else emitMov(cg, os, op0, rax, is32);
             
-            if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  addq %rdx, " << rax << "\n";
-            else *os << "  addq " << op1 << ", " << rax << "\n";
+            if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << rax << "\n";
+            else *os << "  " << addOp << " " << op1 << ", " << rax << "\n";
             
-            *os << "  movq " << rax << ", " << dst << "\n";
+            emitMov(cg, os, rax, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -389,7 +416,9 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string rax = is32 ? "%eax" : "%rax";
+    std::string subOp = is32 ? "subl" : "subq";
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -399,9 +428,9 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
             *os << "  sub " << rax << ", " << op1 << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  subq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            emitMov(cg, os, op0, rax, is32);
+            *os << "  " << subOp << " " << op1 << ", " << rax << "\n";
+            emitMov(cg, os, rax, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -412,7 +441,9 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string rax = is32 ? "%eax" : "%rax";
+    std::string mulOp = is32 ? "imull" : "imulq";
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -422,9 +453,9 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
             *os << "  imul " << rax << ", " << op1 << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  imulq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            emitMov(cg, os, op0, rax, is32);
+            *os << "  " << mulOp << " " << op1 << ", " << rax << "\n";
+            emitMov(cg, os, rax, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -1604,12 +1635,33 @@ bool X64Architecture::isReserved(const std::string& reg) const {
 }
 
 std::string X64Architecture::getRegisterName(const std::string& base, const ir::Type* type) const {
-    if (abi == X64ABI::SystemV) {
-        if (base[0] == '%') return base;
-        return "%" + base;
+    std::string b = base;
+    if (b[0] == '%') b = b.substr(1);
+
+    if (type && type->isInteger()) {
+        auto* it = dynamic_cast<const ir::IntegerType*>(type);
+        if (it && it->getBitwidth() <= 32) {
+            if (b == "rax") b = "eax";
+            else if (b == "rcx") b = "ecx";
+            else if (b == "rdx") b = "edx";
+            else if (b == "rbx") b = "ebx";
+            else if (b == "rsi") b = "esi";
+            else if (b == "rdi") b = "edi";
+            else if (b == "r8") b = "r8d";
+            else if (b == "r9") b = "r9d";
+            else if (b == "r10") b = "r10d";
+            else if (b == "r11") b = "r11d";
+            else if (b == "r12") b = "r12d";
+            else if (b == "r13") b = "r13d";
+            else if (b == "r14") b = "r14d";
+            else if (b == "r15") b = "r15d";
+        }
     }
-    if (base[0] == '%') return base.substr(1);
-    return base;
+
+    if (abi == X64ABI::SystemV) {
+        return "%" + b;
+    }
+    return b;
 }
 
 // Helpers
