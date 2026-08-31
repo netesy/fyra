@@ -1,0 +1,91 @@
+function $fibonacci(%n : w) : w {
+@start
+    %t0 = sle %n, 1 : w
+    jnz %t0, @base_case, @recursive_case
+
+@base_case
+    ret %n : w
+
+@recursive_case
+    %t1 = sub %n, 1 : w
+    %t2 = call $fibonacci(%t1) : w
+    %t3 = sub %n, 2 : w
+    %t4 = call $fibonacci(%t3) : w
+    %t5 = add %t2, %t4 : w
+    ret %t5 : w
+}
+
+function $leaf_arithmetic(%a : w, %b : w, %c : w, %d : w) : w {
+@start
+    %t1 = add %a, %b : w
+    %t2 = sub %c, %d : w
+    %res = mul %t1, %t2 : w
+    ret %res : w
+}
+
+function $compare_branch(%a : w, %b : w) : w {
+@start
+    %c = sgt %a, %b : w
+    jnz %c, @then, @else
+
+@then
+    %res1 = sub %a, %b : w
+    ret %res1 : w
+
+@else
+    %res2 = sub %b, %a : w
+    ret %res2 : w
+}
+
+function $helper(%x : w) : w {
+@start
+    %r = add %x, 1 : w
+    ret %r : w
+}
+
+function $call_result(%x : w) : w {
+@start
+    %a = call $helper(%x) : w
+    %b = call $helper(%a) : w
+    ret %b : w
+}
+
+function $live_across_calls(%x : w, %y : w) : w {
+@start
+    %a = call $helper(%x) : w
+    %b = call $helper(%y) : w
+    %res = add %a, %b : w
+    ret %res : w
+}
+
+function $register_pressure(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : w, %h : w) : w {
+@start
+    %v1 = add %a, %b : w
+    %v2 = add %c, %d : w
+    %v3 = add %e, %f : w
+    %v4 = add %g, %h : w
+    %v5 = mul %v1, %v2 : w
+    %v6 = mul %v3, %v4 : w
+    %res = add %v5, %v6 : w
+    ret %res : w
+}
+
+function $loop_sum(%n : w) : w {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry 0, @body %i_next : w
+    %sum = phi @entry 0, @body %sum_next : w
+    %cond = slt %i, %n : w
+    jnz %cond, @body, @exit
+
+@body
+    %term = mul %i, 2 : w
+    %sum_next = add %sum, %term : w
+    %i_next = add %i, 1 : w
+    jmp @loop
+
+@exit
+    ret %sum : w
+}

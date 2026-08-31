@@ -100,6 +100,9 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
             } else {
                 free_caller.push_back(reg);
             }
+        } else if (std::holds_alternative<StackSlot>(loc)) {
+            StackSlot slot = std::get<StackSlot>(loc);
+            free_stack_slots.push_back(slot);
         }
 
         it = active_intervals.erase(it);
@@ -137,7 +140,13 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         }
     }
 
-    vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
+    if (!free_stack_slots.empty()) {
+        StackSlot slot = free_stack_slots.back();
+        free_stack_slots.pop_back();
+        vreg_to_location_map[current_interval.getVreg()] = slot;
+    } else {
+        vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
+    }
 }
 
 } // namespace transforms

@@ -93,7 +93,6 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
 
         int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
-        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
@@ -104,7 +103,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
         int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
 
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && func.getParameters().empty());
+        bool isZeroFrame = (!makesCalls && stack_alloc == 0);
 
         if (auto* os = cg.getTextStream()) {
             *os << "  .cfi_startproc\n";
@@ -137,31 +136,11 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
         if (auto* os = cg.getTextStream()) {
             if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
-            size_t i_idx = 0, f_idx = 0;
-            for (auto& param : func.getParameters()) {
-                bool isF = param->getType() && (param->getType()->isFloatTy() || param->getType()->isDoubleTy());
-                if (isF) {
-                    if (f_idx < floatArgRegs.size()) {
-                        *os << "  movsd %" << floatArgRegs[f_idx++] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n";
-                    }
-                } else {
-                    if (i_idx < integerArgRegs.size()) {
-                        *os << "  movq %" << integerArgRegs[i_idx++] << ", " << formatStackOperand(cg.getStackOffsets()[param.get()]) << "\n";
-                    }
-                }
-            }
         } else {
             auto& as = cg.getAssembler();
             if (stack_alloc > 0) {
                 if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc});
                 else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); }
-            }
-            int j = 0; for (auto& param : func.getParameters()) {
-                if (j < 6) {
-                    uint8_t r = getArchRegIndex(integerArgRegs[j]);
-                    emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]);
-                }
-                j++;
             }
         }
     } else {
