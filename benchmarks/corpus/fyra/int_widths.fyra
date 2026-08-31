@@ -1,0 +1,43 @@
+function $test_widths(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : l, %h : l) : l {
+@start
+    %a_ext = extsb %a : l
+    %b_ext = extub %b : l
+    %s1 = add %a_ext, %b_ext : l
+
+    %c_ext = extsh %c : l
+    %d_ext = extuh %d : l
+    %s2 = add %c_ext, %d_ext : l
+
+    %e_ext = extsw %e : l
+    %f_ext = extuw %f : l
+    %s3 = add %e_ext, %f_ext : l
+
+    %s4 = add %g, %h : l
+
+    %sum1 = add %s1, %s2 : l
+    %sum2 = add %s3, %s4 : l
+    %res = add %sum1, %sum2 : l
+    ret %res : l
+}
+
+export function $main() : w {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry 1, @body %i_next : w
+    %sum = phi @entry 0, @body %sum_next : l
+    %cond = sle %i, 50000000 : w
+    jnz %cond, @body, @exit
+
+@body
+    %i_l = extsw %i : l
+    %v = call $test_widths(%i, %i, %i, %i, %i, %i, %i_l, %i_l) : l
+    %sum_next = add %sum, %v : l
+    %i_next = add %i, 1 : w
+    jmp @loop
+
+@exit
+    call $print_checksum(l %sum)
+    ret 0 : w
+}

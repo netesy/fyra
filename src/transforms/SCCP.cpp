@@ -142,21 +142,25 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
     if (op == ir::Instruction::Phi) {
         ir::PhiNode* phi = static_cast<ir::PhiNode*>(instr);
         LatticeEntry result = {Top, nullptr};
-        bool has_executable = false;
+        bool all_preds_executable = true;
         
         for (size_t i = 0; i < phi->getOperands().size(); i += 2) {
             ir::BasicBlock* pred = static_cast<ir::BasicBlock*>(phi->getOperands()[i]->get());
             if (executableEdges.count({pred, phi->getParent()})) {
-                has_executable = true;
                 LatticeEntry val = getLatticeValue(phi->getOperands()[i+1]->get());
                 if (val.type == Bottom) { result = {Bottom, nullptr}; break; }
                 if (val.type == Constant) {
                     if (result.type == Top) result = val;
                     else if (result.constant != val.constant) { result = {Bottom, nullptr}; break; }
                 }
+            } else {
+                all_preds_executable = false;
             }
         }
-        if (has_executable) setLatticeValue(phi, result, inInstructionWorklist);
+        if (!all_preds_executable) {
+            result = {Bottom, nullptr};
+        }
+        setLatticeValue(phi, result, inInstructionWorklist);
         return;
     }
 
@@ -184,6 +188,14 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
             if (t_dest && executableEdges.insert({instr->getParent(), t_dest}).second) blockWorklist.push_back(t_dest);
             if (f_dest && executableEdges.insert({instr->getParent(), f_dest}).second) blockWorklist.push_back(f_dest);
         }
+        return;
+    }
+
+    if (op == ir::Instruction::Call || op == ir::Instruction::Syscall ||
+        op == ir::Instruction::ExternCall || op == ir::Instruction::Alloc ||
+        op == ir::Instruction::Load || op == ir::Instruction::Store ||
+        op == ir::Instruction::VAArg) {
+        setLatticeValue(instr, {Bottom, nullptr}, inInstructionWorklist);
         return;
     }
 

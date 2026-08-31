@@ -131,6 +131,7 @@ public:
     const std::map<const ir::FunctionType*, uint32_t>& getWasmTypeIndices() const { return wasmTypeIndices; }
     const std::map<const ir::Function*, uint32_t>& getWasmFunctionIndices() const { return wasmFunctionIndices; }
     ir::Function* getCurrentFunction() const { return currentFunction; }
+    std::string lastStoreOp;
     const std::map<const ir::Value*, uint32_t>& getWasmLocalIndices() const { return wasmLocalIndices; }
 
     // Enhanced CodeGen configuration

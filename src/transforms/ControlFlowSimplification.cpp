@@ -195,6 +195,9 @@ bool ControlFlowSimplification::canMergeBlocks(ir::BasicBlock* pred, ir::BasicBl
     if (!pred || !succ) return false;
     if (succ == func.getBasicBlocks().front().get()) return false;
     if (!hasOnePredecessor(succ, func)) return false;
+    for (auto& instr : succ->getInstructions()) {
+        if (dynamic_cast<ir::PhiNode*>(instr.get())) return false;
+    }
     return true;
 }
 

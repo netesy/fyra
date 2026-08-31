@@ -1,0 +1,35 @@
+function $tail_factorial(%n : l, %acc : l) : l {
+@start
+    %cond = sle %n, 1 : l
+    jnz %cond, @base, @recur
+
+@base
+    ret %acc : l
+
+@recur
+    %n_next = sub %n, 1 : l
+    %acc_next = mul %acc, %n : l
+    %res = call $tail_factorial(%n_next, %acc_next) : l
+    ret %res : l
+}
+
+export function $main() : w {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry 0, @body %i_next : w
+    %sum = phi @entry 0, @body %sum_next : l
+    %cond = slt %i, 5000000 : w
+    jnz %cond, @body, @exit
+
+@body
+    %v = call $tail_factorial(l 15, l 1) : l
+    %sum_next = add %sum, %v : l
+    %i_next = add %i, 1 : w
+    jmp @loop
+
+@exit
+    call $print_checksum(l %sum)
+    ret 0 : w
+}

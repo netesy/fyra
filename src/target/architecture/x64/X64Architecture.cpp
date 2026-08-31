@@ -14,6 +14,42 @@
 
 namespace target {
 
+static std::string to8BitReg(const std::string& reg) {
+    if (reg == "%rax" || reg == "rax") return "%al";
+    if (reg == "%rcx" || reg == "rcx") return "%cl";
+    if (reg == "%rdx" || reg == "rdx") return "%dl";
+    if (reg == "%rbx" || reg == "rbx") return "%bl";
+    if (reg == "%rsi" || reg == "rsi") return "%sil";
+    if (reg == "%rdi" || reg == "rdi") return "%dil";
+    if (reg == "%r8" || reg == "r8") return "%r8b";
+    if (reg == "%r9" || reg == "r9") return "%r9b";
+    if (reg == "%r10" || reg == "r10") return "%r10b";
+    if (reg == "%r11" || reg == "r11") return "%r11b";
+    if (reg == "%r12" || reg == "r12") return "%r12b";
+    if (reg == "%r13" || reg == "r13") return "%r13b";
+    if (reg == "%r14" || reg == "r14") return "%r14b";
+    if (reg == "%r15" || reg == "r15") return "%r15b";
+    return reg;
+}
+
+static std::string to16BitReg(const std::string& reg) {
+    if (reg == "%rax" || reg == "rax") return "%ax";
+    if (reg == "%rcx" || reg == "rcx") return "%cx";
+    if (reg == "%rdx" || reg == "rdx") return "%dx";
+    if (reg == "%rbx" || reg == "rbx") return "%bx";
+    if (reg == "%rsi" || reg == "rsi") return "%si";
+    if (reg == "%rdi" || reg == "rdi") return "%di";
+    if (reg == "%r8" || reg == "r8") return "%r8w";
+    if (reg == "%r9" || reg == "r9") return "%r9w";
+    if (reg == "%r10" || reg == "r10") return "%r10w";
+    if (reg == "%r11" || reg == "r11") return "%r11w";
+    if (reg == "%r12" || reg == "r12") return "%r12w";
+    if (reg == "%r13" || reg == "r13") return "%r13w";
+    if (reg == "%r14" || reg == "r14") return "%r14w";
+    if (reg == "%r15" || reg == "r15") return "%r15w";
+    return reg;
+}
+
 X64Architecture::X64Architecture(X64ABI abi) : abi(abi) {
     initRegisters();
 }
@@ -951,20 +987,24 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
                 *os << "  movsd %xmm0, " << destOp << "\n";
             }
         } else if (op == ir::Instruction::ExtUB) {
-            *os << "  movzbq " << srcOp << ", " << rax << "\n";
+            std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
+            *os << "  movzbq " << r8 << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUH) {
-            *os << "  movzwq " << srcOp << ", " << rax << "\n";
+            std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
+            *os << "  movzwq " << r16 << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUW) {
             *os << "  movq " << srcOp << ", " << rax << "\n";
             *os << "  movl " << eax << ", " << eax << "\n"; // Zero-extends %eax to %rax
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSB) {
-            *os << "  movsbq " << srcOp << ", " << rax << "\n";
+            std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
+            *os << "  movsbq " << r8 << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSH) {
-            *os << "  movswq " << srcOp << ", " << rax << "\n";
+            std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
+            *os << "  movswq " << r16 << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSW) {
             *os << "  movq " << srcOp << ", " << rax << "\n";
@@ -1182,6 +1222,7 @@ void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::BasicBlock* target) {
     if (!target) return;
+    cg.lastStoreOp = "";
     std::vector<std::pair<ir::Value*, ir::PhiNode*>> phiMoves;
     for (auto& instr : target->getInstructions()) {
         if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
