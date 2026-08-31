@@ -25,33 +25,66 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
     stats.numVregs = intervals.size();
     std::set<unsigned int> used_regs;
 
-    // Allocate caller-saved registers (0..7) first for non-call intervals,
-    // and callee-saved registers (8..12) for higher register pressure / live intervals.
-    for (int i = (int)NUM_PHYSICAL_REGISTERS - 1; i >= 0; --i) {
-        free_registers.push_back({(unsigned int)i});
-    }
+    std::vector<PhysicalReg> free_caller_regs;
+    std::vector<PhysicalReg> free_callee_regs;
+
+    // Caller-saved registers: indices 0..7 (r10, r11, rcx, rdx, rsi, rdi, r8, r9)
+    for (int i = 7; i >= 0; --i) free_caller_regs.push_back({(unsigned int)i});
+    // Callee-saved registers: indices 8..12 (rbx, r12, r13, r14, r15)
+    for (int i = 12; i >= 8; --i) free_callee_regs.push_back({(unsigned int)i});
 
     for (const auto& current_interval : intervals) {
-        expireOldIntervals(current_interval.getStart());
+        if (current_interval.isLiveAcrossCall()) {
+            stats.liveAcrossCalls++;
+        }
 
-        if (active_intervals.size() == NUM_PHYSICAL_REGISTERS) {
-            spillAtInterval(current_interval);
+        expireOldIntervals(current_interval.getStart(), free_caller_regs, free_callee_regs);
+
+        bool assigned = false;
+        PhysicalReg reg;
+
+        if (current_interval.isLiveAcrossCall()) {
+            if (!free_callee_regs.empty()) {
+                reg = free_callee_regs.back();
+                free_callee_regs.pop_back();
+                assigned = true;
+                stats.crossCallCalleeSaved++;
+            } else {
+                // Must spill to stack across call to prevent caller-saved clobbering
+                assigned = false;
+            }
         } else {
-            PhysicalReg reg = free_registers.back();
-            free_registers.pop_back();
+            if (!free_caller_regs.empty()) {
+                reg = free_caller_regs.back();
+                free_caller_regs.pop_back();
+                assigned = true;
+                stats.callerSavedUsed++;
+            } else if (!free_callee_regs.empty()) {
+                reg = free_callee_regs.back();
+                free_callee_regs.pop_back();
+                assigned = true;
+            }
+        }
+
+        if (assigned) {
             used_regs.insert(reg.index);
+            if (reg.index >= 8) stats.calleeSavedUsed++;
+            current_interval.getVreg()->setPhysicalRegister(reg.index);
             vreg_to_location_map[current_interval.getVreg()] = reg;
             active_intervals.push_back(&current_interval);
             std::sort(active_intervals.begin(), active_intervals.end(),
                 [](const LiveInterval* a, const LiveInterval* b) {
                     return a->getEnd() < b->getEnd();
                 });
+        } else {
+            if (current_interval.isLiveAcrossCall()) stats.crossCallSpills++;
+            spillAtInterval(current_interval, free_caller_regs, free_callee_regs);
         }
     }
     stats.numPhysicalRegsUsed = used_regs.size();
 }
 
-void LinearScanAllocator::expireOldIntervals(int current_start_point) {
+void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
     auto it = active_intervals.begin();
     while (it != active_intervals.end()) {
         const LiveInterval* interval = *it;
@@ -59,36 +92,52 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point) {
             return;
         }
 
-        // This interval has expired. Add its register back to the free pool.
         RegLocation loc = vreg_to_location_map.at(interval->getVreg());
         if (std::holds_alternative<PhysicalReg>(loc)) {
-            free_registers.push_back(std::get<PhysicalReg>(loc));
+            PhysicalReg reg = std::get<PhysicalReg>(loc);
+            if (reg.index >= 8) {
+                free_callee.push_back(reg);
+            } else {
+                free_caller.push_back(reg);
+            }
         }
 
         it = active_intervals.erase(it);
     }
 }
 
-void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval) {
+void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
     stats.numSpills++;
+    if (active_intervals.empty()) {
+        vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
+        return;
+    }
+
     const LiveInterval* spill_candidate = active_intervals.back();
 
     if (spill_candidate->getEnd() > current_interval.getEnd()) {
         RegLocation loc = vreg_to_location_map.at(spill_candidate->getVreg());
-        PhysicalReg reg = std::get<PhysicalReg>(loc);
+        if (std::holds_alternative<PhysicalReg>(loc)) {
+            PhysicalReg reg = std::get<PhysicalReg>(loc);
+            if (!current_interval.isLiveAcrossCall() || reg.index >= 8) {
+                current_interval.getVreg()->setPhysicalRegister(reg.index);
+                vreg_to_location_map[current_interval.getVreg()] = reg;
 
-        vreg_to_location_map[current_interval.getVreg()] = reg;
-        vreg_to_location_map[spill_candidate->getVreg()] = StackSlot{next_stack_slot++};
+                spill_candidate->getVreg()->setPhysicalRegister(-1);
+                vreg_to_location_map[spill_candidate->getVreg()] = StackSlot{next_stack_slot++};
 
-        active_intervals.pop_back();
-        active_intervals.push_back(&current_interval);
-        std::sort(active_intervals.begin(), active_intervals.end(),
-            [](const LiveInterval* a, const LiveInterval* b) {
-                return a->getEnd() < b->getEnd();
-            });
-    } else {
-        vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
+                active_intervals.pop_back();
+                active_intervals.push_back(&current_interval);
+                std::sort(active_intervals.begin(), active_intervals.end(),
+                    [](const LiveInterval* a, const LiveInterval* b) {
+                        return a->getEnd() < b->getEnd();
+                    });
+                return;
+            }
+        }
     }
+
+    vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
 }
 
 } // namespace transforms

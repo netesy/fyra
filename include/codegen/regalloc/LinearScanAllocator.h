@@ -38,6 +38,11 @@ public:
     struct RegAllocStats {
         size_t numVregs = 0;
         size_t numPhysicalRegsUsed = 0;
+        size_t callerSavedUsed = 0;
+        size_t calleeSavedUsed = 0;
+        size_t liveAcrossCalls = 0;
+        size_t crossCallCalleeSaved = 0;
+        size_t crossCallSpills = 0;
         size_t numSpills = 0;
         size_t numReloads = 0;
         size_t numEliminatedMoves = 0;
@@ -47,11 +52,10 @@ public:
 
 private:
     void linearScan(ir::Function& func);
-    void expireOldIntervals(int current_start_point);
-    void spillAtInterval(const class LiveInterval& interval);
+    void expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
+    void spillAtInterval(const class LiveInterval& interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
 
     unsigned int next_stack_slot = 0;
-    std::vector<PhysicalReg> free_registers;
     std::vector<const class LiveInterval*> active_intervals;
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;
     RegAllocStats stats;

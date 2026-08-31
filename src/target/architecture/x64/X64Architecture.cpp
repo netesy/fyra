@@ -131,7 +131,10 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
 
-        if (stack_alloc % 16 != 0) stack_alloc += (16 - (stack_alloc % 16));
+        int total_frame = 8 * (1 + (int)usedCalleeRegs.size()) + stack_alloc;
+        if (total_frame % 16 != 0) {
+            stack_alloc += (16 - (total_frame % 16));
+        }
         if (auto* os = cg.getTextStream()) {
             if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
             size_t i_idx = 0, f_idx = 0;
@@ -261,9 +264,9 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
                 for (auto it = usedCalleeRegs.rbegin(); it != usedCalleeRegs.rend(); ++it) {
                     *os << "  popq %" << *it << "\n";
                 }
-            }
-            if (!isZeroFrame || !usedCalleeRegs.empty()) {
                 *os << "  popq %rbp\n";
+            } else if (!isZeroFrame) {
+                *os << "  leave\n";
             }
             *os << "  .cfi_def_cfa 7, 8\n";
             *os << "  ret\n";
@@ -286,9 +289,9 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
                     if (r >= 8) as.emitByte(0x41);
                     as.emitByte(0x58 + (r & 7));
                 }
-            }
-            if (!isZeroFrame || !usedCalleeRegs.empty()) {
                 as.emitByte(0x5D); // pop rbp
+            } else if (!isZeroFrame) {
+                as.emitByte(0xC9); // leave
             }
             as.emitByte(0xC3); // ret
         }
@@ -1250,6 +1253,16 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
 }
 
 void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() >= 3) {
+        if (auto* cmpInst = dynamic_cast<ir::Instruction*>(i.getOperands()[0]->get())) {
+            if (cmpInst->getParent() == i.getParent()) {
+                if (emitCmpAndBranchFusion(cg, *cmpInst, i)) {
+                    return;
+                }
+            }
+        }
+    }
+
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
     auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
@@ -1365,23 +1378,24 @@ bool X64Architecture::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, 
         default: jcc = "jne"; break;
     }
 
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    if (auto* os = cg.getTextStream()) {
-        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(cmp.getOperands()[0]->get()) != nullptr ||
-                         (dynamic_cast<ir::GlobalValue*>(cmp.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(cmp.getOperands()[0]->get()));
-        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(cmp.getOperands()[1]->get()) != nullptr ||
-                         (dynamic_cast<ir::GlobalValue*>(cmp.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(cmp.getOperands()[1]->get()));
+    std::string op0 = cg.getValueAsOperand(cmp.getOperands()[0]->get());
+    std::string op1 = cg.getValueAsOperand(cmp.getOperands()[1]->get());
 
+    if (auto* os = cg.getTextStream()) {
         if (abi == X64ABI::Windows) {
-            if (isGlobal0) *os << "  lea " << rax << ", " << cg.getValueAsOperand(cmp.getOperands()[0]->get()) << "\n";
-            else *os << "  mov " << rax << ", " << cg.getValueAsOperand(cmp.getOperands()[0]->get()) << "\n";
-            if (isGlobal1) *os << "  lea rdx, " << cg.getValueAsOperand(cmp.getOperands()[1]->get()) << "\n  cmp " << rax << ", rdx\n";
-            else *os << "  cmp " << rax << ", " << cg.getValueAsOperand(cmp.getOperands()[1]->get()) << "\n";
+            if (op0[0] == '[' && op1[0] == '[') {
+                *os << "  mov rax, " << op0 << "\n";
+                *os << "  cmp rax, " << op1 << "\n";
+            } else {
+                *os << "  cmp " << op0 << ", " << op1 << "\n";
+            }
         } else {
-            if (isGlobal0) *os << "  leaq " << cg.getValueAsOperand(cmp.getOperands()[0]->get()) << ", " << rax << "\n";
-            else *os << "  movq " << cg.getValueAsOperand(cmp.getOperands()[0]->get()) << ", " << rax << "\n";
-            if (isGlobal1) *os << "  leaq " << cg.getValueAsOperand(cmp.getOperands()[1]->get()) << ", %rdx\n  cmpq %rdx, " << rax << "\n";
-            else *os << "  cmpq " << cg.getValueAsOperand(cmp.getOperands()[1]->get()) << ", " << rax << "\n";
+            if (op0[0] != '%' && op1[0] != '%') {
+                *os << "  movq " << op0 << ", %rax\n";
+                *os << "  cmpq " << op1 << ", %rax\n";
+            } else {
+                *os << "  cmpq " << op1 << ", " << op0 << "\n";
+            }
         }
 
         std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);

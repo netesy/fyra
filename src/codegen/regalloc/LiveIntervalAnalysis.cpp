@@ -1,6 +1,7 @@
 #include "codegen/regalloc/LiveIntervalAnalysis.h"
 #include "codegen/regalloc/LivenessAnalysis.h"
 #include <algorithm>
+#include <set>
 
 namespace transforms {
 
@@ -13,13 +14,31 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
     // 2. Clear out any old data
     intervals.clear();
 
+    // Collect call sites instruction indices
+    std::set<int> callSites;
+    int idx = 0;
+    for (auto& bb : func.getBasicBlocks()) {
+        for (auto& instr : bb->getInstructions()) {
+            auto opc = instr->getOpcode();
+            if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
+                callSites.insert(idx);
+            }
+            idx++;
+        }
+    }
+
     // 3. Create LiveInterval objects from the results
     for (const auto& pair : liveRanges) {
         const ir::Instruction* vreg = pair.first;
         const LiveRange& range = pair.second;
-        // The const_cast is safe here because we know the analysis pipeline
-        // won't deallocate the instruction while we hold a pointer to it.
-        intervals.emplace_back(const_cast<ir::Instruction*>(vreg), range.start, range.end);
+        bool crossesCall = false;
+        for (int c : callSites) {
+            if (range.start < c && c < range.end) {
+                crossesCall = true;
+                break;
+            }
+        }
+        intervals.emplace_back(const_cast<ir::Instruction*>(vreg), range.start, range.end, crossesCall);
     }
 
     // 4. Sort the intervals by their starting point
