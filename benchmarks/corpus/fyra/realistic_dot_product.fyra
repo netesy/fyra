@@ -3,20 +3,23 @@ function $dot_product(%n : w) : l {
     jmp @loop
 
 @loop
-    %i = phi @entry 0, @body %i_next : w
-    %sum = phi @entry 0, @body %sum_next : l
+    %i = phi @entry w 0, @body %i_next : w
+    %sum = phi @entry l 0, @body %sum_next : l
     %cond = slt %i, %n : w
     jnz %cond, @body, @exit
 
 @body
-    %i_l = extsw %i : l
-    %t3 = mul %i_l, 3 : l
-    %a = add %t3, 1 : l
-    %t7 = mul %i_l, 7 : l
-    %b = add %t7, 2 : l
+    %t3 = mul %i, w 3 : w
+    %a_w = add %t3, w 1 : w
+    %a = extsw %a_w : l
+
+    %t7 = mul %i, w 7 : w
+    %b_w = add %t7, w 2 : w
+    %b = extsw %b_w : l
+
     %prod = mul %a, %b : l
     %sum_next = add %sum, %prod : l
-    %i_next = add %i, 1 : w
+    %i_next = add %i, w 1 : w
     jmp @loop
 
 @exit
@@ -28,18 +31,18 @@ export function $main() : w {
     jmp @loop
 
 @loop
-    %k = phi @entry 0, @body %k_next : w
-    %res = phi @entry 0, @body %res_next : l
-    %cond = slt %k, 20 : w
+    %k = phi @entry w 0, @body %k_next : w
+    %res = phi @entry l 0, @body %res_next : l
+    %cond = slt %k, w 20 : w
     jnz %cond, @body, @exit
 
 @body
     %v = call $dot_product(w 5000000) : l
     %res_next = add %res, %v : l
-    %k_next = add %k, 1 : w
+    %k_next = add %k, w 1 : w
     jmp @loop
 
 @exit
     call $print_checksum(l %res)
-    ret 0 : w
+    ret w 0 : w
 }
