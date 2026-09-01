@@ -1,7 +1,6 @@
 #include "codegen/regalloc/LinearScanAllocator.h"
 #include "codegen/regalloc/LiveIntervalAnalysis.h"
 #include "ir/Function.h"
-#include "ir/Use.h"
 #include <algorithm>
 #include <cassert>
 #include <iostream>
@@ -48,28 +47,10 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
         bool assigned = false;
         PhysicalReg reg;
 
-        // Prefer operand 0's physical register if available to enable two-address in-place reuse
-        int preferredRegIdx = -1;
-        ir::Instruction* instr = current_interval.getVreg();
-        if (instr && !instr->getOperands().empty() && instr->getOperands()[0]) {
-            if (auto* op0Inst = dynamic_cast<ir::Instruction*>(instr->getOperands()[0]->get())) {
-                if (op0Inst->hasPhysicalRegister()) {
-                    preferredRegIdx = (int)op0Inst->getPhysicalRegister();
-                }
-            }
-        }
-
         if (current_interval.isLiveAcrossCall()) {
             if (!free_callee_regs.empty()) {
-                auto prefIt = std::find_if(free_callee_regs.begin(), free_callee_regs.end(),
-                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
-                if (prefIt != free_callee_regs.end()) {
-                    reg = *prefIt;
-                    free_callee_regs.erase(prefIt);
-                } else {
-                    reg = free_callee_regs.back();
-                    free_callee_regs.pop_back();
-                }
+                reg = free_callee_regs.back();
+                free_callee_regs.pop_back();
                 assigned = true;
                 stats.crossCallCalleeSaved++;
             } else {
@@ -78,27 +59,13 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
             }
         } else {
             if (!free_caller_regs.empty()) {
-                auto prefIt = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
-                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
-                if (prefIt != free_caller_regs.end()) {
-                    reg = *prefIt;
-                    free_caller_regs.erase(prefIt);
-                } else {
-                    reg = free_caller_regs.back();
-                    free_caller_regs.pop_back();
-                }
+                reg = free_caller_regs.back();
+                free_caller_regs.pop_back();
                 assigned = true;
                 stats.callerSavedUsed++;
             } else if (!free_callee_regs.empty()) {
-                auto prefIt = std::find_if(free_callee_regs.begin(), free_callee_regs.end(),
-                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
-                if (prefIt != free_callee_regs.end()) {
-                    reg = *prefIt;
-                    free_callee_regs.erase(prefIt);
-                } else {
-                    reg = free_callee_regs.back();
-                    free_callee_regs.pop_back();
-                }
+                reg = free_callee_regs.back();
+                free_callee_regs.pop_back();
                 assigned = true;
             }
         }

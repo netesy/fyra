@@ -506,8 +506,9 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
     std::string addOp = is32 ? "addl" : "addq";
     if (auto* os = cg.getTextStream()) {
         auto* val0 = i.getOperands()[0]->get();
+        auto* val1 = i.getOperands()[1]->get();
         auto op0 = cg.getValueAsOperand(val0);
-        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto op1 = cg.getValueAsOperand(val1);
         auto dst = cg.getValueAsOperand(&i);
 
         bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(val0) != nullptr ||
@@ -518,25 +519,36 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         if (abi != X64ABI::Windows && !isGlobal0 && canUseInPlace(cg, i, val0)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal1) {
-                *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+                *os << "  leaq " << op1 << ", " << rax << "\n  " << addOp << " " << rax << ", " << d << "\n";
             } else {
-                std::string s1 = op1;
-                if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
-                *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+                auto* const1 = dynamic_cast<ir::ConstantInt*>(val1);
+                if (const1 && (const1->getValue() < -2147483648LL || const1->getValue() > 2147483647LL)) {
+                    emitMov(cg, os, op1, rax, is32);
+                    *os << "  " << addOp << " " << rax << ", " << d << "\n";
+                } else {
+                    std::string s1 = op1;
+                    if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                    *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+                }
             }
             cg.lastStoreOp = "";
             return;
         }
 
-        auto* val1 = i.getOperands()[1]->get();
         if (abi != X64ABI::Windows && !isGlobal1 && canUseInPlace(cg, i, val1)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal0) {
-                *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+                *os << "  leaq " << op0 << ", " << rax << "\n  " << addOp << " " << rax << ", " << d << "\n";
             } else {
-                std::string s0 = op0;
-                if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
-                *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                auto* const0 = dynamic_cast<ir::ConstantInt*>(val0);
+                if (const0 && (const0->getValue() < -2147483648LL || const0->getValue() > 2147483647LL)) {
+                    emitMov(cg, os, op0, rax, is32);
+                    *os << "  " << addOp << " " << rax << ", " << d << "\n";
+                } else {
+                    std::string s0 = op0;
+                    if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                    *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                }
             }
             cg.lastStoreOp = "";
             return;
@@ -551,6 +563,37 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            std::string leaOp = is32 ? "leal" : "leaq";
+            auto* constInt1 = dynamic_cast<ir::ConstantInt*>(val1);
+            auto* constInt0 = dynamic_cast<ir::ConstantInt*>(val0);
+
+            if (!isGlobal0 && !isGlobal1 && d[0] == '%') {
+                if (constInt1 && op0[0] == '%') {
+                    int64_t c = constInt1->getValue();
+                    if (c >= -2147483648LL && c <= 2147483647LL) {
+                        std::string s0_64 = to64BitReg(op0);
+                        *os << "  " << leaOp << " " << c << "(" << s0_64 << "), " << d << "\n";
+                        cg.lastStoreOp = "";
+                        return;
+                    }
+                } else if (constInt0 && op1[0] == '%') {
+                    int64_t c = constInt0->getValue();
+                    if (c >= -2147483648LL && c <= 2147483647LL) {
+                        std::string s1_64 = to64BitReg(op1);
+                        *os << "  " << leaOp << " " << c << "(" << s1_64 << "), " << d << "\n";
+                        cg.lastStoreOp = "";
+                        return;
+                    }
+                } else if (op0[0] == '%' && op1[0] == '%') {
+                    std::string s0_64 = to64BitReg(op0);
+                    std::string s1_64 = to64BitReg(op1);
+                    *os << "  " << leaOp << " (" << s0_64 << "," << s1_64 << "), " << d << "\n";
+                    cg.lastStoreOp = "";
+                    return;
+                }
+            }
+
             if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
             else emitMov(cg, os, op0, rax, is32);
             
@@ -609,8 +652,9 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
     std::string mulOp = is32 ? "imull" : "imulq";
     if (auto* os = cg.getTextStream()) {
         auto* val0 = i.getOperands()[0]->get();
+        auto* val1 = i.getOperands()[1]->get();
         auto op0 = cg.getValueAsOperand(val0);
-        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto op1 = cg.getValueAsOperand(val1);
         auto dst = cg.getValueAsOperand(&i);
 
         if (abi != X64ABI::Windows && canUseInPlace(cg, i, val0)) {
@@ -627,6 +671,48 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
             *os << "  imul " << rax << ", " << op1 << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            std::string leaOp = is32 ? "leal" : "leaq";
+            auto* constInt1 = dynamic_cast<ir::ConstantInt*>(val1);
+            auto* constInt0 = dynamic_cast<ir::ConstantInt*>(val0);
+
+            auto emitLeaMul = [&](ir::Value* regVal, int64_t scale) -> bool {
+                std::string s = cg.getValueAsOperand(regVal);
+                if (s.empty() || s[0] != '%' || d.empty() || d[0] != '%') return false;
+                std::string regS_64 = to64BitReg(s);
+                if (scale == 1) {
+                    *os << "  " << leaOp << " (" << regS_64 << "), " << d << "\n";
+                    return true;
+                } else if (scale == 2) {
+                    *os << "  " << leaOp << " (" << regS_64 << "," << regS_64 << "), " << d << "\n";
+                    return true;
+                } else if (scale == 3) {
+                    *os << "  " << leaOp << " (" << regS_64 << "," << regS_64 << ",2), " << d << "\n";
+                    return true;
+                } else if (scale == 4) {
+                    *os << "  " << leaOp << " (," << regS_64 << ",4), " << d << "\n";
+                    return true;
+                } else if (scale == 5) {
+                    *os << "  " << leaOp << " (" << regS_64 << "," << regS_64 << ",4), " << d << "\n";
+                    return true;
+                } else if (scale == 8) {
+                    *os << "  " << leaOp << " (," << regS_64 << ",8), " << d << "\n";
+                    return true;
+                } else if (scale == 9) {
+                    *os << "  " << leaOp << " (" << regS_64 << "," << regS_64 << ",8), " << d << "\n";
+                    return true;
+                }
+                return false;
+            };
+
+            if (constInt1 && emitLeaMul(val0, constInt1->getValue())) {
+                cg.lastStoreOp = "";
+                return;
+            } else if (constInt0 && emitLeaMul(val1, constInt0->getValue())) {
+                cg.lastStoreOp = "";
+                return;
+            }
+
             emitMov(cg, os, op0, rax, is32);
             *os << "  " << mulOp << " " << op1 << ", " << rax << "\n";
             emitMov(cg, os, rax, dst, is32);
