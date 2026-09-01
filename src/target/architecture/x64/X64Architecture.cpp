@@ -432,7 +432,52 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
                 emitMov(cg, os, src, rax, is32);
             }
         }
-        *os << "  jmp " << i.getParent()->getParent()->getName() << "_epilogue" << "\n";
+        bool makesCalls = false;
+        ir::Function* func = i.getParent()->getParent();
+        for (auto& bb : func->getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                auto opc = instr->getOpcode();
+                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
+                    makesCalls = true;
+                    break;
+                }
+            }
+            if (makesCalls) break;
+        }
+        std::vector<std::string> usedCalleeRegs;
+        static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
+        for (auto& bb : func->getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->hasPhysicalRegister()) {
+                    size_t regIdx = instr->getPhysicalRegister();
+                    if (regIdx < integerRegs.size()) {
+                        const std::string& regName = integerRegs[regIdx];
+                        if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
+                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
+                                usedCalleeRegs.push_back(regName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
+        for (auto& bb : func->getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->getType() && !instr->getType()->isVoidTy()) {
+                    if (func->hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
+                        current_offset -= 8;
+                    }
+                }
+            }
+        }
+        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
+        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
+        if (isZeroFrame) {
+            *os << "  ret\n";
+        } else {
+            *os << "  jmp " << func->getName() << "_epilogue\n";
+        }
     } else {
         if (!i.getOperands().empty()) emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         cg.getAssembler().emitByte(0xE9);
@@ -1371,6 +1416,64 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
         }
     }
     if (phiMoves.empty()) return;
+
+    // Direct move check: if single phi copy or no overlap, try direct moves without push/pop stack operations
+    bool canDirectMove = true;
+    for (const auto& move : phiMoves) {
+        std::string srcOp = cg.getValueAsOperand(move.first);
+        std::string destOp = cg.getValueAsOperand(move.second);
+        if (srcOp.empty() || destOp.empty()) {
+            canDirectMove = false;
+            break;
+        }
+        // x86-64 cannot execute memory-to-memory mov (e.g. -8(%rbp) -> -16(%rbp)) directly
+        bool srcIsMem = (srcOp[0] == '-' || srcOp[0] == '[' || srcOp.find("(%rbp)") != std::string::npos);
+        bool destIsMem = (destOp[0] == '-' || destOp[0] == '[' || destOp.find("(%rbp)") != std::string::npos);
+        if (srcIsMem && destIsMem) {
+            canDirectMove = false;
+            break;
+        }
+    }
+
+    // Check for self cycles among multiple phi moves (e.g. swap %r10 <-> %r11)
+    if (canDirectMove && phiMoves.size() > 1) {
+        for (size_t i = 0; i < phiMoves.size(); ++i) {
+            std::string dest_i = cg.getValueAsOperand(phiMoves[i].second);
+            for (size_t j = i + 1; j < phiMoves.size(); ++j) {
+                std::string src_j = cg.getValueAsOperand(phiMoves[j].first);
+                if (dest_i == src_j) {
+                    canDirectMove = false; // Overlap detected, fallback to push/pop to preserve semantics
+                    break;
+                }
+            }
+            if (!canDirectMove) break;
+        }
+    }
+
+    if (canDirectMove) {
+        for (const auto& move : phiMoves) {
+            ir::Value* incomingVal = move.first;
+            ir::PhiNode* phi = move.second;
+            std::string srcOp = cg.getValueAsOperand(incomingVal);
+            std::string destOp = cg.getValueAsOperand(phi);
+            if (srcOp == destOp) continue;
+
+            bool is32 = is32BitType(phi->getType());
+            if (auto* os = cg.getTextStream()) {
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov " << destOp << ", " << srcOp << "\n";
+                } else {
+                    emitMov(cg, os, srcOp, destOp, is32);
+                }
+            } else {
+                auto& as = cg.getAssembler();
+                emitLoadValue(cg, as, incomingVal, 0);
+                emitStoreResult(cg, *phi, 0);
+            }
+        }
+        return;
+    }
+
     for (const auto& move : phiMoves) {
         ir::Value* incomingVal = move.first;
         if (auto* os = cg.getTextStream()) {
