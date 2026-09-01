@@ -100,6 +100,7 @@ void CodeGen::emitFunction(ir::Function& func) {
     currentFunction = &func;
     stackOffsets.clear();
     lastStoreOp = "";
+    liveness.run(func);
     if (targetInfo->getName() == "wasm32" && !os) {
         auto funcBodyAsm = std::make_unique<asm_::Assembler>();
         auto oldAsm = std::move(assembler); assembler = std::move(funcBodyAsm);
