@@ -56,6 +56,7 @@ bool RegAllocRewriter::run(ir::Function& func) {
                         int slot = func.getStackSlotForVreg(operand_vreg);
                         builder.setInsertPoint(bb.get(), it);
                         ir::Instruction* load = builder.createLoadStack(operand_vreg->getType(), slot);
+                        use->setOriginalValue(operand_vreg);
                         use->set(load);
                     }
                 }

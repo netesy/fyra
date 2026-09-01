@@ -15,9 +15,13 @@ public:
     void set(Value* new_v);
     User* getUser() const { return user; }
 
+    Value* getOriginalValue() const { return originalValue ? originalValue : v; }
+    void setOriginalValue(Value* orig) { originalValue = orig; }
+
 private:
     User* user;
     Value* v;
+    Value* originalValue = nullptr;
 };
 
 } // namespace ir

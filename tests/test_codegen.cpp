@@ -1,8 +1,10 @@
 #include "parser/Parser.h"
 #include "ir/Module.h"
 #include "ir/PhiNode.h"
+#include "ir/Use.h"
 #include "codegen/CodeGen.h"
 #include "codegen/regalloc/LivenessAnalysis.h"
+#include "codegen/regalloc/RegAllocRewriter.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "target/core/TargetDescriptor.h"
@@ -327,6 +329,97 @@ function $test_cfg_vs_linear(%cond : w, %p : w) : w {
             // But x IS live after br on the edge to b_live
             assert(liveness.isLiveAfter(br, x) == true);
         }
+    }
+
+    // Focused tests for spill provenance tracking
+    {
+        using namespace ir;
+        using namespace transforms;
+
+        std::string spill_ir = R"(
+function $test_spill_provenance(%p : w) : w {
+@entry
+    %v0 = add %p, w 1 : w
+    %v1 = add %v0, w 2 : w
+    %v2 = add %v1, w 3 : w
+    %v3 = add %v2, w 4 : w
+    %v4 = add %v3, w 5 : w
+    %v5 = add %v4, w 6 : w
+    %v6 = add %v5, w 7 : w
+    %v7 = add %v6, w 8 : w
+    %v8 = add %v7, w 9 : w
+    %v9 = add %v8, w 10 : w
+    %v10 = add %v9, w 11 : w
+    %v11 = add %v10, w 12 : w
+    %v12 = add %v11, w 13 : w
+    %v13 = add %v12, w 14 : w
+    %v14 = add %v13, w 15 : w
+    %sum1 = add %v0, %v1 : w
+    %sum2 = add %v2, %v3 : w
+    %sum3 = add %v4, %v5 : w
+    %sum4 = add %v6, %v7 : w
+    %sum5 = add %v8, %v9 : w
+    %sum6 = add %v10, %v11 : w
+    %sum7 = add %v12, %v13 : w
+    %total = add %sum1, %sum2 : w
+    %total2 = add %total, %sum3 : w
+    %total3 = add %total2, %sum4 : w
+    %total4 = add %total3, %sum5 : w
+    %total5 = add %total4, %sum6 : w
+    %total6 = add %total5, %sum7 : w
+    %total7 = add %total6, %v14 : w
+    ret %total7 : w
+}
+)";
+        std::istringstream stream(spill_ir);
+        parser::Parser spill_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> spill_module = spill_parser.parseModule();
+        assert(spill_module != nullptr);
+
+        Function* f = spill_module->getFunction("test_spill_provenance");
+        assert(f != nullptr);
+
+        LivenessAnalysis pre_spill_liveness;
+        pre_spill_liveness.run(*f);
+
+        RegAllocRewriter rewriter;
+        rewriter.run(*f);
+
+        bool found_spilled_load = false;
+        bool found_unmodified_use = false;
+
+        for (auto& bb : f->getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                for (auto& use : instr->getOperands()) {
+                    Value* cur_val = use->get();
+                    Value* orig_val = use->getOriginalValue();
+
+                    if (cur_val != orig_val) {
+                        // Spilled operand rewritten to LoadStack
+                        found_spilled_load = true;
+                        auto* load_inst = dynamic_cast<Instruction*>(cur_val);
+                        assert(load_inst != nullptr);
+                        assert(load_inst->getOpcode() == Instruction::Load);
+
+                        // Prove that getOriginalValue() returns the original pre-spill SSA instruction
+                        auto* orig_inst = dynamic_cast<Instruction*>(orig_val);
+                        assert(orig_inst != nullptr);
+                        assert(orig_inst != load_inst);
+
+                        // Verify that pre-spill liveness can be queried using the original Value* and user Instruction*
+                        bool was_live = pre_spill_liveness.isLiveAfter(instr.get(), orig_val);
+                        (void)was_live;
+                    } else if (dynamic_cast<Instruction*>(cur_val)) {
+                        found_unmodified_use = true;
+                        assert(use->getOriginalValue() == cur_val);
+                    }
+                }
+            }
+        }
+
+        assert(found_spilled_load == true);
+        assert(found_unmodified_use == true);
+        std::cout << "Spill provenance tests passed successfully!" << std::endl;
     }
 
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
