@@ -80,6 +80,13 @@ bool LivenessAnalysis::isLiveAfter(const ir::Instruction* instruction, const ir:
     return it->second.count(value) > 0;
 }
 
+bool LivenessAnalysis::isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const {
+    if (!user || !use) return false;
+    const ir::Value* origVal = use->getOriginalValue();
+    if (!origVal) return false;
+    return !isLiveAfter(user, origVal);
+}
+
 void LivenessAnalysis::computePerInstructionCFGLiveness(ir::Function& func) {
     liveAfterMap.clear();
     liveBeforeMap.clear();

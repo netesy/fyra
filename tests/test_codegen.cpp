@@ -202,6 +202,10 @@ function $test_cfg_vs_linear(%cond : w, %p : w) : w {
             assert(liveness.isLiveAfter(i1, i1) == true);
             assert(liveness.isLiveAfter(i2, i1) == false);
             assert(liveness.isLiveAfter(ret, i1) == false);
+
+            // Test isLastUseOfOperand
+            assert(liveness.isLastUseOfOperand(i2, i2->getOperands()[0].get()) == true);
+            assert(liveness.isLastUseOfOperand(ret, ret->getOperands()[0].get()) == true);
         }
 
         // 2. Later same-block use
@@ -220,6 +224,10 @@ function $test_cfg_vs_linear(%cond : w, %p : w) : w {
             assert(liveness.isLiveAfter(x, x) == true);
             assert(liveness.isLiveAfter(a, x) == true);
             assert(liveness.isLiveAfter(b, x) == false);
+
+            // Test isLastUseOfOperand: use at %a is NOT last use of %x; use at %b IS last use of %x
+            assert(liveness.isLastUseOfOperand(a, a->getOperands()[0].get()) == false);
+            assert(liveness.isLastUseOfOperand(b, b->getOperands()[0].get()) == true);
         }
 
         // 3. Conditional branch
@@ -406,9 +414,10 @@ function $test_spill_provenance(%p : w) : w {
                         assert(orig_inst != nullptr);
                         assert(orig_inst != load_inst);
 
-                        // Verify that pre-spill liveness can be queried using the original Value* and user Instruction*
-                        bool was_live = pre_spill_liveness.isLiveAfter(instr.get(), orig_val);
-                        (void)was_live;
+                        // Verify isLastUseOfOperand on spilled reload operand consumes original SSA value provenance
+                        bool is_last_use = pre_spill_liveness.isLastUseOfOperand(instr.get(), use.get());
+                        bool is_live_after = pre_spill_liveness.isLiveAfter(instr.get(), orig_val);
+                        assert(is_last_use == !is_live_after);
                     } else if (dynamic_cast<Instruction*>(cur_val)) {
                         found_unmodified_use = true;
                         assert(use->getOriginalValue() == cur_val);

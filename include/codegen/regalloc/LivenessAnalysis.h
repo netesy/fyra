@@ -25,6 +25,9 @@ public:
     // Returns true if value is live immediately after instruction according to CFG-aware pre-spill analysis
     bool isLiveAfter(const ir::Instruction* instruction, const ir::Value* value) const;
 
+    // Returns true if use represents the final live use of its original pre-spill SSA value
+    bool isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const;
+
 private:
     void computeLiveSets(ir::Function& func);
     void computePerInstructionCFGLiveness(ir::Function& func);
