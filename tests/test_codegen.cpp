@@ -1,6 +1,8 @@
 #include "parser/Parser.h"
 #include "ir/Module.h"
+#include "ir/PhiNode.h"
 #include "codegen/CodeGen.h"
+#include "codegen/regalloc/LivenessAnalysis.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "target/core/TargetDescriptor.h"
@@ -78,5 +80,255 @@ function $test_dot_overflow(%n : w) : l {
     // Verify %edi is compared against loop counter and not overwritten by local variables
     assert(dot_asm.find("cmpl %edi,") != std::string::npos);
 
+    // Focused tests for CFG-aware per-instruction liveness analysis using parsed IR
+    {
+        using namespace ir;
+        using namespace ::transforms;
+
+        std::string liveness_ir = R"(
+function $test_straight_line(%p : w) : w {
+@entry
+    %x = add %p, w 1 : w
+    %y = add %x, w 2 : w
+    ret %y : w
+}
+
+function $test_later_use(%p : w) : w {
+@entry
+    %x = add %p, w 1 : w
+    %a = add %x, w 10 : w
+    %b = add %x, w 20 : w
+    ret %b : w
+}
+
+function $test_branch(%cond : w, %p : w) : w {
+@entry
+    %x = add %p, w 1 : w
+    jnz %cond, @left, @right
+
+@left
+    %a = add %x, w 10 : w
+    ret %a : w
+
+@right
+    ret w 0 : w
+}
+
+function $test_join(%cond : w, %p : w) : w {
+@entry
+    %x = add %p, w 1 : w
+    jnz %cond, @b1, @b2
+
+@b1
+    jmp @join
+
+@b2
+    jmp @join
+
+@join
+    %use_x = add %x, w 5 : w
+    ret %use_x : w
+}
+
+function $test_loop_backedge(%p : w) : w {
+@entry
+    %limit = add %p, w 10 : w
+    jmp @header
+
+@header
+    %phi = phi @entry w 0, @body %next : w
+    %cond = slt %phi, %limit : w
+    jnz %cond, @body, @exit
+
+@body
+    %next = add %phi, w 1 : w
+    jmp @header
+
+@exit
+    ret %phi : w
+}
+
+function $test_phi_edges(%cond : w, %p : w) : w {
+@entry
+    jnz %cond, @bA, @bB
+
+@bA
+    %valA = add %p, w 1 : w
+    jmp @header
+
+@bB
+    %valB = add %p, w 2 : w
+    jmp @header
+
+@header
+    %phi = phi @bA %valA, @bB %valB : w
+    ret %phi : w
+}
+
+function $test_cfg_vs_linear(%cond : w, %p : w) : w {
+@entry
+    %x = add %p, w 100 : w
+    jnz %cond, @b_live, @b_dead
+
+@b_dead
+    %dead_inst = add %p, w 1 : w
+    ret %dead_inst : w
+
+@b_live
+    %live_inst = add %x, w 2 : w
+    ret %live_inst : w
+}
+)";
+        std::istringstream stream(liveness_ir);
+        parser::Parser liveness_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> live_module = liveness_parser.parseModule();
+        assert(live_module != nullptr);
+
+        // 1. Straight-line final use
+        {
+            Function* f = live_module->getFunction("test_straight_line");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            auto& instrs = f->getBasicBlocks().front()->getInstructions();
+            auto it = instrs.begin();
+            Instruction* i1 = (it++)->get(); // %x
+            Instruction* i2 = (it++)->get(); // %y
+            Instruction* ret = (it++)->get(); // ret
+
+            assert(liveness.isLiveAfter(i1, i1) == true);
+            assert(liveness.isLiveAfter(i2, i1) == false);
+            assert(liveness.isLiveAfter(ret, i1) == false);
+        }
+
+        // 2. Later same-block use
+        {
+            Function* f = live_module->getFunction("test_later_use");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            auto& instrs = f->getBasicBlocks().front()->getInstructions();
+            auto it = instrs.begin();
+            Instruction* x = (it++)->get();
+            Instruction* a = (it++)->get();
+            Instruction* b = (it++)->get();
+
+            assert(liveness.isLiveAfter(x, x) == true);
+            assert(liveness.isLiveAfter(a, x) == true);
+            assert(liveness.isLiveAfter(b, x) == false);
+        }
+
+        // 3. Conditional branch
+        {
+            Function* f = live_module->getFunction("test_branch");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            BasicBlock* entry = f->getBasicBlocks().front().get();
+            Instruction* x = entry->getInstructions().front().get();
+            Instruction* br = entry->getInstructions().back().get();
+
+            assert(liveness.isLiveAfter(x, x) == true);
+            assert(liveness.isLiveAfter(br, x) == true);
+        }
+
+        // 4. Join point
+        {
+            Function* f = live_module->getFunction("test_join");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            Instruction* x = f->getBasicBlocks().front()->getInstructions().front().get();
+            assert(liveness.isLiveAfter(x, x) == true);
+
+            for (auto& bb : f->getBasicBlocks()) {
+                if (bb->getName() == "b1" || bb->getName() == "b2") {
+                    Instruction* jmp = bb->getInstructions().back().get();
+                    assert(liveness.isLiveAfter(jmp, x) == true);
+                }
+            }
+        }
+
+        // 5. Loop back-edge
+        {
+            Function* f = live_module->getFunction("test_loop_backedge");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            Instruction* limit = f->getBasicBlocks().front()->getInstructions().front().get();
+
+            for (auto& bb : f->getBasicBlocks()) {
+                if (bb->getName() == "body") {
+                    Instruction* jmp_body = bb->getInstructions().back().get();
+                    assert(liveness.isLiveAfter(jmp_body, limit) == true);
+                }
+            }
+        }
+
+        // 6. Loop-carried Phi incoming edge semantics
+        {
+            Function* f = live_module->getFunction("test_phi_edges");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            Instruction *valA = nullptr, *jmpA = nullptr, *valB = nullptr, *jmpB = nullptr;
+            for (auto& bb : f->getBasicBlocks()) {
+                if (bb->getName() == "bA") {
+                    valA = bb->getInstructions().front().get();
+                    jmpA = bb->getInstructions().back().get();
+                } else if (bb->getName() == "bB") {
+                    valB = bb->getInstructions().front().get();
+                    jmpB = bb->getInstructions().back().get();
+                }
+            }
+            assert(valA && jmpA && valB && jmpB);
+
+            assert(liveness.isLiveAfter(jmpA, valA) == true);
+            assert(liveness.isLiveAfter(jmpB, valA) == false);
+            assert(liveness.isLiveAfter(jmpB, valB) == true);
+            assert(liveness.isLiveAfter(jmpA, valB) == false);
+        }
+
+        // 7. Prove linear instruction ordering is insufficient
+        {
+            Function* f = live_module->getFunction("test_cfg_vs_linear");
+            assert(f != nullptr);
+            LivenessAnalysis liveness;
+            liveness.run(*f);
+
+            Instruction* dead_inst = nullptr;
+            Instruction* ret_dead = nullptr;
+            Instruction* br = nullptr;
+            Instruction* x = nullptr;
+
+            for (auto& bb : f->getBasicBlocks()) {
+                if (bb->getName() == "entry") {
+                    x = bb->getInstructions().front().get();
+                    br = bb->getInstructions().back().get();
+                } else if (bb->getName() == "b_dead") {
+                    dead_inst = bb->getInstructions().front().get();
+                    ret_dead = bb->getInstructions().back().get();
+                }
+            }
+            assert(x && br && dead_inst && ret_dead);
+
+            // Linear instruction numbers put dead_inst and ret_dead AFTER x and BEFORE live_inst.
+            // Under linear ordering, x would appear "live" during b_dead.
+            // Under true CFG dataflow, x is NOT live after dead_inst or ret_dead!
+            assert(liveness.isLiveAfter(dead_inst, x) == false);
+            assert(liveness.isLiveAfter(ret_dead, x) == false);
+
+            // But x IS live after br on the edge to b_live
+            assert(liveness.isLiveAfter(br, x) == true);
+        }
+    }
+
+    std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
     return 0;
 }

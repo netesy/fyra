@@ -22,8 +22,12 @@ public:
         return liveRanges;
     }
 
+    // Returns true if value is live immediately after instruction according to CFG-aware pre-spill analysis
+    bool isLiveAfter(const ir::Instruction* instruction, const ir::Value* value) const;
+
 private:
     void computeLiveSets(ir::Function& func);
+    void computePerInstructionCFGLiveness(ir::Function& func);
 
     // Map from a virtual register (defined by an instruction) to its live range.
     std::map<const ir::Instruction*, LiveRange> liveRanges;
@@ -31,6 +35,10 @@ private:
     // Live-in and live-out sets for each basic block.
     std::map<ir::BasicBlock*, std::set<ir::Instruction*>> liveIn;
     std::map<ir::BasicBlock*, std::set<ir::Instruction*>> liveOut;
+
+    // CFG-aware per-instruction liveAfter sets
+    std::map<const ir::Instruction*, std::set<const ir::Value*>> liveAfterMap;
+    std::map<const ir::Instruction*, std::set<const ir::Value*>> liveBeforeMap;
 };
 
 } // namespace transforms

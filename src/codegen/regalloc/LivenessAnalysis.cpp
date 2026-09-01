@@ -1,4 +1,5 @@
 #include "codegen/regalloc/LivenessAnalysis.h"
+#include "transforms/CFGBuilder.h"
 #include "ir/BasicBlock.h"
 #include "ir/PhiNode.h"
 #include "ir/User.h"
@@ -10,6 +11,7 @@
 namespace transforms {
 
 void LivenessAnalysis::run(ir::Function& func) {
+    CFGBuilder::run(func);
     computeLiveSets(func);
 
     // Assign instruction numbers
@@ -65,6 +67,102 @@ void LivenessAnalysis::run(ir::Function& func) {
     }
     for (auto* var : dead_vars) {
         liveRanges.erase(var);
+    }
+
+    // Compute CFG-aware per-instruction liveness
+    computePerInstructionCFGLiveness(func);
+}
+
+bool LivenessAnalysis::isLiveAfter(const ir::Instruction* instruction, const ir::Value* value) const {
+    if (!instruction || !value) return false;
+    auto it = liveAfterMap.find(instruction);
+    if (it == liveAfterMap.end()) return false;
+    return it->second.count(value) > 0;
+}
+
+void LivenessAnalysis::computePerInstructionCFGLiveness(ir::Function& func) {
+    liveAfterMap.clear();
+    liveBeforeMap.clear();
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+
+        for (auto bb_it = func.getBasicBlocks().rbegin(); bb_it != func.getBasicBlocks().rend(); ++bb_it) {
+            ir::BasicBlock* bb = bb_it->get();
+            auto& instrs = bb->getInstructions();
+            if (instrs.empty()) continue;
+
+            // Compute liveAfter for the last instruction in the basic block
+            ir::Instruction* last_instr = instrs.back().get();
+            std::set<const ir::Value*> new_live_after_last;
+
+            for (ir::BasicBlock* succ : bb->getSuccessors()) {
+                if (succ->getInstructions().empty()) continue;
+                ir::Instruction* succ_first = succ->getInstructions().front().get();
+
+                // Start with liveBefore of the first instruction in the successor
+                std::set<const ir::Value*> succ_live_in = liveBeforeMap[succ_first];
+
+                // Remove Phi definitions in succ (they are defined in succ, not live across edge from pred)
+                for (auto& succ_inst : succ->getInstructions()) {
+                    if (auto* phi = dynamic_cast<const ir::PhiNode*>(succ_inst.get())) {
+                        succ_live_in.erase(phi);
+                        // Add the incoming value for edge bb -> succ
+                        ir::Value* incoming = const_cast<ir::PhiNode*>(phi)->getIncomingValueForBlock(bb);
+                        if (incoming && (dynamic_cast<const ir::Instruction*>(incoming) || dynamic_cast<const ir::Parameter*>(incoming))) {
+                            succ_live_in.insert(incoming);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                new_live_after_last.insert(succ_live_in.begin(), succ_live_in.end());
+            }
+
+            if (liveAfterMap[last_instr] != new_live_after_last) {
+                liveAfterMap[last_instr] = new_live_after_last;
+                changed = true;
+            }
+
+            // Propagate backward through instructions inside the basic block
+            for (auto inst_it = instrs.rbegin(); inst_it != instrs.rend(); ++inst_it) {
+                ir::Instruction* curr = inst_it->get();
+
+                if (inst_it != instrs.rbegin()) {
+                    ir::Instruction* next_instr = std::prev(inst_it)->get();
+                    if (liveAfterMap[curr] != liveBeforeMap[next_instr]) {
+                        liveAfterMap[curr] = liveBeforeMap[next_instr];
+                        changed = true;
+                    }
+                }
+
+                // Compute liveBefore(curr) = use(curr) U (liveAfter(curr) - def(curr))
+                std::set<const ir::Value*> new_live_before = liveAfterMap[curr];
+
+                // Remove def(curr) if non-void
+                if (curr->getType() && !curr->getType()->isVoidTy()) {
+                    new_live_before.erase(curr);
+                }
+
+                // Add uses of curr (non-Phi instructions only; Phi incoming uses are handled on pred -> succ edges)
+                if (!dynamic_cast<const ir::PhiNode*>(curr)) {
+                    for (auto& op_use : curr->getOperands()) {
+                        if (auto* val = op_use->get()) {
+                            if (dynamic_cast<const ir::Instruction*>(val) || dynamic_cast<const ir::Parameter*>(val)) {
+                                new_live_before.insert(val);
+                            }
+                        }
+                    }
+                }
+
+                if (liveBeforeMap[curr] != new_live_before) {
+                    liveBeforeMap[curr] = new_live_before;
+                    changed = true;
+                }
+            }
+        }
     }
 }
 
