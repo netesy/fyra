@@ -28,9 +28,9 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
     std::vector<PhysicalReg> free_caller_regs;
     std::vector<PhysicalReg> free_callee_regs;
 
-    // Caller-saved registers: indices 0,1,4,5,6,7 (r10, r11, rsi, rdi, r8, r9)
+    // Caller-saved registers: pure scratch (0:r10, 1:r11, 6:r8, 7:r9) allocated first before argument registers (5:rdi, 4:rsi)
     // rcx (2) and rdx (3) are reserved for division/remainder and shift instructions (%cl)
-    static const std::vector<unsigned int> caller_indices = {0, 1, 4, 5, 6, 7};
+    static const std::vector<unsigned int> caller_indices = {0, 1, 6, 7, 5, 4};
     for (auto it = caller_indices.rbegin(); it != caller_indices.rend(); ++it) {
         free_caller_regs.push_back({*it});
     }
