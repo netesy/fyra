@@ -528,6 +528,20 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
+        auto* val1 = i.getOperands()[1]->get();
+        if (abi != X64ABI::Windows && !isGlobal1 && canUseInPlace(cg, i, val1)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal0) {
+                *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+            } else {
+                std::string s0 = op0;
+                if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
         if (abi == X64ABI::Windows) {
             if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
             else *os << "  mov " << rax << ", " << op0 << "\n";
