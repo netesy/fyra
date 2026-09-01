@@ -1426,6 +1426,13 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             canDirectMove = false;
             break;
         }
+        // x86-64 cannot execute memory-to-memory mov (e.g. -8(%rbp) -> -16(%rbp)) directly
+        bool srcIsMem = (srcOp[0] == '-' || srcOp[0] == '[' || srcOp.find("(%rbp)") != std::string::npos);
+        bool destIsMem = (destOp[0] == '-' || destOp[0] == '[' || destOp.find("(%rbp)") != std::string::npos);
+        if (srcIsMem && destIsMem) {
+            canDirectMove = false;
+            break;
+        }
     }
 
     // Check for self cycles among multiple phi moves (e.g. swap %r10 <-> %r11)
