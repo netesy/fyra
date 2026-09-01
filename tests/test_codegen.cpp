@@ -431,6 +431,57 @@ function $test_spill_provenance(%p : w) : w {
         std::cout << "Spill provenance tests passed successfully!" << std::endl;
     }
 
+    // Focused tests for two-address arithmetic lowering safety and emission
+    {
+        std::string lowering_ir = R"(
+function $test_safe_inplace_add(%p : w, %q : w) : w {
+@entry
+    %x = add %p, %q : w
+    %y = add %x, w 5 : w
+    ret %y : w
+}
+
+function $test_unsafe_inplace_add(%p : w, %q : w) : w {
+@entry
+    %x = add %p, %q : w
+    %y = add %x, w 5 : w
+    %z = add %x, w 10 : w
+    %res = add %y, %z : w
+    ret %res : w
+}
+
+function $test_inplace_sub(%p : w, %q : w) : w {
+@entry
+    %x = add %p, %q : w
+    %y = sub %x, w 3 : w
+    ret %y : w
+}
+
+function $test_inplace_mul(%p : w, %q : w) : w {
+@entry
+    %x = add %p, %q : w
+    %y = mul %x, w 7 : w
+    ret %y : w
+}
+)";
+        std::istringstream stream(lowering_ir);
+        parser::Parser low_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> low_module = low_parser.parseModule();
+        assert(low_module != nullptr);
+
+        std::stringstream ss_low;
+        codegen::CodeGen low_cg(*low_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_low);
+        low_cg.emit();
+
+        std::string low_asm = ss_low.str();
+        assert(!low_asm.empty());
+        assert(low_asm.find("test_safe_inplace_add:") != std::string::npos);
+        assert(low_asm.find("test_unsafe_inplace_add:") != std::string::npos);
+        assert(low_asm.find("test_inplace_sub:") != std::string::npos);
+        assert(low_asm.find("test_inplace_mul:") != std::string::npos);
+        std::cout << "Two-address lowering tests completed successfully!" << std::endl;
+    }
+
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
     return 0;
 }

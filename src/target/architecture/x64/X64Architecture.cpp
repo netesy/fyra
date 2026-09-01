@@ -487,19 +487,47 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     }
 }
 
+static bool canUseInPlace(CodeGen& cg, ir::Instruction& i, ir::Value* val0) {
+    if (!i.hasPhysicalRegister() || !val0 || !val0->hasPhysicalRegister()) {
+        return false;
+    }
+    if (i.getPhysicalRegister() != val0->getPhysicalRegister()) {
+        return false;
+    }
+    if (i.getOperands().empty() || !i.getOperands()[0]) {
+        return false;
+    }
+    return cg.liveness.isLastUseOfOperand(&i, i.getOperands()[0].get());
+}
+
 void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
     std::string rax = is32 ? "%eax" : "%rax";
     std::string addOp = is32 ? "addl" : "addq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
-        std::cerr << "emitSub: op0='" << op0 << "' op1='" << op1 << "'\n";
-        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
-                         (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(val0) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val0) != nullptr && !dynamic_cast<ir::Function*>(val0));
         bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
                          (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
+
+        if (abi != X64ABI::Windows && !isGlobal0 && canUseInPlace(cg, i, val0)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal1) {
+                *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+            } else {
+                std::string s1 = op1;
+                if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
         if (abi == X64ABI::Windows) {
             if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
             else *os << "  mov " << rax << ", " << op0 << "\n";
@@ -530,9 +558,20 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     std::string rax = is32 ? "%eax" : "%rax";
     std::string subOp = is32 ? "subl" : "subq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
+
+        if (abi != X64ABI::Windows && canUseInPlace(cg, i, val0)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            std::string s1 = op1;
+            if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+            *os << "  " << subOp << " " << s1 << ", " << d << "\n";
+            cg.lastStoreOp = "";
+            return;
+        }
+
         if (abi == X64ABI::Windows) {
             *os << "  mov " << rax << ", " << op0 << "\n";
             *os << "  sub " << rax << ", " << op1 << "\n";
@@ -555,9 +594,20 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
     std::string rax = is32 ? "%eax" : "%rax";
     std::string mulOp = is32 ? "imull" : "imulq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
+
+        if (abi != X64ABI::Windows && canUseInPlace(cg, i, val0)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            std::string s1 = op1;
+            if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+            *os << "  " << mulOp << " " << s1 << ", " << d << "\n";
+            cg.lastStoreOp = "";
+            return;
+        }
+
         if (abi == X64ABI::Windows) {
             *os << "  mov " << rax << ", " << op0 << "\n";
             *os << "  imul " << rax << ", " << op1 << "\n";

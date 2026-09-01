@@ -10,6 +10,7 @@
 #include "codegen/asm/Assembler.h"
 #include "codegen/validation/ASMValidator.h"
 #include "codegen/objectgen/ObjectFileGenerator.h"
+#include "codegen/regalloc/LivenessAnalysis.h"
 #include <ostream>
 #include <map>
 #include <memory>
@@ -132,6 +133,7 @@ public:
     const std::map<const ir::Function*, uint32_t>& getWasmFunctionIndices() const { return wasmFunctionIndices; }
     ir::Function* getCurrentFunction() const { return currentFunction; }
     std::string lastStoreOp;
+    transforms::LivenessAnalysis liveness;
     const std::map<const ir::Value*, uint32_t>& getWasmLocalIndices() const { return wasmLocalIndices; }
 
     // Enhanced CodeGen configuration
