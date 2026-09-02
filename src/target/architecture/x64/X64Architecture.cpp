@@ -1287,12 +1287,13 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
             }
         } else if (op == ir::Instruction::ExtUW) {
             std::string r32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movl " << srcOp << ", " << eax << "\n";
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movl " << r32 << ", " << d32 << "\n";
             } else {
                 *os << "  movl " << r32 << ", " << eax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSB) {
             std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
             std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;

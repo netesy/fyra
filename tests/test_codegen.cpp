@@ -747,6 +747,12 @@ function $test_extuh_direct(%x : w) : l {
     ret %res : l
 }
 
+function $test_extuw_direct(%x : w) : l {
+@entry
+    %res = extuw %x : l
+    ret %res : l
+}
+
 function $test_ext_alias(%x : w) : l {
 @entry
     %a = extsb %x : l
@@ -797,6 +803,9 @@ function $test_ext_alias(%x : w) : l {
             std::string body_uh = getFunctionBody(sysv_asm, "test_extuh_direct");
             assert(body_uh.find("movzwl %di, %r10d") != std::string::npos);
 
+            std::string body_uw = getFunctionBody(sysv_asm, "test_extuw_direct");
+            assert(body_uw.find("movl %edi, %r10d") != std::string::npos);
+
             std::string body_alias = getFunctionBody(sysv_asm, "test_ext_alias");
             assert(body_alias.find("movsbq %dil, %r10") != std::string::npos);
             assert(body_alias.find("movzbl %r10b, %r10d") != std::string::npos);
@@ -822,6 +831,9 @@ function $test_ext_alias(%x : w) : l {
 
             std::string body_uh = getFunctionBody(win_asm, "test_extuh_direct");
             assert(body_uh.find("movzwl [rbp + -64], eax") != std::string::npos);
+
+            std::string body_uw = getFunctionBody(win_asm, "test_extuw_direct");
+            assert(body_uw.find("movl [rbp + -64], eax") != std::string::npos);
         }
 
         // Memory destination fallback test (unallocated register IR fallback path)
@@ -830,6 +842,12 @@ function $test_ext_alias(%x : w) : l {
 function $test_ext_mem(%x : w) : l {
 @entry
     %res = extsb %x : l
+    ret %res : l
+}
+
+function $test_extuw_mem(%x : w) : l {
+@entry
+    %res = extuw %x : l
     ret %res : l
 }
 )";
@@ -846,6 +864,10 @@ function $test_ext_mem(%x : w) : l {
             std::string body_mem = getFunctionBody(mem_asm, "test_ext_mem");
             assert(body_mem.find("movsbq %dil, %rax") != std::string::npos);
             assert(body_mem.find("movq %rax, -8(%rbp)") != std::string::npos);
+
+            std::string body_uw_mem = getFunctionBody(mem_asm, "test_extuw_mem");
+            assert(body_uw_mem.find("movl %edi, %eax") != std::string::npos);
+            assert(body_uw_mem.find("movq %rax, -8(%rbp)") != std::string::npos);
         }
 
         std::cout << "Sign/Zero-Extension Direct Destination Lowering unit tests passed successfully!" << std::endl;
