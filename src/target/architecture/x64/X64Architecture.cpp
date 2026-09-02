@@ -1250,14 +1250,14 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
             }
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSW) {
-            std::string r32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movslq " << srcOp << ", %rax\n";
+            std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
+            std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
+            if (d64[0] == '%') {
+                *os << "  movslq " << s32 << ", " << d64 << "\n";
             } else {
-                *os << "  movl " << r32 << ", " << eax << "\n";
-                *os << "  cltq\n";
+                *os << "  movslq " << s32 << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else {
             *os << "  movq " << srcOp << ", " << rax << "\n";
             *os << "  movq " << rax << ", " << destOp << "\n";
