@@ -873,5 +873,79 @@ function $test_extuw_mem(%x : w) : l {
         std::cout << "Sign/Zero-Extension Direct Destination Lowering unit tests passed successfully!" << std::endl;
     }
 
+    // Tail-Call Optimization (TCO) Unit Tests
+    {
+        std::string tco_ir = R"(
+function $test_tco_positive(%n : l, %acc : l) : l {
+@start
+    %cond = sle %n, 1 : l
+    jnz %cond, @base, @recur
+
+@base
+    ret %acc : l
+
+@recur
+    %n_next = sub %n, 1 : l
+    %acc_next = mul %acc, %n : l
+    %res = call $test_tco_positive(%n_next, %acc_next) : l
+    ret %res : l
+}
+
+function $test_tco_negative_used(%n : l, %acc : l) : l {
+@entry
+    %n_next = sub %n, 1 : l
+    %res = call $test_tco_positive(%n_next, %acc) : l
+    %extra = add %res, l 5 : l
+    ret %extra : l
+}
+
+function $test_tco_negative_stack_args(%a1 : l, %a2 : l, %a3 : l, %a4 : l, %a5 : l, %a6 : l, %a7 : l) : l {
+@entry
+    %res = call $test_tco_positive(%a1, %a2) : l
+    %unused = add %a7, l 1 : l
+    ret %res : l
+}
+)";
+        std::istringstream tco_stream(tco_ir);
+        parser::Parser tco_parser(tco_stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> tco_module = tco_parser.parseModule();
+        assert(tco_module != nullptr);
+
+        for (auto& func : tco_module->getFunctions()) {
+            transforms::CFGBuilder::run(*func);
+            transforms::LivenessAnalysis liveness;
+            liveness.run(*func);
+            transforms::RegAllocRewriter rewriter;
+            rewriter.run(*func);
+        }
+
+        auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
+            size_t pos = asm_str.find(func_name + ":");
+            if (pos == std::string::npos) return "";
+            size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
+            if (end_pos == std::string::npos) end_pos = asm_str.size();
+            return asm_str.substr(pos, end_pos - pos);
+        };
+
+        std::stringstream ss_tco;
+        codegen::CodeGen codeGenTCO(*tco_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_tco);
+        codeGenTCO.emit();
+        std::string tco_asm = ss_tco.str();
+
+        std::string body_pos = getFunctionBody(tco_asm, "test_tco_positive");
+        assert(body_pos.find("jmp test_tco_positive") != std::string::npos);
+        assert(body_pos.find("call test_tco_positive") == std::string::npos);
+
+        std::string body_neg_used = getFunctionBody(tco_asm, "test_tco_negative_used");
+        assert(body_neg_used.find("call test_tco_positive") != std::string::npos);
+        assert(body_neg_used.find("jmp test_tco_positive") == std::string::npos);
+
+        std::string body_neg_stack = getFunctionBody(tco_asm, "test_tco_negative_stack_args");
+        assert(body_neg_stack.find("call test_tco_positive") != std::string::npos);
+        assert(body_neg_stack.find("jmp test_tco_positive") == std::string::npos);
+
+        std::cout << "Tail-Call Optimization (TCO) unit tests passed successfully!" << std::endl;
+    }
+
     return 0;
 }
