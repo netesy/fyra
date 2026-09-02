@@ -49,6 +49,7 @@ public:
     void emitNot(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitCopy(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitCall(codegen::CodeGen& cg, ir::Instruction& i) override;
+    bool emitTailCall(codegen::CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) override;
     void emitFAdd(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitFSub(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitFMul(codegen::CodeGen& cg, ir::Instruction& i) override;

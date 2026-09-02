@@ -1049,6 +1049,118 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
     }
 }
 
+bool X64Architecture::emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) {
+    ir::Value* calleeVal = callInst.getOperands()[0]->get();
+    bool isDirectCall = (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+    if (!isDirectCall) return false;
+
+    // Safety Predicate: Check return value consumption
+    if (callInst.getType()->getTypeID() != ir::Type::VoidTyID) {
+        if (retInst.getOperands().empty() || retInst.getOperands()[0]->get() != &callInst) {
+            return false;
+        }
+    } else {
+        if (!retInst.getOperands().empty()) return false;
+    }
+
+    // Safety Predicate: No stack-passed arguments
+    size_t numArgs = callInst.getOperands().size() - 1;
+    size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
+    if (numArgs > maxArgs) return false;
+
+    if (auto* os = cg.getTextStream()) {
+        size_t int_idx = 0, float_idx = 0;
+        for (size_t j = 1; j < callInst.getOperands().size(); ++j) {
+            ir::Value* argVal = callInst.getOperands()[j]->get();
+            bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
+            bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
+                               (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
+            if (isFloat) {
+                if (float_idx < floatArgRegs.size()) {
+                    std::string reg = floatArgRegs[float_idx++];
+                    if (abi == X64ABI::Windows)
+                        *os << "  movsd " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                    else
+                        *os << "  movsd " << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
+                }
+            } else {
+                if (int_idx < maxArgs) {
+                    bool is32 = is32BitType(argVal->getType());
+                    std::string reg = getRegisterName(integerArgRegs[int_idx++], argVal->getType());
+                    if (argIsGlobal && abi == X64ABI::Windows) {
+                        *os << "  lea " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                    } else if (argIsGlobal && abi == X64ABI::SystemV) {
+                        *os << "  leaq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                    } else {
+                        if (abi == X64ABI::Windows)
+                            *os << "  mov " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
+                        else
+                            emitMov(cg, os, cg.getValueAsOperand(argVal), reg, is32);
+                    }
+                }
+            }
+        }
+
+        // Frame Teardown
+        ir::Function* func = callInst.getParent()->getParent();
+        if (abi == X64ABI::SystemV) {
+            std::vector<std::string> usedCalleeRegs;
+            static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
+            for (auto& bb : func->getBasicBlocks()) {
+                for (auto& instr : bb->getInstructions()) {
+                    if (instr->hasPhysicalRegister()) {
+                        size_t regIdx = instr->getPhysicalRegister();
+                        if (regIdx < integerRegs.size()) {
+                            const std::string& regName = integerRegs[regIdx];
+                            if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
+                                if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
+                                    usedCalleeRegs.push_back(regName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (!usedCalleeRegs.empty()) {
+                *os << "  jmp " << func->getName() << "_epilogue\n";
+                return true;
+            }
+            bool makesCalls = false;
+            for (auto& bb : func->getBasicBlocks()) {
+                for (auto& instr : bb->getInstructions()) {
+                    auto opc = instr->getOpcode();
+                    if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
+                        makesCalls = true;
+                        break;
+                    }
+                }
+                if (makesCalls) break;
+            }
+            int current_offset = -8;
+            for (auto& bb : func->getBasicBlocks()) {
+                for (auto& instr : bb->getInstructions()) {
+                    if (instr->getType() && !instr->getType()->isVoidTy()) {
+                        if (func->hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
+                            current_offset -= 8;
+                        }
+                    }
+                }
+            }
+            int stack_alloc = std::abs(current_offset + 8);
+            bool isZeroFrame = (!makesCalls && stack_alloc == 0);
+            if (!isZeroFrame) {
+                *os << "  leave\n";
+            }
+            *os << "  jmp " << calleeVal->getName() << "\n";
+        } else {
+            *os << "  jmp " << func->getName() << "_epilogue\n";
+        }
+        return true;
+    }
+    return false;
+}
+
 void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
