@@ -598,5 +598,44 @@ function $test_inplace_mul(%p : w, %q : w) : w {
     }
 
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
+
+    // ExtSW Direct movslq Lowering Unit Tests
+    {
+        std::string extsw_ir = R"(
+function $test_extsw_reg(%x : w) : l {
+@entry
+    %res = extsw %x : l
+    ret %res : l
+}
+
+function $test_extsw_positive() : l {
+@entry
+    %a = add w 100, w 200 : w
+    %res = extsw %a : l
+    ret %res : l
+}
+
+function $test_extsw_negative() : l {
+@entry
+    %a = sub w 10, w 20 : w
+    %res = extsw %a : l
+    ret %res : l
+}
+)";
+        std::istringstream extsw_stream(extsw_ir);
+        parser::Parser extsw_parser(extsw_stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> extsw_module = extsw_parser.parseModule();
+        assert(extsw_module != nullptr);
+
+        std::stringstream ss_extsw;
+        codegen::CodeGen codeGenExtSW(*extsw_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_extsw);
+        codeGenExtSW.emit();
+
+        std::string extsw_asm = ss_extsw.str();
+        assert(extsw_asm.find("movslq") != std::string::npos);
+        assert(extsw_asm.find("cltq") == std::string::npos);
+        std::cout << "ExtSW direct movslq lowering tests passed successfully!" << std::endl;
+    }
+
     return 0;
 }
