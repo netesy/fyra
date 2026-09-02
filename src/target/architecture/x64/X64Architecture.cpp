@@ -543,44 +543,22 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
-        std::string s0 = op0;
-        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
-        std::string s1 = op1;
-        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
-
         if (abi == X64ABI::Windows) {
-            if (d == s1 && d != s0) {
-                // Commute: dst = src2 + src1
-                if (isGlobal1) *os << "  lea " << d << ", " << op1 << "\n";
-                else *os << "  mov " << d << ", " << op1 << "\n";
+            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
+            else *os << "  mov " << rax << ", " << op0 << "\n";
 
-                if (isGlobal0) *os << "  lea rdx, " << op0 << "\n  add " << d << ", rdx\n";
-                else *os << "  add " << d << ", " << op0 << "\n";
-            } else {
-                // Direct: dst = src1 + src2
-                if (isGlobal0) *os << "  lea " << d << ", " << op0 << "\n";
-                else *os << "  mov " << d << ", " << op0 << "\n";
+            if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << rax << ", rdx\n";
+            else *os << "  add " << rax << ", " << op1 << "\n";
 
-                if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << d << ", rdx\n";
-                else *os << "  add " << d << ", " << op1 << "\n";
-            }
+            *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            if (d == s1 && d != s0) {
-                // Commute: dst = src2 + src1
-                if (isGlobal1) *os << "  leaq " << op1 << ", " << d << "\n";
-                else emitMov(cg, os, op1, d, is32);
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
+            else emitMov(cg, os, op0, rax, is32);
 
-                if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
-                else *os << "  " << addOp << " " << s0 << ", " << d << "\n";
-            } else {
-                // Direct: dst = src1 + src2
-                if (isGlobal0) *os << "  leaq " << op0 << ", " << d << "\n";
-                else emitMov(cg, os, op0, d, is32);
+            if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << rax << "\n";
+            else *os << "  " << addOp << " " << op1 << ", " << rax << "\n";
 
-                if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
-                else *os << "  " << addOp << " " << s1 << ", " << d << "\n";
-            }
+            emitMov(cg, os, rax, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -609,32 +587,14 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
-        std::string s0 = op0;
-        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
-        std::string s1 = op1;
-        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
-
-        if (d != s1) {
-            // Safe direct lowering: dst = src1 - src2
-            if (abi == X64ABI::Windows) {
-                *os << "  mov " << d << ", " << op0 << "\n";
-                *os << "  sub " << d << ", " << op1 << "\n";
-            } else {
-                emitMov(cg, os, op0, d, is32);
-                *os << "  " << subOp << " " << s1 << ", " << d << "\n";
-            }
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  sub " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            // Fallback for SUB when dst == src2 (non-commutative)
-            if (abi == X64ABI::Windows) {
-                *os << "  mov " << rax << ", " << op0 << "\n";
-                *os << "  sub " << rax << ", " << op1 << "\n";
-                *os << "  mov " << dst << ", " << rax << "\n";
-            } else {
-                emitMov(cg, os, op0, rax, is32);
-                *os << "  " << subOp << " " << s1 << ", " << rax << "\n";
-                emitMov(cg, os, rax, dst, is32);
-            }
+            emitMov(cg, os, op0, rax, is32);
+            *os << "  " << subOp << " " << op1 << ", " << rax << "\n";
+            emitMov(cg, os, rax, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -663,32 +623,14 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
-        std::string s0 = op0;
-        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
-        std::string s1 = op1;
-        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
-
         if (abi == X64ABI::Windows) {
-            if (d == s1 && d != s0) {
-                // Commute: dst = src2 * src1
-                *os << "  mov " << d << ", " << op1 << "\n";
-                *os << "  imul " << d << ", " << op0 << "\n";
-            } else {
-                // Direct: dst = src1 * src2
-                *os << "  mov " << d << ", " << op0 << "\n";
-                *os << "  imul " << d << ", " << op1 << "\n";
-            }
+            *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  imul " << rax << ", " << op1 << "\n";
+            *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            if (d == s1 && d != s0) {
-                // Commute: dst = src2 * src1
-                emitMov(cg, os, op1, d, is32);
-                *os << "  " << mulOp << " " << s0 << ", " << d << "\n";
-            } else {
-                // Direct: dst = src1 * src2
-                emitMov(cg, os, op0, d, is32);
-                *os << "  " << mulOp << " " << s1 << ", " << d << "\n";
-            }
+            emitMov(cg, os, op0, rax, is32);
+            *os << "  " << mulOp << " " << op1 << ", " << rax << "\n";
+            emitMov(cg, os, rax, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -1268,45 +1210,100 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
                 *os << "  movsd %xmm0, " << destOp << "\n";
             }
         } else if (op == ir::Instruction::ExtUB) {
-            std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movzbl " << srcOp << ", %eax\n";
+            std::string r8 = (srcOp[0] == '%' || srcOp[0] == 'r' || srcOp[0] == 'e') ? to8BitReg(srcOp) : srcOp;
+            bool isRegDst = (!destOp.empty() && (destOp[0] == '%' || destOp[0] == 'r' || destOp[0] == 'e'));
+            if (isRegDst) {
+                std::string d32 = to32BitReg(destOp);
+                if (abi == X64ABI::Windows) {
+                    *os << "  movzx " << d32 << ", " << r8 << "\n";
+                } else {
+                    *os << "  movzbl " << r8 << ", " << d32 << "\n";
+                }
             } else {
-                *os << "  movzbl " << r8 << ", %eax\n";
+                if (abi == X64ABI::Windows) {
+                    *os << "  movzx eax, " << r8 << "\n";
+                    *os << "  mov " << destOp << ", rax\n";
+                } else {
+                    *os << "  movzbl " << r8 << ", %eax\n";
+                    *os << "  movq " << rax << ", " << destOp << "\n";
+                }
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUH) {
-            std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movzwl " << srcOp << ", %eax\n";
+            std::string r16 = (srcOp[0] == '%' || srcOp[0] == 'r' || srcOp[0] == 'e') ? to16BitReg(srcOp) : srcOp;
+            bool isRegDst = (!destOp.empty() && (destOp[0] == '%' || destOp[0] == 'r' || destOp[0] == 'e'));
+            if (isRegDst) {
+                std::string d32 = to32BitReg(destOp);
+                if (abi == X64ABI::Windows) {
+                    *os << "  movzx " << d32 << ", " << r16 << "\n";
+                } else {
+                    *os << "  movzwl " << r16 << ", " << d32 << "\n";
+                }
             } else {
-                *os << "  movzwl " << r16 << ", %eax\n";
+                if (abi == X64ABI::Windows) {
+                    *os << "  movzx eax, " << r16 << "\n";
+                    *os << "  mov " << destOp << ", rax\n";
+                } else {
+                    *os << "  movzwl " << r16 << ", %eax\n";
+                    *os << "  movq " << rax << ", " << destOp << "\n";
+                }
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUW) {
-            std::string r32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movl " << srcOp << ", " << eax << "\n";
+            std::string r32 = (srcOp[0] == '%' || srcOp[0] == 'r' || srcOp[0] == 'e') ? to32BitReg(srcOp) : srcOp;
+            bool isRegDst = (!destOp.empty() && (destOp[0] == '%' || destOp[0] == 'r' || destOp[0] == 'e'));
+            if (isRegDst) {
+                std::string d32 = to32BitReg(destOp);
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov " << d32 << ", " << r32 << "\n";
+                } else {
+                    emitMov(cg, os, r32, d32, true);
+                }
             } else {
-                *os << "  movl " << r32 << ", " << eax << "\n";
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov eax, " << r32 << "\n";
+                    *os << "  mov " << destOp << ", rax\n";
+                } else {
+                    *os << "  movl " << r32 << ", " << eax << "\n";
+                    *os << "  movq " << rax << ", " << destOp << "\n";
+                }
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSB) {
-            std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movsbq " << srcOp << ", %rax\n";
+            std::string r8 = (srcOp[0] == '%' || srcOp[0] == 'r' || srcOp[0] == 'e') ? to8BitReg(srcOp) : srcOp;
+            bool isRegDst = (!destOp.empty() && (destOp[0] == '%' || destOp[0] == 'r' || destOp[0] == 'e'));
+            if (isRegDst) {
+                std::string d64 = to64BitReg(destOp);
+                if (abi == X64ABI::Windows) {
+                    *os << "  movsx " << d64 << ", " << r8 << "\n";
+                } else {
+                    *os << "  movsbq " << r8 << ", " << d64 << "\n";
+                }
             } else {
-                *os << "  movsbq " << r8 << ", %rax\n";
+                if (abi == X64ABI::Windows) {
+                    *os << "  movsx rax, " << r8 << "\n";
+                    *os << "  mov " << destOp << ", rax\n";
+                } else {
+                    *os << "  movsbq " << r8 << ", %rax\n";
+                    *os << "  movq " << rax << ", " << destOp << "\n";
+                }
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSH) {
-            std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movswq " << srcOp << ", %rax\n";
+            std::string r16 = (srcOp[0] == '%' || srcOp[0] == 'r' || srcOp[0] == 'e') ? to16BitReg(srcOp) : srcOp;
+            bool isRegDst = (!destOp.empty() && (destOp[0] == '%' || destOp[0] == 'r' || destOp[0] == 'e'));
+            if (isRegDst) {
+                std::string d64 = to64BitReg(destOp);
+                if (abi == X64ABI::Windows) {
+                    *os << "  movsx " << d64 << ", " << r16 << "\n";
+                } else {
+                    *os << "  movswq " << r16 << ", " << d64 << "\n";
+                }
             } else {
-                *os << "  movswq " << r16 << ", %rax\n";
+                if (abi == X64ABI::Windows) {
+                    *os << "  movsx rax, " << r16 << "\n";
+                    *os << "  mov " << destOp << ", rax\n";
+                } else {
+                    *os << "  movswq " << r16 << ", %rax\n";
+                    *os << "  movq " << rax << ", " << destOp << "\n";
+                }
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSW) {
             std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
             std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;

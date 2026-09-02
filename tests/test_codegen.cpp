@@ -109,8 +109,7 @@ function $test_lea_float(%x : s) : s {
         std::string lea_asm = ss_lea.str();
         // Helper to extract function body from generated assembly
         auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
-            size_t pos = asm_str.find(".globl " + func_name);
-            if (pos == std::string::npos) pos = asm_str.find(func_name + ":");
+            size_t pos = asm_str.find(func_name + ":");
             if (pos == std::string::npos) return "";
             size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
             if (end_pos == std::string::npos) end_pos = asm_str.size();
@@ -601,51 +600,39 @@ function $test_inplace_mul(%p : w, %q : w) : w {
 
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
 
-    // Fixed-Register Intermediate Copy Elimination Unit Tests (2-Address Binary Copy Elimination)
+    // Sign/Zero-Extension Direct Destination Lowering Unit Tests
     {
-        std::string copy_elim_ir = R"(
-function $test_add_direct(%a : w, %b : w) : w {
+        std::string ext_ir = R"(
+function $test_extsb(%x : w) : l {
 @entry
-    %res = add %a, %b : w
-    ret %res : w
-}
-
-function $test_sub_direct(%a : w, %b : w) : w {
-@entry
-    %res = sub %a, %b : w
-    ret %res : w
-}
-
-function $test_mul_direct(%a : w, %b : w) : w {
-@entry
-    %res = mul %a, %b : w
-    ret %res : w
-}
-
-function $test_add_64bit(%a : l, %b : l) : l {
-@entry
-    %res = add %a, %b : l
+    %res = extsb %x : l
     ret %res : l
 }
 
-function $test_sub_64bit(%a : l, %b : l) : l {
+function $test_extub(%x : w) : l {
 @entry
-    %res = sub %a, %b : l
+    %res = extub %x : l
     ret %res : l
 }
 
-function $test_mul_64bit(%a : l, %b : l) : l {
+function $test_extsh(%x : w) : l {
 @entry
-    %res = mul %a, %b : l
+    %res = extsh %x : l
+    ret %res : l
+}
+
+function $test_extuh(%x : w) : l {
+@entry
+    %res = extuh %x : l
     ret %res : l
 }
 )";
-        std::istringstream stream(copy_elim_ir);
-        parser::Parser copy_elim_parser(stream, parser::FileFormat::FYRA);
-        std::unique_ptr<ir::Module> copy_elim_module = copy_elim_parser.parseModule();
-        assert(copy_elim_module != nullptr);
+        std::istringstream ext_stream(ext_ir);
+        parser::Parser ext_parser(ext_stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> ext_module = ext_parser.parseModule();
+        assert(ext_module != nullptr);
 
-        for (auto& func : copy_elim_module->getFunctions()) {
+        for (auto& func : ext_module->getFunctions()) {
             transforms::CFGBuilder::run(*func);
             transforms::LivenessAnalysis liveness;
             liveness.run(*func);
@@ -653,33 +640,34 @@ function $test_mul_64bit(%a : l, %b : l) : l {
             rewriter.run(*func);
         }
 
-        std::stringstream ss_ce;
-        codegen::CodeGen codeGenCE(*copy_elim_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_ce);
-        codeGenCE.emit();
+        std::stringstream ss_ext;
+        codegen::CodeGen codeGenExt(*ext_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_ext);
+        codeGenExt.emit();
 
-        std::string ce_asm = ss_ce.str();
+        std::string ext_asm = ss_ext.str();
 
         auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
-            size_t pos = asm_str.find(func_name + ":");
+            size_t pos = asm_str.find(".globl " + func_name);
+            if (pos == std::string::npos) pos = asm_str.find(func_name + ":");
             if (pos == std::string::npos) return "";
             size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
             if (end_pos == std::string::npos) end_pos = asm_str.size();
             return asm_str.substr(pos, end_pos - pos);
         };
 
-        std::string body_add = getFunctionBody(ce_asm, "test_add_direct");
-        assert(body_add.find("movl %edi, %r10d") != std::string::npos);
-        assert(body_add.find("addl %esi, %r10d") != std::string::npos);
+        std::string body_sb = getFunctionBody(ext_asm, "test_extsb");
+        assert(body_sb.find("movsbq %dil, %r10") != std::string::npos);
 
-        std::string body_sub = getFunctionBody(ce_asm, "test_sub_direct");
-        assert(body_sub.find("movl %edi, %r10d") != std::string::npos);
-        assert(body_sub.find("subl %esi, %r10d") != std::string::npos);
+        std::string body_ub = getFunctionBody(ext_asm, "test_extub");
+        assert(body_ub.find("movzbl %dil, %r10d") != std::string::npos);
 
-        std::string body_mul = getFunctionBody(ce_asm, "test_mul_direct");
-        assert(body_mul.find("movl %edi, %r10d") != std::string::npos);
-        assert(body_mul.find("imull %esi, %r10d") != std::string::npos);
+        std::string body_sh = getFunctionBody(ext_asm, "test_extsh");
+        assert(body_sh.find("movswq %di, %r10") != std::string::npos);
 
-        std::cout << "2-Address binary copy elimination unit tests passed successfully!" << std::endl;
+        std::string body_uh = getFunctionBody(ext_asm, "test_extuh");
+        assert(body_uh.find("movzwl %di, %r10d") != std::string::npos);
+
+        std::cout << "Sign/Zero-Extension direct lowering unit tests passed successfully!" << std::endl;
     }
 
     // ExtSW Direct movslq Lowering Unit Tests
