@@ -2,6 +2,7 @@
 #include "ir/Module.h"
 #include "ir/PhiNode.h"
 #include "ir/Use.h"
+#include "transforms/CFGBuilder.h"
 #include "codegen/CodeGen.h"
 #include "codegen/regalloc/LivenessAnalysis.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
@@ -108,7 +109,8 @@ function $test_lea_float(%x : s) : s {
         std::string lea_asm = ss_lea.str();
         // Helper to extract function body from generated assembly
         auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
-            size_t pos = asm_str.find(func_name + ":");
+            size_t pos = asm_str.find(".globl " + func_name);
+            if (pos == std::string::npos) pos = asm_str.find(func_name + ":");
             if (pos == std::string::npos) return "";
             size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
             if (end_pos == std::string::npos) end_pos = asm_str.size();
@@ -598,6 +600,87 @@ function $test_inplace_mul(%p : w, %q : w) : w {
     }
 
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
+
+    // Fixed-Register Intermediate Copy Elimination Unit Tests (2-Address Binary Copy Elimination)
+    {
+        std::string copy_elim_ir = R"(
+function $test_add_direct(%a : w, %b : w) : w {
+@entry
+    %res = add %a, %b : w
+    ret %res : w
+}
+
+function $test_sub_direct(%a : w, %b : w) : w {
+@entry
+    %res = sub %a, %b : w
+    ret %res : w
+}
+
+function $test_mul_direct(%a : w, %b : w) : w {
+@entry
+    %res = mul %a, %b : w
+    ret %res : w
+}
+
+function $test_add_64bit(%a : l, %b : l) : l {
+@entry
+    %res = add %a, %b : l
+    ret %res : l
+}
+
+function $test_sub_64bit(%a : l, %b : l) : l {
+@entry
+    %res = sub %a, %b : l
+    ret %res : l
+}
+
+function $test_mul_64bit(%a : l, %b : l) : l {
+@entry
+    %res = mul %a, %b : l
+    ret %res : l
+}
+)";
+        std::istringstream stream(copy_elim_ir);
+        parser::Parser copy_elim_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> copy_elim_module = copy_elim_parser.parseModule();
+        assert(copy_elim_module != nullptr);
+
+        for (auto& func : copy_elim_module->getFunctions()) {
+            transforms::CFGBuilder::run(*func);
+            transforms::LivenessAnalysis liveness;
+            liveness.run(*func);
+            transforms::RegAllocRewriter rewriter;
+            rewriter.run(*func);
+        }
+
+        std::stringstream ss_ce;
+        codegen::CodeGen codeGenCE(*copy_elim_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_ce);
+        codeGenCE.emit();
+
+        std::string ce_asm = ss_ce.str();
+
+        auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
+            size_t pos = asm_str.find(func_name + ":");
+            if (pos == std::string::npos) return "";
+            size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
+            if (end_pos == std::string::npos) end_pos = asm_str.size();
+            return asm_str.substr(pos, end_pos - pos);
+        };
+
+        std::string body_add = getFunctionBody(ce_asm, "test_add_direct");
+        assert(body_add.find("movl %edi, %r10d") != std::string::npos);
+        assert(body_add.find("addl %esi, %r10d") != std::string::npos);
+
+        std::string body_sub = getFunctionBody(ce_asm, "test_sub_direct");
+        assert(body_sub.find("movl %edi, %r10d") != std::string::npos);
+        assert(body_sub.find("subl %esi, %r10d") != std::string::npos);
+
+        std::string body_mul = getFunctionBody(ce_asm, "test_mul_direct");
+        assert(body_mul.find("movl %edi, %r10d") != std::string::npos);
+        assert(body_mul.find("imull %esi, %r10d") != std::string::npos);
+
+        std::cout << "2-Address binary copy elimination unit tests passed successfully!" << std::endl;
+    }
 
     // ExtSW Direct movslq Lowering Unit Tests
     {
