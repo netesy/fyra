@@ -543,22 +543,44 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
         if (abi == X64ABI::Windows) {
-            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
-            else *os << "  mov " << rax << ", " << op0 << "\n";
-            
-            if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << rax << ", rdx\n";
-            else *os << "  add " << rax << ", " << op1 << "\n";
-            
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 + src1
+                if (isGlobal1) *os << "  lea " << d << ", " << op1 << "\n";
+                else *os << "  mov " << d << ", " << op1 << "\n";
+
+                if (isGlobal0) *os << "  lea rdx, " << op0 << "\n  add " << d << ", rdx\n";
+                else *os << "  add " << d << ", " << op0 << "\n";
+            } else {
+                // Direct: dst = src1 + src2
+                if (isGlobal0) *os << "  lea " << d << ", " << op0 << "\n";
+                else *os << "  mov " << d << ", " << op0 << "\n";
+
+                if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << d << ", rdx\n";
+                else *os << "  add " << d << ", " << op1 << "\n";
+            }
         } else {
-            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else emitMov(cg, os, op0, rax, is32);
-            
-            if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << rax << "\n";
-            else *os << "  " << addOp << " " << op1 << ", " << rax << "\n";
-            
-            emitMov(cg, os, rax, dst, is32);
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 + src1
+                if (isGlobal1) *os << "  leaq " << op1 << ", " << d << "\n";
+                else emitMov(cg, os, op1, d, is32);
+
+                if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+                else *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+            } else {
+                // Direct: dst = src1 + src2
+                if (isGlobal0) *os << "  leaq " << op0 << ", " << d << "\n";
+                else emitMov(cg, os, op0, d, is32);
+
+                if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+                else *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -587,14 +609,32 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  sub " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
+        if (d != s1) {
+            // Safe direct lowering: dst = src1 - src2
+            if (abi == X64ABI::Windows) {
+                *os << "  mov " << d << ", " << op0 << "\n";
+                *os << "  sub " << d << ", " << op1 << "\n";
+            } else {
+                emitMov(cg, os, op0, d, is32);
+                *os << "  " << subOp << " " << s1 << ", " << d << "\n";
+            }
         } else {
-            emitMov(cg, os, op0, rax, is32);
-            *os << "  " << subOp << " " << op1 << ", " << rax << "\n";
-            emitMov(cg, os, rax, dst, is32);
+            // Fallback for SUB when dst == src2 (non-commutative)
+            if (abi == X64ABI::Windows) {
+                *os << "  mov " << rax << ", " << op0 << "\n";
+                *os << "  sub " << rax << ", " << op1 << "\n";
+                *os << "  mov " << dst << ", " << rax << "\n";
+            } else {
+                emitMov(cg, os, op0, rax, is32);
+                *os << "  " << subOp << " " << s1 << ", " << rax << "\n";
+                emitMov(cg, os, rax, dst, is32);
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -623,14 +663,32 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  imul " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 * src1
+                *os << "  mov " << d << ", " << op1 << "\n";
+                *os << "  imul " << d << ", " << op0 << "\n";
+            } else {
+                // Direct: dst = src1 * src2
+                *os << "  mov " << d << ", " << op0 << "\n";
+                *os << "  imul " << d << ", " << op1 << "\n";
+            }
         } else {
-            emitMov(cg, os, op0, rax, is32);
-            *os << "  " << mulOp << " " << op1 << ", " << rax << "\n";
-            emitMov(cg, os, rax, dst, is32);
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 * src1
+                emitMov(cg, os, op1, d, is32);
+                *os << "  " << mulOp << " " << s0 << ", " << d << "\n";
+            } else {
+                // Direct: dst = src1 * src2
+                emitMov(cg, os, op0, d, is32);
+                *os << "  " << mulOp << " " << s1 << ", " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
