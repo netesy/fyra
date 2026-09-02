@@ -720,5 +720,136 @@ function $test_extsw_negative() : l {
         std::cout << "ExtSW direct movslq lowering tests passed successfully!" << std::endl;
     }
 
+    // Sign/Zero-Extension Direct Destination Lowering Unit Tests
+    {
+        std::string ext_direct_ir = R"(
+function $test_extsb_direct(%x : w) : l {
+@entry
+    %res = extsb %x : l
+    ret %res : l
+}
+
+function $test_extub_direct(%x : w) : l {
+@entry
+    %res = extub %x : l
+    ret %res : l
+}
+
+function $test_extsh_direct(%x : w) : l {
+@entry
+    %res = extsh %x : l
+    ret %res : l
+}
+
+function $test_extuh_direct(%x : w) : l {
+@entry
+    %res = extuh %x : l
+    ret %res : l
+}
+
+function $test_ext_alias(%x : w) : l {
+@entry
+    %a = extsb %x : l
+    %b = extub %a : l
+    %c = extsh %b : l
+    %d = extuh %c : l
+    ret %d : l
+}
+)";
+        std::istringstream ext_stream(ext_direct_ir);
+        parser::Parser ext_parser(ext_stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> ext_module = ext_parser.parseModule();
+        assert(ext_module != nullptr);
+
+        for (auto& func : ext_module->getFunctions()) {
+            transforms::CFGBuilder::run(*func);
+            transforms::LivenessAnalysis liveness;
+            liveness.run(*func);
+            transforms::RegAllocRewriter rewriter;
+            rewriter.run(*func);
+        }
+
+        auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
+            size_t pos = asm_str.find(func_name + ":");
+            if (pos == std::string::npos) return "";
+            size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
+            if (end_pos == std::string::npos) end_pos = asm_str.size();
+            return asm_str.substr(pos, end_pos - pos);
+        };
+
+        // SystemV ABI
+        {
+            std::stringstream ss_sysv;
+            codegen::CodeGen codeGenSysV(*ext_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_sysv);
+            codeGenSysV.emit();
+            std::string sysv_asm = ss_sysv.str();
+
+            std::string body_sb = getFunctionBody(sysv_asm, "test_extsb_direct");
+            assert(body_sb.find("movsbq %dil, %r10") != std::string::npos);
+            assert(body_sb.find("%rax") == std::string::npos || body_sb.find("movsbq %dil, %rax") == std::string::npos);
+
+            std::string body_ub = getFunctionBody(sysv_asm, "test_extub_direct");
+            assert(body_ub.find("movzbl %dil, %r10d") != std::string::npos);
+
+            std::string body_sh = getFunctionBody(sysv_asm, "test_extsh_direct");
+            assert(body_sh.find("movswq %di, %r10") != std::string::npos);
+
+            std::string body_uh = getFunctionBody(sysv_asm, "test_extuh_direct");
+            assert(body_uh.find("movzwl %di, %r10d") != std::string::npos);
+
+            std::string body_alias = getFunctionBody(sysv_asm, "test_ext_alias");
+            assert(body_alias.find("movsbq %dil, %r10") != std::string::npos);
+            assert(body_alias.find("movzbl %r10b, %r10d") != std::string::npos);
+            assert(body_alias.find("movswq %r10w, %r10") != std::string::npos);
+            assert(body_alias.find("movzwl %r10w, %r10d") != std::string::npos);
+        }
+
+        // Windows ABI
+        {
+            std::stringstream ss_win;
+            codegen::CodeGen codeGenWin(*ext_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows}), &ss_win);
+            codeGenWin.emit();
+            std::string win_asm = ss_win.str();
+
+            std::string body_sb = getFunctionBody(win_asm, "test_extsb_direct");
+            assert(body_sb.find("movsbq [rbp + -64], rax") != std::string::npos);
+
+            std::string body_ub = getFunctionBody(win_asm, "test_extub_direct");
+            assert(body_ub.find("movzbl [rbp + -64], eax") != std::string::npos);
+
+            std::string body_sh = getFunctionBody(win_asm, "test_extsh_direct");
+            assert(body_sh.find("movswq [rbp + -64], rax") != std::string::npos);
+
+            std::string body_uh = getFunctionBody(win_asm, "test_extuh_direct");
+            assert(body_uh.find("movzwl [rbp + -64], eax") != std::string::npos);
+        }
+
+        // Memory destination fallback test (unallocated register IR fallback path)
+        {
+            std::string mem_ir = R"(
+function $test_ext_mem(%x : w) : l {
+@entry
+    %res = extsb %x : l
+    ret %res : l
+}
+)";
+            std::istringstream mem_stream(mem_ir);
+            parser::Parser mem_parser(mem_stream, parser::FileFormat::FYRA);
+            std::unique_ptr<ir::Module> mem_module = mem_parser.parseModule();
+            assert(mem_module != nullptr);
+
+            std::stringstream ss_mem;
+            codegen::CodeGen codeGenMem(*mem_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_mem);
+            codeGenMem.emit();
+            std::string mem_asm = ss_mem.str();
+
+            std::string body_mem = getFunctionBody(mem_asm, "test_ext_mem");
+            assert(body_mem.find("movsbq %dil, %rax") != std::string::npos);
+            assert(body_mem.find("movq %rax, -8(%rbp)") != std::string::npos);
+        }
+
+        std::cout << "Sign/Zero-Extension Direct Destination Lowering unit tests passed successfully!" << std::endl;
+    }
+
     return 0;
 }

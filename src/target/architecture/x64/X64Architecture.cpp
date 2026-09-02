@@ -1269,20 +1269,22 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
             }
         } else if (op == ir::Instruction::ExtUB) {
             std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movzbl " << srcOp << ", %eax\n";
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movzbl " << r8 << ", " << d32 << "\n";
             } else {
-                *os << "  movzbl " << r8 << ", %eax\n";
+                *os << "  movzbl " << r8 << ", " << eax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUH) {
             std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movzwl " << srcOp << ", %eax\n";
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movzwl " << r16 << ", " << d32 << "\n";
             } else {
-                *os << "  movzwl " << r16 << ", %eax\n";
+                *os << "  movzwl " << r16 << ", " << eax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUW) {
             std::string r32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
             if (srcOp[0] != '%') {
@@ -1293,20 +1295,22 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
             *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSB) {
             std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movsbq " << srcOp << ", %rax\n";
+            std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movsbq " << r8 << ", " << d64 << "\n";
             } else {
-                *os << "  movsbq " << r8 << ", %rax\n";
+                *os << "  movsbq " << r8 << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSH) {
             std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movswq " << srcOp << ", %rax\n";
+            std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movswq " << r16 << ", " << d64 << "\n";
             } else {
-                *os << "  movswq " << r16 << ", %rax\n";
+                *os << "  movswq " << r16 << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSW) {
             std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
             std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
