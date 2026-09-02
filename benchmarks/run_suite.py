@@ -56,7 +56,7 @@ def analyze_assembly(asm_file):
                 calls += 1
             elif op.startswith('j') or op == 'ret' or op == 'retq':
                 branches += 1
-            elif 'mov' in op or 'push' in op or 'pop' in op or 'lea' in op:
+            elif 'mov' in op or 'push' in op or 'pop' in op:
                 if '(' in line or ')' in line or 'ptr' in line:
                     if 'push' in op or ('mov' in op and ('%rbp)' in line or '[rbp' in line or '->' in line)):
                         if op.startswith('mov') and ('(%rbp)' in line.split(',')[-1] or '[rbp' in line.split(',')[-1]):
