@@ -515,6 +515,202 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
                          (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
 
+        // LEA Instruction Selection Optimization:
+        // Try to fuse (x * C1) + C2, or (x * C1) + y, or x + C2 into a single LEA instruction
+        // where LEA can represent x * scale + displacement or base + index * scale + displacement.
+        auto tryEmitLEA = [&]() -> bool {
+            if (isGlobal0 || isGlobal1) return false;
+            // LEA is valid for integer types
+            if (!i.getType() || !i.getType()->isInteger()) return false;
+
+            // Helper to get constant integer from Value
+            auto getConstInt = [](ir::Value* v, int64_t& outVal) -> bool {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(v)) {
+                    outVal = static_cast<int64_t>(ci->getValue());
+                    return true;
+                }
+                return false;
+            };
+
+            // Structure representing a term in LEA calculation: x * mult + disp
+            struct LEATerm {
+                ir::Value* var = nullptr;
+                int64_t mult = 1;
+                int64_t disp = 0;
+                bool valid = false;
+            };
+
+            auto analyzeOperand = [&](ir::Value* opVal) -> LEATerm {
+                LEATerm t;
+                if (!opVal) return t;
+
+                int64_t c = 0;
+                if (getConstInt(opVal, c)) {
+                    t.disp = c;
+                    t.valid = true;
+                    return t;
+                }
+
+                if (auto* mulInst = dynamic_cast<ir::Instruction*>(opVal)) {
+                    if (mulInst->getOpcode() == ir::Instruction::Mul &&
+                        mulInst->getType() && mulInst->getType()->isInteger() &&
+                        mulInst->getType()->getSize() == i.getType()->getSize() &&
+                        mulInst->getOperands().size() == 2) {
+                        ir::Value* m0 = mulInst->getOperands()[0]->get();
+                        ir::Value* m1 = mulInst->getOperands()[1]->get();
+                        int64_t mc = 0;
+                        if (getConstInt(m1, mc)) {
+                            t.var = m0;
+                            t.mult = mc;
+                            t.valid = true;
+                            return t;
+                        } else if (getConstInt(m0, mc)) {
+                            t.var = m1;
+                            t.mult = mc;
+                            t.valid = true;
+                            return t;
+                        }
+                    }
+                }
+
+                // Plain variable term (mult = 1, disp = 0)
+                t.var = opVal;
+                t.mult = 1;
+                t.disp = 0;
+                t.valid = true;
+                return t;
+            };
+
+            LEATerm term0 = analyzeOperand(val0);
+            LEATerm term1 = analyzeOperand(i.getOperands()[1]->get());
+            if (!term0.valid || !term1.valid) return false;
+
+            // Combine terms: Total = var0 * mult0 + var1 * mult1 + totalDisp
+            ir::Value* var0 = term0.var;
+            int64_t mult0 = term0.mult;
+            ir::Value* var1 = term1.var;
+            int64_t mult1 = term1.mult;
+            int64_t totalDisp = term0.disp + term1.disp;
+
+            // Case A: Single variable calculation (one of var0/var1 is null)
+            ir::Value* x = nullptr;
+            int64_t mult = 0;
+            if (var0 && !var1) { x = var0; mult = mult0; }
+            else if (!var0 && var1) { x = var1; mult = mult1; }
+            else if (var0 && var1 && var0 == var1) {
+                x = var0;
+                mult = mult0 + mult1;
+            }
+
+            std::string baseReg = "";
+            std::string indexReg = "";
+            int scale = 1;
+
+            if (x) {
+                // Check if multiplier can be directly or decomposed into x86 LEA scale
+                // Direct scale factors: 1, 2, 4, 8 -> [x * scale + disp] or [x + x*scale' + disp]
+                if (mult == 1 || mult == 2 || mult == 4 || mult == 8) {
+                    indexReg = cg.getValueAsOperand(x);
+                    scale = static_cast<int>(mult);
+                } else if (mult == 3) {
+                    baseReg = cg.getValueAsOperand(x);
+                    indexReg = cg.getValueAsOperand(x);
+                    scale = 2; // x + x * 2 = 3 * x
+                } else if (mult == 5) {
+                    baseReg = cg.getValueAsOperand(x);
+                    indexReg = cg.getValueAsOperand(x);
+                    scale = 4; // x + x * 4 = 5 * x
+                } else if (mult == 9) {
+                    baseReg = cg.getValueAsOperand(x);
+                    indexReg = cg.getValueAsOperand(x);
+                    scale = 8; // x + x * 8 = 9 * x
+                } else {
+                    return false; // Unsupported multiplier factor for LEA
+                }
+            } else if (var0 && var1 && var0 != var1) {
+                // Case B: Two distinct variables, e.g. var0 + var1 * scale + disp
+                // Check if one of them has scale 1 and the other scale 1, 2, 4, 8
+                if (mult0 == 1 && (mult1 == 1 || mult1 == 2 || mult1 == 4 || mult1 == 8)) {
+                    baseReg = cg.getValueAsOperand(var0);
+                    indexReg = cg.getValueAsOperand(var1);
+                    scale = static_cast<int>(mult1);
+                } else if (mult1 == 1 && (mult0 == 1 || mult0 == 2 || mult0 == 4 || mult0 == 8)) {
+                    baseReg = cg.getValueAsOperand(var1);
+                    indexReg = cg.getValueAsOperand(var0);
+                    scale = static_cast<int>(mult0);
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
+            // Standardize register names for current width (32-bit vs 64-bit)
+            auto prepareReg = [&](const std::string& r) -> std::string {
+                if (r.empty()) return "";
+                if (r[0] == '%') return is32 ? to32BitReg(r) : to64BitReg(r);
+                return r;
+            };
+
+            baseReg = prepareReg(baseReg);
+            indexReg = prepareReg(indexReg);
+
+            // Register names must be register operands, not constants or stack slots
+            auto isRegOp = [](const std::string& r) {
+                if (r.empty()) return true; // empty is allowed
+                return r[0] == '%';
+            };
+
+            if (abi != X64ABI::Windows) {
+                if (!isRegOp(baseReg) || !isRegOp(indexReg)) return false;
+            }
+
+            // Emit LEA according to target ABI syntax
+            std::string leaOp = is32 ? "leal" : "leaq";
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+
+            if (abi == X64ABI::Windows) {
+                // Intel syntax: lea dst, [base + index*scale + disp]
+                std::string addrStr = "";
+                if (!baseReg.empty()) addrStr += baseReg;
+                if (!indexReg.empty()) {
+                    if (!addrStr.empty()) addrStr += " + ";
+                    addrStr += indexReg;
+                    if (scale > 1) addrStr += " * " + std::to_string(scale);
+                }
+                if (totalDisp != 0 || addrStr.empty()) {
+                    if (!addrStr.empty()) {
+                        if (totalDisp > 0) addrStr += " + " + std::to_string(totalDisp);
+                        else addrStr += " - " + std::to_string(-totalDisp);
+                    } else {
+                        addrStr = std::to_string(totalDisp);
+                    }
+                }
+                *os << "  lea " << d << ", [" << addrStr << "]\n";
+            } else {
+                // AT&T syntax: leal disp(base, index, scale), dst
+                std::string dispStr = (totalDisp != 0) ? std::to_string(totalDisp) : "";
+                std::string indexStr = "";
+                if (!indexReg.empty()) {
+                    indexStr = indexReg;
+                    if (scale > 1) indexStr += "," + std::to_string(scale);
+                }
+                *os << "  " << leaOp << " " << dispStr << "(" << baseReg;
+                if (!indexStr.empty()) {
+                    if (baseReg.empty()) *os << "," << indexStr;
+                    else *os << "," << indexStr;
+                }
+                *os << "), " << d << "\n";
+            }
+
+            cg.lastStoreOp = "";
+            return true;
+        };
+
+        if (tryEmitLEA()) {
+            return;
+        }
+
         if (abi != X64ABI::Windows && !isGlobal0 && canUseInPlace(cg, i, val0)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal1) {

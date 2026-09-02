@@ -36,6 +36,91 @@ int main() {
     assert(generated_asm.find("movq $42, %rax") != std::string::npos || generated_asm.find("movl $42, %eax") != std::string::npos);
     assert(generated_asm.find("ret") != std::string::npos);
 
+    // LEA Instruction Selection Unit Tests
+    {
+        std::string lea_ir = R"(
+function $test_lea_x_mul2_plus_c(%x : w) : w {
+@entry
+    %t = mul %x, w 2 : w
+    %res = add %t, w 10 : w
+    ret %res : w
+}
+
+function $test_lea_x_mul3_plus_c(%x : w) : w {
+@entry
+    %t = mul %x, w 3 : w
+    %res = add %t, w 15 : w
+    ret %res : w
+}
+
+function $test_lea_x_mul4_plus_c(%x : w) : w {
+@entry
+    %t = mul %x, w 4 : w
+    %res = add %t, w 20 : w
+    ret %res : w
+}
+
+function $test_lea_x_mul5_plus_c(%x : w) : w {
+@entry
+    %t = mul %x, w 5 : w
+    %res = add %t, w 25 : w
+    ret %res : w
+}
+
+function $test_lea_x_mul8_plus_c(%x : w) : w {
+@entry
+    %t = mul %x, w 8 : w
+    %res = add %t, w 30 : w
+    ret %res : w
+}
+
+function $test_lea_unsupported_multiplier(%x : w) : w {
+@entry
+    %t = mul %x, w 7 : w
+    %res = add %t, w 10 : w
+    ret %res : w
+}
+
+function $test_lea_mismatched_width(%x : w) : l {
+@entry
+    %t = mul %x, w 2 : w
+    %t_ext = extsw %t : l
+    %res = add %t_ext, l 10 : l
+    ret %res : l
+}
+
+function $test_lea_float(%x : s) : s {
+@entry
+    %t = fmul %x, s 2.0 : s
+    %res = fadd %t, s 10.0 : s
+    ret %res : s
+}
+)";
+        std::istringstream lea_stream(lea_ir);
+        parser::Parser lea_parser(lea_stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> lea_module = lea_parser.parseModule();
+        assert(lea_module != nullptr);
+
+        std::stringstream ss_lea;
+        codegen::CodeGen codeGenLEA(*lea_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_lea);
+        codeGenLEA.emit();
+
+        std::string lea_asm = ss_lea.str();
+        // Positive tests
+        assert(lea_asm.find("test_lea_x_mul2_plus_c:") != std::string::npos);
+        assert(lea_asm.find("test_lea_x_mul3_plus_c:") != std::string::npos);
+        assert(lea_asm.find("test_lea_x_mul4_plus_c:") != std::string::npos);
+        assert(lea_asm.find("test_lea_x_mul5_plus_c:") != std::string::npos);
+        assert(lea_asm.find("test_lea_x_mul8_plus_c:") != std::string::npos);
+        assert(lea_asm.find("leal") != std::string::npos || lea_asm.find("lea") != std::string::npos);
+
+        // Negative tests
+        assert(lea_asm.find("test_lea_unsupported_multiplier:") != std::string::npos);
+        assert(lea_asm.find("test_lea_mismatched_width:") != std::string::npos);
+        assert(lea_asm.find("test_lea_float:") != std::string::npos);
+        std::cout << "LEA unit tests passed successfully!" << std::endl;
+    }
+
     // Test 32-bit arithmetic with overflow sign-extension semantics and parameter preservation
     std::string test_dot_ir = R"(
 function $test_dot_overflow(%n : w) : l {
