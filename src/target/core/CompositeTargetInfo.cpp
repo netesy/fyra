@@ -114,6 +114,7 @@ void CompositeTargetInfo::emitFusedMultiplyAdd(codegen::CodeGen& cg, const ir::F
 void CompositeTargetInfo::emitFusedMultiplySubtract(codegen::CodeGen& cg, const ir::FusedInstruction& i) { architecture->emitFusedMultiplySubtract(cg, i); }
 void CompositeTargetInfo::emitLoadAndOperate(codegen::CodeGen& cg, ir::Instruction& l, ir::Instruction& o) { architecture->emitLoadAndOperate(cg, l, o); }
 bool CompositeTargetInfo::emitCmpAndBranchFusion(codegen::CodeGen& cg, ir::Instruction& c, ir::Instruction& b) { return architecture->emitCmpAndBranchFusion(cg, c, b); }
+bool CompositeTargetInfo::emitMulAddFusion(codegen::CodeGen& cg, ir::Instruction& m, ir::Instruction& a) { return architecture->emitMulAddFusion(cg, m, a); }
 void CompositeTargetInfo::emitComplexAddressing(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitComplexAddressing(cg, i); }
 
 void CompositeTargetInfo::emitDebugInfo(codegen::CodeGen& cg, const ir::Function& f) { architecture->emitDebugInfo(cg, f); }

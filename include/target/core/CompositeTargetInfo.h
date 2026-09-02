@@ -116,6 +116,7 @@ public:
     void emitFusedMultiplySubtract(codegen::CodeGen& cg, const ir::FusedInstruction& i) override;
     void emitLoadAndOperate(codegen::CodeGen& cg, ir::Instruction& l, ir::Instruction& o) override;
     bool emitCmpAndBranchFusion(codegen::CodeGen& cg, ir::Instruction& c, ir::Instruction& b) override;
+    bool emitMulAddFusion(codegen::CodeGen& cg, ir::Instruction& m, ir::Instruction& a) override;
     void emitComplexAddressing(codegen::CodeGen& cg, ir::Instruction& i) override;
 
     void emitDebugInfo(codegen::CodeGen& cg, const ir::Function& f) override;

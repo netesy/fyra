@@ -92,6 +92,7 @@ public:
     virtual void emitFusedMultiplySubtract(CodeGen& cg, const ir::FusedInstruction& i) {}
     virtual void emitLoadAndOperate(CodeGen& cg, ir::Instruction& load, ir::Instruction& op) {}
     virtual bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) { return false; }
+    virtual bool emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::Instruction& add) { return false; }
     virtual void emitComplexAddressing(CodeGen& cg, ir::Instruction& i) {}
 
     virtual void emitDebugInfo(CodeGen& cg, const ir::Function& func) {}
