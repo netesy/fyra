@@ -207,6 +207,14 @@ void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
                 ++it; // Advance past Add
                 continue; // Skip emitInstruction for current (Mul) as well!
             }
+
+            const bool isCallFollowedByRet = (current->getOpcode() == ir::Instruction::Call) &&
+                                              (nextInst->getOpcode() == ir::Instruction::Ret);
+
+            if (isCallFollowedByRet && targetInfo->emitTailCall(*this, *current, *nextInst)) {
+                ++it; // Consume Ret
+                continue; // Skip standard emitInstruction for Call
+            }
         }
 
         emitInstruction(*current);

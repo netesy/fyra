@@ -59,6 +59,7 @@ public:
     virtual void emitNot(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitCopy(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitCall(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual bool emitTailCall(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
     virtual void emitFAdd(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitFSub(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitFMul(codegen::CodeGen&, ir::Instruction&) = 0;

@@ -47,6 +47,7 @@ void CompositeTargetInfo::emitNeg(codegen::CodeGen& cg, ir::Instruction& i) { ar
 void CompositeTargetInfo::emitNot(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitNot(cg, i); }
 void CompositeTargetInfo::emitCopy(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitCopy(cg, i); }
 void CompositeTargetInfo::emitCall(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitCall(cg, i); }
+bool CompositeTargetInfo::emitTailCall(codegen::CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) { return architecture->emitTailCall(cg, callInst, retInst); }
 void CompositeTargetInfo::emitFAdd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitFAdd(cg, i); }
 void CompositeTargetInfo::emitFSub(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitFSub(cg, i); }
 void CompositeTargetInfo::emitFMul(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitFMul(cg, i); }
