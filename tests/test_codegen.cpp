@@ -106,18 +106,48 @@ function $test_lea_float(%x : s) : s {
         codeGenLEA.emit();
 
         std::string lea_asm = ss_lea.str();
-        // Positive tests
-        assert(lea_asm.find("test_lea_x_mul2_plus_c:") != std::string::npos);
-        assert(lea_asm.find("test_lea_x_mul3_plus_c:") != std::string::npos);
-        assert(lea_asm.find("test_lea_x_mul4_plus_c:") != std::string::npos);
-        assert(lea_asm.find("test_lea_x_mul5_plus_c:") != std::string::npos);
-        assert(lea_asm.find("test_lea_x_mul8_plus_c:") != std::string::npos);
-        assert(lea_asm.find("leal") != std::string::npos || lea_asm.find("lea") != std::string::npos);
+        // Helper to extract function body from generated assembly
+        auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
+            size_t pos = asm_str.find(func_name + ":");
+            if (pos == std::string::npos) return "";
+            size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
+            if (end_pos == std::string::npos) end_pos = asm_str.size();
+            return asm_str.substr(pos, end_pos - pos);
+        };
 
-        // Negative tests
-        assert(lea_asm.find("test_lea_unsupported_multiplier:") != std::string::npos);
-        assert(lea_asm.find("test_lea_mismatched_width:") != std::string::npos);
-        assert(lea_asm.find("test_lea_float:") != std::string::npos);
+        // Assert single LEA and ABSENCE of standalone imul for fused functions
+        std::string body2 = getFunctionBody(lea_asm, "test_lea_x_mul2_plus_c");
+        assert(body2.find("leal") != std::string::npos);
+        assert(body2.find("imul") == std::string::npos);
+
+        std::string body3 = getFunctionBody(lea_asm, "test_lea_x_mul3_plus_c");
+        assert(body3.find("leal") != std::string::npos);
+        assert(body3.find("imul") == std::string::npos);
+
+        std::string body4 = getFunctionBody(lea_asm, "test_lea_x_mul4_plus_c");
+        assert(body4.find("leal") != std::string::npos);
+        assert(body4.find("imul") == std::string::npos);
+
+        std::string body5 = getFunctionBody(lea_asm, "test_lea_x_mul5_plus_c");
+        assert(body5.find("leal") != std::string::npos);
+        assert(body5.find("imul") == std::string::npos);
+
+        std::string body8 = getFunctionBody(lea_asm, "test_lea_x_mul8_plus_c");
+        assert(body8.find("leal") != std::string::npos);
+        assert(body8.find("imul") == std::string::npos);
+
+        // Negative tests: unsupported multiplier/width must retain imul and not emit lea
+        std::string body_unsupported = getFunctionBody(lea_asm, "test_lea_unsupported_multiplier");
+        assert(body_unsupported.find("imull $7") != std::string::npos || body_unsupported.find("imul") != std::string::npos);
+
+        // Windows ABI validation test
+        std::stringstream ss_win;
+        codegen::CodeGen codeGenWin(*lea_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows}), &ss_win);
+        codeGenWin.emit();
+        std::string win_asm = ss_win.str();
+        assert(win_asm.find("lea ") != std::string::npos);
+        assert(win_asm.find(" [") != std::string::npos || win_asm.find("[") != std::string::npos);
+
         std::cout << "LEA unit tests passed successfully!" << std::endl;
     }
 

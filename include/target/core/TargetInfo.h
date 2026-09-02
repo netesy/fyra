@@ -125,6 +125,7 @@ public:
     virtual void emitFusedMultiplySubtract(codegen::CodeGen&, const ir::FusedInstruction&) {}
     virtual void emitLoadAndOperate(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) {}
     virtual bool emitCmpAndBranchFusion(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
+    virtual bool emitMulAddFusion(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
     virtual void emitComplexAddressing(codegen::CodeGen&, ir::Instruction&) {}
     virtual void emitDebugInfo(codegen::CodeGen&, const ir::Function&) {}
     virtual void emitLineInfo(codegen::CodeGen&, unsigned, const std::string&) {}

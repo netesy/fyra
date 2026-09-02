@@ -184,17 +184,28 @@ void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
         auto next = std::next(it);
 
         if (next != instructions.end()) {
-            ir::Instruction* br = next->get();
-            const bool isBranch = (br->getOpcode() == ir::Instruction::Br || br->getOpcode() == ir::Instruction::Jnz);
+            ir::Instruction* nextInst = next->get();
+            const bool isBranch = (nextInst->getOpcode() == ir::Instruction::Br || nextInst->getOpcode() == ir::Instruction::Jnz);
             const bool compareFeedsBranch =
                 isCompareOpcode(current->getOpcode()) &&
                 isBranch &&
-                !br->getOperands().empty() &&
-                br->getOperands()[0]->get() == current;
+                !nextInst->getOperands().empty() &&
+                nextInst->getOperands()[0]->get() == current;
 
-            if (compareFeedsBranch && targetInfo->emitCmpAndBranchFusion(*this, *current, *br)) {
+            if (compareFeedsBranch && targetInfo->emitCmpAndBranchFusion(*this, *current, *nextInst)) {
                 ++it; // Skip branch; it was emitted by fusion hook.
                 continue;
+            }
+
+            const bool isMulAdd = (current->getOpcode() == ir::Instruction::Mul) &&
+                                  (nextInst->getOpcode() == ir::Instruction::Add) &&
+                                  !nextInst->getOperands().empty() &&
+                                  (nextInst->getOperands()[0]->get() == current ||
+                                   (nextInst->getOperands().size() > 1 && nextInst->getOperands()[1]->get() == current));
+
+            if (isMulAdd && targetInfo->emitMulAddFusion(*this, *current, *nextInst)) {
+                ++it; // Advance past Add
+                continue; // Skip emitInstruction for current (Mul) as well!
             }
         }
 
