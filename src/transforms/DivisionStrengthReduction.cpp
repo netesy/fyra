@@ -55,7 +55,7 @@ DivisionStrengthReduction::UnsignedMagic DivisionStrengthReduction::computeUnsig
 
 DivisionStrengthReduction::SignedMagic DivisionStrengthReduction::computeSignedMagic32(int32_t d_in) {
     SignedMagic m;
-    uint32_t d = (d_in < 0) ? -d_in : d_in;
+    uint32_t d = (d_in < 0) ? (0U - static_cast<uint32_t>(d_in)) : static_cast<uint32_t>(d_in);
     uint32_t ad = d;
     uint32_t anc = (1U << 31) - 1 - (1U << 31) % ad;
     uint32_t p = 31;
@@ -195,14 +195,13 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
             Q = builder.createSub(zero, N);
         } else if (bitWidth == 32) {
             int32_t d32 = static_cast<int32_t>(sD);
-            uint32_t absD = (d32 < 0) ? -d32 : d32;
+            uint32_t absD = (d32 < 0) ? (0U - static_cast<uint32_t>(d32)) : static_cast<uint32_t>(d32);
             if ((absD & (absD - 1)) == 0) {
                 // Power of 2 signed division
                 uint32_t shift = 0;
                 while ((1U << shift) < absD) shift++;
 
                 // Add sign adjustment: (N < 0 ? absD - 1 : 0)
-                // In Fyra IR: (N >> 31) u>> (32 - shift)
                 ir::ConstantInt* c31 = ir::ConstantInt::get(type, 31);
                 ir::Value* sign = builder.createSar(N, c31);
                 ir::ConstantInt* cMask = ir::ConstantInt::get(type, (32 - shift));
@@ -219,17 +218,20 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
                 }
             } else {
                 SignedMagic m = computeSignedMagic32(d32);
+                int32_t m32 = static_cast<int32_t>(m.magic);
+                int64_t m64 = static_cast<int64_t>(m32); // Properly sign-extend 32-bit magic
+
                 ir::IntegerType* i64Ty = ir::IntegerType::get(64);
                 ir::Value* nExt = builder.createExtSW(N, i64Ty);
-                ir::Value* mExt = ir::ConstantInt::get(i64Ty, static_cast<uint64_t>(m.magic) & 0xFFFFFFFFULL);
+                ir::Value* mExt = ir::ConstantInt::get(i64Ty, static_cast<uint64_t>(m64));
                 ir::Value* mul64 = builder.createMul(nExt, mExt);
                 ir::Value* c32 = ir::ConstantInt::get(i64Ty, 32);
                 ir::Value* high64 = builder.createSar(mul64, c32); // Signed shift for high 32
                 ir::Value* high32 = builder.createTruncD(high64, type);
 
-                if (d32 > 0 && m.magic < 0) {
+                if (d32 > 0 && m32 < 0) {
                     high32 = builder.createAdd(high32, N);
-                } else if (d32 < 0 && m.magic > 0) {
+                } else if (d32 < 0 && m32 > 0) {
                     high32 = builder.createSub(high32, N);
                 }
 
