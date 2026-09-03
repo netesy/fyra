@@ -205,8 +205,6 @@ static void processBlockGlobalGVN(ir::BasicBlock* bb, const DominatorTree& domTr
     }
 
     if (!to_remove.empty()) {
-            for (auto* r : to_remove) {
-            }
         bb->removeInstructions(to_remove);
     }
 
