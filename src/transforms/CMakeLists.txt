@@ -5,6 +5,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/PhiInsertion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SSARenamer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Mem2Reg.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/DivisionStrengthReduction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/CopyElimination.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/GVN.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/DeadInstructionElimination.cpp
