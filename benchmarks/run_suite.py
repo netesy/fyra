@@ -82,18 +82,22 @@ def run_cmd(cmd):
     p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return p.returncode, p.stdout, p.stderr
 
-def measure_execution(exec_path, samples=10, warmup=2):
+def run_exec(exec_path):
+    p = subprocess.run([exec_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return p.returncode, p.stdout, p.stderr
+
+def measure_execution(exec_path, samples=15, warmup=2):
     if not os.path.exists(exec_path):
         return {"median": 0.0, "min": 0.0, "stddev": 0.0, "output": ""}
 
     for _ in range(warmup):
-        run_cmd(exec_path)
+        run_exec(exec_path)
 
     runtimes = []
     output = ""
     for _ in range(samples):
         t0 = time.perf_counter()
-        rc, out, err = run_cmd(exec_path)
+        rc, out, err = run_exec(exec_path)
         t1 = time.perf_counter()
         if rc == 0:
             runtimes.append(t1 - t0)
@@ -139,6 +143,7 @@ def main():
 
         out_dir = os.path.join(BENCHMARKS_DIR, "output", bname)
         os.makedirs(out_dir, exist_ok=True)
+        print(f"Benchmarking {bname}...", flush=True)
 
         # 1. Compile GCC -O2 -static
         gcc_s = os.path.join(out_dir, "gcc.s")

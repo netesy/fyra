@@ -243,3 +243,23 @@ add_test(NAME SqliteEmulationTest COMMAND test_sqlite_emulation)
 add_executable(test_portable_capabilities test_portable_capabilities.cpp)
 target_link_libraries(test_portable_capabilities PRIVATE fyra)
 add_test(NAME PortableCapabilitiesTest COMMAND test_portable_capabilities)
+
+add_executable(test_licm test_licm.cpp)
+target_link_libraries(test_licm PRIVATE fyra)
+add_test(NAME LICMTest COMMAND test_licm)
+set_tests_properties(LICMTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_inliner test_inliner.cpp)
+target_link_libraries(test_inliner PRIVATE fyra)
+add_test(NAME InlinerTest COMMAND test_inliner)
+set_tests_properties(InlinerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_gvn test_gvn.cpp)
+target_link_libraries(test_gvn PRIVATE fyra)
+add_test(NAME GVNTest COMMAND test_gvn)
+set_tests_properties(GVNTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_composition test_composition.cpp)
+target_link_libraries(test_composition PRIVATE fyra)
+add_test(NAME CompositionTest COMMAND test_composition)
+set_tests_properties(CompositionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
