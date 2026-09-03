@@ -35,6 +35,8 @@ void CompositeTargetInfo::emitRet(codegen::CodeGen& cg, ir::Instruction& i) { ar
 void CompositeTargetInfo::emitAdd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitAdd(cg, i); }
 void CompositeTargetInfo::emitSub(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSub(cg, i); }
 void CompositeTargetInfo::emitMul(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitMul(cg, i); }
+void CompositeTargetInfo::emitSmulh(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSmulh(cg, i); }
+void CompositeTargetInfo::emitUmulh(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitUmulh(cg, i); }
 void CompositeTargetInfo::emitDiv(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitDiv(cg, i); }
 void CompositeTargetInfo::emitRem(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitRem(cg, i); }
 void CompositeTargetInfo::emitAnd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitAnd(cg, i); }

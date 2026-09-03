@@ -37,6 +37,8 @@ public:
     void emitAdd(CodeGen& cg, ir::Instruction& i) override;
     void emitSub(CodeGen& cg, ir::Instruction& i) override;
     void emitMul(CodeGen& cg, ir::Instruction& i) override;
+    void emitSmulh(CodeGen& cg, ir::Instruction& i) override;
+    void emitUmulh(CodeGen& cg, ir::Instruction& i) override;
     void emitDiv(CodeGen& cg, ir::Instruction& i) override;
     void emitRem(CodeGen& cg, ir::Instruction& i) override;
     void emitAnd(CodeGen& cg, ir::Instruction& i) override;

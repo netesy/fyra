@@ -232,6 +232,8 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Add: targetInfo->emitAdd(*this, instr); break;
         case ir::Instruction::Sub: targetInfo->emitSub(*this, instr); break;
         case ir::Instruction::Mul: targetInfo->emitMul(*this, instr); break;
+        case ir::Instruction::Smulh: targetInfo->emitSmulh(*this, instr); break;
+        case ir::Instruction::Umulh: targetInfo->emitUmulh(*this, instr); break;
         case ir::Instruction::Div: case ir::Instruction::Udiv: targetInfo->emitDiv(*this, instr); break;
         case ir::Instruction::Rem: case ir::Instruction::Urem: targetInfo->emitRem(*this, instr); break;
         case ir::Instruction::And: targetInfo->emitAnd(*this, instr); break;

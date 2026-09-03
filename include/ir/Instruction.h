@@ -23,6 +23,8 @@ public:
         Add,
         Sub,
         Mul,
+        Smulh,
+        Umulh,
         Div,
         Udiv,
         Rem,

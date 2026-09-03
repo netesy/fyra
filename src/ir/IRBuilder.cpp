@@ -404,6 +404,38 @@ Instruction* IRBuilder::createMul(Value* lhs, Value* rhs, Type* resultType) {
     return instrPtr;
 }
 
+Instruction* IRBuilder::createSmulh(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<Instruction>(new Instruction(lhs->getType(), Instruction::Smulh, {lhs, rhs}, insertPoint));
+    Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createSmulh(Value* lhs, Value* rhs, Type* resultType) {
+    auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Smulh, {lhs, rhs}, insertPoint));
+    Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createUmulh(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<Instruction>(new Instruction(lhs->getType(), Instruction::Umulh, {lhs, rhs}, insertPoint));
+    Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createUmulh(Value* lhs, Value* rhs, Type* resultType) {
+    auto instr = std::unique_ptr<Instruction>(new Instruction(resultType, Instruction::Umulh, {lhs, rhs}, insertPoint));
+    Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
 Instruction* IRBuilder::createDiv(Value* lhs, Value* rhs) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(lhs->getType(), Instruction::Div, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();

@@ -162,15 +162,10 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
             Q = builder.createShr(N, shiftConst);
         } else if (bitWidth == 32) {
             UnsignedMagic m = computeUnsignedMagic32(static_cast<uint32_t>(uD));
+            ir::ConstantInt* magicConst = ir::ConstantInt::get(type, static_cast<uint32_t>(m.magic));
 
-            // High multiply: mul N, magic
-            ir::IntegerType* i64Ty = ir::IntegerType::get(64);
-            ir::Value* nExt = builder.createExtUW(N, i64Ty);
-            ir::Value* mExt = ir::ConstantInt::get(i64Ty, m.magic);
-            ir::Value* mul64 = builder.createMul(nExt, mExt);
-            ir::Value* c32 = ir::ConstantInt::get(i64Ty, 32);
-            ir::Value* high64 = builder.createShr(mul64, c32);
-            ir::Value* high32 = builder.createTruncD(high64, type); // trunc to 32
+            // High multiply: umulh N, magic
+            ir::Value* high32 = builder.createUmulh(N, magicConst);
 
             if (m.add_indicator) {
                 // (N - high32) >> 1 + high32 >> m.shift
@@ -219,15 +214,10 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
             } else {
                 SignedMagic m = computeSignedMagic32(d32);
                 int32_t m32 = static_cast<int32_t>(m.magic);
-                int64_t m64 = static_cast<int64_t>(m32); // Properly sign-extend 32-bit magic
+                ir::ConstantInt* magicConst = ir::ConstantInt::get(type, static_cast<uint32_t>(m32));
 
-                ir::IntegerType* i64Ty = ir::IntegerType::get(64);
-                ir::Value* nExt = builder.createExtSW(N, i64Ty);
-                ir::Value* mExt = ir::ConstantInt::get(i64Ty, static_cast<uint64_t>(m64));
-                ir::Value* mul64 = builder.createMul(nExt, mExt);
-                ir::Value* c32 = ir::ConstantInt::get(i64Ty, 32);
-                ir::Value* high64 = builder.createSar(mul64, c32); // Signed shift for high 32
-                ir::Value* high32 = builder.createTruncD(high64, type);
+                // High multiply: smulh N, magic
+                ir::Value* high32 = builder.createSmulh(N, magicConst);
 
                 if (d32 > 0 && m32 < 0) {
                     high32 = builder.createAdd(high32, N);

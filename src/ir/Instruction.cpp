@@ -41,6 +41,8 @@ void Instruction::print(std::ostream& os) const {
         case Add: os << "add"; break;
         case Sub: os << "sub"; break;
         case Mul: os << "mul"; break;
+        case Smulh: os << "smulh"; break;
+        case Umulh: os << "umulh"; break;
         case Div: os << "div"; break;
         case Udiv: os << "udiv"; break;
         case Rem: os << "rem"; break;

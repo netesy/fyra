@@ -42,6 +42,10 @@ public:
     Instruction* createSub(Value* lhs, Value* rhs, Type* resultType); // Explicit type override
     Instruction* createMul(Value* lhs, Value* rhs);
     Instruction* createMul(Value* lhs, Value* rhs, Type* resultType); // Explicit type override
+    Instruction* createSmulh(Value* lhs, Value* rhs);
+    Instruction* createSmulh(Value* lhs, Value* rhs, Type* resultType);
+    Instruction* createUmulh(Value* lhs, Value* rhs);
+    Instruction* createUmulh(Value* lhs, Value* rhs, Type* resultType);
     Instruction* createDiv(Value* lhs, Value* rhs);
     Instruction* createDiv(Value* lhs, Value* rhs, Type* resultType); // Explicit type override
     Instruction* createUdiv(Value* lhs, Value* rhs);

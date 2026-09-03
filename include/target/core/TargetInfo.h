@@ -47,6 +47,8 @@ public:
     virtual void emitAdd(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitSub(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitMul(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitSmulh(codegen::CodeGen&, ir::Instruction&) {}
+    virtual void emitUmulh(codegen::CodeGen&, ir::Instruction&) {}
     virtual void emitDiv(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitRem(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitAnd(codegen::CodeGen&, ir::Instruction&) = 0;
