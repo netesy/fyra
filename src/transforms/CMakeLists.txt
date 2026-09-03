@@ -10,6 +10,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/DeadInstructionElimination.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SCCP.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopInvariantCodeMotion.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ScalarEvolution.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ControlFlowSimplification.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/FunctionInliner.cpp
 )

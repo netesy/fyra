@@ -10,7 +10,7 @@ namespace transforms {
 
 class FunctionInliner {
 public:
-    FunctionInliner(size_t maxInstrThreshold = 15) : threshold(maxInstrThreshold) {}
+    FunctionInliner(size_t maxInstrThreshold = 25) : threshold(maxInstrThreshold) {}
 
     bool runOnModule(ir::Module& module);
 

@@ -18,6 +18,7 @@
 #include "transforms/FunctionInliner.h"
 #include "transforms/DeadInstructionElimination.h"
 #include "transforms/LoopInvariantCodeMotion.h"
+#include "transforms/ScalarEvolution.h"
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/ErrorReporter.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
@@ -219,6 +220,7 @@ int main(int argc, char** argv) {
         transforms::CopyElimination copy_elim;
         transforms::GVN gvn;
         transforms::LoopInvariantCodeMotion licm(error_reporter);
+        transforms::ScalarEvolution scev;
         
         bool optimization_changed = true;
         int iteration = 1;
@@ -233,6 +235,7 @@ int main(int argc, char** argv) {
                 if (gvn.run(*func)) optimization_changed = true;
                 if (cfg_simplifier.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && licm.run(*func)) optimization_changed = true;
+                if (optimizationLevel >= 2 && scev.run(*func)) optimization_changed = true;
                 if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;
             }
