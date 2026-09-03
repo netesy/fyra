@@ -21,6 +21,7 @@
 #include "transforms/ScalarEvolution.h"
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/DivisionStrengthReduction.h"
+#include "transforms/LoopUnroll.h"
 #include "transforms/ErrorReporter.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
 #include "codegen/abi/ABIAnalysis.h"
@@ -223,6 +224,7 @@ int main(int argc, char** argv) {
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
         transforms::DivisionStrengthReduction div_sr(error_reporter);
+        transforms::LoopUnrollPass loop_unroll(error_reporter);
         
         bool optimization_changed = true;
         int iteration = 1;
@@ -238,6 +240,7 @@ int main(int argc, char** argv) {
                 if (gvn.run(*func)) optimization_changed = true;
                 if (cfg_simplifier.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && licm.run(*func)) optimization_changed = true;
+                if (optimizationLevel >= 2 && loop_unroll.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && scev.run(*func)) optimization_changed = true;
                 if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;
