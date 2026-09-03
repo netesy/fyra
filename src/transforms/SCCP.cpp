@@ -15,6 +15,7 @@
 namespace transforms {
 
 bool SCCP::performTransformation(ir::Function& func) {
+    std::cout << "[SCCP] Starting performTransformation for " << func.getName() << std::endl;
     this->initialize(func);
     
     std::set<ir::BasicBlock*> executableBlocks;
@@ -144,10 +145,22 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
         LatticeEntry result = {Top, nullptr};
         bool all_preds_executable = true;
         
-        for (size_t i = 0; i < phi->getOperands().size(); i += 2) {
-            ir::BasicBlock* pred = static_cast<ir::BasicBlock*>(phi->getOperands()[i]->get());
+        for (size_t i = 0; i + 1 < phi->getOperands().size(); i += 2) {
+            ir::Value* op1 = phi->getOperands()[i] ? phi->getOperands()[i]->get() : nullptr;
+            ir::Value* op2 = phi->getOperands()[i + 1] ? phi->getOperands()[i + 1]->get() : nullptr;
+            ir::BasicBlock* pred = dynamic_cast<ir::BasicBlock*>(op1);
+            ir::Value* incVal = op2;
+            if (!pred) {
+                pred = dynamic_cast<ir::BasicBlock*>(op2);
+                incVal = op1;
+            }
+            if (!pred || !incVal) {
+                all_preds_executable = false;
+                continue;
+            }
+
             if (executableEdges.count({pred, phi->getParent()})) {
-                LatticeEntry val = getLatticeValue(phi->getOperands()[i+1]->get());
+                LatticeEntry val = getLatticeValue(incVal);
                 if (val.type == Bottom) { result = {Bottom, nullptr}; break; }
                 if (val.type == Constant) {
                     if (result.type == Top) result = val;

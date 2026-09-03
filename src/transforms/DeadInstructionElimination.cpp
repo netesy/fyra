@@ -1,4 +1,5 @@
 #include "transforms/DeadInstructionElimination.h"
+#include "transforms/CFGBuilder.h"
 #include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
 #include "ir/Function.h"
@@ -19,22 +20,26 @@ bool DeadInstructionElimination::performTransformation(ir::Function& func) {
     while (iteration_changed) {
         iteration_changed = false;
         
+        std::cout << "[DCE1] eliminateUnreachableBlocks" << std::endl;
         if (eliminateUnreachableBlocks(func)) {
             changed = true;
             iteration_changed = true;
         }
         
+        std::cout << "[DCE2] eliminateDeadInstructions" << std::endl;
         if (eliminateDeadInstructions(func)) {
             changed = true;
             iteration_changed = true;
         }
 
+        std::cout << "[DCE3] eliminateDeadStores" << std::endl;
         if (eliminateDeadStores(func)) {
             changed = true;
             iteration_changed = true;
         }
     }
     
+    std::cout << "[DCE END] performTransformation returning " << changed << std::endl;
     return changed;
 }
 
@@ -50,6 +55,7 @@ bool DeadInstructionElimination::eliminateDeadInstructions(ir::Function& func) {
         while (it != instrs.end()) {
             ir::Instruction* instr = it->get();
             if (live.find(instr) == live.end() && !hasSideEffects(instr) && !isTerminator(instr)) {
+                std::cout << "[DCE ERASE] erasing op=" << instr->getOpcode() << " in " << bb->getName() << std::endl;
                 it = instrs.erase(it);
                 changed = true;
                 dead_instructions_removed_++;
@@ -104,6 +110,9 @@ bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) 
         } else {
             ++it;
         }
+    }
+    if (changed) {
+        CFGBuilder::run(func);
     }
     return changed;
 }
@@ -196,6 +205,7 @@ void DeadInstructionElimination::findReachableBlocks(ir::Function& func, std::se
     
     std::vector<ir::BasicBlock*> worklist;
     ir::BasicBlock* entry = func.getBasicBlocks().front().get();
+    if (!entry) return;
     
     reachable.insert(entry);
     worklist.push_back(entry);
@@ -203,13 +213,16 @@ void DeadInstructionElimination::findReachableBlocks(ir::Function& func, std::se
     while (!worklist.empty()) {
         ir::BasicBlock* curr = worklist.back();
         worklist.pop_back();
+        if (!curr) continue;
         
         if (curr->getInstructions().empty()) continue;
         ir::Instruction* term = curr->getInstructions().back().get();
+        if (!term) continue;
         
         for (auto& op : term->getOperands()) {
+            if (!op) continue;
             if (auto* succ = dynamic_cast<ir::BasicBlock*>(op->get())) {
-                if (reachable.insert(succ).second) {
+                if (succ && reachable.insert(succ).second) {
                     worklist.push_back(succ);
                 }
             }
@@ -223,6 +236,8 @@ void DeadInstructionElimination::markLiveInstructions(ir::Function& func, std::s
     for (auto& bb_ptr : func.getBasicBlocks()) {
         for (auto& instr_ptr : bb_ptr->getInstructions()) {
             ir::Instruction* instr = instr_ptr.get();
+            if (!instr) continue;
+            std::cout << "[DCE MARK] instr op=" << instr->getOpcode() << " side=" << hasSideEffects(instr) << " term=" << isTerminator(instr) << std::endl;
             if (hasSideEffects(instr) || isTerminator(instr)) {
                 live.insert(instr);
                 worklist.insert(instr);

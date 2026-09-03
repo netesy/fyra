@@ -45,6 +45,7 @@ void BasicBlock::removeSuccessor(BasicBlock* succ) {
 void BasicBlock::removeInstructions(const std::vector<Instruction*>& to_remove) {
     for (auto* instr : to_remove) {
         if (instr->getParent() == this) {
+            std::cout << "[BB REMOVE] removing instr op=" << instr->getOpcode() << " from " << getName() << std::endl;
             for (auto& op : instr->getOperands()) {
                 op->set(nullptr);
             }

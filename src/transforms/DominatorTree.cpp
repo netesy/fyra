@@ -8,6 +8,9 @@
 namespace transforms {
 
 void DominatorTree::run(ir::Function& func) {
+    iDomMap.clear();
+    childrenMap.clear();
+
     if (func.getBasicBlocks().empty()) {
         return;
     }
@@ -78,8 +81,8 @@ void DominatorTree::run(ir::Function& func) {
             bool is_idom = true;
             for (ir::BasicBlock* d2 : sdom) {
                 if (d1 != d2) {
-                    // if d2 dominates d1, then d1 cannot be the idom
-                    if (domSets[d1].count(d2)) {
+                    // Immediate dominator d1 must be dominated by every other strict dominator d2
+                    if (!domSets[d1].count(d2)) {
                         is_idom = false;
                         break;
                     }
