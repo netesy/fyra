@@ -14,6 +14,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ScalarEvolution.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ControlFlowSimplification.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/FunctionInliner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LoopUnroll.cpp
 )
 
 target_sources(fyra PRIVATE ${TRANSFORMS_SOURCES})

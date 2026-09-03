@@ -19,6 +19,7 @@
 #include "transforms/DeadInstructionElimination.h"
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/ScalarEvolution.h"
+#include "transforms/LoopUnroll.h"
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/DivisionStrengthReduction.h"
 #include "transforms/ErrorReporter.h"
@@ -107,10 +108,13 @@ int main(int argc, char** argv) {
     bool verboseOutput = false;
     bool runPipeline = false;
     bool generateExecutable = false;
+    bool enableUnroll = true;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--no-validate") {
+        if (arg == "--no-unroll") {
+            enableUnroll = false;
+        } else if (arg == "--no-validate") {
             enableValidation = false;
         } else if (arg == "--validate") {
             enableValidation = true;
@@ -222,6 +226,7 @@ int main(int argc, char** argv) {
         transforms::GVN gvn;
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
+        transforms::LoopUnroll loop_unroll(error_reporter);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
         
         bool optimization_changed = true;
@@ -239,6 +244,7 @@ int main(int argc, char** argv) {
                 if (cfg_simplifier.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && licm.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && scev.run(*func)) optimization_changed = true;
+                if (optimizationLevel >= 2 && enableUnroll && loop_unroll.run(*func)) optimization_changed = true;
                 if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;
             }

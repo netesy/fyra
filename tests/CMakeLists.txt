@@ -277,3 +277,8 @@ add_executable(test_div_strength_reduction test_div_strength_reduction.cpp)
 target_link_libraries(test_div_strength_reduction PRIVATE fyra)
 add_test(NAME DivisionStrengthReductionTest COMMAND test_div_strength_reduction)
 set_tests_properties(SCCPInterproceduralTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_loop_unroll test_loop_unroll.cpp)
+target_link_libraries(test_loop_unroll PRIVATE fyra)
+add_test(NAME LoopUnrollTest COMMAND test_loop_unroll)
+set_tests_properties(LoopUnrollTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
