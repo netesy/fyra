@@ -28,6 +28,10 @@ public:
     // Returns true if use represents the final live use of its original pre-spill SSA value
     bool isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const;
 
+    const std::map<const ir::Instruction*, std::set<const ir::Value*>>& getLiveAfterMap() const {
+        return liveAfterMap;
+    }
+
 private:
     void computeLiveSets(ir::Function& func);
     void computePerInstructionCFGLiveness(ir::Function& func);

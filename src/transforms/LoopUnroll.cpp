@@ -2,6 +2,7 @@
 #include "transforms/InstructionCloner.h"
 #include "transforms/DominatorTree.h"
 #include "transforms/LoopInvariantCodeMotion.h"
+#include "codegen/regalloc/LivenessAnalysis.h"
 #include "ir/IRBuilder.h"
 #include "ir/Type.h"
 #include "ir/Use.h"
@@ -54,9 +55,12 @@ bool LoopUnrollPass::isLegalToUnroll(Loop& loop, ir::Function& func, UnrollCandi
     }
     if (!cand.body) cand.body = cand.header;
 
-    // Check side effects / calls / branches / instruction limits / register pressure in body
+    // Compute exact maximum simultaneously live SSA values across loop instructions
+    LivenessAnalysis liveness;
+    liveness.run(func);
+
     size_t bodyInstCount = 0;
-    size_t liveVregCount = 0;
+    size_t maxSimultaneousLive = 0;
 
     for (ir::BasicBlock* bb : loop.blocks) {
         for (auto& instPtr : bb->getInstructions()) {
@@ -73,15 +77,22 @@ bool LoopUnrollPass::isLegalToUnroll(Loop& loop, ir::Function& func, UnrollCandi
             if (bb == cand.body && (opc == ir::Instruction::Jnz || opc == ir::Instruction::Jz || opc == ir::Instruction::Br)) {
                 return false; // No internal control flow branches inside body
             }
-            if (inst->getType() && !inst->getType()->isVoidTy()) {
-                liveVregCount++;
+
+            auto it = liveness.getLiveAfterMap().find(inst);
+            if (it != liveness.getLiveAfterMap().end()) {
+                if (it->second.size() > maxSimultaneousLive) {
+                    maxSimultaneousLive = it->second.size();
+                }
             }
         }
     }
 
     if (bodyInstCount < 3) return false;   // Must have at least 3 body instructions
     if (bodyInstCount > 150) return false; // Prevent instruction bloat
-    if (liveVregCount > 12) return false;  // Register pressure guard: prevent spill regressions (e.g. reg_pressure)
+
+    // Target x86-64 register pressure limit: 11 allocatable GPRs (6 caller-saved + 5 callee-saved).
+    // The candidate loop's peak simultaneous live SSA values must fit within allocatable GPRs.
+    if (maxSimultaneousLive > 11) return false;
 
     // Locate comparison instruction in header feeding loop condition
     ir::Instruction* cmpInst = nullptr;
