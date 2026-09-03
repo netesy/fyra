@@ -20,6 +20,7 @@
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/ScalarEvolution.h"
 #include "transforms/ControlFlowSimplification.h"
+#include "transforms/DivisionStrengthReduction.h"
 #include "transforms/ErrorReporter.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
 #include "codegen/abi/ABIAnalysis.h"
@@ -221,6 +222,7 @@ int main(int argc, char** argv) {
         transforms::GVN gvn;
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
+        transforms::DivisionStrengthReduction div_sr(error_reporter);
         
         bool optimization_changed = true;
         int iteration = 1;
@@ -230,6 +232,7 @@ int main(int argc, char** argv) {
         if (!isWasm) {
             while (optimization_changed && iteration <= maxIterations) {
                 optimization_changed = false;
+                if (div_sr.run(*func)) optimization_changed = true;
                 if (enhanced_sccp.run(*func)) optimization_changed = true;
                 if (copy_elim.run(*func)) optimization_changed = true;
                 if (gvn.run(*func)) optimization_changed = true;
