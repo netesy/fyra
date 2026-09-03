@@ -263,3 +263,8 @@ add_executable(test_composition test_composition.cpp)
 target_link_libraries(test_composition PRIVATE fyra)
 add_test(NAME CompositionTest COMMAND test_composition)
 set_tests_properties(CompositionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_scev test_scev.cpp)
+target_link_libraries(test_scev PRIVATE fyra)
+add_test(NAME SCEVTest COMMAND test_scev)
+set_tests_properties(SCEVTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "transforms/TransformPass.h"
+#include "transforms/Loop.h"
 #include "ir/Function.h"
 #include "ir/BasicBlock.h"
 #include "ir/Instruction.h"
@@ -30,6 +31,11 @@ public:
     explicit LoopInvariantCodeMotion(std::shared_ptr<ErrorReporter> error_reporter = nullptr)
         : TransformPass("Loop-Invariant Code Motion", error_reporter) {}
 
+public:
+    // Loop detection methods
+    void findLoops(ir::Function& func, std::vector<std::unique_ptr<Loop>>& loops);
+    ir::BasicBlock* getOrCreatePreheader(Loop& loop, ir::Function& func);
+
 protected:
     /**
      * @brief Perform the actual LICM transformation
@@ -48,22 +54,6 @@ protected:
     bool validatePreconditions(ir::Function& func) override;
 
 private:
-    /**
-     * @brief Represents a natural loop in the CFG
-     */
-    struct Loop {
-        ir::BasicBlock* header;           ///< Loop header block
-        std::set<ir::BasicBlock*> blocks; ///< All blocks in the loop
-        std::set<ir::BasicBlock*> exits;  ///< Loop exit blocks
-        ir::BasicBlock* preheader;        ///< Preheader block (may be null initially)
-        Loop* parent;                     ///< Parent loop (for nested loops)
-        std::vector<Loop*> children;      ///< Nested loops
-        
-        Loop(ir::BasicBlock* h) : header(h), preheader(nullptr), parent(nullptr) {}
-    };
-    
-    // Loop detection methods
-    void findLoops(ir::Function& func, std::vector<std::unique_ptr<Loop>>& loops);
     void findBackEdges(ir::Function& func, std::vector<std::pair<ir::BasicBlock*, ir::BasicBlock*>>& backEdges);
     void buildLoop(ir::BasicBlock* header, ir::BasicBlock* latch, std::unique_ptr<Loop>& loop);
     void buildDominatorTree(ir::Function& func);
@@ -81,7 +71,6 @@ private:
     bool hasMemoryDependencies(ir::Instruction* instr, const Loop& loop);
     
     // Preheader management
-    ir::BasicBlock* getOrCreatePreheader(Loop& loop, ir::Function& func);
     bool needsPreheader(const Loop& loop);
     
     // Code motion methods
