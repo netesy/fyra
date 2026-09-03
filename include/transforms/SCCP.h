@@ -6,6 +6,7 @@
 #include "ir/Constant.h"
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <limits>
@@ -42,6 +43,15 @@ private:
     void visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir::BasicBlock*>>& executableEdges, std::set<ir::BasicBlock*>& executableBlocks, std::unordered_set<ir::Instruction*>& inInstructionWorklist);
     LatticeEntry getLatticeValue(ir::Value* val);
     void setLatticeValue(ir::Instruction* instr, LatticeEntry new_val, std::unordered_set<ir::Instruction*>& inInstructionWorklist);
+
+    bool isFunctionPure(ir::Function* func, std::unordered_map<ir::Function*, bool>& purityCache, std::unordered_set<ir::Function*>& activeVisiting);
+    ir::Constant* evaluatePureFunctionCall(
+        ir::Function* callee,
+        const std::vector<ir::Constant*>& argConstants,
+        int depth,
+        int& stepCount,
+        std::unordered_map<ir::Function*, bool>& purityCache
+    );
     
     std::map<ir::Value*, LatticeEntry> lattice;
     std::vector<ir::Instruction*> instructionWorklist;

@@ -10,9 +10,285 @@
 #include <set>
 #include <unordered_set>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace transforms {
+
+static uint64_t getBitWidth(ir::Type* ty) {
+    if (!ty) return 32;
+    if (auto* ity = dynamic_cast<ir::IntegerType*>(ty)) {
+        return ity->getBitwidth();
+    }
+    return 32;
+}
+
+static uint64_t maskValue(uint64_t val, uint64_t width) {
+    if (width >= 64) return val;
+    return val & ((1ULL << width) - 1ULL);
+}
+
+static int64_t signExtend(uint64_t val, uint64_t width) {
+    val = maskValue(val, width);
+    if (width >= 64) return (int64_t)val;
+    uint64_t signBit = 1ULL << (width - 1);
+    if (val & signBit) {
+        uint64_t mask = (1ULL << width) - 1ULL;
+        return (int64_t)(val | ~mask);
+    }
+    return (int64_t)val;
+}
+
+bool SCCP::isFunctionPure(ir::Function* func, std::unordered_map<ir::Function*, bool>& purityCache, std::unordered_set<ir::Function*>& activeVisiting) {
+    if (!func || func->getBasicBlocks().empty()) return false;
+
+    auto it = purityCache.find(func);
+    if (it != purityCache.end()) return it->second;
+
+    if (!activeVisiting.insert(func).second) {
+        return true;
+    }
+
+    bool pure = true;
+    for (const auto& bbPtr : func->getBasicBlocks()) {
+        if (!pure) break;
+        for (const auto& instPtr : bbPtr->getInstructions()) {
+            ir::Instruction* inst = instPtr.get();
+            if (!inst) continue;
+
+            ir::Instruction::Opcode op = inst->getOpcode();
+
+            if (op == ir::Instruction::Alloc || op == ir::Instruction::Alloc4 || op == ir::Instruction::Alloc16 ||
+                op == ir::Instruction::Load || op == ir::Instruction::Loadd || op == ir::Instruction::Loads ||
+                op == ir::Instruction::Loadl || op == ir::Instruction::Loaduw || op == ir::Instruction::Loadsh ||
+                op == ir::Instruction::Loaduh || op == ir::Instruction::Loadsb || op == ir::Instruction::Loadub ||
+                op == ir::Instruction::Store || op == ir::Instruction::Stored || op == ir::Instruction::Stores ||
+                op == ir::Instruction::Storel || op == ir::Instruction::Storeh || op == ir::Instruction::Storeb ||
+                op == ir::Instruction::Syscall || op == ir::Instruction::ExternCall ||
+                op == ir::Instruction::VAStart || op == ir::Instruction::VAArg ||
+                op == ir::Instruction::Blit || op == ir::Instruction::Hlt) {
+                pure = false;
+                break;
+            }
+
+            if (op == ir::Instruction::Call) {
+                if (inst->getOperands().empty()) { pure = false; break; }
+                ir::Function* callee = dynamic_cast<ir::Function*>(inst->getOperands()[0]->get());
+                if (!callee || !isFunctionPure(callee, purityCache, activeVisiting)) {
+                    pure = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    activeVisiting.erase(func);
+    purityCache[func] = pure;
+    return pure;
+}
+
+ir::Constant* SCCP::evaluatePureFunctionCall(
+    ir::Function* callee,
+    const std::vector<ir::Constant*>& argConstants,
+    int depth,
+    int& stepCount,
+    std::unordered_map<ir::Function*, bool>& purityCache
+) {
+    if (!callee || callee->getBasicBlocks().empty()) return nullptr;
+    if (depth > 64) return nullptr;
+
+    std::unordered_set<ir::Function*> activeVisiting;
+    if (!isFunctionPure(callee, purityCache, activeVisiting)) return nullptr;
+
+    std::unordered_map<ir::Value*, ir::Constant*> frame;
+    const auto& params = callee->getParameters();
+    size_t pIdx = 0;
+    for (auto pIt = params.begin(); pIt != params.end() && pIdx < argConstants.size(); ++pIt, ++pIdx) {
+        frame[pIt->get()] = argConstants[pIdx];
+    }
+
+    ir::BasicBlock* currentBB = callee->getBasicBlocks().front().get();
+    ir::BasicBlock* prevBB = nullptr;
+
+    while (currentBB) {
+        ir::BasicBlock* nextBB = nullptr;
+        bool blockTerminated = false;
+
+        for (auto& instPtr : currentBB->getInstructions()) {
+            if (++stepCount > 100000) return nullptr;
+
+            ir::Instruction* instr = instPtr.get();
+            if (!instr) continue;
+
+            ir::Instruction::Opcode op = instr->getOpcode();
+
+            if (op == ir::Instruction::Phi) {
+                ir::PhiNode* phi = static_cast<ir::PhiNode*>(instr);
+                ir::Value* incomingVal = nullptr;
+                if (prevBB) {
+                    incomingVal = phi->getIncomingValueForBlock(prevBB);
+                }
+                if (!incomingVal) {
+                    for (size_t i = 0; i + 1 < phi->getOperands().size(); i += 2) {
+                        ir::Value* op1 = phi->getOperands()[i] ? phi->getOperands()[i]->get() : nullptr;
+                        ir::Value* op2 = phi->getOperands()[i + 1] ? phi->getOperands()[i + 1]->get() : nullptr;
+                        ir::BasicBlock* p = dynamic_cast<ir::BasicBlock*>(op1);
+                        ir::Value* v = op2;
+                        if (!p) { p = dynamic_cast<ir::BasicBlock*>(op2); v = op1; }
+                        if (p == prevBB) { incomingVal = v; break; }
+                    }
+                }
+                if (!incomingVal) return nullptr;
+
+                ir::Constant* constVal = nullptr;
+                if (auto* c = dynamic_cast<ir::Constant*>(incomingVal)) constVal = c;
+                else if (frame.count(incomingVal)) constVal = frame[incomingVal];
+
+                if (!constVal) return nullptr;
+                frame[instr] = constVal;
+                continue;
+            }
+
+            if (op == ir::Instruction::Jmp) {
+                if (instr->getOperands().empty()) return nullptr;
+                nextBB = dynamic_cast<ir::BasicBlock*>(instr->getOperands()[0]->get());
+                if (!nextBB) return nullptr;
+                blockTerminated = true;
+                break;
+            }
+
+            if (op == ir::Instruction::Br || op == ir::Instruction::Jnz || op == ir::Instruction::Jz) {
+                if (instr->getOperands().empty()) return nullptr;
+                ir::Value* condVal = instr->getOperands()[0]->get();
+                ir::ConstantInt* condCI = nullptr;
+                if (auto* c = dynamic_cast<ir::ConstantInt*>(condVal)) condCI = c;
+                else if (frame.count(condVal)) condCI = dynamic_cast<ir::ConstantInt*>(frame[condVal]);
+
+                if (!condCI) return nullptr;
+
+                ir::BasicBlock* t_dest = dynamic_cast<ir::BasicBlock*>(instr->getOperands()[1]->get());
+                ir::BasicBlock* f_dest = (instr->getOperands().size() > 2) ? dynamic_cast<ir::BasicBlock*>(instr->getOperands()[2]->get()) : nullptr;
+
+                bool is_true = (op == ir::Instruction::Jz) ? (condCI->getValue() == 0) : (condCI->getValue() != 0);
+                nextBB = is_true ? t_dest : f_dest;
+                if (!nextBB) return nullptr;
+                blockTerminated = true;
+                break;
+            }
+
+            if (op == ir::Instruction::Ret) {
+                if (instr->getOperands().empty()) return nullptr;
+                ir::Value* retVal = instr->getOperands()[0]->get();
+                if (auto* c = dynamic_cast<ir::Constant*>(retVal)) return c;
+                if (frame.count(retVal)) return frame[retVal];
+                return nullptr;
+            }
+
+            if (op == ir::Instruction::Call) {
+                if (instr->getOperands().empty()) return nullptr;
+                ir::Function* subCallee = dynamic_cast<ir::Function*>(instr->getOperands()[0]->get());
+                if (!subCallee) return nullptr;
+
+                std::vector<ir::Constant*> subArgs;
+                for (size_t i = 1; i < instr->getOperands().size(); ++i) {
+                    ir::Value* argVal = instr->getOperands()[i]->get();
+                    ir::Constant* c = nullptr;
+                    if (auto* ci = dynamic_cast<ir::Constant*>(argVal)) c = ci;
+                    else if (frame.count(argVal)) c = frame[argVal];
+                    if (!c) return nullptr;
+                    subArgs.push_back(c);
+                }
+
+                ir::Constant* res = evaluatePureFunctionCall(subCallee, subArgs, depth + 1, stepCount, purityCache);
+                if (!res) return nullptr;
+                frame[instr] = res;
+                continue;
+            }
+
+            std::vector<ir::ConstantInt*> opCIs;
+            for (auto& opUse : instr->getOperands()) {
+                ir::Value* v = opUse ? opUse->get() : nullptr;
+                ir::ConstantInt* ci = nullptr;
+                if (auto* c = dynamic_cast<ir::ConstantInt*>(v)) ci = c;
+                else if (frame.count(v)) ci = dynamic_cast<ir::ConstantInt*>(frame[v]);
+                opCIs.push_back(ci);
+            }
+
+            uint64_t width = getBitWidth(instr->getType());
+            uint64_t u1 = (!opCIs.empty() && opCIs[0]) ? opCIs[0]->getValue() : 0;
+            uint64_t u2 = (opCIs.size() > 1 && opCIs[1]) ? opCIs[1]->getValue() : 0;
+            int64_t s1 = signExtend(u1, width);
+            int64_t s2 = signExtend(u2, width);
+            uint64_t resU = 0;
+            bool evalSuccess = true;
+
+            switch (op) {
+                case ir::Instruction::Add: resU = maskValue(u1 + u2, width); break;
+                case ir::Instruction::Sub: resU = maskValue(u1 - u2, width); break;
+                case ir::Instruction::Mul: resU = maskValue(u1 * u2, width); break;
+                case ir::Instruction::Div:
+                    if (s2 == 0) evalSuccess = false;
+                    else resU = maskValue((uint64_t)(s1 / s2), width);
+                    break;
+                case ir::Instruction::Udiv:
+                    if (u2 == 0) evalSuccess = false;
+                    else resU = maskValue(u1 / u2, width);
+                    break;
+                case ir::Instruction::Rem:
+                    if (s2 == 0) evalSuccess = false;
+                    else resU = maskValue((uint64_t)(s1 % s2), width);
+                    break;
+                case ir::Instruction::Urem:
+                    if (u2 == 0) evalSuccess = false;
+                    else resU = maskValue(u1 % u2, width);
+                    break;
+                case ir::Instruction::And: resU = maskValue(u1 & u2, width); break;
+                case ir::Instruction::Or:  resU = maskValue(u1 | u2, width); break;
+                case ir::Instruction::Xor: resU = maskValue(u1 ^ u2, width); break;
+                case ir::Instruction::Shl: resU = maskValue(u1 << (u2 & 63), width); break;
+                case ir::Instruction::Shr: resU = maskValue(u1 >> (u2 & 63), width); break;
+                case ir::Instruction::Sar: resU = maskValue((uint64_t)(s1 >> (u2 & 63)), width); break;
+                case ir::Instruction::Neg: resU = maskValue(-u1, width); break;
+                case ir::Instruction::Not: resU = maskValue(~u1, width); break;
+
+                case ir::Instruction::Ceq: resU = (u1 == u2) ? 1 : 0; break;
+                case ir::Instruction::Cne: resU = (u1 != u2) ? 1 : 0; break;
+                case ir::Instruction::Csle: resU = (s1 <= s2) ? 1 : 0; break;
+                case ir::Instruction::Cslt: resU = (s1 < s2) ? 1 : 0; break;
+                case ir::Instruction::Csge: resU = (s1 >= s2) ? 1 : 0; break;
+                case ir::Instruction::Csgt: resU = (s1 > s2) ? 1 : 0; break;
+                case ir::Instruction::Cule: resU = (u1 <= u2) ? 1 : 0; break;
+                case ir::Instruction::Cult: resU = (u1 < u2) ? 1 : 0; break;
+                case ir::Instruction::Cuge: resU = (u1 >= u2) ? 1 : 0; break;
+                case ir::Instruction::Cugt: resU = (u1 > u2) ? 1 : 0; break;
+
+                case ir::Instruction::Copy: resU = maskValue(u1, width); break;
+                case ir::Instruction::ExtUB: case ir::Instruction::ExtUH: case ir::Instruction::ExtUW:
+                case ir::Instruction::Cast:
+                    resU = maskValue(u1, width); break;
+                case ir::Instruction::ExtSB: resU = maskValue((uint64_t)signExtend(u1, 8), width); break;
+                case ir::Instruction::ExtSH: resU = maskValue((uint64_t)signExtend(u1, 16), width); break;
+                case ir::Instruction::ExtSW: resU = maskValue((uint64_t)signExtend(u1, 32), width); break;
+                case ir::Instruction::ExtS:  resU = maskValue((uint64_t)s1, width); break;
+                case ir::Instruction::TruncD: resU = maskValue(u1, width); break;
+
+                default: evalSuccess = false; break;
+            }
+
+            if (!evalSuccess) return nullptr;
+
+            ir::IntegerType* ity = dynamic_cast<ir::IntegerType*>(instr->getType());
+            if (!ity) ity = ir::IntegerType::get(width);
+            frame[instr] = ir::ConstantInt::get(ity, resU);
+        }
+
+        if (!blockTerminated) return nullptr;
+        prevBB = currentBB;
+        currentBB = nextBB;
+    }
+
+    return nullptr;
+}
 
 bool SCCP::performTransformation(ir::Function& func) {
     this->initialize(func);
@@ -203,10 +479,39 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
         return;
     }
 
-    if (op == ir::Instruction::Call || op == ir::Instruction::Syscall ||
-        op == ir::Instruction::ExternCall || op == ir::Instruction::Alloc ||
-        op == ir::Instruction::Load || op == ir::Instruction::Store ||
-        op == ir::Instruction::VAArg) {
+    if (op == ir::Instruction::Call) {
+        if (!instr->getOperands().empty()) {
+            ir::Function* callee = dynamic_cast<ir::Function*>(instr->getOperands()[0]->get());
+            if (callee) {
+                bool all_args_const = true;
+                std::vector<ir::Constant*> arg_consts;
+                for (size_t i = 1; i < instr->getOperands().size(); ++i) {
+                    LatticeEntry arg_lat = getLatticeValue(instr->getOperands()[i]->get());
+                    if (arg_lat.type == Constant && arg_lat.constant) {
+                        arg_consts.push_back(arg_lat.constant);
+                    } else {
+                        all_args_const = false;
+                        break;
+                    }
+                }
+                if (all_args_const) {
+                    int stepCount = 0;
+                    std::unordered_map<ir::Function*, bool> purityCache;
+                    ir::Constant* eval_res = evaluatePureFunctionCall(callee, arg_consts, 0, stepCount, purityCache);
+                    if (eval_res) {
+                        setLatticeValue(instr, {Constant, eval_res}, inInstructionWorklist);
+                        return;
+                    }
+                }
+            }
+        }
+        setLatticeValue(instr, {Bottom, nullptr}, inInstructionWorklist);
+        return;
+    }
+
+    if (op == ir::Instruction::Syscall || op == ir::Instruction::ExternCall ||
+        op == ir::Instruction::Alloc || op == ir::Instruction::Load ||
+        op == ir::Instruction::Store || op == ir::Instruction::VAArg) {
         setLatticeValue(instr, {Bottom, nullptr}, inInstructionWorklist);
         return;
     }
