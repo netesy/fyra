@@ -202,11 +202,16 @@ int main(int argc, char** argv) {
         
         transforms::Mem2Reg mem2reg;
         mem2reg.run(*func);
+    }
 
-        if (optimizationLevel == 0) continue;
-
+    if (optimizationLevel > 0) {
         transforms::FunctionInliner inliner;
         inliner.runOnModule(*module);
+    }
+
+    for (auto& func : module->getFunctions()) {
+        if (func->getBasicBlocks().empty()) continue;
+        if (optimizationLevel == 0) continue;
 
         transforms::SCCP enhanced_sccp(error_reporter);
         transforms::ControlFlowSimplification cfg_simplifier(error_reporter);

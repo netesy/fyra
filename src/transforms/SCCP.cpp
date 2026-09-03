@@ -15,7 +15,6 @@
 namespace transforms {
 
 bool SCCP::performTransformation(ir::Function& func) {
-    std::cout << "[SCCP] Starting performTransformation for " << func.getName() << std::endl;
     this->initialize(func);
     
     std::set<ir::BasicBlock*> executableBlocks;

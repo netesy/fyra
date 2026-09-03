@@ -206,7 +206,6 @@ static void processBlockGlobalGVN(ir::BasicBlock* bb, const DominatorTree& domTr
 
     if (!to_remove.empty()) {
             for (auto* r : to_remove) {
-                std::cout << "[GVN REMOVE] removing op=" << r->getOpcode() << " in " << bb->getName() << std::endl;
             }
         bb->removeInstructions(to_remove);
     }

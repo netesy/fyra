@@ -10,17 +10,17 @@
 
 namespace transforms {
 
-static bool isRecursiveCall(const ir::Function* callee, const ir::Function* target, std::set<const ir::Function*>& visited) {
-    if (!callee || !target) return false;
-    if (callee == target) return true;
-    if (!visited.insert(callee).second) return false;
+static bool calleeCanReach(const ir::Function* current, const ir::Function* target, std::set<const ir::Function*>& visited) {
+    if (!current || !target) return false;
+    if (!visited.insert(current).second) return false;
 
-    for (const auto& bb : callee->getBasicBlocks()) {
+    for (const auto& bb : current->getBasicBlocks()) {
         for (const auto& instr : bb->getInstructions()) {
             if (instr->getOpcode() == ir::Instruction::Call && !instr->getOperands().empty()) {
                 auto* subCallee = dynamic_cast<const ir::Function*>(instr->getOperands()[0]->get());
-                if (subCallee && isRecursiveCall(subCallee, target, visited)) {
-                    return true;
+                if (subCallee) {
+                    if (subCallee == target) return true;
+                    if (calleeCanReach(subCallee, target, visited)) return true;
                 }
             }
         }
@@ -30,11 +30,15 @@ static bool isRecursiveCall(const ir::Function* callee, const ir::Function* targ
 
 bool FunctionInliner::canInline(const ir::Function* callee, const ir::Function* caller) const {
     if (!callee || !caller) return false;
-    if (callee == caller) return false; // Direct recursion
+    if (callee == caller) return false;
     if (callee->getBasicBlocks().empty()) return false;
 
-    std::set<const ir::Function*> visited;
-    if (isRecursiveCall(callee, caller, visited)) return false; // Indirect recursion
+    // Reject self-recursive or cycle-producing functions
+    std::set<const ir::Function*> visitedSelf;
+    if (calleeCanReach(callee, callee, visitedSelf)) return false;
+
+    std::set<const ir::Function*> visitedCaller;
+    if (calleeCanReach(callee, caller, visitedCaller)) return false;
 
     size_t totalInstrs = 0;
     for (const auto& bb : callee->getBasicBlocks()) {
@@ -87,15 +91,12 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
     ir::BasicBlock* callerBB = callInst->getParent();
     if (!callerBB) return false;
 
-    std::cout << "[INLINER] Step 0: start inlineCall for " << callee->getName() << " into " << caller->getName() << std::endl;
-
     auto ctx = caller->getParent() ? caller->getParent()->getContextShared() : std::make_shared<ir::IRContext>();
     ir::IRBuilder builder(ctx);
     builder.setModule(caller->getParent());
 
     // 1. Split callerBB at callInst
     ir::BasicBlock* continuationBB = builder.createBasicBlock(callerBB->getName() + "_cont", caller);
-    std::cout << "[INLINER] Step 1: continuationBB created" << std::endl;
 
     auto& callerBlocks = caller->getBasicBlocks();
     auto callerIt = callerBlocks.end();

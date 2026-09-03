@@ -20,26 +20,22 @@ bool DeadInstructionElimination::performTransformation(ir::Function& func) {
     while (iteration_changed) {
         iteration_changed = false;
         
-        std::cout << "[DCE1] eliminateUnreachableBlocks" << std::endl;
         if (eliminateUnreachableBlocks(func)) {
             changed = true;
             iteration_changed = true;
         }
         
-        std::cout << "[DCE2] eliminateDeadInstructions" << std::endl;
         if (eliminateDeadInstructions(func)) {
             changed = true;
             iteration_changed = true;
         }
 
-        std::cout << "[DCE3] eliminateDeadStores" << std::endl;
         if (eliminateDeadStores(func)) {
             changed = true;
             iteration_changed = true;
         }
     }
     
-    std::cout << "[DCE END] performTransformation returning " << changed << std::endl;
     return changed;
 }
 
@@ -55,7 +51,6 @@ bool DeadInstructionElimination::eliminateDeadInstructions(ir::Function& func) {
         while (it != instrs.end()) {
             ir::Instruction* instr = it->get();
             if (live.find(instr) == live.end() && !hasSideEffects(instr) && !isTerminator(instr)) {
-                std::cout << "[DCE ERASE] erasing op=" << instr->getOpcode() << " in " << bb->getName() << std::endl;
                 it = instrs.erase(it);
                 changed = true;
                 dead_instructions_removed_++;
@@ -237,7 +232,6 @@ void DeadInstructionElimination::markLiveInstructions(ir::Function& func, std::s
         for (auto& instr_ptr : bb_ptr->getInstructions()) {
             ir::Instruction* instr = instr_ptr.get();
             if (!instr) continue;
-            std::cout << "[DCE MARK] instr op=" << instr->getOpcode() << " side=" << hasSideEffects(instr) << " term=" << isTerminator(instr) << std::endl;
             if (hasSideEffects(instr) || isTerminator(instr)) {
                 live.insert(instr);
                 worklist.insert(instr);
