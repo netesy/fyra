@@ -125,6 +125,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
         if (!sumPhi) continue;
 
+        // Verify sumPhi is i32
+        if (!sumPhi->getType() || !sumPhi->getType()->isInteger()) continue;
+        auto* sumIntTy = dynamic_cast<ir::IntegerType*>(sumPhi->getType());
+        if (!sumIntTy || sumIntTy->getBitwidth() != 32) continue;
+
         // Verify sumPhi preheader incoming constant 0
         ir::Value* sumPreVal = sumPhi->getIncomingValueForBlock(entryBB);
         if (!sumPreVal) continue;
