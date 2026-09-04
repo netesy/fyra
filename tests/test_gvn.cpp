@@ -83,8 +83,61 @@ void test_gvn_constant_fold() {
     std::cout << "--- GVN Constant Fold Test Passed ---" << std::endl;
 }
 
+void test_gvn_identity_simplification() {
+    std::cout << "--- Running GVN Identity Simplification Test ---" << std::endl;
+    auto ctx = std::make_shared<ir::IRContext>();
+    ir::Module module("gvn_identity_module", ctx);
+    ir::IRBuilder builder(ctx);
+    builder.setModule(&module);
+
+    ir::Type* i32Ty = ctx->getIntegerType(32);
+    ir::Type* floatTy = ctx->getFloatType();
+
+    ir::Function* func = builder.createFunction("gvn_identity_func", i32Ty, {i32Ty, floatTy});
+    ir::Parameter* paramX = func->getParameters().front().get();
+    ir::Parameter* paramFP = (*std::next(func->getParameters().begin())).get();
+
+    ir::BasicBlock* entry = builder.createBasicBlock("entry", func);
+    builder.setInsertPoint(entry);
+
+    ir::Value* zero32 = ctx->getConstantInt(ctx->getIntegerType(32), 0);
+    ir::Value* one32 = ctx->getConstantInt(ctx->getIntegerType(32), 1);
+    ir::Value* negOne32 = ctx->getConstantInt(ctx->getIntegerType(32), 0xFFFFFFFFULL);
+
+    // Integer identity operations
+    ir::Instruction* addZero = builder.createAdd(paramX, zero32);        // -> paramX
+    ir::Instruction* subZero = builder.createSub(addZero, zero32);       // -> paramX
+    ir::Instruction* mulOne  = builder.createMul(subZero, one32);        // -> paramX
+    ir::Instruction* subSelf = builder.createSub(mulOne, paramX);        // -> 0
+    ir::Instruction* xorSelf = builder.createXor(paramX, paramX);        // -> 0
+    ir::Instruction* andMask = builder.createAnd(paramX, negOne32);      // -> paramX
+    ir::Instruction* eqSelf  = builder.createCeq(paramX, paramX);        // -> 1
+    ir::Instruction* ltSelf  = builder.createCslt(paramX, paramX);       // -> 0
+
+    // Floating-point operation (MUST NOT be simplified by integer identity)
+    ir::Instruction* fpAdd  = builder.createFAdd(paramFP, ctx->getConstantFP(floatTy, 0.0));
+
+    ir::Instruction* finalSum = builder.createAdd(addZero, subSelf);
+    builder.createRet(finalSum);
+
+    transforms::CFGBuilder::run(*func);
+
+    transforms::GVN gvn;
+    bool changed = gvn.run(*func);
+
+    assert(changed);
+
+    // Verify that GVN transitively folded addZero, subZero, mulOne, subSelf, and finalSum to paramX!
+    ir::Instruction* retInst = entry->getInstructions().back().get();
+    assert(retInst->getOpcode() == ir::Instruction::Ret);
+    assert(retInst->getOperands()[0]->get() == paramX);
+
+    std::cout << "--- GVN Identity Simplification Test Passed ---" << std::endl;
+}
+
 int main() {
     test_gvn_cross_block_and_commutative();
     test_gvn_constant_fold();
+    test_gvn_identity_simplification();
     return 0;
 }

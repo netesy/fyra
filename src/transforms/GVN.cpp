@@ -113,6 +113,100 @@ static int64_t signExtendValue(uint64_t val, unsigned bitwidth) {
     return static_cast<int64_t>((val ^ mask) - mask);
 }
 
+static ir::Value* tryIdentitySimplify(ir::Instruction* instr, ir::Function* func) {
+    if (!instr || instr->getOperands().size() < 2) return nullptr;
+    if (!instr->getOperands()[0] || !instr->getOperands()[1]) return nullptr;
+
+    // Strict IntegerType check: reject non-integer operations
+    ir::Type* resultType = instr->getType();
+    auto* intTy = dynamic_cast<ir::IntegerType*>(resultType);
+    if (!intTy) return nullptr;
+
+    ir::Value* op0 = instr->getOperands()[0]->get();
+    ir::Value* op1 = instr->getOperands()[1]->get();
+    if (!op0 || !op1) return nullptr;
+
+    auto* c0 = dynamic_cast<ir::ConstantInt*>(op0);
+    auto* c1 = dynamic_cast<ir::ConstantInt*>(op1);
+
+    auto ctx = func->getParent() ? func->getParent()->getContextShared() : std::make_shared<ir::IRContext>();
+    ir::IntegerType* boolTy = ctx->getIntegerType(32); // Comparison result type in Fyra IR
+
+    ir::Instruction::Opcode opc = instr->getOpcode();
+
+    // 1. Same-operand identities (x op x)
+    if (op0 == op1) {
+        switch (opc) {
+            case ir::Instruction::Sub:
+            case ir::Instruction::Xor:
+                return ctx->getConstantInt(intTy, 0);
+            case ir::Instruction::Ceq:
+            case ir::Instruction::Csle:
+            case ir::Instruction::Cule:
+            case ir::Instruction::Csge:
+            case ir::Instruction::Cuge:
+                return ctx->getConstantInt(boolTy, 1);
+            case ir::Instruction::Cne:
+            case ir::Instruction::Cslt:
+            case ir::Instruction::Cult:
+            case ir::Instruction::Csgt:
+            case ir::Instruction::Cugt:
+                return ctx->getConstantInt(boolTy, 0);
+            default:
+                break;
+        }
+    }
+
+    // 2. Single-constant identities with op1 as constant
+    if (c1) {
+        uint64_t val1 = c1->getValue();
+        uint64_t mask1 = (intTy->getBitwidth() >= 64) ? ~0ULL : ((1ULL << intTy->getBitwidth()) - 1);
+        switch (opc) {
+            case ir::Instruction::Add:
+            case ir::Instruction::Sub:
+            case ir::Instruction::Or:
+            case ir::Instruction::Xor:
+                if (val1 == 0) return op0;
+                break;
+            case ir::Instruction::Mul:
+                if (val1 == 1) return op0;
+                if (val1 == 0) return ctx->getConstantInt(intTy, 0);
+                break;
+            case ir::Instruction::And:
+                if (val1 == 0) return ctx->getConstantInt(intTy, 0);
+                if ((val1 & mask1) == mask1) return op0;
+                break;
+            default:
+                break;
+        }
+    }
+
+    // 3. Single-constant identities with op0 as constant
+    if (c0) {
+        uint64_t val0 = c0->getValue();
+        uint64_t mask0 = (intTy->getBitwidth() >= 64) ? ~0ULL : ((1ULL << intTy->getBitwidth()) - 1);
+        switch (opc) {
+            case ir::Instruction::Add:
+            case ir::Instruction::Or:
+            case ir::Instruction::Xor:
+                if (val0 == 0) return op1;
+                break;
+            case ir::Instruction::Mul:
+                if (val0 == 1) return op1;
+                if (val0 == 0) return ctx->getConstantInt(intTy, 0);
+                break;
+            case ir::Instruction::And:
+                if (val0 == 0) return ctx->getConstantInt(intTy, 0);
+                if ((val0 & mask0) == mask0) return op1;
+                break;
+            default:
+                break;
+        }
+    }
+
+    return nullptr;
+}
+
 static ir::ConstantInt* tryConstantFold(ir::Instruction* instr, ir::Function* func) {
     if (!instr || instr->getOperands().size() < 2) return nullptr;
     if (!instr->getOperands()[0] || !instr->getOperands()[1]) return nullptr;
@@ -183,6 +277,14 @@ static void processBlockGlobalGVN(ir::BasicBlock* bb, const DominatorTree& domTr
         // Fold Constant expressions
         if (ir::ConstantInt* folded = tryConstantFold(instr, bb->getParent())) {
             instr->replaceAllUsesWith(folded);
+            to_remove.push_back(instr);
+            changed = true;
+            continue;
+        }
+
+        // Fold Identity expressions
+        if (ir::Value* identityVal = tryIdentitySimplify(instr, bb->getParent())) {
+            instr->replaceAllUsesWith(identityVal);
             to_remove.push_back(instr);
             changed = true;
             continue;
