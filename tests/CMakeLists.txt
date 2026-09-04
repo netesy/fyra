@@ -287,3 +287,8 @@ add_executable(test_simd_exec test_simd_exec.cpp)
 target_link_libraries(test_simd_exec PRIVATE fyra)
 add_test(NAME SIMDTest COMMAND test_simd_exec)
 set_tests_properties(SIMDTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_loop_vectorizer test_loop_vectorizer.cpp)
+target_link_libraries(test_loop_vectorizer PRIVATE fyra)
+add_test(NAME LoopVectorizerTest COMMAND test_loop_vectorizer)
+set_tests_properties(LoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

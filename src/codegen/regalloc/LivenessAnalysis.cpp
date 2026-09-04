@@ -58,6 +58,18 @@ void LivenessAnalysis::run(ir::Function& func) {
         }
     }
 
+    // Extend live ranges based on CFG liveOut sets for loop-invariant/cross-block variables
+    for (auto& bb_ptr : func.getBasicBlocks()) {
+        ir::BasicBlock* bb = bb_ptr.get();
+        if (bb->getInstructions().empty()) continue;
+        int bb_end_site = instrNumbering[bb->getInstructions().back().get()];
+        for (ir::Instruction* live_instr : liveOut[bb]) {
+            if (liveRanges.count(live_instr)) {
+                liveRanges[live_instr].end = std::max(liveRanges[live_instr].end, bb_end_site);
+            }
+        }
+    }
+
     // Remove ranges for dead variables (no uses)
     std::vector<const ir::Instruction*> dead_vars;
     for (auto const& [var, range] : liveRanges) {
