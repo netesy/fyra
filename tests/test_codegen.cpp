@@ -5,6 +5,7 @@
 #include "transforms/CFGBuilder.h"
 #include "codegen/CodeGen.h"
 #include "codegen/regalloc/LivenessAnalysis.h"
+#include "codegen/regalloc/LinearScanAllocator.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
@@ -945,6 +946,73 @@ function $test_tco_negative_stack_args(%a1 : l, %a2 : l, %a3 : l, %a4 : l, %a5 :
         assert(body_neg_stack.find("jmp test_tco_positive") == std::string::npos);
 
         std::cout << "Tail-Call Optimization (TCO) unit tests passed successfully!" << std::endl;
+    }
+
+    // Direct 3-Address Move Reduction Unit Test
+    {
+        std::cout << "--- Testing Direct 3-Address Move Reduction ---" << std::endl;
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("test_move_reduction", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        ir::Type* i32Ty = ctx->getIntegerType(32);
+        ir::IntegerType* i64Ty = ctx->getIntegerType(64);
+
+        ir::Function* func = builder.createFunction("test_logic_func", i32Ty, {i32Ty, i32Ty, i64Ty, i64Ty});
+        const auto& params = func->getParameters();
+        auto pIt = params.begin();
+        ir::Value* pA32 = (pIt++)->get();
+        ir::Value* pB32 = (pIt++)->get();
+        ir::Value* pA64 = (pIt++)->get();
+        ir::Value* pB64 = (pIt++)->get();
+
+        ir::BasicBlock* bb = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(bb);
+
+        ir::Instruction* and32 = builder.createAnd(pA32, pB32);
+        ir::Instruction* or32 = builder.createOr(pA32, pB32);
+        ir::Instruction* xor64 = builder.createXor(pA64, pB64);
+        ir::Instruction* neg32 = builder.createNeg(pA32);
+        ir::Instruction* not64 = builder.createXor(pA64, ctx->getConstantInt(i64Ty, -1));
+        ir::Instruction* shl32 = builder.createShl(pA32, pB32);
+        ir::Instruction* shr32 = builder.createShr(pA32, pB32);
+        ir::Instruction* sar64 = builder.createSar(pA64, pB32);
+
+        ir::Instruction* sum = builder.createAdd(and32, or32);
+        ir::Instruction* sum2 = builder.createAdd(sum, neg32);
+        ir::Instruction* sum3 = builder.createAdd(sum2, shl32);
+        ir::Instruction* sum4 = builder.createAdd(sum3, shr32);
+        ir::Instruction* truncXor = builder.createCast(xor64, i32Ty);
+        ir::Instruction* truncNot = builder.createCast(not64, i32Ty);
+        ir::Instruction* truncSar = builder.createCast(sar64, i32Ty);
+        ir::Instruction* finalSum = builder.createAdd(sum4, truncXor);
+        ir::Instruction* finalSum2 = builder.createAdd(finalSum, truncNot);
+        ir::Instruction* res = builder.createAdd(finalSum2, truncSar);
+
+        builder.createRet(res);
+
+        transforms::CFGBuilder::run(*func);
+        transforms::LinearScanAllocator allocator;
+        allocator.run(*func);
+
+        std::stringstream ss;
+        codegen::CodeGen codeGen(module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss);
+        codeGen.emit();
+        std::string asm_str = ss.str();
+
+        std::cout << "Generated Assembly:\n" << asm_str << std::endl;
+
+        assert(asm_str.find("andl") != std::string::npos);
+        assert(asm_str.find("orl") != std::string::npos);
+        assert(asm_str.find("xorq") != std::string::npos);
+        assert(asm_str.find("negl") != std::string::npos);
+        assert(asm_str.find("xorq") != std::string::npos);
+        assert(asm_str.find("shll") != std::string::npos);
+        assert(asm_str.find("shrl") != std::string::npos);
+        assert(asm_str.find("sarq") != std::string::npos);
+
+        std::cout << "--- Direct 3-Address Move Reduction Unit Tests Passed ---" << std::endl;
     }
 
     return 0;
