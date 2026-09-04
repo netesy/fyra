@@ -421,7 +421,7 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
 
 void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        if (!i.getOperands().empty()) {
+        if (!i.getOperands().empty() && i.getOperands()[0]->get() != nullptr) {
             ir::Value* retVal = i.getOperands()[0]->get();
             bool is32 = is32BitType(retVal->getType());
             std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
@@ -781,7 +781,10 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string andOp = is32 ? "andl" : "andq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -791,9 +794,9 @@ void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
             *os << "  and " << rax << ", " << op1 << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  andq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            *os << "  " << movOp << " " << op0 << ", " << rax << "\n";
+            *os << "  " << andOp << " " << op1 << ", " << rax << "\n";
+            *os << "  " << movOp << " " << rax << ", " << dst << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -804,7 +807,10 @@ void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string orOp = is32 ? "orl" : "orq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -814,9 +820,9 @@ void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
             *os << "  or " << rax << ", " << op1 << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  orq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            *os << "  " << movOp << " " << op0 << ", " << rax << "\n";
+            *os << "  " << orOp << " " << op1 << ", " << rax << "\n";
+            *os << "  " << movOp << " " << rax << ", " << dst << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -827,7 +833,10 @@ void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string xorOp = is32 ? "xorl" : "xorq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -837,9 +846,9 @@ void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
             *os << "  xor " << rax << ", " << op1 << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  xorq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            *os << "  " << movOp << " " << op0 << ", " << rax << "\n";
+            *os << "  " << xorOp << " " << op1 << ", " << rax << "\n";
+            *os << "  " << movOp << " " << rax << ", " << dst << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -850,13 +859,15 @@ void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
+    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  shlq %cl, " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
+        *os << "  " << (is32 ? "shll" : "shlq") << " %cl, " << rax << "\n";
+        *os << "  " << movOp << " " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -866,13 +877,15 @@ void X64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
+    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  shrq %cl, " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
+        *os << "  " << (is32 ? "shrl" : "shrq") << " %cl, " << rax << "\n";
+        *os << "  " << movOp << " " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -882,13 +895,15 @@ void X64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
+    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  sarq %cl, " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+        *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
+        *os << "  " << (is32 ? "sarl" : "sarq") << " %cl, " << rax << "\n";
+        *os << "  " << movOp << " " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
@@ -898,7 +913,10 @@ void X64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string negOp = is32 ? "negl" : "negq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto dst = cg.getValueAsOperand(&i);
@@ -907,9 +925,9 @@ void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
             *os << "  neg " << rax << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  negq " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            *os << "  " << movOp << " " << op0 << ", " << rax << "\n";
+            *os << "  " << negOp << " " << rax << "\n";
+            *os << "  " << movOp << " " << rax << ", " << dst << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -919,7 +937,10 @@ void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string notOp = is32 ? "notl" : "notq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
     if (auto* os = cg.getTextStream()) {
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto dst = cg.getValueAsOperand(&i);
@@ -928,9 +949,9 @@ void X64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
             *os << "  not " << rax << "\n";
             *os << "  mov " << dst << ", " << rax << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  notq " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            *os << "  " << movOp << " " << op0 << ", " << rax << "\n";
+            *os << "  " << notOp << " " << rax << "\n";
+            *os << "  " << movOp << " " << rax << ", " << dst << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -1433,9 +1454,21 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
                 *os << "  movslq " << s32 << ", " << rax << "\n";
                 *os << "  movq " << rax << ", " << destOp << "\n";
             }
+        } else if (op == ir::Instruction::TruncD) {
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
+            if (destOp[0] == '%') {
+                *os << "  movl " << s32 << ", " << d32 << "\n";
+            } else {
+                *os << "  movl " << s32 << ", " << eax << "\n";
+                *os << "  movl " << eax << ", " << destOp << "\n";
+            }
         } else {
+            bool is32 = is32BitType(to);
+            std::string movOp = is32 ? "movl" : "movq";
+            std::string regRax = is32 ? eax : rax;
             *os << "  movq " << srcOp << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << destOp << "\n";
+            *os << "  " << movOp << " " << regRax << ", " << destOp << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -2247,6 +2280,80 @@ bool X64Architecture::isCallerSaved(const std::string& reg) const { return calle
 bool X64Architecture::isCalleeSaved(const std::string& reg) const { return calleeSaved.count(reg) && calleeSaved.at(reg); }
 bool X64Architecture::isReserved(const std::string& reg) const {
     return reg == "rsp" || reg == "rbp" || reg == "%rsp" || reg == "%rbp";
+}
+
+VectorCapabilities X64Architecture::getVectorCapabilities() const {
+    VectorCapabilities caps;
+    caps.supportsSSE = true;
+    caps.maxVectorWidth = 128;
+    caps.supportedWidths = {128};
+    caps.supportsIntegerVectors = true;
+    caps.simdExtension = "SSE2/SSE4.1";
+    return caps;
+}
+
+bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
+    if (!type) return false;
+    auto* elemTy = type->getElementType();
+    if (!elemTy || !elemTy->isInteger()) return false;
+    auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+    if (!intTy || intTy->getBitwidth() != 32) return false;
+    return type->getNumElements() == 4;
+}
+
+void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        std::string ptrOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+        std::string dstOp = cg.getValueAsOperand(&i);
+        std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << ptrOp << "\n";
+            *os << "  movdqu " << dstOp << ", [" << rax << "]\n";
+        } else {
+            *os << "  movq " << ptrOp << ", " << rax << "\n";
+            *os << "  movdqu (%rax), " << dstOp << "\n";
+        }
+    }
+}
+
+void X64Architecture::emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        std::string srcOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+        std::string ptrOp = cg.getValueAsOperand(i.getOperands()[1]->get());
+        std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+
+        if (abi == X64ABI::Windows) {
+            *os << "  mov " << rax << ", " << ptrOp << "\n";
+            *os << "  movdqu [" << rax << "], " << srcOp << "\n";
+        } else {
+            *os << "  movq " << ptrOp << ", " << rax << "\n";
+            *os << "  movdqu " << srcOp << ", (%rax)\n";
+        }
+    }
+}
+
+void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        std::string op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        std::string op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        std::string dst = cg.getValueAsOperand(&i);
+
+        std::string simdInst;
+        switch (i.getOpcode()) {
+            case ir::Instruction::VAdd: simdInst = "paddd"; break;
+            case ir::Instruction::VSub: simdInst = "psubd"; break;
+            case ir::Instruction::VMul: simdInst = "pmulld"; break;
+            default: simdInst = "paddd"; break;
+        }
+
+        if (dst == op0) {
+            *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+        } else {
+            *os << "  movdqu " << op0 << ", " << dst << "\n";
+            *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+        }
+    }
 }
 
 std::string X64Architecture::getRegisterName(const std::string& base, const ir::Type* type) const {

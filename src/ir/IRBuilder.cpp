@@ -1,5 +1,6 @@
 #include "ir/IRBuilder.h"
 #include "ir/PhiNode.h"
+#include "ir/SIMDInstruction.h"
 #include "ir/Constant.h"
 #include "ir/FunctionType.h"
 #include "ir/Parameter.h"
@@ -878,6 +879,46 @@ Instruction* IRBuilder::createLoadub(Value* ptr) {
 Instruction* IRBuilder::createVAArg(Value* val, Type* destTy) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(destTy, Instruction::VAArg, {val}, insertPoint));
     Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVAdd(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VAdd, {lhs, rhs}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVSub(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VSub, {lhs, rhs}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVMul(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VMul, {lhs, rhs}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVLoad(VectorType* type, Value* ptr) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VLoad, {ptr}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVStore(Value* vec, Value* ptr) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vec->getType(), Instruction::VStore, {vec, ptr}, 128, insertPoint));
+    auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;

@@ -280,6 +280,17 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Cast:
             targetInfo->emitCast(*this, instr, instr.getOperands()[0]->get()->getType(), instr.getType());
             break;
+        case ir::Instruction::VLoad:
+            targetInfo->emitVectorLoad(*this, static_cast<ir::VectorInstruction&>(instr));
+            break;
+        case ir::Instruction::VStore:
+            targetInfo->emitVectorStore(*this, static_cast<ir::VectorInstruction&>(instr));
+            break;
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+            targetInfo->emitVectorArithmetic(*this, static_cast<ir::VectorInstruction&>(instr));
+            break;
         default: break;
     }
 }
@@ -291,10 +302,15 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
 
     // Handle physical registers and stack slots assigned by Register Allocator
     if (value->hasPhysicalRegister()) {
+        int physReg = value->getPhysicalRegister();
+        if (physReg >= 100 && physReg <= 115) {
+            std::string xmmName = "xmm" + std::to_string(physReg - 100);
+            return targetInfo->getRegisterName(xmmName, value->getType());
+        }
         auto regClass = value->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
         auto& regs = targetInfo->getRegisters(regClass);
-        if (static_cast<size_t>(value->getPhysicalRegister()) < regs.size()) {
-            return targetInfo->getRegisterName(regs[value->getPhysicalRegister()], value->getType());
+        if (static_cast<size_t>(physReg) < regs.size()) {
+            return targetInfo->getRegisterName(regs[physReg], value->getType());
         }
     }
     if (currentFunction && currentFunction->hasStackSlot(value)) {

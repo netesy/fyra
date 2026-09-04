@@ -52,7 +52,7 @@ public:
 
 private:
     void linearScan(ir::Function& func);
-    void expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
+    void expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee, std::vector<PhysicalReg>& free_xmm);
     void spillAtInterval(const class LiveInterval& interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
 
     unsigned int next_stack_slot = 0;

@@ -81,6 +81,12 @@ public:
     bool isReserved(const std::string& reg) const override;
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
 
+    VectorCapabilities getVectorCapabilities() const override;
+    bool supportsVectorType(const ir::VectorType* type) const override;
+    void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+
 private:
     X64ABI abi;
     std::vector<std::string> integerRegs, floatRegs, vectorRegs;
