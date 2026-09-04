@@ -20,6 +20,7 @@
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/ScalarEvolution.h"
 #include "transforms/LoopUnroll.h"
+#include "transforms/LoopVectorizer.h"
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/DivisionStrengthReduction.h"
 #include "transforms/ErrorReporter.h"

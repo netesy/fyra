@@ -27,6 +27,26 @@ bool SIMDPatternMatcher::canVectorize(Instruction* inst) {
     return false;
 }
 
+VectorInstruction* SIMDBuilder::createVectorAdd(VectorType* type, Value* lhs, Value* rhs) {
+    return new VectorInstruction(type, Instruction::VAdd, {lhs, rhs}, 128);
+}
+
+VectorInstruction* SIMDBuilder::createVectorSub(VectorType* type, Value* lhs, Value* rhs) {
+    return new VectorInstruction(type, Instruction::VSub, {lhs, rhs}, 128);
+}
+
+VectorInstruction* SIMDBuilder::createVectorMul(VectorType* type, Value* lhs, Value* rhs) {
+    return new VectorInstruction(type, Instruction::VMul, {lhs, rhs}, 128);
+}
+
+VectorInstruction* SIMDBuilder::createVectorLoad(VectorType* type, Value* ptr) {
+    return new VectorInstruction(type, Instruction::VLoad, {ptr}, 128);
+}
+
+VectorInstruction* SIMDBuilder::createVectorStore(Value* vec, Value* ptr) {
+    return new VectorInstruction(vec->getType(), Instruction::VStore, {vec, ptr}, 128);
+}
+
 std::vector<VectorInstruction*> SIMDBuilder::vectorizeScalarLoop(const std::vector<Instruction*>& scalarInstructions, unsigned vectorWidth) {
     std::vector<VectorInstruction*> vectorInstructions;
     for (Instruction* inst : scalarInstructions) {

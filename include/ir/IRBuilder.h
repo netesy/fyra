@@ -12,6 +12,8 @@
 
 namespace ir {
 
+class VectorInstruction;
+
 class IRBuilder {
 public:
     void setContext(std::shared_ptr<IRContext> ctx) { context = ctx; }
@@ -137,6 +139,12 @@ public:
     Instruction* createCast(Value* val, Type* destTy);
     Instruction* createVAStart(Value* val);
     Instruction* createVAArg(Value* val, Type* destTy);
+
+    VectorInstruction* createVAdd(Value* lhs, Value* rhs);
+    VectorInstruction* createVSub(Value* lhs, Value* rhs);
+    VectorInstruction* createVMul(Value* lhs, Value* rhs);
+    VectorInstruction* createVLoad(VectorType* type, Value* ptr);
+    VectorInstruction* createVStore(Value* vec, Value* ptr);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);
