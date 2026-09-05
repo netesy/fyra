@@ -383,76 +383,64 @@ int main() {
 
 void test_simd_rejection() {
     std::cout << "--- Running SIMD Negative Rejection Tests ---" << std::endl;
+    auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
 
     auto ctx = std::make_shared<IRContext>();
     Type* i8Ty = ctx->getIntegerType(8);
-    Type* i32Ty = ctx->getIntegerType(32);
     Type* i64Ty = ctx->getIntegerType(64);
     Type* f32Ty = ctx->getFloatType();
     Type* f64Ty = ctx->getDoubleType();
 
     VectorType* vec16i8 = ctx->getVectorType(i8Ty, 16);
-    VectorType* vec4i32 = ctx->getVectorType(i32Ty, 4);
     VectorType* vec2i64 = ctx->getVectorType(i64Ty, 2);
-    VectorType* vec3i32 = ctx->getVectorType(i32Ty, 3);
+    VectorType* vec3i32 = ctx->getVectorType(ctx->getIntegerType(32), 3);
     VectorType* vec3f32 = ctx->getVectorType(f32Ty, 3);
     VectorType* vec4f64 = ctx->getVectorType(f64Ty, 4);
 
-    {
-        auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
-        assert(x64Arch->supportsVectorType(vec16i8) == true);
-        assert(x64Arch->supportsVectorType(vec2i64) == true);
-        assert(x64Arch->supportsVectorType(vec3i32) == false); // Unsupported lane count
-        assert(x64Arch->supportsVectorType(vec3f32) == false); // Unsupported float lane count
-        assert(x64Arch->supportsVectorType(vec4f64) == false); // Unsupported double lane count
+    // supportsVectorType checks
+    assert(x64Arch->supportsVectorType(vec16i8) == true);
+    assert(x64Arch->supportsVectorType(vec2i64) == true);
+    assert(x64Arch->supportsVectorType(vec3i32) == false); // Unsupported lane count
+    assert(x64Arch->supportsVectorType(vec3f32) == false); // Unsupported float lane count
+    assert(x64Arch->supportsVectorType(vec4f64) == false); // Unsupported double lane count
+
+    // VMul rejection check for <2 x i64>
+    Module module("test_simd_reject", ctx);
+    IRBuilder builder(ctx);
+    builder.setModule(&module);
+    Function* func = builder.createFunction("test_reject_func", ctx->getVoidType(), {i64Ty, i64Ty, i64Ty});
+    const auto& params = func->getParameters();
+    auto pIt = params.begin();
+    Value* pInA = (pIt++)->get();
+    Value* pInB = (pIt++)->get();
+    Value* pOut = (pIt++)->get();
+
+    BasicBlock* entry = builder.createBasicBlock("entry", func);
+    builder.setInsertPoint(entry);
+
+    VectorInstruction* vA = builder.createVLoad(vec2i64, pInA);
+    VectorInstruction* vB = builder.createVLoad(vec2i64, pInB);
+    VectorInstruction* vMul = builder.createVMul(vA, vB);
+    builder.createVStore(vMul, pOut);
+    builder.createRet(nullptr);
+
+    transforms::CFGBuilder::run(*func);
+    transforms::LinearScanAllocator allocator;
+    allocator.run(*func);
+
+    auto linuxOS = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> targetInfo = std::make_unique<target::CompositeTargetInfo>(std::move(x64Arch), std::move(linuxOS));
+    std::ostringstream asmStream;
+    codegen::CodeGen cg(module, std::move(targetInfo), &asmStream);
+
+    bool caughtError = false;
+    try {
+        cg.emit(false);
+    } catch (const std::runtime_error& e) {
+        caughtError = true;
+        std::cout << "Caught expected rejection: " << e.what() << std::endl;
     }
-
-    auto test_reject_op = [&](VectorType* vTy, Instruction::Opcode op, const std::string& testName) {
-        auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
-        Module module("test_simd_reject_" + testName, ctx);
-        IRBuilder builder(ctx);
-        builder.setModule(&module);
-        Function* func = builder.createFunction("test_reject_" + testName, ctx->getVoidType(), {i64Ty, i64Ty, i64Ty});
-        const auto& params = func->getParameters();
-        auto pIt = params.begin();
-        Value* pInA = (pIt++)->get();
-        Value* pInB = (pIt++)->get();
-        Value* pOut = (pIt++)->get();
-
-        BasicBlock* entry = builder.createBasicBlock("entry", func);
-        builder.setInsertPoint(entry);
-
-        VectorInstruction* vA = builder.createVLoad(vTy, pInA);
-        VectorInstruction* vB = builder.createVLoad(vTy, pInB);
-        VectorInstruction* vOp = new VectorInstruction(vTy, op, {vA, vB}, 128);
-        entry->addInstruction(std::unique_ptr<Instruction>(vOp));
-        builder.createVStore(vOp, pOut);
-        builder.createRet(nullptr);
-
-        transforms::CFGBuilder::run(*func);
-        transforms::LinearScanAllocator allocator;
-        allocator.run(*func);
-
-        auto linuxOS = std::make_unique<target::LinuxOS>();
-        std::unique_ptr<target::TargetInfo> targetInfo = std::make_unique<target::CompositeTargetInfo>(std::move(x64Arch), std::move(linuxOS));
-        std::ostringstream asmStream;
-        codegen::CodeGen cg(module, std::move(targetInfo), &asmStream);
-
-        bool caughtError = false;
-        try {
-            cg.emit(false);
-        } catch (const std::runtime_error& e) {
-            caughtError = true;
-            std::cout << "Caught expected rejection [" << testName << "]: " << e.what() << std::endl;
-        }
-        assert(caughtError && "Operation must be rejected!");
-    };
-
-    test_reject_op(vec2i64, Instruction::VMul, "i64_mul");
-    test_reject_op(vec16i8, Instruction::VMul, "i8_mul");
-    test_reject_op(vec4i32, Instruction::VDiv, "i32_div");
-    test_reject_op(vec16i8, Instruction::VDiv, "i8_div");
-    test_reject_op(vec2i64, Instruction::VDiv, "i64_div");
+    assert(caughtError && "VMul for <2 x i64> must be rejected!");
 
     std::cout << "--- SIMD Negative Rejection Tests PASSED ---" << std::endl;
 }

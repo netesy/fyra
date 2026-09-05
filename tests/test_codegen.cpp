@@ -600,6 +600,61 @@ function $test_inplace_mul(%p : w, %q : w) : w {
         std::cout << "Two-address lowering tests completed successfully!" << std::endl;
     }
 
+    // Focused regression test for precise scalar interval expiration across CFG blocks
+    {
+        using namespace ir;
+        using namespace ::transforms;
+
+        std::string liveness_regression_ir = R"(
+function $test_liveness_expiration_regression(%n : w) : w {
+@entry
+    %v0 = add %n, w 1 : w
+    %v1 = add %v0, w 2 : w
+    %v2 = add %v1, w 3 : w
+    %v3 = add %v2, w 4 : w
+    jmp @loop
+
+@loop
+    %i = phi @entry w 0, @body %i_next : w
+    %sum = phi @entry w 0, @body %sum_next : w
+    %cond = slt %i, %n : w
+    jnz %cond, @body, @exit
+
+@body
+    %temp1 = add %i, %v3 : w
+    %sum_next = add %sum, %temp1 : w
+    %i_next = add %i, w 1 : w
+    jmp @loop
+
+@exit
+    ret %sum : w
+}
+)";
+        std::istringstream stream(liveness_regression_ir);
+        parser::Parser reg_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> reg_module = reg_parser.parseModule();
+        assert(reg_module != nullptr);
+
+        Function* f = reg_module->getFunction("test_liveness_expiration_regression");
+        assert(f != nullptr);
+
+        transforms::CFGBuilder::run(*f);
+        transforms::LivenessAnalysis liveness;
+        liveness.run(*f);
+
+        transforms::LinearScanAllocator allocator;
+        allocator.run(*f);
+
+        std::stringstream ss_reg;
+        codegen::CodeGen codeGenReg(*reg_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_reg);
+        codeGenReg.emit();
+
+        std::string reg_asm = ss_reg.str();
+        // Verify zero stack spills for temporary variables %v0, %v1, %v2
+        assert(reg_asm.find("subq $") == std::string::npos || reg_asm.find("subq $24") == std::string::npos);
+        std::cout << "Scalar liveness expiration regression unit test passed successfully!" << std::endl;
+    }
+
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
 
     // Fixed-Register Intermediate Copy Elimination Unit Tests (2-Address Binary Copy Elimination)

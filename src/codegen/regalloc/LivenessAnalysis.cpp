@@ -58,14 +58,28 @@ void LivenessAnalysis::run(ir::Function& func) {
         }
     }
 
-    // Extend live ranges based on CFG liveOut sets for loop-invariant/cross-block variables
+    // Extend live ranges across backedges for loop-carried/loop-invariant variables
     for (auto& bb_ptr : func.getBasicBlocks()) {
         ir::BasicBlock* bb = bb_ptr.get();
         if (bb->getInstructions().empty()) continue;
         int bb_end_site = instrNumbering[bb->getInstructions().back().get()];
-        for (ir::Instruction* live_instr : liveOut[bb]) {
-            if (liveRanges.count(live_instr)) {
-                liveRanges[live_instr].end = std::max(liveRanges[live_instr].end, bb_end_site);
+
+        bool hasBackedge = false;
+        for (ir::BasicBlock* succ : bb->getSuccessors()) {
+            if (!succ->getInstructions().empty()) {
+                int succ_start_site = instrNumbering[succ->getInstructions().front().get()];
+                if (succ_start_site <= bb_end_site) {
+                    hasBackedge = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasBackedge) {
+            for (ir::Instruction* live_instr : liveOut[bb]) {
+                if (liveRanges.count(live_instr)) {
+                    liveRanges[live_instr].end = std::max(liveRanges[live_instr].end, bb_end_site);
+                }
             }
         }
     }
