@@ -2,6 +2,7 @@
 #include "ir/IRBuilder.h"
 #include "ir/IRContext.h"
 #include "ir/SIMDInstruction.h"
+#include "ir/PhiNode.h"
 #include "codegen/CodeGen.h"
 #include "codegen/regalloc/LinearScanAllocator.h"
 #include "target/architecture/x64/X64Architecture.h"
@@ -381,6 +382,132 @@ int main() {
     std::cout << "--- End-to-End SIMD Runtime Execution Test PASSED ---" << std::endl;
 }
 
+void test_simd_loop_liveness() {
+    std::cout << "--- Running SIMD Loop Liveness Regression Test ---" << std::endl;
+
+    auto ctx = std::make_shared<IRContext>();
+    Module module("test_simd_loop_module", ctx);
+    IRBuilder builder(ctx);
+    builder.setModule(&module);
+
+    Type* i32Ty = ctx->getIntegerType(32);
+    Type* i64Ty = ctx->getIntegerType(64);
+    VectorType* vec4i32Ty = ctx->getVectorType(i32Ty, 4);
+
+    Function* func = builder.createFunction("test_simd_loop_func", ctx->getVoidType(), {i64Ty, i64Ty, i64Ty});
+    const auto& params = func->getParameters();
+    auto pIt = params.begin();
+    Value* pInA = (pIt++)->get();
+    Value* pInB = (pIt++)->get();
+    Value* pOut = (pIt++)->get();
+
+    BasicBlock* entry = builder.createBasicBlock("entry", func);
+    BasicBlock* loopHead = builder.createBasicBlock("loop_head", func);
+    BasicBlock* loopBody = builder.createBasicBlock("loop_body", func);
+    BasicBlock* loopExit = builder.createBasicBlock("loop_exit", func);
+
+    // Entry (preheader): load vector A and vector B, compute preheader invariant vector
+    builder.setInsertPoint(entry);
+    VectorInstruction* vA = builder.createVLoad(vec4i32Ty, pInA);
+    VectorInstruction* vB = builder.createVLoad(vec4i32Ty, pInB);
+    VectorInstruction* vInvariant = builder.createVAdd(vA, vB); // Preheader SIMD invariant
+    builder.createJmp(loopHead);
+
+    // Loop head
+    builder.setInsertPoint(loopHead);
+    auto phiI_ptr = std::make_unique<PhiNode>(i32Ty, 0, nullptr, loopHead);
+    PhiNode* phiI = phiI_ptr.get();
+    loopHead->getInstructions().push_back(std::move(phiI_ptr));
+
+    auto phiAcc_ptr = std::make_unique<PhiNode>(vec4i32Ty, 0, nullptr, loopHead);
+    PhiNode* phiAcc = phiAcc_ptr.get();
+    loopHead->getInstructions().push_back(std::move(phiAcc_ptr));
+
+    phiI->addIncoming(ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0), entry);
+    phiAcc->addIncoming(vA, entry);
+
+    Instruction* cond = builder.createCslt(phiI, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 10));
+    builder.createBr(cond, loopBody, loopExit);
+
+    // Loop body: Accumulate vInvariant 10 times across loop recurrences
+    builder.setInsertPoint(loopBody);
+    VectorInstruction* vAccNext = builder.createVAdd(phiAcc, vInvariant);
+    Instruction* iNext = builder.createAdd(phiI, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 1));
+
+    phiI->addIncoming(iNext, loopBody);
+    phiAcc->addIncoming(vAccNext, loopBody);
+    builder.createJmp(loopHead);
+
+    // Loop exit: Store accumulated SIMD result
+    builder.setInsertPoint(loopExit);
+    builder.createVStore(phiAcc, pOut);
+    builder.createRet(nullptr);
+
+    transforms::CFGBuilder::run(*func);
+    transforms::LinearScanAllocator allocator;
+    allocator.run(*func);
+
+    auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    auto linuxOS = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> targetInfo = std::make_unique<target::CompositeTargetInfo>(std::move(x64Arch), std::move(linuxOS));
+
+    std::ostringstream asmStream;
+    codegen::CodeGen cg(module, std::move(targetInfo), &asmStream);
+    cg.emit(false);
+
+    std::string asmCode = asmStream.str();
+    assert(asmCode.find("paddd") != std::string::npos);
+
+    std::string asmFilePath = "/tmp/test_simd_loop_generated.s";
+    std::string binFilePath = "/tmp/test_simd_loop_runner";
+    {
+        std::ofstream asmFile(asmFilePath);
+        asmFile << asmCode;
+    }
+
+    std::string harnessPath = "/tmp/test_simd_loop_harness.c";
+    {
+        std::ofstream hFile(harnessPath);
+        hFile << R"(
+#include <stdio.h>
+#include <stdint.h>
+#include <assert.h>
+
+extern void test_simd_loop_func(const int32_t* inA, const int32_t* inB, int32_t* out);
+
+int main() {
+    int32_t inA[4] = {10, 20, 30, 40};
+    int32_t inB[4] = {1,  2,  3,  4};
+    int32_t out[4] = {0};
+
+    // inA + 10 * (inA + inB) = [10, 20, 30, 40] + 10 * [11, 22, 33, 44] = [120, 240, 360, 480]
+    test_simd_loop_func(inA, inB, out);
+    assert(out[0] == 120 && out[1] == 240 && out[2] == 360 && out[3] == 480);
+    printf("SIMD_LOOP_LIVENESS_SUCCESS\n");
+    return 0;
+}
+)";
+    }
+
+    std::string compileCmd = "gcc -no-pie " + asmFilePath + " " + harnessPath + " -o " + binFilePath;
+    int compileRc = std::system(compileCmd.c_str());
+    assert(compileRc == 0 && "Compilation of SIMD loop test assembly failed");
+
+    FILE* pipe = popen(binFilePath.c_str(), "r");
+    assert(pipe != nullptr);
+    char buffer[128];
+    std::string resultOutput = "";
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        resultOutput += buffer;
+    }
+    int execRc = pclose(pipe);
+
+    assert(execRc == 0 && "Execution of SIMD loop test binary failed");
+    assert(resultOutput.find("SIMD_LOOP_LIVENESS_SUCCESS") != std::string::npos);
+
+    std::cout << "--- SIMD Loop Liveness Regression Test PASSED ---" << std::endl;
+}
+
 void test_simd_rejection() {
     std::cout << "--- Running SIMD Negative Rejection Tests ---" << std::endl;
     auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
@@ -447,6 +574,7 @@ void test_simd_rejection() {
 
 int main() {
     test_simd_runtime_execution();
+    test_simd_loop_liveness();
     test_simd_rejection();
     return 0;
 }
