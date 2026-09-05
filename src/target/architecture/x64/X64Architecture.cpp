@@ -1845,12 +1845,13 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
         // Load value-to-store into rax
         bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
                            (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        bool is32Val = (size <= 4);
         if (abi == X64ABI::Windows) {
             if (isGlobalVal) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
             else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
         } else {
             if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            else emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), rax, is32Val);
         }
         std::string op = cg.getValueAsOperand(i.getOperands()[1]->get());
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
@@ -2647,6 +2648,56 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         auto* elemTy = vecType->getElementType();
         unsigned numElem = vecType->getNumElements();
         std::string simdInst = "";
+
+        // VBroadcast handling
+        if (i.getOpcode() == ir::Instruction::VBroadcast) {
+            if (elemTy->isIntegerTy()) {
+                auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+                unsigned bw = intTy ? intTy->getBitwidth() : 32;
+                if (bw == 32) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  pshufd $0, " << dst << ", " << dst << "\n";
+                } else if (bw == 64) {
+                    *os << "  movq " << op0 << ", " << dst << "\n";
+                    *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                } else if (bw == 16) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  pshuflw $0, " << dst << ", " << dst << "\n";
+                    *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                } else if (bw == 8) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  punpcklbw " << dst << ", " << dst << "\n";
+                    *os << "  pshuflw $0, " << dst << ", " << dst << "\n";
+                    *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                } else {
+                    throw std::runtime_error("Unsupported integer bitwidth for VBroadcast");
+                }
+            } else if (elemTy->isFloatTy()) {
+                if (isXmmRegisterName(op0)) {
+                    if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0, " << dst << ", " << dst << "\n";
+                } else if (isDirectGprRegister(op0)) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0, " << dst << ", " << dst << "\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0, " << dst << ", " << dst << "\n";
+                }
+            } else if (elemTy->isDoubleTy()) {
+                if (isXmmRegisterName(op0)) {
+                    *os << "  movddup " << op0 << ", " << dst << "\n";
+                } else if (isDirectGprRegister(op0)) {
+                    *os << "  movq " << op0 << ", " << dst << "\n";
+                    *os << "  movddup " << dst << ", " << dst << "\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  movddup " << dst << ", " << dst << "\n";
+                }
+            } else {
+                throw std::runtime_error("Unsupported vector type for VBroadcast");
+            }
+            return;
+        }
 
         // FMA 3-operand instructions
         if (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FMS ||

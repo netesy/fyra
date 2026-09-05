@@ -577,9 +577,254 @@ void test_simd_rejection() {
     std::cout << "--- SIMD Negative Rejection Tests PASSED ---" << std::endl;
 }
 
+void test_simd_vbroadcast() {
+    std::cout << "--- Running SIMD VBroadcast Execution & Assembly Assertion Test ---" << std::endl;
+
+    auto ctx = std::make_shared<IRContext>();
+    Module module("test_simd_vbroadcast_module", ctx);
+    IRBuilder builder(ctx);
+    builder.setModule(&module);
+
+    Type* i8Ty = ctx->getIntegerType(8);
+    Type* i16Ty = ctx->getIntegerType(16);
+    Type* i32Ty = ctx->getIntegerType(32);
+    Type* i64Ty = ctx->getIntegerType(64);
+    Type* f32Ty = ctx->getFloatType();
+    Type* f64Ty = ctx->getDoubleType();
+
+    VectorType* vec16i8Ty = ctx->getVectorType(i8Ty, 16);
+    VectorType* vec8i16Ty = ctx->getVectorType(i16Ty, 8);
+    VectorType* vec4i32Ty = ctx->getVectorType(i32Ty, 4);
+    VectorType* vec2i64Ty = ctx->getVectorType(i64Ty, 2);
+    VectorType* vec4f32Ty = ctx->getVectorType(f32Ty, 4);
+    VectorType* vec2f64Ty = ctx->getVectorType(f64Ty, 2);
+
+    Function* func = builder.createFunction("test_vbroadcast_func", ctx->getVoidType(), {i64Ty});
+    const auto& params = func->getParameters();
+    Value* pArgs = params.front().get();
+
+    BasicBlock* entry = builder.createBasicBlock("entry", func);
+    builder.setInsertPoint(entry);
+
+    // Load input pointers and output pointers sequentially from array
+    Value* ptr0 = pArgs;
+    Value* pIn32 = builder.createLoadl(ptr0);
+
+    Value* ptr1 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pIn64 = builder.createLoadl(ptr1);
+
+    Value* ptr2 = builder.createAdd(ptr1, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pInF32 = builder.createLoadl(ptr2);
+
+    Value* ptr3 = builder.createAdd(ptr2, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pInF64 = builder.createLoadl(ptr3);
+
+    Value* ptr4 = builder.createAdd(ptr3, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOut32 = builder.createLoadl(ptr4);
+
+    Value* ptr5 = builder.createAdd(ptr4, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOut64 = builder.createLoadl(ptr5);
+
+    Value* ptr6 = builder.createAdd(ptr5, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOut16 = builder.createLoadl(ptr6);
+
+    Value* ptr7 = builder.createAdd(ptr6, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOut8 = builder.createLoadl(ptr7);
+
+    Value* ptr8 = builder.createAdd(ptr7, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOutF32 = builder.createLoadl(ptr8);
+
+    Value* ptr9 = builder.createAdd(ptr8, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOutF64 = builder.createLoadl(ptr9);
+
+    Value* ptr10 = builder.createAdd(ptr9, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pOutPreserve = builder.createLoadl(ptr10);
+
+    Instruction* val32 = builder.createLoaduw(pIn32);
+    Instruction* val64 = builder.createLoadl(pIn64);
+    Instruction* valF32 = builder.createLoadd(pInF32);
+    Instruction* valF64 = builder.createLoadl(pInF64);
+
+    // Truncate to i16 and i8 for narrow broadcasts
+    Value* val16 = builder.createTruncD(val32, i16Ty);
+    Value* val8  = builder.createTruncD(val32, i8Ty);
+
+    // VBroadcast instructions
+    VectorInstruction* v32 = new VectorInstruction(vec4i32Ty, Instruction::VBroadcast, {val32}, 128);
+    VectorInstruction* v64 = new VectorInstruction(vec2i64Ty, Instruction::VBroadcast, {val64}, 128);
+    VectorInstruction* v16 = new VectorInstruction(vec8i16Ty, Instruction::VBroadcast, {val16}, 128);
+    VectorInstruction* v8  = new VectorInstruction(vec16i8Ty, Instruction::VBroadcast, {val8}, 128);
+    VectorInstruction* vF32 = new VectorInstruction(vec4f32Ty, Instruction::VBroadcast, {valF32}, 128);
+    VectorInstruction* vF64 = new VectorInstruction(vec2f64Ty, Instruction::VBroadcast, {valF64}, 128);
+
+    entry->addInstruction(std::unique_ptr<Instruction>(v32));
+    entry->addInstruction(std::unique_ptr<Instruction>(v64));
+    entry->addInstruction(std::unique_ptr<Instruction>(v16));
+    entry->addInstruction(std::unique_ptr<Instruction>(v8));
+    entry->addInstruction(std::unique_ptr<Instruction>(vF32));
+    entry->addInstruction(std::unique_ptr<Instruction>(vF64));
+
+    // Scalar preservation check: use val32 after VBroadcast in scalar arithmetic
+    Value* val32Add = builder.createAdd(val32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 100));
+    builder.createStore(val32Add, pOutPreserve);
+
+    builder.createVStore(v32, pOut32);
+    builder.createVStore(v64, pOut64);
+    builder.createVStore(v16, pOut16);
+    builder.createVStore(v8, pOut8);
+    builder.createVStore(vF32, pOutF32);
+    builder.createVStore(vF64, pOutF64);
+    builder.createRet(nullptr);
+
+    transforms::CFGBuilder::run(*func);
+    transforms::LinearScanAllocator allocator;
+    allocator.run(*func);
+
+    auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    auto linuxOS = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> targetInfo = std::make_unique<target::CompositeTargetInfo>(std::move(x64Arch), std::move(linuxOS));
+
+    std::ostringstream asmStream;
+    codegen::CodeGen cg(module, std::move(targetInfo), &asmStream);
+    cg.emit(false);
+
+    std::string asmCode = asmStream.str();
+    std::cout << "Generated VBroadcast Assembly:\n" << asmCode << std::endl;
+
+    assert(asmCode.find("pshufd") != std::string::npos && "pshufd required for i32 broadcast");
+    assert(asmCode.find("punpcklqdq") != std::string::npos && "punpcklqdq required for i64 broadcast");
+    assert(asmCode.find("pshuflw") != std::string::npos && "pshuflw required for i16 broadcast");
+    assert(asmCode.find("punpcklbw") != std::string::npos && "punpcklbw required for i8 broadcast");
+    assert(asmCode.find("shufps") != std::string::npos && "shufps required for f32 broadcast");
+    assert(asmCode.find("movddup") != std::string::npos && "movddup required for f64 broadcast");
+
+    std::string asmFilePath = "/tmp/test_vbroadcast_generated.s";
+    std::string binFilePath = "/tmp/test_vbroadcast_runner";
+    {
+        std::ofstream asmFile(asmFilePath);
+        asmFile << asmCode;
+    }
+
+    std::string harnessPath = "/tmp/test_vbroadcast_harness.c";
+    {
+        std::ofstream hFile(harnessPath);
+        hFile << R"(
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
+#include <assert.h>
+
+struct VBroadcastArgs {
+    uint64_t pVal32;
+    uint64_t pVal64;
+    uint64_t pValF32;
+    uint64_t pValF64;
+    uint64_t pOut32;
+    uint64_t pOut64;
+    uint64_t pOut16;
+    uint64_t pOut8;
+    uint64_t pOutF32;
+    uint64_t pOutF64;
+    uint64_t pOutPreserve;
+};
+
+extern void test_vbroadcast_func(const struct VBroadcastArgs* args);
+
+int main() {
+    int32_t val32 = -1234567;
+    int64_t val64 = 0x123456789ABCDEF0LL;
+    float valF32 = 3.14159265f;
+    double valF64 = 2.718281828459045;
+
+    int32_t out32[4] = {0};
+    int64_t out64[2] = {0};
+    int16_t out16[8] = {0};
+    int8_t  out8[16] = {0};
+    float   outF32[4] = {0};
+    double  outF64[2] = {0};
+    int32_t outPreserve[1] = {0};
+
+    struct VBroadcastArgs args = {
+        (uint64_t)&val32,
+        (uint64_t)&val64,
+        (uint64_t)&valF32,
+        (uint64_t)&valF64,
+        (uint64_t)out32,
+        (uint64_t)out64,
+        (uint64_t)out16,
+        (uint64_t)out8,
+        (uint64_t)outF32,
+        (uint64_t)outF64,
+        (uint64_t)outPreserve
+    };
+
+    test_vbroadcast_func(&args);
+
+    // Verify i32 broadcast
+    for (int i = 0; i < 4; i++) {
+        assert(out32[i] == -1234567);
+    }
+
+    // Verify i64 broadcast
+    for (int i = 0; i < 2; i++) {
+        assert(out64[i] == 0x123456789ABCDEF0LL);
+    }
+
+    // Verify i16 broadcast
+    int16_t expected16 = (int16_t)(-1234567 & 0xFFFF);
+    for (int i = 0; i < 8; i++) {
+        assert(out16[i] == expected16);
+    }
+
+    // Verify i8 broadcast
+    int8_t expected8 = (int8_t)(-1234567 & 0xFF);
+    for (int i = 0; i < 16; i++) {
+        assert(out8[i] == expected8);
+    }
+
+    // Verify f32 broadcast
+    for (int i = 0; i < 4; i++) {
+        assert(fabsf(outF32[i] - 3.14159265f) < 1e-6f);
+    }
+
+    // Verify f64 broadcast
+    for (int i = 0; i < 2; i++) {
+        assert(fabs(outF64[i] - 2.718281828459045) < 1e-12);
+    }
+
+    // Verify scalar preservation
+    assert(outPreserve[0] == -1234567 + 100);
+
+    printf("VBROADCAST_RUNTIME_EXECUTION_SUCCESS\n");
+    return 0;
+}
+)";
+    }
+
+    std::string compileCmd = "gcc -no-pie " + asmFilePath + " " + harnessPath + " -o " + binFilePath;
+    int compileRc = std::system(compileCmd.c_str());
+    assert(compileRc == 0 && "Compilation of VBroadcast test assembly failed");
+
+    FILE* pipe = popen(binFilePath.c_str(), "r");
+    assert(pipe != nullptr);
+    char buffer[128];
+    std::string resultOutput = "";
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        resultOutput += buffer;
+    }
+    int execRc = pclose(pipe);
+
+    assert(execRc == 0 && "Execution of VBroadcast test binary failed");
+    assert(resultOutput.find("VBROADCAST_RUNTIME_EXECUTION_SUCCESS") != std::string::npos);
+
+    std::cout << "--- SIMD VBroadcast Execution & Assembly Assertion Test PASSED ---" << std::endl;
+}
+
 int main() {
     test_simd_runtime_execution();
     test_simd_loop_liveness();
+    test_simd_vbroadcast();
     test_simd_rejection();
     return 0;
 }
