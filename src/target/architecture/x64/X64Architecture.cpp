@@ -2749,12 +2749,6 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                 *os << "  " << simdInst << " " << dst << ", " << op1 << "\n";
             } else if (dst == op1 && isCommutative) {
                 *os << "  " << simdInst << " " << dst << ", " << op0 << "\n";
-            } else if (dst == op1 && !isCommutative) {
-                *os << "  sub rsp, 16\n";
-                *os << "  movdqu [rsp], " << dst << "\n";
-                *os << "  movdqu " << dst << ", " << op0 << "\n";
-                *os << "  " << simdInst << " " << dst << ", [rsp]\n";
-                *os << "  add rsp, 16\n";
             } else {
                 *os << "  movdqu " << dst << ", " << op0 << "\n";
                 *os << "  " << simdInst << " " << dst << ", " << op1 << "\n";
@@ -2765,12 +2759,6 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                 *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
             } else if (dst == op1 && isCommutative) {
                 *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
-            } else if (dst == op1 && !isCommutative) {
-                *os << "  subq $16, %rsp\n";
-                *os << "  movdqu " << dst << ", (%rsp)\n";
-                *os << "  movdqu " << op0 << ", " << dst << "\n";
-                *os << "  " << simdInst << " (%rsp), " << dst << "\n";
-                *os << "  addq $16, %rsp\n";
             } else {
                 *os << "  movdqu " << op0 << ", " << dst << "\n";
                 *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
