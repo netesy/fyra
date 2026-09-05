@@ -1,0 +1,50 @@
+function $simd_loop_calc(%n : w) : l {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry w 0, @body %i_next : w
+    %sum = phi @entry l 0, @body %sum_next : l
+    %cond = slt %i, %n : w
+    jnz %cond, @body, @exit
+
+@body
+    %t1 = mul %i, w 5 : w
+    %a_w = add %t1, w 3 : w
+    %a = extsw %a_w : l
+
+    %t2 = mul %i, w 2 : w
+    %b_w = add %t2, w 7 : w
+    %b = extsw %b_w : l
+
+    %prod = mul %a, %b : l
+    %diff = sub %a, %b : l
+    %step = add %prod, %diff : l
+    %sum_next = add %sum, %step : l
+    %i_next = add %i, w 1 : w
+    jmp @loop
+
+@exit
+    ret %sum : l
+}
+
+export function $main() : w {
+@entry
+    jmp @loop
+
+@loop
+    %k = phi @entry w 0, @body %k_next : w
+    %res = phi @entry l 0, @body %res_next : l
+    %cond = slt %k, w 20 : w
+    jnz %cond, @body, @exit
+
+@body
+    %v = call $simd_loop_calc(w 5000000) : l
+    %res_next = add %res, %v : l
+    %k_next = add %k, w 1 : w
+    jmp @loop
+
+@exit
+    call $print_checksum(l %res)
+    ret w 0 : w
+}
