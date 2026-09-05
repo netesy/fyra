@@ -2546,10 +2546,25 @@ VectorCapabilities X64Architecture::getVectorCapabilities() const {
 bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
     if (!type) return false;
     auto* elemTy = type->getElementType();
-    if (!elemTy || !elemTy->isInteger()) return false;
-    auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
-    if (!intTy || intTy->getBitwidth() != 32) return false;
-    return type->getNumElements() == 4;
+    if (!elemTy) return false;
+
+    unsigned numElem = type->getNumElements();
+
+    if (elemTy->isIntegerTy()) {
+        auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+        if (!intTy) return false;
+        unsigned bw = intTy->getBitwidth();
+        if (bw == 8 && numElem == 16) return true;
+        if (bw == 16 && numElem == 8) return true;
+        if (bw == 32 && numElem == 4) return true;
+        if (bw == 64 && numElem == 2) return true;
+    } else if (elemTy->isFloatTy()) {
+        if (numElem == 4) return true;
+    } else if (elemTy->isDoubleTy()) {
+        if (numElem == 2) return true;
+    }
+
+    return false;
 }
 
 void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
@@ -2586,21 +2601,123 @@ void X64Architecture::emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {
 
 void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) {
     if (auto* os = cg.getTextStream()) {
+        if (i.getOperands().empty() || !i.getOperands()[0] || !i.getOperands()[0]->get()) {
+            throw std::runtime_error("Vector instruction missing primary operand");
+        }
+
         std::string op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
-        std::string op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        std::string op1 = (i.getOperands().size() > 1 && i.getOperands()[1] && i.getOperands()[1]->get()) ?
+                           cg.getValueAsOperand(i.getOperands()[1]->get()) : "";
         std::string dst = cg.getValueAsOperand(&i);
 
-        std::string simdInst;
-        switch (i.getOpcode()) {
-            case ir::Instruction::VAdd: simdInst = "paddd"; break;
-            case ir::Instruction::VSub: simdInst = "psubd"; break;
-            case ir::Instruction::VMul: simdInst = "pmulld"; break;
-            default: simdInst = "paddd"; break;
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+        if (!vecType || !vecType->getElementType()) {
+            throw std::runtime_error("Unsupported vector arithmetic type");
         }
+
+        auto* elemTy = vecType->getElementType();
+        unsigned numElem = vecType->getNumElements();
+        std::string simdInst = "";
+
+        // FMA 3-operand instructions
+        if (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FMS ||
+            i.getOpcode() == ir::Instruction::FNMA || i.getOpcode() == ir::Instruction::FNMS) {
+            if (i.getOperands().size() < 3) throw std::runtime_error("FMA requires 3 operands");
+            std::string op2 = cg.getValueAsOperand(i.getOperands()[2]->get());
+            std::string mulInst = elemTy->isFloatTy() ? "mulps" : "mulpd";
+            std::string addSubInst = (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FNMA) ?
+                                     (elemTy->isFloatTy() ? "addps" : "addpd") :
+                                     (elemTy->isFloatTy() ? "subps" : "subpd");
+
+            *os << "  movdqu " << op0 << ", " << dst << "\n";
+            *os << "  " << mulInst << " " << op1 << ", " << dst << "\n";
+            *os << "  " << addSubInst << " " << op2 << ", " << dst << "\n";
+            return;
+        }
+
+        // Binary vector opcodes selection
+        if (i.getOpcode() == ir::Instruction::VAnd) {
+            simdInst = "pand";
+        } else if (i.getOpcode() == ir::Instruction::VOr) {
+            simdInst = "por";
+        } else if (i.getOpcode() == ir::Instruction::VXor) {
+            simdInst = "pxor";
+        } else if (i.getOpcode() == ir::Instruction::VShl && elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            unsigned bw = intTy ? intTy->getBitwidth() : 32;
+            simdInst = (bw == 16) ? "psllw" : "pslld";
+        } else if (i.getOpcode() == ir::Instruction::VShr && elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            unsigned bw = intTy ? intTy->getBitwidth() : 32;
+            simdInst = (bw == 16) ? "psrlw" : "psrld";
+        } else if (i.getOpcode() == ir::Instruction::VMin) {
+            simdInst = (elemTy->getSize() == 1) ? "pminub" : ((elemTy->getSize() == 2) ? "pminsw" : "pminsd");
+        } else if (i.getOpcode() == ir::Instruction::VMax) {
+            simdInst = (elemTy->getSize() == 1) ? "pmaxub" : ((elemTy->getSize() == 2) ? "pmaxsw" : "pmaxsd");
+        } else if (i.getOpcode() == ir::Instruction::VFMin) {
+            simdInst = (elemTy->isFloatTy()) ? "minps" : "minpd";
+        } else if (i.getOpcode() == ir::Instruction::VFMax) {
+            simdInst = (elemTy->isFloatTy()) ? "maxps" : "maxpd";
+        } else if (i.getOpcode() == ir::Instruction::VHAdd) {
+            simdInst = (elemTy->isFloatTy()) ? "haddps" : ((elemTy->isDoubleTy()) ? "haddpd" : "phaddd");
+        } else if (i.getOpcode() == ir::Instruction::VCmp) {
+            simdInst = elemTy->isFloatTy() ? "cmpps $0," : (elemTy->isDoubleTy() ? "cmppd $0," : "pcmpeqd");
+        } else if (i.getOpcode() == ir::Instruction::VSelect) {
+            *os << "  movdqu " << op0 << ", " << dst << "\n";
+            *os << "  pand " << op1 << ", " << dst << "\n";
+            return;
+        } else if (elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            if (!intTy) throw std::runtime_error("Invalid integer vector element type");
+            unsigned bw = intTy->getBitwidth();
+
+            if (bw == 8 && numElem == 16) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddb";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubb";
+                else throw std::runtime_error("Unsupported vector instruction for <16 x i8>");
+            } else if (bw == 16 && numElem == 8) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddw";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubw";
+                else if (i.getOpcode() == ir::Instruction::VMul) simdInst = "pmullw";
+                else throw std::runtime_error("Unsupported vector instruction for <8 x i16>");
+            } else if (bw == 32 && numElem == 4) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddd";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubd";
+                else if (i.getOpcode() == ir::Instruction::VMul) simdInst = "pmulld";
+                else throw std::runtime_error("Unsupported vector instruction for <4 x i32>");
+            } else if (bw == 64 && numElem == 2) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddq";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubq";
+                else throw std::runtime_error("Unsupported vector instruction for <2 x i64>");
+            } else {
+                throw std::runtime_error("Unsupported integer vector type for arithmetic emission");
+            }
+        } else if (elemTy->isFloatTy() && numElem == 4) {
+            if (i.getOpcode() == ir::Instruction::VFAdd) simdInst = "addps";
+            else if (i.getOpcode() == ir::Instruction::VFSub) simdInst = "subps";
+            else if (i.getOpcode() == ir::Instruction::VFMul) simdInst = "mulps";
+            else if (i.getOpcode() == ir::Instruction::VFDiv) simdInst = "divps";
+            else throw std::runtime_error("Unsupported floating-point vector instruction for <4 x f32>");
+        } else if (elemTy->isDoubleTy() && numElem == 2) {
+            if (i.getOpcode() == ir::Instruction::VFAdd) simdInst = "addpd";
+            else if (i.getOpcode() == ir::Instruction::VFSub) simdInst = "subpd";
+            else if (i.getOpcode() == ir::Instruction::VFMul) simdInst = "mulpd";
+            else if (i.getOpcode() == ir::Instruction::VFDiv) simdInst = "divpd";
+            else throw std::runtime_error("Unsupported floating-point vector instruction for <2 x f64>");
+        } else {
+            throw std::runtime_error("Unsupported vector type for arithmetic emission");
+        }
+
+        if (simdInst.empty()) throw std::runtime_error("Unrecognized SIMD instruction opcode");
+
+        bool isCommutative = (i.getOpcode() == ir::Instruction::VAdd || i.getOpcode() == ir::Instruction::VMul ||
+                              i.getOpcode() == ir::Instruction::VFAdd || i.getOpcode() == ir::Instruction::VFMul ||
+                              i.getOpcode() == ir::Instruction::VAnd || i.getOpcode() == ir::Instruction::VOr ||
+                              i.getOpcode() == ir::Instruction::VXor);
 
         if (dst == op0) {
             *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
-        } else if (dst == op1 && (i.getOpcode() == ir::Instruction::VAdd || i.getOpcode() == ir::Instruction::VMul)) {
+        } else if (dst == op1 && isCommutative) {
             *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
         } else {
             *os << "  movdqu " << op0 << ", " << dst << "\n";

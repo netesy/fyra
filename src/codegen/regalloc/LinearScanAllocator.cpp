@@ -63,6 +63,37 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
                 case ir::Instruction::VAdd:
                 case ir::Instruction::VSub:
                 case ir::Instruction::VMul:
+                case ir::Instruction::VDiv:
+                case ir::Instruction::VFAdd:
+                case ir::Instruction::VFSub:
+                case ir::Instruction::VFMul:
+                case ir::Instruction::VFDiv:
+                case ir::Instruction::VAnd:
+                case ir::Instruction::VOr:
+                case ir::Instruction::VXor:
+                case ir::Instruction::VShl:
+                case ir::Instruction::VShr:
+                case ir::Instruction::VNot:
+                case ir::Instruction::VBroadcast:
+                case ir::Instruction::VExtract:
+                case ir::Instruction::VInsert:
+                case ir::Instruction::VShuffle:
+                case ir::Instruction::VCmp:
+                case ir::Instruction::VSelect:
+                case ir::Instruction::VHAdd:
+                case ir::Instruction::VHSub:
+                case ir::Instruction::VHMul:
+                case ir::Instruction::VHAnd:
+                case ir::Instruction::VHOr:
+                case ir::Instruction::VHXor:
+                case ir::Instruction::VMin:
+                case ir::Instruction::VMax:
+                case ir::Instruction::VFMin:
+                case ir::Instruction::VFMax:
+                case ir::Instruction::FMA:
+                case ir::Instruction::FMS:
+                case ir::Instruction::FNMA:
+                case ir::Instruction::FNMS:
                     isVector = true;
                     break;
                 default: break;
