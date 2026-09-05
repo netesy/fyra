@@ -2548,8 +2548,17 @@ bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
     auto* elemTy = type->getElementType();
     if (!elemTy || !elemTy->isInteger()) return false;
     auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
-    if (!intTy || intTy->getBitwidth() != 32) return false;
-    return type->getNumElements() == 4;
+    if (!intTy) return false;
+
+    unsigned bw = intTy->getBitwidth();
+    unsigned numElem = type->getNumElements();
+
+    if (bw == 8 && numElem == 16) return true;
+    if (bw == 16 && numElem == 8) return true;
+    if (bw == 32 && numElem == 4) return true;
+    if (bw == 64 && numElem == 2) return true;
+
+    return false;
 }
 
 void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
@@ -2590,12 +2599,39 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         std::string op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         std::string dst = cg.getValueAsOperand(&i);
 
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+        if (!vecType || !vecType->getElementType()) {
+            throw std::runtime_error("Unsupported vector arithmetic type");
+        }
+        auto* intTy = dynamic_cast<const ir::IntegerType*>(vecType->getElementType());
+        if (!intTy) {
+            throw std::runtime_error("Unsupported non-integer vector arithmetic type");
+        }
+
+        unsigned bw = intTy->getBitwidth();
+        unsigned numElem = vecType->getNumElements();
         std::string simdInst;
-        switch (i.getOpcode()) {
-            case ir::Instruction::VAdd: simdInst = "paddd"; break;
-            case ir::Instruction::VSub: simdInst = "psubd"; break;
-            case ir::Instruction::VMul: simdInst = "pmulld"; break;
-            default: simdInst = "paddd"; break;
+
+        if (bw == 8 && numElem == 16) {
+            if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddb";
+            else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubb";
+            else throw std::runtime_error("Unsupported vector instruction for <16 x i8>");
+        } else if (bw == 16 && numElem == 8) {
+            if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddw";
+            else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubw";
+            else if (i.getOpcode() == ir::Instruction::VMul) simdInst = "pmullw";
+            else throw std::runtime_error("Unsupported vector instruction for <8 x i16>");
+        } else if (bw == 32 && numElem == 4) {
+            if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddd";
+            else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubd";
+            else if (i.getOpcode() == ir::Instruction::VMul) simdInst = "pmulld";
+            else throw std::runtime_error("Unsupported vector instruction for <4 x i32>");
+        } else if (bw == 64 && numElem == 2) {
+            if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddq";
+            else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubq";
+            else throw std::runtime_error("Unsupported vector instruction for <2 x i64>");
+        } else {
+            throw std::runtime_error("Unsupported vector type for arithmetic emission");
         }
 
         if (dst == op0) {
