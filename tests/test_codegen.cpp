@@ -674,6 +674,101 @@ function $test_liveness_precision(%n : w, %inv : w) : w {
 
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
 
+    // Focused VExtract Register-Class Allocation Unit Tests
+    {
+        using namespace ir;
+        using namespace transforms;
+
+        std::cout << "--- Testing VExtract Register-Class Allocation ---" << std::endl;
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("test_vextract_regclass", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        ir::Type* i8Ty = ctx->getIntegerType(8);
+        ir::Type* i16Ty = ctx->getIntegerType(16);
+        ir::Type* i32Ty = ctx->getIntegerType(32);
+        ir::Type* i64Ty = ctx->getIntegerType(64);
+        ir::Type* f32Ty = ctx->getFloatType();
+        ir::Type* f64Ty = ctx->getDoubleType();
+
+        ir::VectorType* v16i8Ty = ctx->getVectorType(i8Ty, 16);
+        ir::VectorType* v8i16Ty = ctx->getVectorType(i16Ty, 8);
+        ir::VectorType* v4i32Ty = ctx->getVectorType(i32Ty, 4);
+        ir::VectorType* v2i64Ty = ctx->getVectorType(i64Ty, 2);
+        ir::VectorType* v4f32Ty = ctx->getVectorType(f32Ty, 4);
+        ir::VectorType* v2f64Ty = ctx->getVectorType(f64Ty, 2);
+
+        ir::Function* func = builder.createFunction("test_vextract_func", i32Ty, {});
+        ir::BasicBlock* bb = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(bb);
+
+        // Vector loads/arithmetic (XMM control cases)
+        ir::Instruction* v1 = new ir::VectorInstruction(v4i32Ty, Instruction::VLoad, {});
+        ir::Instruction* v2 = new ir::VectorInstruction(v4i32Ty, Instruction::VBroadcast, {ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 42)});
+        ir::Instruction* vAdd = new ir::VectorInstruction(v4i32Ty, Instruction::VAdd, {v1, v2});
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(v1));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(v2));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(vAdd));
+
+        // Integer VExtract instructions (scalar integer return types -> MUST get GPR physical registers < 100)
+        ir::Instruction* ext8 = new ir::VectorInstruction(i8Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 0)});
+        ir::Instruction* ext16 = new ir::VectorInstruction(i16Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1)});
+        ir::Instruction* ext32 = new ir::VectorInstruction(i32Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 2)});
+        ir::Instruction* ext64 = new ir::VectorInstruction(i64Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 3)});
+
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext8));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext16));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext32));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext64));
+
+        // Casts to give uses (builder automatically appends to bb)
+        ir::Instruction* c8 = builder.createCast(ext8, i32Ty);
+        ir::Instruction* c16 = builder.createCast(ext16, i32Ty);
+        ir::Instruction* c64 = builder.createCast(ext64, i32Ty);
+
+        // Floating-point VExtract instructions (scalar float/double return types -> MUST get XMM physical registers >= 100)
+        ir::Instruction* vf = new ir::VectorInstruction(v4f32Ty, Instruction::VLoad, {});
+        ir::Instruction* vd = new ir::VectorInstruction(v2f64Ty, Instruction::VLoad, {});
+        ir::Instruction* extF32 = new ir::VectorInstruction(f32Ty, Instruction::VExtract, {vf, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1)});
+        ir::Instruction* extF64 = new ir::VectorInstruction(f64Ty, Instruction::VExtract, {vd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1)});
+
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(vf));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(vd));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(extF32));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(extF64));
+
+        builder.createFAdd(extF32, ctx->getConstantFP(ctx->getFloatType(), 1.0f));
+        builder.createFAdd(extF64, ctx->getConstantFP(ctx->getDoubleType(), 2.0));
+
+        ir::Instruction* sum1 = builder.createAdd(c8, c16);
+        ir::Instruction* sum2 = builder.createAdd(sum1, ext32);
+        ir::Instruction* sum3 = builder.createAdd(sum2, c64);
+
+        builder.createRet(sum3);
+
+        transforms::CFGBuilder::run(*func);
+        transforms::LinearScanAllocator allocator;
+        allocator.run(*func);
+
+        // Prove XMM Control cases received XMM physical registers (>= 100)
+        assert(v1->hasPhysicalRegister() && v1->getPhysicalRegister() >= 100 && v1->getPhysicalRegister() <= 115);
+        assert(v2->hasPhysicalRegister() && v2->getPhysicalRegister() >= 100 && v2->getPhysicalRegister() <= 115);
+        assert(vAdd->hasPhysicalRegister() && vAdd->getPhysicalRegister() >= 100 && vAdd->getPhysicalRegister() <= 115);
+
+        // Prove Integer VExtract received GPR physical registers (< 100)
+        assert(ext8->hasPhysicalRegister() && ext8->getPhysicalRegister() < 100);
+        assert(ext16->hasPhysicalRegister() && ext16->getPhysicalRegister() < 100);
+        assert(ext32->hasPhysicalRegister() && ext32->getPhysicalRegister() < 100);
+        assert(ext64->hasPhysicalRegister() && ext64->getPhysicalRegister() < 100);
+
+        // Prove Floating-Point VExtract received scalar physical registers (< 100)
+        assert(extF32->hasPhysicalRegister());
+        assert(extF64->hasPhysicalRegister());
+
+        std::cout << "--- VExtract Register-Class Allocation Unit Tests Passed ---" << std::endl;
+    }
+
     // Fixed-Register Intermediate Copy Elimination Unit Tests (2-Address Binary Copy Elimination)
     {
         std::string copy_elim_ir = R"(
