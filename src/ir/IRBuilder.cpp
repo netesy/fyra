@@ -74,6 +74,27 @@ Instruction* IRBuilder::createRet(Value* val) {
     return instrPtr;
 }
 
+VectorInstruction* IRBuilder::createVBroadcast(VectorType* type, Value* val) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VBroadcast, {val}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVExtract(Value* vec, Value* idx) {
+    Type* elemType = nullptr;
+    if (auto* vt = dynamic_cast<VectorType*>(vec->getType())) {
+        elemType = vt->getElementType();
+    }
+    if (!elemType) elemType = context->getIntegerType(32);
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(elemType, Instruction::VExtract, {vec, idx}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
 Instruction* IRBuilder::createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType) {
     Type* returnType = retType ? retType : context->getVoidType();
     auto instr = std::make_unique<ExternCallInstruction>(returnType, args, capability, insertPoint);

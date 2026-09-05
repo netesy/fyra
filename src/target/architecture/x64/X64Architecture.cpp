@@ -88,6 +88,7 @@ static std::string to64BitReg(const std::string& reg) {
 
 static bool is32BitType(const ir::Type* type) {
     if (!type) return false;
+    if (type->isFloatTy()) return true;
     if (type->isInteger()) return type->getSize() <= 4;
     if (auto* it = dynamic_cast<const ir::IntegerType*>(type)) {
         return it->getBitwidth() <= 32;
@@ -120,7 +121,21 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
     if (!os) return;
     if (isXmmRegisterName(src) || isXmmRegisterName(dst)) {
         if (src == dst) return;
-        *os << "  movdqu " << src << ", " << dst << "\n";
+        if (isXmmRegisterName(src) && isXmmRegisterName(dst)) {
+            *os << "  movdqu " << src << ", " << dst << "\n";
+        } else if (isXmmRegisterName(src)) {
+            if (is32BitRegisterName(dst) || is32) {
+                *os << "  movd " << src << ", " << to32BitReg(dst) << "\n";
+            } else {
+                *os << "  movq " << src << ", " << to64BitReg(dst) << "\n";
+            }
+        } else {
+            if (is32BitRegisterName(src) || is32) {
+                *os << "  movd " << to32BitReg(src) << ", " << dst << "\n";
+            } else {
+                *os << "  movq " << to64BitReg(src) << ", " << dst << "\n";
+            }
+        }
         cg.lastStoreOp = "";
         return;
     }
@@ -136,6 +151,25 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
 
     if (!cg.lastStoreOp.empty() && s == cg.lastStoreOp && (d == regRax || d == "%rax" || d == "%eax")) {
         std::cerr << "SKIPPED emitMov: s=" << s << " d=" << d << " lastStoreOp=" << cg.lastStoreOp << "\n";
+        return;
+    }
+
+    bool srcIsMem = (!s.empty() && (s[0] == '-' || s[0] == '[' || s.find("(%rbp)") != std::string::npos));
+    bool dstIsMem = (!d.empty() && (d[0] == '-' || d[0] == '[' || d.find("(%rbp)") != std::string::npos));
+
+    if (srcIsMem && dstIsMem) {
+        bool isWin = cg.getTargetInfo() && (cg.getTargetInfo()->getName().find("windows") != std::string::npos || cg.getTargetInfo()->getName().find("win64") != std::string::npos);
+        if (isWin) {
+            std::string reg = is32 ? "eax" : "rax";
+            *os << "  mov " << reg << ", " << s << "\n";
+            *os << "  mov " << d << ", " << reg << "\n";
+        } else {
+            std::string reg = is32 ? "%eax" : "%rax";
+            std::string op = is32 ? "movl" : "movq";
+            *os << "  " << op << " " << s << ", " << reg << "\n";
+            *os << "  " << op << " " << reg << ", " << d << "\n";
+        }
+        cg.lastStoreOp = d;
         return;
     }
 
@@ -171,6 +205,8 @@ void X64Architecture::initRegisters() {
 
 TypeInfo X64Architecture::getTypeInfo(const ir::Type* type) const {
     if (!type || type->isVoidTy()) return {0, 0, RegisterClass::Integer, false, false};
+    if (type->isFloatTy()) return {4, 4, RegisterClass::Float, false, false};
+    if (type->isDoubleTy()) return {8, 8, RegisterClass::Float, false, false};
     if (type->isPointerTy()) return {8, 8, RegisterClass::Integer, false, false};
     if (auto* it = dynamic_cast<const ir::IntegerType*>(type)) {
         int w = it->getBitwidth();
@@ -241,9 +277,12 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                 }
             }
         }
-        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
-
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
+        int total_frame = std::abs(current_offset);
+        if (total_frame % 16 != 0) {
+            total_frame += (16 - (total_frame % 16));
+        }
+        int stack_alloc = total_frame - 8 * (1 + (int)usedCalleeRegs.size());
+        bool isZeroFrame = (!makesCalls && stack_alloc <= 0 && usedCalleeRegs.empty());
 
         if (auto* os = cg.getTextStream()) {
             *os << "  .cfi_startproc\n";
@@ -271,10 +310,6 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         }
 
         if (!isZeroFrame) {
-            int total_frame = 8 * (1 + (int)usedCalleeRegs.size()) + stack_alloc;
-            if (total_frame % 16 != 0) {
-                stack_alloc += (16 - (total_frame % 16));
-            }
             if (auto* os = cg.getTextStream()) {
                 if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
             } else {
@@ -1764,8 +1799,22 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
-        std::string op = cg.getValueAsOperand(i.getOperands()[0]->get());
-        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr;
+        ir::Value* ptrVal = i.getOperands()[0]->get();
+        if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            std::string stackOp = formatStackOperand(-ciSlot->getValue());
+            bool is32 = is32BitType(i.getType());
+            std::string dest = (abi == X64ABI::Windows) ? (is32 ? "eax" : "rax") : (is32 ? "%eax" : "%rax");
+            if (i.getType() && i.getType()->isFloatingPoint()) {
+                dest = (abi == X64ABI::Windows) ? "xmm0" : "%xmm0";
+            }
+            if (i.hasPhysicalRegister()) {
+                dest = cg.getValueAsOperand(&i);
+            }
+            emitMov(cg, os, stackOp, dest, is32);
+            return;
+        }
+        std::string op = cg.getValueAsOperand(ptrVal);
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(ptrVal) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << op << ", " << rax << "\n";
@@ -1842,6 +1891,14 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     std::string ax = (abi == X64ABI::SystemV) ? "%ax" : "ax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
+        ir::Value* ptrVal = i.getOperands()[1]->get();
+        if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            std::string stackOp = formatStackOperand(-ciSlot->getValue());
+            bool is32Val = (size <= 4);
+            emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), stackOp, is32Val);
+            return;
+        }
+
         // Load value-to-store into rax
         bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
                            (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
@@ -1853,7 +1910,7 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
             if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
             else emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), rax, is32Val);
         }
-        std::string op = cg.getValueAsOperand(i.getOperands()[1]->get());
+        std::string op = cg.getValueAsOperand(ptrVal);
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
@@ -2639,6 +2696,164 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         std::string op1 = (i.getOperands().size() > 1 && i.getOperands()[1] && i.getOperands()[1]->get()) ?
                            cg.getValueAsOperand(i.getOperands()[1]->get()) : "";
         std::string dst = cg.getValueAsOperand(&i);
+
+        // VExtract handling
+        if (i.getOpcode() == ir::Instruction::VExtract) {
+            auto* vecVal = i.getOperands()[0]->get();
+            auto* idxVal = (i.getOperands().size() > 1 && i.getOperands()[1]) ? i.getOperands()[1]->get() : nullptr;
+            auto* constIdx = dynamic_cast<const ir::ConstantInt*>(idxVal);
+            if (!constIdx) {
+                throw std::runtime_error("VExtract requires constant lane index");
+            }
+
+            auto* srcVecTy = dynamic_cast<const ir::VectorType*>(vecVal->getType());
+            if (!srcVecTy || !srcVecTy->getElementType()) {
+                throw std::runtime_error("Invalid source vector type for VExtract");
+            }
+
+            int idx = static_cast<int>(constIdx->getValue());
+            int numElem = static_cast<int>(srcVecTy->getNumElements());
+            if (idx < 0 || idx >= numElem) {
+                throw std::runtime_error("VExtract lane index out of bounds");
+            }
+
+            auto* elemTy = srcVecTy->getElementType();
+            if (elemTy->isIntegerTy()) {
+                auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+                unsigned bw = intTy ? intTy->getBitwidth() : 32;
+
+                bool directGpr = isDirectGprRegister(dst);
+                std::string targetReg32 = directGpr ? to32BitReg(dst) : (abi == X64ABI::Windows ? "eax" : "%eax");
+                std::string targetReg64 = directGpr ? to64BitReg(dst) : (abi == X64ABI::Windows ? "rax" : "%rax");
+
+                if (abi == X64ABI::Windows) {
+                    if (bw == 8) {
+                        *os << "  pextrb " << targetReg32 << ", " << op0 << ", " << idx << "\n";
+                        if (!directGpr) *os << "  mov " << dst << ", al\n";
+                    } else if (bw == 16) {
+                        *os << "  pextrw " << targetReg32 << ", " << op0 << ", " << idx << "\n";
+                        if (!directGpr) *os << "  mov " << dst << ", ax\n";
+                    } else if (bw == 32) {
+                        if (idx == 0) {
+                            *os << "  movd " << targetReg32 << ", " << op0 << "\n";
+                        } else {
+                            *os << "  pextrd " << targetReg32 << ", " << op0 << ", " << idx << "\n";
+                        }
+                        if (!directGpr) *os << "  mov " << dst << ", eax\n";
+                    } else if (bw == 64) {
+                        *os << "  pextrq " << targetReg64 << ", " << op0 << ", " << idx << "\n";
+                        if (!directGpr) *os << "  mov " << dst << ", rax\n";
+                    } else {
+                        throw std::runtime_error("Unsupported bitwidth for integer VExtract");
+                    }
+                } else {
+                    if (bw == 8) {
+                        *os << "  pextrb $" << idx << ", " << op0 << ", " << targetReg32 << "\n";
+                        if (!directGpr) *os << "  movb %al, " << dst << "\n";
+                    } else if (bw == 16) {
+                        *os << "  pextrw $" << idx << ", " << op0 << ", " << targetReg32 << "\n";
+                        if (!directGpr) *os << "  movw %ax, " << dst << "\n";
+                    } else if (bw == 32) {
+                        if (idx == 0) {
+                            *os << "  movd " << op0 << ", " << targetReg32 << "\n";
+                        } else {
+                            *os << "  pextrd $" << idx << ", " << op0 << ", " << targetReg32 << "\n";
+                        }
+                        if (!directGpr) *os << "  movl %eax, " << dst << "\n";
+                    } else if (bw == 64) {
+                        *os << "  pextrq $" << idx << ", " << op0 << ", " << targetReg64 << "\n";
+                        if (!directGpr) *os << "  movq %rax, " << dst << "\n";
+                    } else {
+                        throw std::runtime_error("Unsupported bitwidth for integer VExtract");
+                    }
+                }
+            } else if (elemTy->isFloatTy()) {
+                bool directGpr = isDirectGprRegister(dst);
+                bool directXmm = isXmmRegisterName(dst);
+                std::string targetGpr32 = directGpr ? to32BitReg(dst) : (abi == X64ABI::Windows ? "eax" : "%eax");
+
+                if (abi == X64ABI::Windows) {
+                    if (directXmm) {
+                        if (dst != op0) *os << "  movdqu " << dst << ", " << op0 << "\n";
+                        if (idx > 0) *os << "  shufps " << dst << ", " << dst << ", " << idx << "\n";
+                    } else if (directGpr) {
+                        *os << "  movdqu xmm0, " << op0 << "\n";
+                        if (idx > 0) *os << "  shufps xmm0, xmm0, " << idx << "\n";
+                        *os << "  movd " << targetGpr32 << ", xmm0\n";
+                    } else {
+                        *os << "  movdqu xmm0, " << op0 << "\n";
+                        if (idx > 0) *os << "  shufps xmm0, xmm0, " << idx << "\n";
+                        *os << "  movss " << dst << ", xmm0\n";
+                    }
+                } else {
+                    if (directXmm) {
+                        if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                        if (idx > 0) *os << "  shufps $" << idx << ", " << dst << ", " << dst << "\n";
+                    } else if (directGpr) {
+                        *os << "  movdqu " << op0 << ", %xmm0\n";
+                        if (idx > 0) *os << "  shufps $" << idx << ", %xmm0, %xmm0\n";
+                        *os << "  movd %xmm0, " << targetGpr32 << "\n";
+                    } else {
+                        *os << "  movdqu " << op0 << ", %xmm0\n";
+                        if (idx > 0) *os << "  shufps $" << idx << ", %xmm0, %xmm0\n";
+                        *os << "  movss %xmm0, " << dst << "\n";
+                    }
+                }
+            } else if (elemTy->isDoubleTy()) {
+                bool directGpr = isDirectGprRegister(dst);
+                bool directXmm = isXmmRegisterName(dst);
+                std::string targetGpr64 = directGpr ? to64BitReg(dst) : (abi == X64ABI::Windows ? "rax" : "%rax");
+
+                if (abi == X64ABI::Windows) {
+                    if (directXmm) {
+                        if (idx == 0) {
+                            if (dst != op0) *os << "  movdqu " << dst << ", " << op0 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << dst << ", " << op0 << "\n";
+                        }
+                    } else if (directGpr) {
+                        if (idx == 0) {
+                            *os << "  movq " << targetGpr64 << ", " << op0 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps xmm0, " << op0 << "\n";
+                            *os << "  movq " << targetGpr64 << ", xmm0\n";
+                        }
+                    } else {
+                        if (idx == 0) {
+                            *os << "  movsd " << dst << ", " << op0 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps xmm0, " << op0 << "\n";
+                            *os << "  movsd " << dst << ", xmm0\n";
+                        }
+                    }
+                } else {
+                    if (directXmm) {
+                        if (idx == 0) {
+                            if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << op0 << ", " << dst << "\n";
+                        }
+                    } else if (directGpr) {
+                        if (idx == 0) {
+                            *os << "  movq " << op0 << ", " << targetGpr64 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << op0 << ", %xmm0\n";
+                            *os << "  movq %xmm0, " << targetGpr64 << "\n";
+                        }
+                    } else {
+                        if (idx == 0) {
+                            *os << "  movsd " << op0 << ", " << dst << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << op0 << ", %xmm0\n";
+                            *os << "  movsd %xmm0, " << dst << "\n";
+                        }
+                    }
+                }
+            } else {
+                throw std::runtime_error("Unsupported element type for VExtract");
+            }
+            return;
+        }
 
         auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
         if (!vecType || !vecType->getElementType()) {

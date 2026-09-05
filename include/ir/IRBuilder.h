@@ -145,6 +145,8 @@ public:
     VectorInstruction* createVMul(Value* lhs, Value* rhs);
     VectorInstruction* createVLoad(VectorType* type, Value* ptr);
     VectorInstruction* createVStore(Value* vec, Value* ptr);
+    VectorInstruction* createVBroadcast(VectorType* type, Value* val);
+    VectorInstruction* createVExtract(Value* vec, Value* idx);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);

@@ -5,6 +5,7 @@
 #include "ir/PhiNode.h"
 #include "codegen/CodeGen.h"
 #include "codegen/regalloc/LinearScanAllocator.h"
+#include "codegen/regalloc/RegAllocRewriter.h"
 #include "target/architecture/x64/X64Architecture.h"
 #include "target/os/linux/LinuxOS.h"
 #include "target/core/CompositeTargetInfo.h"
@@ -449,8 +450,10 @@ void test_simd_loop_liveness() {
     builder.createRet(nullptr);
 
     transforms::CFGBuilder::run(*func);
-    transforms::LinearScanAllocator allocator;
-    allocator.run(*func);
+    transforms::LivenessAnalysis liveness_vextract;
+    liveness_vextract.run(*func);
+    transforms::RegAllocRewriter rewriter_vextract;
+    rewriter_vextract.run(*func);
 
     auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
     auto linuxOS = std::make_unique<target::LinuxOS>();
@@ -606,79 +609,75 @@ void test_simd_vbroadcast() {
     BasicBlock* entry = builder.createBasicBlock("entry", func);
     builder.setInsertPoint(entry);
 
-    // Load input pointers and output pointers sequentially from array
-    Value* ptr0 = pArgs;
+    Value* ptr0 = builder.createCopy(pArgs);
+
+    // 1. i32 VBroadcast
     Value* pIn32 = builder.createLoadl(ptr0);
-
-    Value* ptr1 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pIn64 = builder.createLoadl(ptr1);
-
-    Value* ptr2 = builder.createAdd(ptr1, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pInF32 = builder.createLoadl(ptr2);
-
-    Value* ptr3 = builder.createAdd(ptr2, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pInF64 = builder.createLoadl(ptr3);
-
-    Value* ptr4 = builder.createAdd(ptr3, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* ptr4 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 32));
     Value* pOut32 = builder.createLoadl(ptr4);
-
-    Value* ptr5 = builder.createAdd(ptr4, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pOut64 = builder.createLoadl(ptr5);
-
-    Value* ptr6 = builder.createAdd(ptr5, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pOut16 = builder.createLoadl(ptr6);
-
-    Value* ptr7 = builder.createAdd(ptr6, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pOut8 = builder.createLoadl(ptr7);
-
-    Value* ptr8 = builder.createAdd(ptr7, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pOutF32 = builder.createLoadl(ptr8);
-
-    Value* ptr9 = builder.createAdd(ptr8, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pOutF64 = builder.createLoadl(ptr9);
-
-    Value* ptr10 = builder.createAdd(ptr9, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
-    Value* pOutPreserve = builder.createLoadl(ptr10);
-
     Instruction* val32 = builder.createLoaduw(pIn32);
-    Instruction* val64 = builder.createLoadl(pIn64);
-    Instruction* valF32 = builder.createLoadd(pInF32);
-    Instruction* valF64 = builder.createLoadl(pInF64);
-
-    // Truncate to i16 and i8 for narrow broadcasts
-    Value* val16 = builder.createTruncD(val32, i16Ty);
-    Value* val8  = builder.createTruncD(val32, i8Ty);
-
-    // VBroadcast instructions
     VectorInstruction* v32 = new VectorInstruction(vec4i32Ty, Instruction::VBroadcast, {val32}, 128);
-    VectorInstruction* v64 = new VectorInstruction(vec2i64Ty, Instruction::VBroadcast, {val64}, 128);
-    VectorInstruction* v16 = new VectorInstruction(vec8i16Ty, Instruction::VBroadcast, {val16}, 128);
-    VectorInstruction* v8  = new VectorInstruction(vec16i8Ty, Instruction::VBroadcast, {val8}, 128);
-    VectorInstruction* vF32 = new VectorInstruction(vec4f32Ty, Instruction::VBroadcast, {valF32}, 128);
-    VectorInstruction* vF64 = new VectorInstruction(vec2f64Ty, Instruction::VBroadcast, {valF64}, 128);
-
     entry->addInstruction(std::unique_ptr<Instruction>(v32));
-    entry->addInstruction(std::unique_ptr<Instruction>(v64));
-    entry->addInstruction(std::unique_ptr<Instruction>(v16));
-    entry->addInstruction(std::unique_ptr<Instruction>(v8));
-    entry->addInstruction(std::unique_ptr<Instruction>(vF32));
-    entry->addInstruction(std::unique_ptr<Instruction>(vF64));
+    builder.createVStore(v32, pOut32);
 
-    // Scalar preservation check: use val32 after VBroadcast in scalar arithmetic
+    // Scalar preservation check: use val32 in scalar arithmetic
+    Value* ptr10 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 80));
+    Value* pOutPreserve = builder.createLoadl(ptr10);
     Value* val32Add = builder.createAdd(val32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 100));
     builder.createStore(val32Add, pOutPreserve);
 
-    builder.createVStore(v32, pOut32);
+    // 2. i64 VBroadcast
+    Value* ptr1 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 8));
+    Value* pIn64 = builder.createLoadl(ptr1);
+    Value* ptr5 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 40));
+    Value* pOut64 = builder.createLoadl(ptr5);
+    Instruction* val64 = builder.createLoadl(pIn64);
+    VectorInstruction* v64 = new VectorInstruction(vec2i64Ty, Instruction::VBroadcast, {val64}, 128);
+    entry->addInstruction(std::unique_ptr<Instruction>(v64));
     builder.createVStore(v64, pOut64);
+
+    // 3. i16 VBroadcast
+    Value* ptr6 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 48));
+    Value* pOut16 = builder.createLoadl(ptr6);
+    Value* val16 = builder.createTruncD(val32, i16Ty);
+    VectorInstruction* v16 = new VectorInstruction(vec8i16Ty, Instruction::VBroadcast, {val16}, 128);
+    entry->addInstruction(std::unique_ptr<Instruction>(v16));
     builder.createVStore(v16, pOut16);
+
+    // 4. i8 VBroadcast
+    Value* ptr7 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 56));
+    Value* pOut8 = builder.createLoadl(ptr7);
+    Value* val8 = builder.createTruncD(val32, i8Ty);
+    VectorInstruction* v8 = new VectorInstruction(vec16i8Ty, Instruction::VBroadcast, {val8}, 128);
+    entry->addInstruction(std::unique_ptr<Instruction>(v8));
     builder.createVStore(v8, pOut8);
+
+    // 5. f32 VBroadcast
+    Value* ptr2 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 16));
+    Value* pInF32 = builder.createLoadl(ptr2);
+    Value* ptr8 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 64));
+    Value* pOutF32 = builder.createLoadl(ptr8);
+    Instruction* valF32 = builder.createLoadd(pInF32);
+    VectorInstruction* vF32 = new VectorInstruction(vec4f32Ty, Instruction::VBroadcast, {valF32}, 128);
+    entry->addInstruction(std::unique_ptr<Instruction>(vF32));
     builder.createVStore(vF32, pOutF32);
+
+    // 6. f64 VBroadcast
+    Value* ptr3 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 24));
+    Value* pInF64 = builder.createLoadl(ptr3);
+    Value* ptr9 = builder.createAdd(ptr0, ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), 72));
+    Value* pOutF64 = builder.createLoadl(ptr9);
+    Instruction* valF64 = builder.createLoadl(pInF64);
+    VectorInstruction* vF64 = new VectorInstruction(vec2f64Ty, Instruction::VBroadcast, {valF64}, 128);
+    entry->addInstruction(std::unique_ptr<Instruction>(vF64));
     builder.createVStore(vF64, pOutF64);
     builder.createRet(nullptr);
 
     transforms::CFGBuilder::run(*func);
-    transforms::LinearScanAllocator allocator;
-    allocator.run(*func);
+    transforms::LivenessAnalysis liveness;
+    liveness.run(*func);
+    transforms::RegAllocRewriter rewriter;
+    rewriter.run(*func);
 
     auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
     auto linuxOS = std::make_unique<target::LinuxOS>();
@@ -821,10 +820,309 @@ int main() {
     std::cout << "--- SIMD VBroadcast Execution & Assembly Assertion Test PASSED ---" << std::endl;
 }
 
+void test_simd_vextract() {
+    std::cout << "--- Running SIMD VExtract Execution & Assembly Assertion Test ---" << std::endl;
+
+    auto ctx = std::make_shared<IRContext>();
+    Module module("test_simd_vextract_module", ctx);
+    IRBuilder builder(ctx);
+    builder.setModule(&module);
+
+    Type* i8Ty = ctx->getIntegerType(8);
+    Type* i16Ty = ctx->getIntegerType(16);
+    Type* i32Ty = ctx->getIntegerType(32);
+    Type* i64Ty = ctx->getIntegerType(64);
+    Type* f32Ty = ctx->getFloatType();
+    Type* f64Ty = ctx->getDoubleType();
+
+    VectorType* vec16i8Ty = ctx->getVectorType(i8Ty, 16);
+    VectorType* vec8i16Ty = ctx->getVectorType(i16Ty, 8);
+    VectorType* vec4i32Ty = ctx->getVectorType(i32Ty, 4);
+    VectorType* vec2i64Ty = ctx->getVectorType(i64Ty, 2);
+    VectorType* vec4f32Ty = ctx->getVectorType(f32Ty, 4);
+    VectorType* vec2f64Ty = ctx->getVectorType(f64Ty, 2);
+
+    Function* func = builder.createFunction("test_vextract_func", ctx->getVoidType(), {i64Ty});
+    const auto& params = func->getParameters();
+    Value* pArgs = params.front().get();
+
+    BasicBlock* entry = builder.createBasicBlock("entry", func);
+    builder.setInsertPoint(entry);
+
+    Instruction* slot = builder.createAlloc16(i64Ty);
+    builder.createStore(pArgs, slot);
+
+    auto loadPtrAt = [&](int byteOffset) -> Value* {
+        Value* currentArgs = builder.createLoad(slot);
+        Value* offVal = ctx->getConstantInt(dynamic_cast<IntegerType*>(i64Ty), byteOffset);
+        Value* slotAddr = builder.createAdd(currentArgs, offVal);
+        return builder.createLoadl(slotAddr);
+    };
+
+    // Group 1: i8 (lane 0, 7, 15)
+    {
+        Value* pIn8 = loadPtrAt(0);
+        VectorInstruction* v8 = builder.createVLoad(vec16i8Ty, pIn8);
+
+        VectorInstruction* ext8_0 = builder.createVExtract(v8, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0));
+        builder.createStore(ext8_0, loadPtrAt(48));
+
+        VectorInstruction* ext8_7 = builder.createVExtract(v8, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 7));
+        builder.createStore(ext8_7, loadPtrAt(56));
+
+        VectorInstruction* ext8_15 = builder.createVExtract(v8, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 15));
+        builder.createStore(ext8_15, loadPtrAt(64));
+    }
+
+    // Group 2: i16 (lane 0, 3, 7)
+    {
+        Value* pIn16 = loadPtrAt(8);
+        VectorInstruction* v16 = builder.createVLoad(vec8i16Ty, pIn16);
+
+        VectorInstruction* ext16_0 = builder.createVExtract(v16, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0));
+        builder.createStore(ext16_0, loadPtrAt(72));
+
+        VectorInstruction* ext16_3 = builder.createVExtract(v16, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 3));
+        builder.createStore(ext16_3, loadPtrAt(80));
+
+        VectorInstruction* ext16_7 = builder.createVExtract(v16, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 7));
+        builder.createStore(ext16_7, loadPtrAt(88));
+    }
+
+    // Group 3: i32 (lane 0, 1, 3, plus vector reuse)
+    {
+        Value* pIn32 = loadPtrAt(16);
+        VectorInstruction* v32 = builder.createVLoad(vec4i32Ty, pIn32);
+
+        VectorInstruction* ext32_0 = builder.createVExtract(v32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0));
+        builder.createStore(ext32_0, loadPtrAt(96));
+
+        VectorInstruction* ext32_1 = builder.createVExtract(v32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 1));
+        builder.createStore(ext32_1, loadPtrAt(104));
+
+        VectorInstruction* ext32_3 = builder.createVExtract(v32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 3));
+        builder.createStore(ext32_3, loadPtrAt(112));
+
+        VectorInstruction* v32Double = builder.createVAdd(v32, v32);
+        builder.createVStore(v32Double, loadPtrAt(176));
+    }
+
+    // Group 4: i64 (lane 0, 1)
+    {
+        Value* pIn64 = loadPtrAt(24);
+        VectorInstruction* v64 = builder.createVLoad(vec2i64Ty, pIn64);
+
+        VectorInstruction* ext64_0 = builder.createVExtract(v64, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0));
+        builder.createStore(ext64_0, loadPtrAt(120));
+
+        VectorInstruction* ext64_1 = builder.createVExtract(v64, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 1));
+        builder.createStore(ext64_1, loadPtrAt(128));
+    }
+
+    // Group 5: f32 (lane 0, 1, 3)
+    {
+        Value* pInF32 = loadPtrAt(32);
+        VectorInstruction* vF32 = builder.createVLoad(vec4f32Ty, pInF32);
+
+        VectorInstruction* extF32_0 = builder.createVExtract(vF32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0));
+        builder.createStore(extF32_0, loadPtrAt(136));
+
+        VectorInstruction* extF32_1 = builder.createVExtract(vF32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 1));
+        builder.createStore(extF32_1, loadPtrAt(144));
+
+        VectorInstruction* extF32_3 = builder.createVExtract(vF32, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 3));
+        builder.createStore(extF32_3, loadPtrAt(152));
+    }
+
+    // Group 6: f64 (lane 0, 1)
+    {
+        Value* pInF64 = loadPtrAt(40);
+        VectorInstruction* vF64 = builder.createVLoad(vec2f64Ty, pInF64);
+
+        VectorInstruction* extF64_0 = builder.createVExtract(vF64, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0));
+        builder.createStore(extF64_0, loadPtrAt(160));
+
+        VectorInstruction* extF64_1 = builder.createVExtract(vF64, ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 1));
+        builder.createStore(extF64_1, loadPtrAt(168));
+    }
+
+    builder.createRet(nullptr);
+
+    transforms::CFGBuilder::run(*func);
+    transforms::LivenessAnalysis liveness;
+    liveness.run(*func);
+    transforms::RegAllocRewriter rewriter;
+    rewriter.run(*func);
+
+    auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    auto linuxOS = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> targetInfo = std::make_unique<target::CompositeTargetInfo>(std::move(x64Arch), std::move(linuxOS));
+
+    std::ostringstream asmStream;
+    codegen::CodeGen cg(module, std::move(targetInfo), &asmStream);
+    cg.emit(false);
+
+    std::string asmCode = asmStream.str();
+    std::cout << "Generated VExtract Assembly:\n" << asmCode << std::endl;
+
+    assert(asmCode.find("pextrb") != std::string::npos && "pextrb required for i8 extraction");
+    assert(asmCode.find("pextrw") != std::string::npos && "pextrw required for i16 extraction");
+    assert(asmCode.find("movd") != std::string::npos && "movd required for i32 lane 0 extraction");
+    assert(asmCode.find("pextrd") != std::string::npos && "pextrd required for i32 extraction");
+    assert(asmCode.find("movq") != std::string::npos && "movq required for i64 extraction");
+    assert(asmCode.find("pextrq") != std::string::npos && "pextrq required for i64 lane 1 extraction");
+    assert(asmCode.find("shufps") != std::string::npos && "shufps required for f32 extraction");
+    assert(asmCode.find("movhlps") != std::string::npos && "movhlps required for f64 lane 1 extraction");
+
+    std::string asmFilePath = "/tmp/test_vextract_generated.s";
+    std::string binFilePath = "/tmp/test_vextract_runner";
+    {
+        std::ofstream asmFile(asmFilePath);
+        asmFile << asmCode;
+    }
+
+    std::string harnessPath = "/tmp/test_vextract_harness.c";
+    {
+        std::ofstream hFile(harnessPath);
+        hFile << R"(
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
+#include <assert.h>
+
+struct VExtractArgs {
+    uint64_t pIn8;
+    uint64_t pIn16;
+    uint64_t pIn32;
+    uint64_t pIn64;
+    uint64_t pInF32;
+    uint64_t pInF64;
+
+    uint64_t pOut8_0;
+    uint64_t pOut8_7;
+    uint64_t pOut8_15;
+
+    uint64_t pOut16_0;
+    uint64_t pOut16_3;
+    uint64_t pOut16_7;
+
+    uint64_t pOut32_0;
+    uint64_t pOut32_1;
+    uint64_t pOut32_3;
+
+    uint64_t pOut64_0;
+    uint64_t pOut64_1;
+
+    uint64_t pOutF32_0;
+    uint64_t pOutF32_1;
+    uint64_t pOutF32_3;
+
+    uint64_t pOutF64_0;
+    uint64_t pOutF64_1;
+
+    uint64_t pOutReuse;
+};
+
+extern void test_vextract_func(const struct VExtractArgs* args);
+
+int main() {
+    int8_t  in8[16]  = { -1, 2, 3, 4, 5, 6, 7, 0x7F, -10, -20, -30, -40, -50, -60, -70, (int8_t)0x80 };
+    int16_t in16[8]  = { -1000, 200, 300, 0x7FFF, 500, 600, 700, (int16_t)0x8000 };
+    int32_t in32[4]  = { -1234567, 0x7FFFFFFF, 300000, (int32_t)0x80000000 };
+    int64_t in64[2]  = { 0x123456789ABCDEF0LL, -100000000000LL };
+    float   inF32[4] = { 3.14159f, -2.71828f, 100.5f, -0.001f };
+    double  inF64[2] = { 2.718281828459045, -3.141592653589793 };
+
+    int8_t  out8_0 = 0, out8_7 = 0, out8_15 = 0;
+    int16_t out16_0 = 0, out16_3 = 0, out16_7 = 0;
+    int32_t out32_0 = 0, out32_1 = 0, out32_3 = 0;
+    int64_t out64_0 = 0, out64_1 = 0;
+    float   outF32_0 = 0, outF32_1 = 0, outF32_3 = 0;
+    double  outF64_0 = 0, outF64_1 = 0;
+    int32_t outReuse[4] = {0};
+
+    struct VExtractArgs args = {
+        (uint64_t)in8, (uint64_t)in16, (uint64_t)in32, (uint64_t)in64, (uint64_t)inF32, (uint64_t)inF64,
+        (uint64_t)&out8_0, (uint64_t)&out8_7, (uint64_t)&out8_15,
+        (uint64_t)&out16_0, (uint64_t)&out16_3, (uint64_t)&out16_7,
+        (uint64_t)&out32_0, (uint64_t)&out32_1, (uint64_t)&out32_3,
+        (uint64_t)&out64_0, (uint64_t)&out64_1,
+        (uint64_t)&outF32_0, (uint64_t)&outF32_1, (uint64_t)&outF32_3,
+        (uint64_t)&outF64_0, (uint64_t)&outF64_1,
+        (uint64_t)outReuse
+    };
+
+    test_vextract_func(&args);
+
+    // Assert i8 extractions
+    assert(out8_0 == -1);
+    assert(out8_7 == 0x7F);
+    assert(out8_15 == (int8_t)0x80);
+
+    // Assert i16 extractions
+    assert(out16_0 == -1000);
+    assert(out16_3 == 0x7FFF);
+    assert(out16_7 == (int16_t)0x8000);
+
+    // Assert i32 extractions
+    assert(out32_0 == -1234567);
+    assert(out32_1 == 0x7FFFFFFF);
+    assert(out32_3 == (int32_t)0x80000000);
+
+    // Assert i64 extractions
+    printf("DEBUG: out64_0 = 0x%llx, expected = 0x123456789abcdef0\n", (unsigned long long)out64_0);
+    fflush(stdout);
+    assert(out64_0 == 0x123456789ABCDEF0LL);
+    assert(out64_1 == -100000000000LL);
+
+    // Assert f32 extractions
+    assert(fabsf(outF32_0 - 3.14159f) < 1e-5f);
+    assert(fabsf(outF32_1 - (-2.71828f)) < 1e-5f);
+    assert(fabsf(outF32_3 - (-0.001f)) < 1e-5f);
+
+    // Assert f64 extractions
+    assert(fabs(outF64_0 - 2.718281828459045) < 1e-12);
+    assert(fabs(outF64_1 - (-3.141592653589793)) < 1e-12);
+
+    // Assert vector re-use after extraction
+    assert(outReuse[0] == -1234567 * 2);
+    assert(outReuse[1] == (int32_t)(0x7FFFFFFFU * 2U));
+    assert(outReuse[3] == (int32_t)(0x80000000 * 2));
+
+    printf("VEXTRACT_RUNTIME_EXECUTION_SUCCESS\n");
+    return 0;
+}
+)";
+    }
+
+    std::string compileCmd = "gcc -no-pie " + asmFilePath + " " + harnessPath + " -o " + binFilePath;
+    int compileRc = std::system(compileCmd.c_str());
+    assert(compileRc == 0 && "Compilation of VExtract test assembly failed");
+
+    FILE* pipe = popen(binFilePath.c_str(), "r");
+    assert(pipe != nullptr);
+    char buffer[128];
+    std::string resultOutput = "";
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        resultOutput += buffer;
+    }
+    int execRc = pclose(pipe);
+    if (execRc != 0) {
+        std::cout << "Runner Output on failure:\n" << resultOutput << std::endl;
+    }
+
+    assert(execRc == 0 && "Execution of VExtract test binary failed");
+    assert(resultOutput.find("VEXTRACT_RUNTIME_EXECUTION_SUCCESS") != std::string::npos);
+
+    std::cout << "--- SIMD VExtract Execution & Assembly Assertion Test PASSED ---" << std::endl;
+}
+
 int main() {
     test_simd_runtime_execution();
     test_simd_loop_liveness();
     test_simd_vbroadcast();
+    test_simd_vextract();
     test_simd_rejection();
     return 0;
 }
