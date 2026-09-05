@@ -2619,6 +2619,11 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         unsigned numElem = vecType->getNumElements();
         std::string simdInst = "";
 
+        // Explicitly reject integer vector division
+        if (i.getOpcode() == ir::Instruction::VDiv) {
+            throw std::runtime_error("Integer vector division is not supported by 128-bit XMM architecture");
+        }
+
         // FMA 3-operand instructions
         if (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FMS ||
             i.getOpcode() == ir::Instruction::FNMA || i.getOpcode() == ir::Instruction::FNMS) {
@@ -2629,9 +2634,15 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                                      (elemTy->isFloatTy() ? "addps" : "addpd") :
                                      (elemTy->isFloatTy() ? "subps" : "subpd");
 
-            *os << "  movdqu " << op0 << ", " << dst << "\n";
-            *os << "  " << mulInst << " " << op1 << ", " << dst << "\n";
-            *os << "  " << addSubInst << " " << op2 << ", " << dst << "\n";
+            if (abi == X64ABI::Windows) {
+                *os << "  movdqu " << dst << ", " << op0 << "\n";
+                *os << "  " << mulInst << " " << dst << ", " << op1 << "\n";
+                *os << "  " << addSubInst << " " << dst << ", " << op2 << "\n";
+            } else {
+                *os << "  movdqu " << op0 << ", " << dst << "\n";
+                *os << "  " << mulInst << " " << op1 << ", " << dst << "\n";
+                *os << "  " << addSubInst << " " << op2 << ", " << dst << "\n";
+            }
             return;
         }
 
@@ -2645,15 +2656,27 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         } else if (i.getOpcode() == ir::Instruction::VShl && elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
             unsigned bw = intTy ? intTy->getBitwidth() : 32;
-            simdInst = (bw == 16) ? "psllw" : "pslld";
+            if (bw == 16) simdInst = "psllw";
+            else if (bw == 32) simdInst = "pslld";
+            else if (bw == 64) simdInst = "psllq";
+            else throw std::runtime_error("Unsupported vector shift width");
         } else if (i.getOpcode() == ir::Instruction::VShr && elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
             unsigned bw = intTy ? intTy->getBitwidth() : 32;
-            simdInst = (bw == 16) ? "psrlw" : "psrld";
+            if (bw == 16) simdInst = "psrlw";
+            else if (bw == 32) simdInst = "psrld";
+            else if (bw == 64) simdInst = "psrlq";
+            else throw std::runtime_error("Unsupported vector shift width");
         } else if (i.getOpcode() == ir::Instruction::VMin) {
-            simdInst = (elemTy->getSize() == 1) ? "pminub" : ((elemTy->getSize() == 2) ? "pminsw" : "pminsd");
+            if (elemTy->getSize() == 1) simdInst = "pminub";
+            else if (elemTy->getSize() == 2) simdInst = "pminsw";
+            else if (elemTy->getSize() == 4) simdInst = "pminsd";
+            else throw std::runtime_error("Unsupported vector min element size");
         } else if (i.getOpcode() == ir::Instruction::VMax) {
-            simdInst = (elemTy->getSize() == 1) ? "pmaxub" : ((elemTy->getSize() == 2) ? "pmaxsw" : "pmaxsd");
+            if (elemTy->getSize() == 1) simdInst = "pmaxub";
+            else if (elemTy->getSize() == 2) simdInst = "pmaxsw";
+            else if (elemTy->getSize() == 4) simdInst = "pmaxsd";
+            else throw std::runtime_error("Unsupported vector max element size");
         } else if (i.getOpcode() == ir::Instruction::VFMin) {
             simdInst = (elemTy->isFloatTy()) ? "minps" : "minpd";
         } else if (i.getOpcode() == ir::Instruction::VFMax) {
@@ -2663,8 +2686,13 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         } else if (i.getOpcode() == ir::Instruction::VCmp) {
             simdInst = elemTy->isFloatTy() ? "cmpps $0," : (elemTy->isDoubleTy() ? "cmppd $0," : "pcmpeqd");
         } else if (i.getOpcode() == ir::Instruction::VSelect) {
-            *os << "  movdqu " << op0 << ", " << dst << "\n";
-            *os << "  pand " << op1 << ", " << dst << "\n";
+            if (abi == X64ABI::Windows) {
+                *os << "  movdqu " << dst << ", " << op0 << "\n";
+                *os << "  pand " << dst << ", " << op1 << "\n";
+            } else {
+                *os << "  movdqu " << op0 << ", " << dst << "\n";
+                *os << "  pand " << op1 << ", " << dst << "\n";
+            }
             return;
         } else if (elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
@@ -2715,13 +2743,38 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                               i.getOpcode() == ir::Instruction::VAnd || i.getOpcode() == ir::Instruction::VOr ||
                               i.getOpcode() == ir::Instruction::VXor);
 
-        if (dst == op0) {
-            *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
-        } else if (dst == op1 && isCommutative) {
-            *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
+        if (abi == X64ABI::Windows) {
+            // Intel syntax: inst dst, src
+            if (dst == op0) {
+                *os << "  " << simdInst << " " << dst << ", " << op1 << "\n";
+            } else if (dst == op1 && isCommutative) {
+                *os << "  " << simdInst << " " << dst << ", " << op0 << "\n";
+            } else if (dst == op1 && !isCommutative) {
+                *os << "  sub rsp, 16\n";
+                *os << "  movdqu [rsp], " << dst << "\n";
+                *os << "  movdqu " << dst << ", " << op0 << "\n";
+                *os << "  " << simdInst << " " << dst << ", [rsp]\n";
+                *os << "  add rsp, 16\n";
+            } else {
+                *os << "  movdqu " << dst << ", " << op0 << "\n";
+                *os << "  " << simdInst << " " << dst << ", " << op1 << "\n";
+            }
         } else {
-            *os << "  movdqu " << op0 << ", " << dst << "\n";
-            *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+            // AT&T syntax: inst src, dst
+            if (dst == op0) {
+                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+            } else if (dst == op1 && isCommutative) {
+                *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
+            } else if (dst == op1 && !isCommutative) {
+                *os << "  subq $16, %rsp\n";
+                *os << "  movdqu " << dst << ", (%rsp)\n";
+                *os << "  movdqu " << op0 << ", " << dst << "\n";
+                *os << "  " << simdInst << " (%rsp), " << dst << "\n";
+                *os << "  addq $16, %rsp\n";
+            } else {
+                *os << "  movdqu " << op0 << ", " << dst << "\n";
+                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+            }
         }
     }
 }
