@@ -1,5 +1,7 @@
 #include "codegen/regalloc/LivenessAnalysis.h"
 #include "transforms/CFGBuilder.h"
+#include "transforms/LoopInvariantCodeMotion.h"
+#include "transforms/Loop.h"
 #include "ir/BasicBlock.h"
 #include "ir/PhiNode.h"
 #include "ir/User.h"
@@ -58,27 +60,36 @@ void LivenessAnalysis::run(ir::Function& func) {
         }
     }
 
-    // Extend live ranges across backedges for loop-carried/loop-invariant variables
-    for (auto& bb_ptr : func.getBasicBlocks()) {
-        ir::BasicBlock* bb = bb_ptr.get();
-        if (bb->getInstructions().empty()) continue;
-        int bb_end_site = instrNumbering[bb->getInstructions().back().get()];
+    // Extend live ranges across loop latches for non-Phi loop-invariant variables defined outside the loop
+    std::vector<std::unique_ptr<Loop>> loops;
+    LoopInvariantCodeMotion licm;
+    licm.findLoops(func, loops);
 
-        bool hasBackedge = false;
-        for (ir::BasicBlock* succ : bb->getSuccessors()) {
-            if (!succ->getInstructions().empty()) {
-                int succ_start_site = instrNumbering[succ->getInstructions().front().get()];
-                if (succ_start_site <= bb_end_site) {
-                    hasBackedge = true;
+    for (const auto& loopPtr : loops) {
+        if (!loopPtr) continue;
+        int max_latch_site = -1;
+        for (ir::BasicBlock* bb : loopPtr->blocks) {
+            if (bb->getInstructions().empty()) continue;
+            int bb_end_site = instrNumbering[bb->getInstructions().back().get()];
+            for (ir::BasicBlock* succ : bb->getSuccessors()) {
+                if (succ == loopPtr->header) {
+                    max_latch_site = std::max(max_latch_site, bb_end_site);
                     break;
                 }
             }
         }
+        if (max_latch_site < 0) continue;
 
-        if (hasBackedge) {
-            for (ir::Instruction* live_instr : liveOut[bb]) {
-                if (liveRanges.count(live_instr)) {
-                    liveRanges[live_instr].end = std::max(liveRanges[live_instr].end, bb_end_site);
+        for (ir::BasicBlock* bb : loopPtr->blocks) {
+            for (auto& instr_ptr : bb->getInstructions()) {
+                for (auto& operand : instr_ptr->getOperands()) {
+                    if (auto* op_instr = dynamic_cast<ir::Instruction*>(operand->get())) {
+                        if (loopPtr->blocks.count(op_instr->getParent()) == 0) {
+                            if (liveRanges.count(op_instr)) {
+                                liveRanges[op_instr].end = std::max(liveRanges[op_instr].end, max_latch_site);
+                            }
+                        }
+                    }
                 }
             }
         }

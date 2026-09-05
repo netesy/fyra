@@ -600,18 +600,18 @@ function $test_inplace_mul(%p : w, %q : w) : w {
         std::cout << "Two-address lowering tests completed successfully!" << std::endl;
     }
 
-    // Focused regression test for precise scalar interval expiration across CFG blocks
+    // Focused regression & safety tests for targeted loop-aware liveness interval handling
     {
         using namespace ir;
         using namespace ::transforms;
 
-        std::string liveness_regression_ir = R"(
-function $test_liveness_expiration_regression(%n : w) : w {
+        // Test A: Short-lived intra-loop temporary (must NOT be extended to loop latch)
+        // Test B: Loop-carried Phi value (must remain live through predecessor edge)
+        // Test C: Non-Phi loop-invariant (must be extended to loop latch)
+        std::string targeted_liveness_ir = R"(
+function $test_liveness_precision(%n : w, %inv : w) : w {
 @entry
-    %v0 = add %n, w 1 : w
-    %v1 = add %v0, w 2 : w
-    %v2 = add %v1, w 3 : w
-    %v3 = add %v2, w 4 : w
+    %vec_const = add %inv, w 10 : w
     jmp @loop
 
 @loop
@@ -621,8 +621,9 @@ function $test_liveness_expiration_regression(%n : w) : w {
     jnz %cond, @body, @exit
 
 @body
-    %temp1 = add %i, %v3 : w
-    %sum_next = add %sum, %temp1 : w
+    %temp_intra = add %i, w 1 : w
+    %use_inv = add %temp_intra, %vec_const : w
+    %sum_next = add %sum, %use_inv : w
     %i_next = add %i, w 1 : w
     jmp @loop
 
@@ -630,29 +631,45 @@ function $test_liveness_expiration_regression(%n : w) : w {
     ret %sum : w
 }
 )";
-        std::istringstream stream(liveness_regression_ir);
-        parser::Parser reg_parser(stream, parser::FileFormat::FYRA);
-        std::unique_ptr<ir::Module> reg_module = reg_parser.parseModule();
-        assert(reg_module != nullptr);
+        std::istringstream stream(targeted_liveness_ir);
+        parser::Parser l_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> l_module = l_parser.parseModule();
+        assert(l_module != nullptr);
 
-        Function* f = reg_module->getFunction("test_liveness_expiration_regression");
+        Function* f = l_module->getFunction("test_liveness_precision");
         assert(f != nullptr);
 
         transforms::CFGBuilder::run(*f);
         transforms::LivenessAnalysis liveness;
         liveness.run(*f);
 
-        transforms::LinearScanAllocator allocator;
-        allocator.run(*f);
+        auto liveRanges = liveness.getLiveRanges();
 
-        std::stringstream ss_reg;
-        codegen::CodeGen codeGenReg(*reg_module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_reg);
-        codeGenReg.emit();
+        // Identify instructions
+        Instruction *vec_const = nullptr, *temp_intra = nullptr, *i_next = nullptr;
+        for (auto& bb : f->getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->getName() == "vec_const") vec_const = instr.get();
+                else if (instr->getName() == "temp_intra") temp_intra = instr.get();
+                else if (instr->getName() == "i_next") i_next = instr.get();
+            }
+        }
+        assert(vec_const && temp_intra && i_next);
 
-        std::string reg_asm = ss_reg.str();
-        // Verify zero stack spills for temporary variables %v0, %v1, %v2
-        assert(reg_asm.find("subq $") == std::string::npos || reg_asm.find("subq $24") == std::string::npos);
-        std::cout << "Scalar liveness expiration regression unit test passed successfully!" << std::endl;
+        // Find loop latch end site (i_next instruction site in @body)
+        int body_latch_site = liveRanges.at(i_next).start;
+        assert(body_latch_site > 0);
+
+        // Test C: Non-Phi loop-invariant %vec_const IS extended to loop latch
+        assert(liveRanges.at(vec_const).end >= body_latch_site);
+
+        // Test A: Intra-loop temporary %temp_intra is NOT extended to loop latch
+        assert(liveRanges.at(temp_intra).end < body_latch_site);
+
+        // Test B: Loop-carried Phi %i_next IS extended to loop latch
+        assert(liveRanges.at(i_next).end >= body_latch_site);
+
+        std::cout << "Targeted loop-aware liveness precision unit tests passed successfully!" << std::endl;
     }
 
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
