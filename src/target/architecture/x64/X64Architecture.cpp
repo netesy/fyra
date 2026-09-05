@@ -105,6 +105,17 @@ static bool isXmmRegisterName(const std::string& reg) {
     return reg.find("xmm") != std::string::npos;
 }
 
+static bool isDirectGprRegister(const std::string& op) {
+    if (op.empty()) return false;
+    if (isXmmRegisterName(op)) return false;
+    if (op[0] == '%' || op[0] == 'r' || op[0] == 'e') {
+        if (op[0] == '-' || op[0] == '[' || op[0] == '$') return false;
+        if (op.find('(') != std::string::npos || op.find(')') != std::string::npos) return false;
+        return true;
+    }
+    return false;
+}
+
 static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const std::string& dst, bool is32) {
     if (!os) return;
     if (isXmmRegisterName(src) || isXmmRegisterName(dst)) {
@@ -2571,14 +2582,23 @@ void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
     if (auto* os = cg.getTextStream()) {
         std::string ptrOp = cg.getValueAsOperand(i.getOperands()[0]->get());
         std::string dstOp = cg.getValueAsOperand(&i);
-        std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
 
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << ptrOp << "\n";
-            *os << "  movdqu " << dstOp << ", [" << rax << "]\n";
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  movdqu " << dstOp << ", [" << ptrOp << "]\n";
+            } else {
+                std::string rax = "rax";
+                *os << "  mov " << rax << ", " << ptrOp << "\n";
+                *os << "  movdqu " << dstOp << ", [" << rax << "]\n";
+            }
         } else {
-            *os << "  movq " << ptrOp << ", " << rax << "\n";
-            *os << "  movdqu (%rax), " << dstOp << "\n";
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  movdqu (" << ptrOp << "), " << dstOp << "\n";
+            } else {
+                std::string rax = "%rax";
+                *os << "  movq " << ptrOp << ", " << rax << "\n";
+                *os << "  movdqu (%rax), " << dstOp << "\n";
+            }
         }
     }
 }
@@ -2587,14 +2607,23 @@ void X64Architecture::emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {
     if (auto* os = cg.getTextStream()) {
         std::string srcOp = cg.getValueAsOperand(i.getOperands()[0]->get());
         std::string ptrOp = cg.getValueAsOperand(i.getOperands()[1]->get());
-        std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
 
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << ptrOp << "\n";
-            *os << "  movdqu [" << rax << "], " << srcOp << "\n";
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  movdqu [" << ptrOp << "], " << srcOp << "\n";
+            } else {
+                std::string rax = "rax";
+                *os << "  mov " << rax << ", " << ptrOp << "\n";
+                *os << "  movdqu [" << rax << "], " << srcOp << "\n";
+            }
         } else {
-            *os << "  movq " << ptrOp << ", " << rax << "\n";
-            *os << "  movdqu " << srcOp << ", (%rax)\n";
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  movdqu " << srcOp << ", (" << ptrOp << ")\n";
+            } else {
+                std::string rax = "%rax";
+                *os << "  movq " << ptrOp << ", " << rax << "\n";
+                *os << "  movdqu " << srcOp << ", (%rax)\n";
+            }
         }
     }
 }

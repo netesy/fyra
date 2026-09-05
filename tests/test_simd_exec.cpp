@@ -266,6 +266,11 @@ void test_simd_runtime_execution() {
     assert(asmCode.find("mulpd") != std::string::npos);
     assert(asmCode.find("divpd") != std::string::npos);
 
+    // Direct memory addressing assertions (verifies removal of redundant movq %rdi, %rax copies)
+    assert(asmCode.find("movdqu (%rdi), %xmm0") != std::string::npos);
+    assert(asmCode.find("movdqu %xmm2, (%rdx)") != std::string::npos);
+    assert(asmCode.find("movq %rdi, %rax") == std::string::npos);
+
     std::string asmFilePath = "/tmp/test_simd_generated.s";
     std::string binFilePath = "/tmp/test_simd_runner";
     {
