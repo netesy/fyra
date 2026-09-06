@@ -103,6 +103,7 @@ target_link_libraries(test_comprehensive PRIVATE fyra)
 target_compile_definitions(test_comprehensive PRIVATE TEST_FILE="${CMAKE_CURRENT_SOURCE_DIR}/comprehensive.fyra")
 
 add_test(NAME ComprehensiveParserTest COMMAND test_comprehensive)
+set_tests_properties(ComprehensiveParserTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 if(FYRA_ENABLE_EXTENDED_TESTS)
     add_executable(test_copy_elimination test_copy_elimination.cpp)

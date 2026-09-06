@@ -1,104 +1,104 @@
 # Comprehensive Correctness Test Suite for Fyra Compiler Backend
 
 # 1. CFG Diamond Pattern: A -> B, A -> C, B -> D, C -> D
-export function $cfg_diamond(%cond : w, %x : w, %y : w) : w {
+export function $cfg_diamond(%cond : i32, %x : i32, %y : i32) : i32 {
 @A
     jnz %cond, @B, @C
 @B
-    %val_b = add %x, 10 : w
+    %val_b = add %x, 10 : i32
     jmp @D
 @C
-    %val_c = add %y, 20 : w
+    %val_c = add %y, 20 : i32
     jmp @D
 @D
-    %res = phi @B %val_b, @C %val_c : w
-    ret %res : w
+    %res = phi @B %val_b, @C %val_c : i32
+    ret %res : i32
 }
 
 # 2. CFG Loop: A -> B -> C -> B with conditional exit
-export function $cfg_loop(%limit : w) : w {
+export function $cfg_loop(%limit : i32) : i32 {
 @A
-    %i = copy 0 : w
-    %sum = copy 0 : w
+    %i = copy 0 : i32
+    %sum = copy 0 : i32
     jmp @B
 @B
-    %sum_next = phi @A %sum, @C %sum_new : w
-    %i_next = phi @A %i, @C %i_new : w
-    %cond = slt %i_next, %limit : w
+    %sum_next = phi @A %sum, @C %sum_new : i32
+    %i_next = phi @A %i, @C %i_new : i32
+    %cond = slt %i_next, %limit : i32
     jnz %cond, @C, @D
 @C
-    %sum_new = add %sum_next, %i_next : w
-    %i_new = add %i_next, 1 : w
+    %sum_new = add %sum_next, %i_next : i32
+    %i_new = add %i_next, 1 : i32
     jmp @B
 @D
-    ret %sum_next : w
+    ret %sum_next : i32
 }
 
 # 3. Unsigned comparisons and boundary values
-export function $unsigned_comparisons(%x : l, %y : l) : w {
+export function $unsigned_comparisons(%x : i64, %y : i64) : i32 {
 @start
-    %res_ult = ult %x, %y : w
-    %res_ule = ule %x, %y : w
-    %res_ugt = ugt %x, %y : w
-    %res_uge = uge %x, %y : w
+    %res_ult = ult %x, %y : i32
+    %res_ule = ule %x, %y : i32
+    %res_ugt = ugt %x, %y : i32
+    %res_uge = uge %x, %y : i32
 
     # Sum up the boolean results
-    %s1 = add %res_ult, %res_ule : w
-    %s2 = add %s1, %res_ugt : w
-    %res = add %s2, %res_uge : w
-    ret %res : w
+    %s1 = add %res_ult, %res_ule : i32
+    %s2 = add %s1, %res_ugt : i32
+    %res = add %s2, %res_uge : i32
+    ret %res : i32
 }
 
 # 4. Type extensions (Casting)
-export function $type_extensions(%b : w) : l {
+export function $type_extensions(%b : i32) : i64 {
 @start
     # Sign extension from byte to 64-bit
-    %s_ext = extsb %b : l
+    %s_ext = extsb %b : i64
     # Zero extension from byte to 64-bit
-    %z_ext = extub %b : l
+    %z_ext = extub %b : i64
     # Add them up
-    %res = add %s_ext, %z_ext : l
-    ret %res : l
+    %res = add %s_ext, %z_ext : i64
+    ret %res : i64
 }
 
 # 5. Nested Loops and Nested Conditionals
-export function $nested_loops_cond(%outer_lim : w, %inner_lim : w) : w {
+export function $nested_loops_cond(%outer_lim : i32, %inner_lim : i32) : i32 {
 @start
-    %i = copy 0 : w
-    %total = copy 0 : w
+    %i = copy 0 : i32
+    %total = copy 0 : i32
     jmp @outer_cond
 @outer_cond
-    %i_curr = phi @start %i, @outer_step %i_next : w
-    %tot_curr = phi @start %total, @outer_step %tot_next : w
-    %outer_cmp = slt %i_curr, %outer_lim : w
+    %i_curr = phi @start %i, @outer_step %i_next : i32
+    %tot_curr = phi @start %total, @outer_step %tot_next : i32
+    %outer_cmp = slt %i_curr, %outer_lim : i32
     jnz %outer_cmp, @inner_init, @done
 @inner_init
-    %j = copy 0 : w
+    %j = copy 0 : i32
     jmp @inner_cond
 @inner_cond
-    %j_curr = phi @inner_init %j, @inner_step %j_next : w
-    %tot_inner = phi @inner_init %tot_curr, @inner_step %tot_inner_next : w
-    %inner_cmp = slt %j_curr, %inner_lim : w
+    %j_curr = phi @inner_init %j, @inner_step %j_next : i32
+    %tot_inner = phi @inner_init %tot_curr, @inner_step %tot_inner_next : i32
+    %inner_cmp = slt %j_curr, %inner_lim : i32
     jnz %inner_cmp, @inner_body, @outer_step
 @inner_body
     # Nested conditional
-    %sum_ij = add %i_curr, %j_curr : w
-    %is_even_cond = and %sum_ij, 1 : w
+    %sum_ij = add %i_curr, %j_curr : i32
+    %is_even_cond = and %sum_ij, 1 : i32
     jnz %is_even_cond, @odd_path, @even_body
 @even_body
-    %tot_even = add %tot_inner, 2 : w
+    %tot_even = add %tot_inner, 2 : i32
     jmp @inner_step
 @odd_path
-    %tot_odd = add %tot_inner, 1 : w
+    %tot_odd = add %tot_inner, 1 : i32
     jmp @inner_step
 @inner_step
-    %tot_inner_next = phi @even_body %tot_even, @odd_path %tot_odd : w
-    %j_next = add %j_curr, 1 : w
+    %tot_inner_next = phi @even_body %tot_even, @odd_path %tot_odd : i32
+    %j_next = add %j_curr, 1 : i32
     jmp @inner_cond
 @outer_step
-    %tot_next = phi @inner_cond %tot_inner : w
-    %i_next = add %i_curr, 1 : w
+    %tot_next = phi @inner_cond %tot_inner : i32
+    %i_next = add %i_curr, 1 : i32
     jmp @outer_cond
 @done
-    ret %tot_curr : w
+    ret %tot_curr : i32
 }

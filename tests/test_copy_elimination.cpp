@@ -36,8 +36,10 @@ int main() {
 
     // After copy elimination and SCCP, the operation may be folded or registers renamed.
     // We check for the final constant result 10 being loaded or the result copied properly.
-    assert(generated_asm.find("movq $10, %rax") != std::string::npos ||
-           generated_asm.find("addq $5, %rax") != std::string::npos);
+    assert(generated_asm.find("movq $10") != std::string::npos ||
+           generated_asm.find("movl $10") != std::string::npos ||
+           generated_asm.find("addq $5") != std::string::npos ||
+           generated_asm.find("addl $5") != std::string::npos);
 
     return 0;
 }

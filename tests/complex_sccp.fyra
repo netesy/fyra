@@ -1,17 +1,17 @@
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %n = copy 5 : w
-    %res = call $complex_sccp(%n) : w
-    ret %res : w
+    %n = copy 5 : i32
+    %res = call $complex_sccp(%n) : i32
+    ret %res : i32
 }
 
-function $complex_sccp(%n : w) : w {
+function $complex_sccp(%n : i32) : i32 {
 @start
-    %cond = copy 1 : w
+    %cond = copy 1 : i32
     jnz %cond, @then, @else
 @then
-    ret 100 : w
+    ret 100 : i32
 @else
-    %val = add %n, 2 : w
-    ret %val : w
+    %val = add %n, 2 : i32
+    ret %val : i32
 }

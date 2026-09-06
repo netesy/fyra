@@ -75,7 +75,6 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
                 case ir::Instruction::VShr:
                 case ir::Instruction::VNot:
                 case ir::Instruction::VBroadcast:
-                case ir::Instruction::VExtract:
                 case ir::Instruction::VInsert:
                 case ir::Instruction::VShuffle:
                 case ir::Instruction::VCmp:

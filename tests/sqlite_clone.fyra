@@ -8,82 +8,82 @@
 #   [16-23] : reserved/padding
 
 # Global head of the linked list
-data $head = { l 0 }
+data $head = { i64 0 }
 
-function $put(%key : w, %val : w) : w {
+function $put(%key : i32, %val : i32) : i32 {
 @p_start
     # Allocate new node
-    %node = alloc 24 : l
+    %node = alloc 24 : i64
 
     # Set key and value
-    %val_ptr = add %node, 12 : l
-    store %val, %val_ptr : w
+    %val_ptr = add %node, 12 : i64
+    store %val, %val_ptr : i32
 
-    %key_ptr = add %node, 8 : l
-    store %key, %key_ptr : w
+    %key_ptr = add %node, 8 : i64
+    store %key, %key_ptr : i32
 
     # Load current head
-    %current_head = load $head : l
+    %current_head = load $head : i64
 
     # Set next pointer
-    store %current_head, %node : l
+    store %current_head, %node : i64
 
     # Update head
-    store %node, $head : l
+    store %node, $head : i64
 
-    ret 0 : w
+    ret 0 : i32
 }
 
-function $get(%key : w) : w {
+function $get(%key : i32) : i32 {
 @g_start
-    %curr_start = load $head : l
+    %curr_start = load $head : i64
     jmp @g_loop_entry
 
 @g_loop_entry
-    %curr = phi @g_start %curr_start, @g_move_next %curr_next : l
-    %is_null = eq %curr, 0 : l
+    %curr = phi @g_start %curr_start, @g_move_next %curr_next : i64
+    %is_null = eq %curr, 0 : i64
     jnz %is_null, @g_not_found, @g_check_key
 
 @g_check_key
     # Load key from node
-    %key_ptr_c = add %curr, 8 : l
-    %node_key = load %key_ptr_c : w
+    %key_ptr_c = add %curr, 8 : i64
+    %node_key = load %key_ptr_c : i32
 
-    %match = eq %node_key, %key : w
+    %match = eq %node_key, %key : i32
     jnz %match, @g_found, @g_move_next
 
 @g_move_next
     # Move to next node
-    %curr_next = load %curr : l
+    %curr_next = load %curr : i64
     jmp @g_loop_entry
 
 @g_found
     # Load and return value
-    %val_ptr_f = add %curr, 12 : l
-    %val = load %val_ptr_f : w
-    ret %val : w
+    %val_ptr_f = add %curr, 12 : i64
+    %val = load %val_ptr_f : i32
+    ret %val : i32
 
 @g_not_found
-    ret -1 : w
+    ret -1 : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @m_start
     # Put (1, 10), (2, 20), (3, 30)
-    %t0 = call $put(w 1, w 10) : w
-    %t1 = call $put(w 2, w 20) : w
-    %t2 = call $put(w 3, w 30) : w
+    %t0 = call $put(i32 1, i32 10) : i32
+    %t1 = call $put(i32 2, i32 20) : i32
+    %t2 = call $put(i32 3, i32 30) : i32
 
     # Get values
-    %v1 = call $get(w 1) : w   # Expect 10
-    %v2 = call $get(w 2) : w   # Expect 20
-    %v3 = call $get(w 3) : w   # Expect 30
-    %v4 = call $get(w 4) : w   # Expect -1
+    %v1 = call $get(i32 1) : i32   # Expect 10
+    %v2 = call $get(i32 2) : i32   # Expect 20
+    %v3 = call $get(i32 3) : i32   # Expect 30
+    %v4 = call $get(i32 4) : i32   # Expect -1
 
     # sum = 10 + 20 + 30 + (-1) = 59
-    %s1 = add %v1, %v2 : w
-    %s2 = add %s1, %v3 : w
-    %final = add %s2, %v4 : w
+    %s1 = add %v1, %v2 : i32
+    %s2 = add %s1, %v3 : i32
+    %final = add %s2, %v4 : i32
 
-    ret %final : w
+    ret %final : i32
 }

@@ -13,7 +13,7 @@ Fyra is a compiler backend written in C++17 that processes a QBE-like textual In
 *   **Robust C++ IR Model:** Complete in-memory representation built with modern C++ features (smart pointers, RAII)
 *   **User/Use Pattern:** Efficient operand tracking and def-use chain management
 *   **Programmatic IR Building:** Fluent API via `IRBuilder` for generating IR from C++ code
-*   **Type System:** Target-aware type system with support for custom integer bit widths and pointer types
+*   **Type System:** Target-aware unified type system supporting explicit scalar widths (`i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `bool`) and compositional vector SIMD types (`v16i8`, `v8i16`, `v4i32`, `v2i64`, `v4f32`, `v2f64`)
 
 ### SSA Construction Pipeline
 *   **Control Flow Graph (CFG) Construction:** Automatic CFG building with dominance analysis

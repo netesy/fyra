@@ -1,4 +1,4 @@
-function $dot_product(%n : i32) : i64 {
+function $simd_loop_calc(%n : i32) : i64 {
 @entry
     jmp @loop
 
@@ -9,16 +9,18 @@ function $dot_product(%n : i32) : i64 {
     jnz %cond, @body, @exit
 
 @body
-    %t3 = mul %i, i32 3 : i32
-    %a_w = add %t3, i32 1 : i32
+    %t1 = mul %i, i32 5 : i32
+    %a_w = add %t1, i32 3 : i32
     %a = extsw %a_w : i64
 
-    %t7 = mul %i, i32 7 : i32
-    %b_w = add %t7, i32 2 : i32
+    %t2 = mul %i, i32 2 : i32
+    %b_w = add %t2, i32 7 : i32
     %b = extsw %b_w : i64
 
     %prod = mul %a, %b : i64
-    %sum_next = add %sum, %prod : i64
+    %diff = sub %a, %b : i64
+    %step = add %prod, %diff : i64
+    %sum_next = add %sum, %step : i64
     %i_next = add %i, i32 1 : i32
     jmp @loop
 
@@ -37,7 +39,7 @@ export function $main() : i32 {
     jnz %cond, @body, @exit
 
 @body
-    %v = call $dot_product(i32 5000000) : i64
+    %v = call $simd_loop_calc(i32 5000000) : i64
     %res_next = add %res, %v : i64
     %k_next = add %k, i32 1 : i32
     jmp @loop

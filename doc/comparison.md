@@ -7,10 +7,10 @@ This guide shows **side‑by‑side translations** between **QBE IL** and **Fyra
 > * **QBE** syntax is taken from the official docs.
 > * **Fyra** follows the updated colon type syntax:
 >
->   * Results are in SSA: `%r = op ... : T` where `T ∈ {w,l,s,d}`.
->   * Memory ops use **suffix types**: `loadX`, `loaduX`, `loadsX`, `storeX` with `X ∈ {b,h,w,l,s,d}`.
+>   * Results are in SSA: `%r = op ... : T` where `T ∈ { i32, i64,s,d}`.
+>   * Memory ops use **suffix types**: `loadX`, `loaduX`, `loadsX`, `storeX` with `X ∈ { i8,h, i32, i64,s,d}`.
 >   * For `storeb`/`storeh`, the value is `w`-typed; pointers are integers (usually `l`).
->   * Comparisons: `%r = <COND> %a, %b : w` where `COND ∈ {eq,ne,sgt,slt,sge,sle,ugt,ult,uge,ule, gt,lt,ge,le,o,uo}`.
+>   * Comparisons: `%r = <COND> %a, %b : i32` where `COND ∈ {eq,ne,sgt,slt,sge,sle,ugt,ult,uge,ule, gt,lt,ge,le,o,uo}`.
 >   * Control flow: `jmp`, `jnz cond, @t, @f`, `ret`, `hlt`.
 >   * Calls: `%dst = call $callee(%a1 : T1, ...) : R` (with colon type syntax).
 >   * `%r = phi @L1 %v1, @L2 %v2, ... : T`.
@@ -21,26 +21,26 @@ This guide shows **side‑by‑side translations** between **QBE IL** and **Fyra
 
 | Category              | QBE                                                                    | Fyra                                                                                                                                                             |                       |
 | --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| Add                   | `%r =w add %a, %b`                                                     | `%r = add %a, %b : w`                                                                                                                                               |
-| Sub                   | `%r =w sub %a, %b`                                                     | `%r = sub %a, %b : w`                                                                                                                                               |
-| Mul                   | `%r =w mul %a, %b`                                                     | `%r = mul %a, %b : w`                                                                                                                                               |
-| Div (signed/unsigned) | `%r =w div %a, %b` / `udiv`                                            | `%r = div %a, %b : w` / `udiv`                                                                                                                                      |
-| Rem (signed/unsigned) | `rem` / `urem`                                                         | `rem` / `urem` with `: w`                                                                                                                                                   |
+| Add                   | `%r =w add %a, %b`                                                     | `%r = add %a, %b : i32`                                                                                                                                               |
+| Sub                   | `%r =w sub %a, %b`                                                     | `%r = sub %a, %b : i32`                                                                                                                                               |
+| Mul                   | `%r =w mul %a, %b`                                                     | `%r = mul %a, %b : i32`                                                                                                                                               |
+| Div (signed/unsigned) | `%r =w div %a, %b` / `udiv`                                            | `%r = div %a, %b : i32` / `udiv`                                                                                                                                      |
+| Rem (signed/unsigned) | `rem` / `urem`                                                         | `rem` / `urem` with `: i32`                                                                                                                                                   |
 | Bitwise               | `and/or/xor` (wl)                                                      | `and/or/xor` with `: type`                                                                                                                                                |
 | Shifts                | `sar/shr/shl`                                                          | `sar/shr/shl` with `: type`                                                                                                                                                    |
-| Load                  | `%r =d loadd %p` / `%r =w loaduw %p`                                   | `%r = load %p : d` / `%r = loaduw %p : w`                                                                                                                           |
-| Store                 | `storew %val, %ptr`                                                    | `store %val, %ptr : w`                                                                                                                         |
+| Load                  | `%r =d loadd %p` / `%r =w loaduw %p`                                   | `%r = load %p : f64` / `%r = loaduw %p : i32`                                                                                                                           |
+| Store                 | `storew %val, %ptr`                                                    | `store %val, %ptr : i32`                                                                                                                         |
 | Blit                  | `blit %dst, %src, N` (N const)                                         | `blit %dst, %src, %count` (count may be reg)                                                                                                                     |
-| Stack alloc           | `alloc{4,8,16} %size` → returns pointer                                | `%r = alloc %size : l` (N∈{4,8,16})                                                                                                                                |
-| Compare (eq)          | `%r =w ceqw %a, %b`                                                    | `%r = eq %a, %b : w`                                                 |
-| Compare (signed <)    | `%r =w csltw %a, %b`                                                   | `%r = slt %a, %b : w`                                                 |
-| Floats compare        | `cgts/cges/...` or ordered `cod`/unordered `cuod`                      | `gt/ge/...` or `co/cuo` with `: w`                                                                                                                                          |
+| Stack alloc           | `alloc{4,8,16} %size` → returns pointer                                | `%r = alloc %size : i64` (N∈{4,8,16})                                                                                                                                |
+| Compare (eq)          | `%r =w ceqw %a, %b`                                                    | `%r = eq %a, %b : i32`                                                 |
+| Compare (signed <)    | `%r =w csltw %a, %b`                                                   | `%r = slt %a, %b : i32`                                                 |
+| Floats compare        | `cgts/cges/...` or ordered `cod`/unordered `cuod`                      | `gt/ge/...` or `co/cuo` with `: i32`                                                                                                                                          |
 | Cast/Copy             | `cast`, `copy`                                                         | `cast`, `copy` with `: type`                                                                                                                                                   |
 | Int extend            | `extub/extsb/extuh/extsh/extuw/extsw`                                  | `extub/extsb/...` with `: type`                                                                                                                                  |
 | Float/int convert     | `swtof, sltof, uwtof, ultof, stosi, stoui, dtosi, dtoui, truncd, exts` | Same ops with `: type` syntax                                                                                                                            |
-| Call                  | `%r =w call $f(w %a)` (optional result)                                | `%r = call $f(%a : w) : w`                                                                                                                                          |
-| Variadic              | `vastart %ap` / `%r =w vaarg %ap`                                      | `vastart %ap` / `%r = vaarg %ap : w`                                                                                                                                                             |
-| Phi                   | `%r =w phi @L1 %v1, @L2 %v2`                                           | `%r = phi @L1 %v1, @L2 %v2 : w`                                                                                                                                             |
+| Call                  | `%r =w call $f(w %a)` (optional result)                                | `%r = call $f(%a : i32) : i32`                                                                                                                                          |
+| Variadic              | `vastart %ap` / `%r =w vaarg %ap`                                      | `vastart %ap` / `%r = vaarg %ap : i32`                                                                                                                                                             |
+| Phi                   | `%r =w phi @L1 %v1, @L2 %v2`                                           | `%r = phi @L1 %v1, @L2 %v2 : i32`                                                                                                                                             |
 
 > **Note**: The table above uses QBE mnemonics literally to avoid confusion. Fyra’s compare instruction is written `c<cond><type>`, e.g., `ceqw`, `csltw`, `cgtd`.
 
@@ -57,7 +57,7 @@ int add(int a, int b) { return a + b; }
 **QBE**
 
 ```qbe
-function w $add(w %a, w %b) {
+function w $add(w %a, i32 %b) {
 @start
     %c =w add %a, %b
     ret %c
@@ -67,16 +67,16 @@ function w $add(w %a, w %b) {
 **Fyra**
 
 ```fyra
-function $add(%a : w, %b : w) : w {
+function $add(%a : i32, %b : i32) : i32 {
 @start
-    %c = add %a, %b : w
-    ret %c : w
+    %c = add %a, %b : i32
+    ret %c : i32
 }
 ```
 
 **Notes**
 
-* Fyra uses colon type syntax; function header uses `: w` for return type clarity.
+* Fyra uses colon type syntax; function header uses `: i32` for return type clarity.
 
 ---
 
@@ -111,7 +111,7 @@ function w $f(w %x) {
 **Fyra**
 
 ```fyra
-function $f(%x : w) : w {
+function $f(%x : i32) : i32 {
 @start
     jnz %x, @ift, @iff
 @ift
@@ -119,8 +119,8 @@ function $f(%x : w) : w {
 @iff
     jmp @ret
 @ret
-    %y = phi @ift 1, @iff 2 : w
-    ret %y : w
+    %y = phi @ift 1, @iff 2 : i32
+    ret %y : i32
 }
 ```
 
@@ -142,7 +142,7 @@ int cmp(int a, int b) { return a < b; } // signed
 **QBE**
 
 ```qbe
-function w $cmp(w %a, w %b) {
+function w $cmp(w %a, i32 %b) {
 @start
     %r =w csltw %a, %b   # signed less-than, word
     ret %r
@@ -152,10 +152,10 @@ function w $cmp(w %a, w %b) {
 **Fyra**
 
 ```fyra
-function $cmp(%a : w, %b : w) : w {
+function $cmp(%a : i32, %b : i32) : i32 {
 @start
-    %r = slt %a, %b : w   # Fyra uses simplified comparison names
-    ret %r : w
+    %r = slt %a, %b : i32   # Fyra uses simplified comparison names
+    ret %r : i32
 }
 ```
 
@@ -196,16 +196,16 @@ function w $sum_down(w %n) {
 **Fyra**
 
 ```fyra
-function $sum_down(%n : w) : w {
+function $sum_down(%n : i32) : i32 {
 @start
-    %s = copy 0 : w
+    %s = copy 0 : i32
     jmp @loop
 @loop
-    %s = add %s, %n : w
-    %n = sub %n, 1 : w
+    %s = add %s, %n : i32
+    %n = sub %n, 1 : i32
     jnz %n, @loop, @end
 @end
-    ret %s : w
+    ret %s : i32
 }
 ```
 
@@ -216,17 +216,17 @@ function $sum_down(%n : w) : w {
 **Loop with explicit `phi`**
 
 ```fyra
-function $sum_down_phi(%n0 : w) : w {
+function $sum_down_phi(%n0 : i32) : i32 {
 @start
     jmp @loop
 @loop
-    %n = phi @start %n0, @loop %n1 : w
-    %s = phi @start 0, @loop %s1 : w
-    %s1 = add %s, %n : w
-    %n1 = sub %n, 1 : w
+    %n = phi @start %n0, @loop %n1 : i32
+    %s = phi @start 0, @loop %s1 : i32
+    %s1 = add %s, %n : i32
+    %n1 = sub %n, 1 : i32
     jnz %n1, @loop, @end
 @end
-    ret %s1 : w
+    ret %s1 : i32
 }
 ```
 
@@ -248,7 +248,7 @@ void h(void) { sink(7); }
 ```qbe
 function w $g() {
 @start
-    %r =w call $add(w 40, w 2)
+    %r =w call $add(w 40, i32 2)
     ret %r
 }
 
@@ -262,15 +262,15 @@ function $h() {
 **Fyra**
 
 ```fyra
-function $g() : w {
+function $g() : i32 {
 @start
-    %r = call $add(40 : w, 2 : w) : w
-    ret %r : w
+    %r = call $add(40 : i32, 2 : i32) : i32
+    ret %r : i32
 }
 
 function $h() : void {
 @start
-    call $sink(7 : w) : w
+    call $sink(7 : i32) : i32
     ret
 }
 ```
@@ -311,12 +311,12 @@ function w $box(w %x) {
 **Fyra**
 
 ```fyra
-function $box(%x : w) : w {
+function $box(%x : i32) : i32 {
 @start
-    %p = alloc 4 : l          # pointer is integer‑typed (l on 64‑bit)
-    store %x, %p : w          # store with colon type syntax
-    %y = load %p : w          # load with colon type syntax
-    ret %y : w
+    %p = alloc 4 : i64          # pointer is integer‑typed (l on 64‑bit)
+    store %x, %p : i32          # store with colon type syntax
+    %y = load %p : i32          # load with colon type syntax
+    ret %y : i32
 }
 ```
 
@@ -348,16 +348,16 @@ function w $widen_unsigned(w %b) {
 **Fyra**
 
 ```fyra
-function $widen_signed(%b : w) : w {
+function $widen_signed(%b : i32) : i32 {
 @start
-    %bw = extsb %b : w    # sign‑extend sb→w
-    ret %bw : w
+    %bw = extsb %b : i32    # sign‑extend sb→w
+    ret %bw : i32
 }
 
-function $widen_unsigned(%b : w) : w {
+function $widen_unsigned(%b : i32) : i32 {
 @start
-    %bw = extub %b : w    # zero‑extend ub→w
-    ret %bw : w
+    %bw = extub %b : i32    # zero‑extend ub→w
+    ret %bw : i32
 }
 ```
 
@@ -374,7 +374,7 @@ void copy(struct P* dst, struct P* src) { *dst = *src; }
 
 ```qbe
 # Assume 2 * 4 bytes = 8 bytes
-function $copy(l %dst, l %src) {
+function $copy(l %dst, i64 %src) {
 @start
     blit %dst, %src, 8    # byte count must be an immediate constant
     ret
@@ -384,7 +384,7 @@ function $copy(l %dst, l %src) {
 **Fyra**
 
 ```fyra
-function $copy(%dst : l, %src : l) : void {
+function $copy(%dst : i64, %src : i64) : void {
 @start
     blit %dst, %src, 8    # Fyra also permits a register count if desired
     ret
@@ -415,11 +415,11 @@ function d $f(d %x, s %y) {
 **Fyra**
 
 ```fyra
-function $f(%x : d, %y : s) : d {
+function $f(%x : f64, %y : f32) : f64 {
 @start
-    %yd = exts %y : d          # s → d
-    %z = add %x, %yd : d
-    ret %z : d
+    %yd = exts %y : f64          # s → d
+    %z = add %x, %yd : f64
+    ret %z : f64
 }
 ```
 
@@ -448,10 +448,10 @@ function w $ok(d %x) {
 **Fyra**
 
 ```fyra
-function $ok(%x : d) : w {
+function $ok(%x : f64) : i32 {
 @start
-    %r = co %x, %x : w  # ordered comparison with colon syntax
-    ret %r : w
+    %r = co %x, %x : i32  # ordered comparison with colon syntax
+    ret %r : i32
 }
 ```
 
@@ -472,11 +472,11 @@ int main() { printf("n=%d\n", 7); return 0; }
 **QBE**
 
 ```qbe
-data $fmt = { b "n=%d\n", b 0 }
+data $fmt = { i8 "n=%d\n", i8 0 }
 
 export function w $main() {
 @start
-    call $printf(l $fmt, ..., w 7)
+    call $printf(l $fmt, ..., i32 7)
     ret 0
 }
 ```
@@ -484,12 +484,12 @@ export function w $main() {
 **Fyra**
 
 ```fyra
-data $fmt = { b "n=%d\n", b 0 }
+data $fmt = { i8 "n=%d\n", i8 0 }
 
-export function $main() : w {
+export function $main() : i32 {
 @start
-    call $printf($fmt : l, ..., 7 : w) : w
-    ret 0 : w
+    call $printf($fmt : i64, ..., 7 : i32) : i32
+    ret 0 : i32
 }
 ```
 
@@ -512,7 +512,7 @@ export function $main() : w {
 @f
     jmp @join
 @join
-    %r = phi @t %a, @f %b : w
+    %r = phi @t %a, @f %b : i32
 ```
 
 ### 10.2 Loop carried state
@@ -521,13 +521,13 @@ export function $main() : w {
 @start
     jmp @L
 @L
-    %i = phi @start 0, @L %i1 : w
-    %s = phi @start 0, @L %s1 : w
-    %s1 = add %s, %i : w
-    %i1 = add %i, 1 : w
+    %i = phi @start 0, @L %i1 : i32
+    %s = phi @start 0, @L %s1 : i32
+    %s1 = add %s, %i : i32
+    %i1 = add %i, 1 : i32
     jnz %i1, @L, @end
 @end
-    ret %s1 : w
+    ret %s1 : i32
 ```
 
 ---
@@ -562,17 +562,17 @@ export function w $fact(w %n) {
 **Fyra**
 
 ```fyra
-export function $fact(%n : w) : w {
+export function $fact(%n : i32) : i32 {
 @start
-    %cmp = sle %n, 1 : w
+    %cmp = sle %n, 1 : i32
     jnz %cmp, @base, @recur
 @base
-    ret 1 : w
+    ret 1 : i32
 @recur
-    %n1 = sub %n, 1 : w
-    %r = call $fact(%n1 : w) : w
-    %p = mul %n, %r : w
-    ret %p : w
+    %n1 = sub %n, 1 : i32
+    %r = call $fact(%n1 : i32) : i32
+    %p = mul %n, %r : i32
+    ret %p : i32
 }
 ```
 
@@ -581,20 +581,20 @@ export function $fact(%n : w) : w {
 **QBE/Fyra (updated with colon syntax)**
 
 ```fyra
-export function $fact_iter(%n0 : w) : w {
+export function $fact_iter(%n0 : i32) : i32 {
 @start
     jmp @loop
 @loop
-    %n = phi @start %n0, @loop %n1 : w
-    %a = phi @start 1, @loop %a1 : w
-    %done = sle %n, 1 : w
+    %n = phi @start %n0, @loop %n1 : i32
+    %a = phi @start 1, @loop %a1 : i32
+    %done = sle %n, 1 : i32
     jnz %done, @end, @body
 @body
-    %a1 = mul %a, %n : w
-    %n1 = sub %n, 1 : w
+    %a1 = mul %a, %n : i32
+    %n1 = sub %n, 1 : i32
     jmp @loop
 @end
-    ret %a : w
+    ret %a : i32
 }
 ```
 
@@ -603,7 +603,7 @@ export function $fact_iter(%n0 : w) : w {
 **High‑level**
 
 ```c
-int fib(int n){ int a=0,b=1; while(n--){ int t=a+b; a=b; b=t; } return a; }
+int fib(int n){ int a=0, b=1; while(n--){ int t=a+b; a=b; b=t; } return a; }
 ```
 
 **QBE**
@@ -632,23 +632,23 @@ export function w $fib(w %n0) {
 **Fyra**
 
 ```fyra
-export function $fib(%n0 : w) : w {
+export function $fib(%n0 : i32) : i32 {
 @start
     jmp @L
 @L
-    %n = phi @start %n0, @L %n1 : w
-    %a = phi @start 0, @L %a1 : w
-    %b = phi @start 1, @L %b1 : w
-    %done = eq %n, 0 : w
+    %n = phi @start %n0, @L %n1 : i32
+    %a = phi @start 0, @L %a1 : i32
+    %b = phi @start 1, @L %b1 : i32
+    %done = eq %n, 0 : i32
     jnz %done, @end, @body
 @body
-    %t = add %a, %b : w
-    %a1 = copy %b : w
-    %b1 = copy %t : w
-    %n1 = sub %n, 1 : w
+    %t = add %a, %b : i32
+    %a1 = copy %b : i32
+    %b1 = copy %t : i32
+    %n1 = sub %n, 1 : i32
     jmp @L
 @end
-    ret %a : w
+    ret %a : i32
 }
 ```
 
@@ -681,13 +681,13 @@ export function $fib(%n0 : w) : w {
 
 | Intent               | QBE     | Fyra                   |
 | -------------------- | ------- | ---------------------- |
-| `a == b` (w)         | `ceqw`  | `eq ... : w`           |
-| `a != b` (w)         | `cnew`  | `ne ... : w`           |
-| `a < b` signed (w)   | `csltw` | `slt ... : w`          |
-| `a < b` unsigned (w) | `cultw` | `ult ... : w`          |
-| `a >= b` signed (l)  | `csgel` | `sge ... : w`          |
-| `x > y` (double)     | `cgtd`  | `gt ... : w`           |
-| ordered (double)     | `cod`   | `co ... : w`           |
-| unordered (single)   | `cuos`  | `cuo ... : w`          |
+| `a == b` (w)         | `ceqw`  | `eq ... : i32`           |
+| `a != b` (w)         | `cnew`  | `ne ... : i32`           |
+| `a < b` signed (w)   | `csltw` | `slt ... : i32`          |
+| `a < b` unsigned (w) | `cultw` | `ult ... : i32`          |
+| `a >= b` signed (l)  | `csgel` | `sge ... : i32`          |
+| `x > y` (double)     | `cgtd`  | `gt ... : i32`           |
+| ordered (double)     | `cod`   | `co ... : i32`           |
+| unordered (single)   | `cuos`  | `cuo ... : i32`          |
 
 

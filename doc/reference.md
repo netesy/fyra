@@ -7,7 +7,7 @@ This manual provides a comprehensive comparison between QBE IL and Fyra IL, cove
 ### Key Similarities
 - **SSA-based design** with explicit typing
 - **Three-address instruction format** for most operations
-- **Similar type system** with integers, floats, and pointers
+- **Similar type system** with explicit scalar types (`i8`–`i64`, `f32`, `f64`) and compositional vector SIMD types (`v4i32`, `v4f32`, etc.)
 - **Compatible control flow** constructs
 - **Function and basic block organization**
 
@@ -56,9 +56,9 @@ export function w $main() {
 
 **Fyra:**
 ```fyra
-export function $main() : w {
+export function $main() : i32 {
 @start
-    ret 0 : w
+    ret 0 : i32
 }
 ```
 
@@ -72,23 +72,23 @@ export function $main() : w {
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Addition | `%d =w add %a, %b` | `%d = add %a, %b : w` | Fyra uses colon type syntax |
-| Subtraction | `%d =w sub %a, %b` | `%d = sub %a, %b : w` | Fyra uses colon type syntax |
-| Multiplication | `%d =w mul %a, %b` | `%d = mul %a, %b : w` | Fyra uses colon type syntax |
-| Division (Signed) | `%d =w div %a, %b` | `%d = div %a, %b : w` | Fyra uses colon type syntax |
-| Division (Unsigned) | `%d =w udiv %a, %b` | `%d = udiv %a, %b : w` | Fyra uses colon type syntax |
-| Remainder (Signed) | `%d =w rem %a, %b` | `%d = rem %a, %b : w` | Fyra uses colon type syntax |
-| Remainder (Unsigned) | `%d =w urem %a, %b` | `%d = urem %a, %b : w` | Fyra uses colon type syntax |
-| Negation | `%d =w sub 0, %a` | `%d = neg %a : w` | Fyra has explicit neg with colon syntax |
+| Addition | `%d =w add %a, %b` | `%d = add %a, %b : i32` | Fyra uses colon type syntax |
+| Subtraction | `%d =w sub %a, %b` | `%d = sub %a, %b : i32` | Fyra uses colon type syntax |
+| Multiplication | `%d =w mul %a, %b` | `%d = mul %a, %b : i32` | Fyra uses colon type syntax |
+| Division (Signed) | `%d =w div %a, %b` | `%d = div %a, %b : i32` | Fyra uses colon type syntax |
+| Division (Unsigned) | `%d =w udiv %a, %b` | `%d = udiv %a, %b : i32` | Fyra uses colon type syntax |
+| Remainder (Signed) | `%d =w rem %a, %b` | `%d = rem %a, %b : i32` | Fyra uses colon type syntax |
+| Remainder (Unsigned) | `%d =w urem %a, %b` | `%d = urem %a, %b : i32` | Fyra uses colon type syntax |
+| Negation | `%d =w sub 0, %a` | `%d = neg %a : i32` | Fyra has explicit neg with colon syntax |
 
 ### Floating-Point Arithmetic
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Addition | `%d =s add %a, %b` | `%d = fadd %a, %b : s` | Fyra uses fadd with colon syntax |
-| Subtraction | `%d =s sub %a, %b` | `%d = fsub %a, %b : s` | Fyra uses fsub with colon syntax |
-| Multiplication | `%d =s mul %a, %b` | `%d = fmul %a, %b : s` | Fyra uses fmul with colon syntax |
-| Division | `%d =s div %a, %b` | `%d = fdiv %a, %b : s` | Fyra uses fdiv with colon syntax |
+| Addition | `%d =s add %a, %b` | `%d = fadd %a, %b : f32` | Fyra uses fadd with colon syntax |
+| Subtraction | `%d =s sub %a, %b` | `%d = fsub %a, %b : f32` | Fyra uses fsub with colon syntax |
+| Multiplication | `%d =s mul %a, %b` | `%d = fmul %a, %b : f32` | Fyra uses fmul with colon syntax |
+| Division | `%d =s div %a, %b` | `%d = fdiv %a, %b : f32` | Fyra uses fdiv with colon syntax |
 
 **Migration Note:** In Fyra, floating-point operations use explicit `f` prefixes to distinguish from integer operations.
 
@@ -100,13 +100,13 @@ export function $main() : w {
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| AND | `%d =w and %a, %b` | `%d = and %a, %b : w` | Fyra uses colon type syntax |
-| OR | `%d =w or %a, %b` | `%d = or %a, %b : w` | Fyra uses colon type syntax |
-| XOR | `%d =w xor %a, %b` | `%d = xor %a, %b : w` | Fyra uses colon type syntax |
-| NOT | `%d =w xor %a, -1` | `%d = xor %a, -1 : w` | No explicit NOT in either, colon syntax |
-| Shift Left | `%d =w shl %a, %b` | `%d = shl %a, %b : w` | Fyra uses colon type syntax |
-| Shift Right (Logical) | `%d =w shr %a, %b` | `%d = shr %a, %b : w` | Fyra uses colon type syntax |
-| Shift Right (Arithmetic) | `%d =w sar %a, %b` | `%d = sar %a, %b : w` | Fyra uses colon type syntax |
+| AND | `%d =w and %a, %b` | `%d = and %a, %b : i32` | Fyra uses colon type syntax |
+| OR | `%d =w or %a, %b` | `%d = or %a, %b : i32` | Fyra uses colon type syntax |
+| XOR | `%d =w xor %a, %b` | `%d = xor %a, %b : i32` | Fyra uses colon type syntax |
+| NOT | `%d =w xor %a, -1` | `%d = xor %a, -1 : i32` | No explicit NOT in either, colon syntax |
+| Shift Left | `%d =w shl %a, %b` | `%d = shl %a, %b : i32` | Fyra uses colon type syntax |
+| Shift Right (Logical) | `%d =w shr %a, %b` | `%d = shr %a, %b : i32` | Fyra uses colon type syntax |
+| Shift Right (Arithmetic) | `%d =w sar %a, %b` | `%d = sar %a, %b : i32` | Fyra uses colon type syntax |
 
 **Compatibility:** Bitwise operations are fully compatible between QBE and Fyra.
 
@@ -120,29 +120,29 @@ export function $main() : w {
 
 | Comparison | QBE Syntax | Fyra Syntax | Notes |
 |------------|------------|-------------|-------|
-| Equal | `%d =w ceq %a, %b` | `%d = eq %a, %b : w` | Fyra simplified to eq with colon syntax |
-| Not Equal | `%d =w cne %a, %b` | `%d = ne %a, %b : w` | Fyra simplified to ne with colon syntax |
-| Signed Less | `%d =w cslt %a, %b` | `%d = slt %a, %b : w` | Fyra simplified to slt with colon syntax |
-| Signed Less/Equal | `%d =w csle %a, %b` | `%d = sle %a, %b : w` | Fyra simplified to sle with colon syntax |
-| Signed Greater | `%d =w csgt %a, %b` | `%d = sgt %a, %b : w` | Fyra simplified to sgt with colon syntax |
-| Signed Greater/Equal | `%d =w csge %a, %b` | `%d = sge %a, %b : w` | Fyra simplified to sge with colon syntax |
-| Unsigned Less | `%d =w cult %a, %b` | `%d = ult %a, %b : w` | Fyra simplified to ult with colon syntax |
-| Unsigned Less/Equal | `%d =w cule %a, %b` | `%d = ule %a, %b : w` | Fyra simplified to ule with colon syntax |
-| Unsigned Greater | `%d =w cugt %a, %b` | `%d = ugt %a, %b : w` | Fyra simplified to ugt with colon syntax |
-| Unsigned Greater/Equal | `%d =w cuge %a, %b` | `%d = uge %a, %b : w` | Fyra simplified to uge with colon syntax |
+| Equal | `%d =w ceq %a, %b` | `%d = eq %a, %b : i32` | Fyra simplified to eq with colon syntax |
+| Not Equal | `%d =w cne %a, %b` | `%d = ne %a, %b : i32` | Fyra simplified to ne with colon syntax |
+| Signed Less | `%d =w cslt %a, %b` | `%d = slt %a, %b : i32` | Fyra simplified to slt with colon syntax |
+| Signed Less/Equal | `%d =w csle %a, %b` | `%d = sle %a, %b : i32` | Fyra simplified to sle with colon syntax |
+| Signed Greater | `%d =w csgt %a, %b` | `%d = sgt %a, %b : i32` | Fyra simplified to sgt with colon syntax |
+| Signed Greater/Equal | `%d =w csge %a, %b` | `%d = sge %a, %b : i32` | Fyra simplified to sge with colon syntax |
+| Unsigned Less | `%d =w cult %a, %b` | `%d = ult %a, %b : i32` | Fyra simplified to ult with colon syntax |
+| Unsigned Less/Equal | `%d =w cule %a, %b` | `%d = ule %a, %b : i32` | Fyra simplified to ule with colon syntax |
+| Unsigned Greater | `%d =w cugt %a, %b` | `%d = ugt %a, %b : i32` | Fyra simplified to ugt with colon syntax |
+| Unsigned Greater/Equal | `%d =w cuge %a, %b` | `%d = uge %a, %b : i32` | Fyra simplified to uge with colon syntax |
 
 ### Floating-Point Comparisons
 
 | Comparison | QBE Syntax | Fyra Syntax | Notes |
 |------------|------------|-------------|-------|
-| Equal | `%d =w ceq %a, %b` | `%d = eq %a, %b : w` | Fyra uses generic eq with colon syntax |
-| Not Equal | `%d =w cne %a, %b` | `%d = ne %a, %b : w` | Fyra uses generic ne with colon syntax |
-| Less Than | `%d =w clt %a, %b` | `%d = lt %a, %b : w` | Fyra context-dependent with colon syntax |
-| Less/Equal | `%d =w cle %a, %b` | `%d = le %a, %b : w` | Fyra context-dependent with colon syntax |
-| Greater Than | `%d =w cgt %a, %b` | `%d = gt %a, %b : w` | Fyra context-dependent with colon syntax |
-| Greater/Equal | `%d =w cge %a, %b` | `%d = ge %a, %b : w` | Fyra context-dependent with colon syntax |
-| Ordered | `%d =w cod %a, %b` | `%d = co %a, %b : w` | Fyra drops 'd' suffix, uses colon syntax |
-| Unordered | `%d =w cuod %a, %b` | `%d = cuo %a, %b : w` | Fyra drops 'd' suffix, uses colon syntax |
+| Equal | `%d =w ceq %a, %b` | `%d = eq %a, %b : i32` | Fyra uses generic eq with colon syntax |
+| Not Equal | `%d =w cne %a, %b` | `%d = ne %a, %b : i32` | Fyra uses generic ne with colon syntax |
+| Less Than | `%d =w clt %a, %b` | `%d = lt %a, %b : i32` | Fyra context-dependent with colon syntax |
+| Less/Equal | `%d =w cle %a, %b` | `%d = le %a, %b : i32` | Fyra context-dependent with colon syntax |
+| Greater Than | `%d =w cgt %a, %b` | `%d = gt %a, %b : i32` | Fyra context-dependent with colon syntax |
+| Greater/Equal | `%d =w cge %a, %b` | `%d = ge %a, %b : i32` | Fyra context-dependent with colon syntax |
+| Ordered | `%d =w cod %a, %b` | `%d = co %a, %b : i32` | Fyra drops 'd' suffix, uses colon syntax |
+| Unordered | `%d =w cuod %a, %b` | `%d = cuo %a, %b : i32` | Fyra drops 'd' suffix, uses colon syntax |
 
 ### Type-Specific Shortcuts
 
@@ -151,16 +151,16 @@ Both QBE and Fyra support type-specific comparison shortcuts:
 **Examples:**
 ```fyra
 # Word comparisons
-%cmp = ceqw %a, %b : w    # 32-bit equality
-%cmp = csltw %a, %b : w   # 32-bit signed less-than
+%cmp = ceqw %a, %b : i32    # 32-bit equality
+%cmp = csltw %a, %b : i32   # 32-bit signed less-than
 
 # Long comparisons  
-%cmp = ceql %a, %b : w    # 64-bit equality
-%cmp = cultl %a, %b : w   # 64-bit unsigned less-than
+%cmp = ceql %a, %b : i32    # 64-bit equality
+%cmp = cultl %a, %b : i32   # 64-bit unsigned less-than
 
 # Float comparisons
-%cmp = ceqs %a, %b : w    # Single precision equality
-%cmp = ceqd %a, %b : w    # Double precision equality
+%cmp = ceqs %a, %b : i32    # Single precision equality
+%cmp = ceqd %a, %b : i32    # Double precision equality
 ```
 
 ---
@@ -173,32 +173,32 @@ Both QBE and Fyra support type-specific comparison shortcuts:
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Alloc 4-byte | `%p =l alloc4 %size` | `%p = alloc4 %size : l` | Fyra uses colon type syntax |
-| Alloc 8-byte | `%p =l alloc8 %size` | `%p = alloc %size : l` | Fyra alloc defaults to 8-byte, colon syntax |
-| Alloc 16-byte | `%p =l alloc16 %size` | `%p = alloc16 %size : l` | Fyra uses colon type syntax |
+| Alloc 4-byte | `%p =l alloc4 %size` | `%p = alloc4 %size : i64` | Fyra uses colon type syntax |
+| Alloc 8-byte | `%p =l alloc8 %size` | `%p = alloc %size : i64` | Fyra alloc defaults to 8-byte, colon syntax |
+| Alloc 16-byte | `%p =l alloc16 %size` | `%p = alloc16 %size : i64` | Fyra uses colon type syntax |
 
 ### Load Operations
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Load Word | `%d =w loadw %addr` | `%d = load %addr : w` | Fyra uses colon type syntax |
-| Load Long | `%d =l loadl %addr` | `%d = load %addr : l` | Fyra uses colon type syntax |
-| Load Single | `%d =s loads %addr` | `%d = load %addr : s` | Fyra uses colon type syntax |
-| Load Double | `%d =d loadd %addr` | `%d = load %addr : d` | Fyra uses colon type syntax |
-| Load Unsigned Byte | `%d =w loadub %addr` | `%d = loadub %addr : w` | Fyra uses colon type syntax |
-| Load Signed Byte | `%d =w loadsb %addr` | `%d = loadsb %addr : w` | Fyra uses colon type syntax |
-| Load Unsigned Half | `%d =w loaduh %addr` | `%d = loaduh %addr : w` | Fyra uses colon type syntax |
-| Load Signed Half | `%d =w loadsh %addr` | `%d = loadsh %addr : w` | Fyra uses colon type syntax |
-| Load Unsigned Word | `%d =l loaduw %addr` | `%d = loaduw %addr : l` | Fyra uses colon type syntax |
+| Load Word | `%d =w loadw %addr` | `%d = load %addr : i32` | Fyra uses colon type syntax |
+| Load Long | `%d =l loadl %addr` | `%d = load %addr : i64` | Fyra uses colon type syntax |
+| Load Single | `%d =s loads %addr` | `%d = load %addr : f32` | Fyra uses colon type syntax |
+| Load Double | `%d =d loadd %addr` | `%d = load %addr : f64` | Fyra uses colon type syntax |
+| Load Unsigned Byte | `%d =w loadub %addr` | `%d = loadub %addr : i32` | Fyra uses colon type syntax |
+| Load Signed Byte | `%d =w loadsb %addr` | `%d = loadsb %addr : i32` | Fyra uses colon type syntax |
+| Load Unsigned Half | `%d =w loaduh %addr` | `%d = loaduh %addr : i32` | Fyra uses colon type syntax |
+| Load Signed Half | `%d =w loadsh %addr` | `%d = loadsh %addr : i32` | Fyra uses colon type syntax |
+| Load Unsigned Word | `%d =l loaduw %addr` | `%d = loaduw %addr : i64` | Fyra uses colon type syntax |
 
 ### Store Operations
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Store Word | `storew %val, %addr` | `store %val, %addr : w` | Fyra uses generic store with colon syntax |
-| Store Long | `storel %val, %addr` | `store %val, %addr : l` | Fyra uses generic store with colon syntax |
-| Store Single | `stores %val, %addr` | `store %val, %addr : s` | Fyra uses generic store with colon syntax |
-| Store Double | `stored %val, %addr` | `store %val, %addr : d` | Fyra uses generic store with colon syntax |
+| Store Word | `storew %val, %addr` | `store %val, %addr : i32` | Fyra uses generic store with colon syntax |
+| Store Long | `storel %val, %addr` | `store %val, %addr : i64` | Fyra uses generic store with colon syntax |
+| Store Single | `stores %val, %addr` | `store %val, %addr : f32` | Fyra uses generic store with colon syntax |
+| Store Double | `stored %val, %addr` | `store %val, %addr : f64` | Fyra uses generic store with colon syntax |
 | Store Half | `storeh %val, %addr` | `store %val, %addr : h` | Fyra uses generic store with colon syntax |
 | Store Byte | `storeb %val, %addr` | `store %val, %addr : b` | Fyra uses generic store with colon syntax |
 
@@ -228,7 +228,7 @@ Both QBE and Fyra support type-specific comparison shortcuts:
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Call with Return | `%d =w call $func(%args)` | `call [%d =w] $func(%args)` | Fyra uses bracket syntax |
+| Call with Return | `%d =w call $func(%args)` | `%d = call $func(%args) : T` | Fyra uses colon type syntax |
 | Call Void | `call $func(%args)` | `call $func(%args)` | Identical |
 
 **Examples:**
@@ -241,8 +241,8 @@ call $print(l $str)
 
 **Fyra:**
 ```fyra
-call [%result =w] $add(w %a, w %b)
-call $print(l $str)
+%result = call $add(%a : i32, %b : i32) : i32
+call $print(%str : i64)
 ```
 
 ---
@@ -255,32 +255,32 @@ call $print(l $str)
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Zero-extend Byte | `%d =w extub %src` | `%d = extub %src : w` | Fyra uses colon type syntax |
-| Zero-extend Half | `%d =w extuh %src` | `%d = extuh %src : w` | Fyra uses colon type syntax |
-| Zero-extend Word | `%d =l extuw %src` | `%d = extuw %src : l` | Fyra uses colon type syntax |
-| Sign-extend Byte | `%d =w extsb %src` | `%d = extsb %src : w` | Fyra uses colon type syntax |
-| Sign-extend Half | `%d =w extsh %src` | `%d = extsh %src : w` | Fyra uses colon type syntax |
-| Sign-extend Word | `%d =l extsw %src` | `%d = extsw %src : l` | Fyra uses colon type syntax |
+| Zero-extend Byte | `%d =w extub %src` | `%d = extub %src : i32` | Fyra uses colon type syntax |
+| Zero-extend Half | `%d =w extuh %src` | `%d = extuh %src : i32` | Fyra uses colon type syntax |
+| Zero-extend Word | `%d =l extuw %src` | `%d = extuw %src : i64` | Fyra uses colon type syntax |
+| Sign-extend Byte | `%d =w extsb %src` | `%d = extsb %src : i32` | Fyra uses colon type syntax |
+| Sign-extend Half | `%d =w extsh %src` | `%d = extsh %src : i32` | Fyra uses colon type syntax |
+| Sign-extend Word | `%d =l extsw %src` | `%d = extsw %src : i64` | Fyra uses colon type syntax |
 
 ### Floating-Point Conversions
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Single to Double | `%d =d exts %src` | `%d = exts %src : d` | Fyra uses colon type syntax |
-| Double to Single | `%d =s truncd %src` | `%d = truncd %src : s` | Fyra uses colon type syntax |
+| Single to Double | `%d =d exts %src` | `%d = exts %src : f64` | Fyra uses colon type syntax |
+| Double to Single | `%d =s truncd %src` | `%d = truncd %src : f32` | Fyra uses colon type syntax |
 
 ### Integer/Float Conversions
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Signed Word to Float | `%d =s swtof %src` | `%d = swtof %src : s` | Fyra uses colon type syntax |
-| Unsigned Word to Float | `%d =s uwtof %src` | `%d = uwtof %src : s` | Fyra uses colon type syntax |
-| Signed Long to Float | `%d =s sltof %src` | `%d = sltof %src : s` | Fyra uses colon type syntax |
-| Unsigned Long to Float | `%d =s ultof %src` | `%d = ultof %src : s` | Fyra uses colon type syntax |
-| Double to Signed Int | `%d =w dtosi %src` | `%d = dtosi %src : w` | Fyra uses colon type syntax |
-| Double to Unsigned Int | `%d =w dtoui %src` | `%d = dtoui %src : w` | Fyra uses colon type syntax |
-| Single to Signed Int | `%d =w stosi %src` | `%d = stosi %src : w` | Fyra uses colon type syntax |
-| Single to Unsigned Int | `%d =w stoui %src` | `%d = stoui %src : w` | Fyra uses colon type syntax |
+| Signed Word to Float | `%d =s swtof %src` | `%d = swtof %src : f32` | Fyra uses colon type syntax |
+| Unsigned Word to Float | `%d =s uwtof %src` | `%d = uwtof %src : f32` | Fyra uses colon type syntax |
+| Signed Long to Float | `%d =s sltof %src` | `%d = sltof %src : f32` | Fyra uses colon type syntax |
+| Unsigned Long to Float | `%d =s ultof %src` | `%d = ultof %src : f32` | Fyra uses colon type syntax |
+| Double to Signed Int | `%d =w dtosi %src` | `%d = dtosi %src : i32` | Fyra uses colon type syntax |
+| Double to Unsigned Int | `%d =w dtoui %src` | `%d = dtoui %src : i32` | Fyra uses colon type syntax |
+| Single to Signed Int | `%d =w stosi %src` | `%d = stosi %src : i32` | Fyra uses colon type syntax |
+| Single to Unsigned Int | `%d =w stoui %src` | `%d = stoui %src : i32` | Fyra uses colon type syntax |
 
 ### Bitwise Casting
 
@@ -303,7 +303,7 @@ call $print(l $str)
 
 **Fyra:**
 ```fyra
-%d = phi @lbl1 %a, @lbl2 %b : w
+%d = phi @lbl1 %a, @lbl2 %b : i32
 ```
 
 **Notes:** Fyra uses colon type syntax for phi nodes.
@@ -312,14 +312,14 @@ call $print(l $str)
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
-| Copy Value | `%d =w copy %src` | `%d = copy %src : w` | Fyra uses colon type syntax |
+| Copy Value | `%d =w copy %src` | `%d = copy %src : i32` | Fyra uses colon type syntax |
 
 ### Variadic Function Support
 
 | Operation | QBE Syntax | Fyra Syntax | Notes |
 |-----------|------------|-------------|-------|
 | VA Start | `vastart %ap` | `vastart %ap` | Identical |
-| VA Arg | `%d =w vaarg %ap` | `%d = vaarg %ap : w` | Fyra uses colon type syntax |
+| VA Arg | `%d =w vaarg %ap` | `%d = vaarg %ap : i32` | Fyra uses colon type syntax |
 
 ---
 
@@ -347,7 +347,7 @@ export function w $main() {
 
 **After (Fyra):**
 ```fyra
-export function $main() : w {
+export function $main() : i32 {
     # body
 }
 ```
@@ -361,7 +361,7 @@ storew %value, %pointer
 
 **After (Fyra):**
 ```fyra
-store %value, %pointer : w
+store %value, %pointer : i32
 ```
 
 #### Step 3: Update Floating-Point Operations
@@ -373,7 +373,7 @@ store %value, %pointer : w
 
 **After (Fyra):**
 ```fyra
-%result = fadd %a, %b : s
+%result = fadd %a, %b : f32
 ```
 
 #### Step 4: Verify Comparisons
@@ -387,8 +387,8 @@ Most comparisons are compatible, but verify floating-point comparisons:
 
 **Fyra (recommended):**
 ```fyra
-%cmp = eq %a, %b : w     # For integers
-%cmp = eq %a, %b : w     # For floats (generic eq works for both)
+%cmp = eq %a, %b : i32     # For integers
+%cmp = eq %a, %b : i32     # For floats (generic eq works for both)
 ```
 
 ### Compatibility Testing
@@ -414,16 +414,29 @@ After migration, consider leveraging Fyra's enhanced features:
 
 | Aspect | QBE | Fyra | Impact |
 |--------|-----|------|--------|
-| Function Syntax | `function w $name` | `function $name() : w` | Migration required |
+| Function Syntax | `function w $name` | `function $name() : i32` | Migration required |
 | Store Order | `store val, addr` | `store val, addr : type` | Syntax update required |
 | Float Arithmetic | Context-dependent | Explicit `fadd`, etc. with `:type` | Recommended update |
 | Float Comparisons | Context-dependent | Generic `eq`, `lt`, etc. with `:type` | Recommended update |
 | Export Position | After `function` | Before `function` | Migration required |
 | Type Syntax | `%var =type instruction` | `%var = instruction : type` | **Breaking change** |
 | Halt Instruction | None | `hlt` | Fyra addition |
-| Call Syntax | `%d =w call $f()` | `%d = call $f() : w` | Syntax update required |
+| Call Syntax | `%d =w call $f()` | `%d = call $f() : i32` | Syntax update required |
 | Target Support | Single target | Multi-target | Fyra enhancement |
 | File Formats | `.qbe` only | `.qbe`, `.fyra`, `.fy` | Fyra enhancement |
+
+### Vector Types Reference
+
+Fyra introduces a compositional vector syntax `v<lanes><scalar_type>` over QBE's scalar model:
+
+| Vector Type | Meaning |
+| ----------- | ------- |
+| `v16i8`     | 16 × 8-bit signed integers |
+| `v8i16`     | 8 × 16-bit signed integers |
+| `v4i32`     | 4 × 32-bit signed integers |
+| `v2i64`     | 2 × 64-bit signed integers |
+| `v4f32`     | 4 × 32-bit floating point numbers |
+| `v2f64`     | 2 × 64-bit floating point numbers |
 
 ### Compatibility Level
 

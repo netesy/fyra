@@ -508,7 +508,7 @@ IRBuilder provides fluent interface:
 builder.createFunction("test", IntegerType::get(32))
        .createBasicBlock("entry")
        .setInsertPoint()
-       .createAdd(a, b)
+       .createAdd(a, i8)
        .createRet();
 ```
 

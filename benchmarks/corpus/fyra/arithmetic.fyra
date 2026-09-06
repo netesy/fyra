@@ -1,95 +1,95 @@
-function $test_basic_add(%a : w, %b : w) : w {
+function $test_basic_add(%a : i32, %b : i32) : i32 {
 @start
-    %res = add %a, %b : w
-    ret %res : w
+    %res = add %a, %b : i32
+    ret %res : i32
 }
 
-function $test_basic_sub(%a : w, %b : w) : w {
+function $test_basic_sub(%a : i32, %b : i32) : i32 {
 @start
-    %res = sub %a, %b : w
-    ret %res : w
+    %res = sub %a, %b : i32
+    ret %res : i32
 }
 
-function $test_basic_mul(%a : w, %b : w) : w {
+function $test_basic_mul(%a : i32, %b : i32) : i32 {
 @start
-    %res = mul %a, %b : w
-    ret %res : w
+    %res = mul %a, %b : i32
+    ret %res : i32
 }
 
-function $test_basic_div(%a : w, %b : w) : w {
+function $test_basic_div(%a : i32, %b : i32) : i32 {
 @start
-    %res = div %a, %b : w
-    ret %res : w
+    %res = div %a, %b : i32
+    ret %res : i32
 }
 
-function $test_basic_rem(%a : w, %b : w) : w {
+function $test_basic_rem(%a : i32, %b : i32) : i32 {
 @start
-    %res = rem %a, %b : w
-    ret %res : w
+    %res = rem %a, %b : i32
+    ret %res : i32
 }
 
-function $test_mixed(%a : w, %b : w, %c : w, %d : w) : w {
+function $test_mixed(%a : i32, %b : i32, %c : i32, %d : i32) : i32 {
 @start
-    %t1 = add %a, %b : w
-    %t2 = sub %c, %d : w
-    %res = mul %t1, %t2 : w
-    ret %res : w
+    %t1 = add %a, %b : i32
+    %t2 = sub %c, %d : i32
+    %res = mul %t1, %t2 : i32
+    ret %res : i32
 }
 
-function $test_chained(%a : w, %b : w, %c : w, %d : w) : w {
+function $test_chained(%a : i32, %b : i32, %c : i32, %d : i32) : i32 {
 @start
-    %p1 = mul %a, %b : w
-    %p2 = mul %c, %d : w
-    %s1 = add %p1, %p2 : w
-    %s2 = add %a, %d : w
-    %res = sub %s1, %s2 : w
-    ret %res : w
+    %p1 = mul %a, %b : i32
+    %p2 = mul %c, %d : i32
+    %s1 = add %p1, %p2 : i32
+    %s2 = add %a, %d : i32
+    %res = sub %s1, %s2 : i32
+    ret %res : i32
 }
 
-function $test_constant(%a : w) : w {
+function $test_constant(%a : i32) : i32 {
 @start
-    %t1 = add %a, 1 : w
-    %t2 = mul %t1, 2 : w
-    %res = sub %t2, 3 : w
-    ret %res : w
+    %t1 = add %a, 1 : i32
+    %t2 = mul %t1, 2 : i32
+    %res = sub %t2, 3 : i32
+    ret %res : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry 1, @body %i_next : w
-    %sum = phi @entry 0, @body %sum_next : l
-    %cond = sle %i, 100000000 : w
+    %i = phi @entry 1, @body %i_next : i32
+    %sum = phi @entry 0, @body %sum_next : i64
+    %cond = sle %i, 100000000 : i32
     jnz %cond, @body, @exit
 
 @body
-    %m7 = rem %i, 7 : w
-    %m11 = rem %i, 11 : w
-    %m13 = rem %i, 13 : w
-    %v1 = call $test_mixed(%i, %m7, %m11, %m13) : w
+    %m7 = rem %i, 7 : i32
+    %m11 = rem %i, 11 : i32
+    %m13 = rem %i, 13 : i32
+    %v1 = call $test_mixed(%i, %m7, %m11, %m13) : i32
 
-    %m5 = rem %i, 5 : w
-    %m9 = rem %i, 9 : w
-    %m17 = rem %i, 17 : w
-    %m23 = rem %i, 23 : w
-    %v2 = call $test_chained(%m5, %m9, %m17, %m23) : w
+    %m5 = rem %i, 5 : i32
+    %m9 = rem %i, 9 : i32
+    %m17 = rem %i, 17 : i32
+    %m23 = rem %i, 23 : i32
+    %v2 = call $test_chained(%m5, %m9, %m17, %m23) : i32
 
-    %v3 = call $test_constant(%i) : w
+    %v3 = call $test_constant(%i) : i32
 
-    %v1_ext = extsw %v1 : l
-    %v2_ext = extsw %v2 : l
-    %v3_ext = extsw %v3 : l
+    %v1_ext = extsw %v1 : i64
+    %v2_ext = extsw %v2 : i64
+    %v3_ext = extsw %v3 : i64
 
-    %s_a = add %sum, %v1_ext : l
-    %s_b = add %s_a, %v2_ext : l
-    %sum_next = add %s_b, %v3_ext : l
+    %s_a = add %sum, %v1_ext : i64
+    %s_b = add %s_a, %v2_ext : i64
+    %sum_next = add %s_b, %v3_ext : i64
 
-    %i_next = add %i, 1 : w
+    %i_next = add %i, 1 : i32
     jmp @loop
 
 @exit
-    call $print_checksum(l %sum)
-    ret 0 : w
+    call $print_checksum(i64 %sum)
+    ret 0 : i32
 }

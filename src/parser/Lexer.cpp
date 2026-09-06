@@ -56,6 +56,36 @@ Token Lexer::getNextToken() {
         return {TokenType::FloatLiteral, floatStr, currentLine};
     }
 
+    if (lastChar == 'f') {
+        char c1 = getChar();
+        char c2 = getChar();
+        if ((c1 == '3' && c2 == '2') || (c1 == '6' && c2 == '4')) {
+            if (input.peek() == '_') {
+                std::string floatStr;
+                floatStr += 'f';
+                floatStr += c1;
+                floatStr += c2;
+                lastChar = getChar(); // consume '_'
+                floatStr += lastChar;
+                lastChar = getChar();
+
+                if (lastChar == '-') {
+                    floatStr += lastChar;
+                    lastChar = getChar();
+                }
+
+                while (isdigit(lastChar) || lastChar == '.') {
+                    floatStr += lastChar;
+                    lastChar = getChar();
+                }
+                return {TokenType::FloatLiteral, floatStr, currentLine};
+            }
+        }
+        input.putback(c2);
+        input.putback(c1);
+        lastChar = 'f';
+    }
+
     if (isalpha(lastChar) || lastChar == '_') { // Identifiers and keywords
         std::string identifierStr;
         identifierStr += lastChar;
@@ -69,10 +99,13 @@ Token Lexer::getNextToken() {
             {"function", TokenType::Keyword}, {"export", TokenType::Keyword},
             {"data", TokenType::Keyword}, {"type", TokenType::Keyword},
             {"global", TokenType::Keyword},
-            // Types
-            {"w", TokenType::Keyword}, {"l", TokenType::Keyword},
-            {"s", TokenType::Keyword}, {"d", TokenType::Keyword},
-            {"b", TokenType::Keyword}, {"h", TokenType::Keyword},
+            // Scalar Types
+            {"i8", TokenType::Keyword}, {"i16", TokenType::Keyword},
+            {"i32", TokenType::Keyword}, {"i64", TokenType::Keyword},
+            {"u8", TokenType::Keyword}, {"u16", TokenType::Keyword},
+            {"u32", TokenType::Keyword}, {"u64", TokenType::Keyword},
+            {"f32", TokenType::Keyword}, {"f64", TokenType::Keyword},
+            {"bool", TokenType::Keyword}, {"void", TokenType::Keyword},
             // Instructions
             {"ret", TokenType::Keyword}, {"add", TokenType::Keyword},
             {"sub", TokenType::Keyword}, {"mul", TokenType::Keyword},

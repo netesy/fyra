@@ -1,28 +1,28 @@
 # Simple HTTP Server in Fyra IR using Capabilities
 
-data $msg = { b "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!", b 0 }
+data $msg = { i8 "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!", i8 0 }
 
-export function $main() : w {
+export function $main() : i32 {
 @m_start
     # net.socket(AF_INET=2, SOCK_STREAM=1, 0)
-    %fd = extern "net.socket"(l 2, l 1, l 0) : l
+    %fd = extern "net.socket"(i64 2, i64 1, i64 0) : i64
 
     # net.bind(fd, sin_family=2, sin_port=8080, sin_addr=0)
     # We'll use a simplified bind capability or raw syscall if it doesn't fit
     # For this refactor, let's assume net.listen(fd, backlog)
-    %l = extern "net.listen"(l %fd, l 5) : l
+    %l = extern "net.listen"(i64 %fd, i64 5) : i64
 
 @m_loop
     # net.accept(fd, 0, 0)
-    %client = extern "net.accept"(l %fd, l 0, l 0) : l
+    %client = extern "net.accept"(i64 %fd, i64 0, i64 0) : i64
 
     # io.write(client, $msg, 53)
-    %w = extern "io.write"(l %client, l $msg, l 53) : l
+    %w = extern "io.write"(i64 %client, i64 $msg, i64 53) : i64
 
     # io.close(client)
-    %c = extern "io.close"(l %client) : l
+    %c = extern "io.close"(i64 %client) : i64
 
     jmp @m_loop
 
-    ret 0 : w
+    ret 0 : i32
 }

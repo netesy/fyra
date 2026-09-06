@@ -1,50 +1,50 @@
 # Industrial-grade capability test suite
-extern io.open(l, w, w) : l
-extern io.write(l, l, l) : l
-extern io.read(l, l, l) : l
-extern io.seek(l, l, w) : l
-extern io.stat(l, l) : w
-extern io.close(l)
+extern io.open(i64, i32, i32) : i64
+extern io.write(i64, i64, i64) : i64
+extern io.read(i64, i64, i64) : i64
+extern io.seek(i64, i64, i32) : i64
+extern io.stat(i64, i64) : i32
+extern io.close(i64)
 
-extern memory.alloc(l) : l
-extern memory.free(l, l)
-extern memory.protect(l, l, w) : w
+extern memory.alloc(i64) : i64
+extern memory.free(i64, i64)
+extern memory.protect(i64, i64, i32) : i32
 
-extern process.exit(w)
+extern process.exit(i32)
 extern process.abort()
-extern process.sleep(l)
+extern process.sleep(i64)
 
-extern random.u64() : l
-extern time.now() : l
-extern time.monotonic() : l
+extern random.u64() : i64
+extern time.now() : i64
+extern time.monotonic() : i64
 
-extern sync.mutex.lock(l)
-extern sync.mutex.unlock(l)
+extern sync.mutex.lock(i64)
+extern sync.mutex.unlock(i64)
 
-extern debug.log(l)
+extern debug.log(i64)
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
     # Test IO
-    %path = copy $path_str : l
-    %fd = extern io.open(%path, 0, 0) : l
-    %buf = extern memory.alloc(1024) : l
-    %nread = extern io.read(%fd, %buf, 1024) : l
-    %nwrite = extern io.write(%fd, %buf, 1024) : l
-    %nseek = extern io.seek(%fd, 0, 0) : l
+    %path = copy $path_str : i64
+    %fd = extern io.open(%path, 0, 0) : i64
+    %buf = extern memory.alloc(1024) : i64
+    %nread = extern io.read(%fd, %buf, 1024) : i64
+    %nwrite = extern io.write(%fd, %buf, 1024) : i64
+    %nseek = extern io.seek(%fd, 0, 0) : i64
     extern io.close(%fd)
 
     # Test Memory
-    extern memory.protect(%buf, 1024, 1) : w
+    extern memory.protect(%buf, 1024, 1) : i32
     extern memory.free(%buf, 1024)
 
     # Test Time & Random
-    %t1 = extern time.now() : l
-    %t2 = extern time.monotonic() : l
-    %r = extern random.u64() : l
+    %t1 = extern time.now() : i64
+    %t2 = extern time.monotonic() : i64
+    %r = extern random.u64() : i64
 
     # Test Sync
-    %mutex = extern memory.alloc(8) : l
+    %mutex = extern memory.alloc(8) : i64
     extern sync.mutex.lock(%mutex)
     extern sync.mutex.unlock(%mutex)
 
@@ -52,7 +52,7 @@ export function $main() : w {
     extern debug.log($path_str)
 
     extern process.exit(0)
-    ret 0 : w
+    ret 0 : i32
 }
 
-data $path_str = { b "test.txt", b 0 }
+data $path_str = { i8 "test.txt", i8 0 }

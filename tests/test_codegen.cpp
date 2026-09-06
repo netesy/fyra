@@ -41,61 +41,61 @@ int main() {
     // LEA Instruction Selection Unit Tests
     {
         std::string lea_ir = R"(
-function $test_lea_x_mul2_plus_c(%x : w) : w {
+function $test_lea_x_mul2_plus_c(%x : i32) : i32 {
 @entry
-    %t = mul %x, w 2 : w
-    %res = add %t, w 10 : w
-    ret %res : w
+    %t = mul %x, i32 2 : i32
+    %res = add %t, i32 10 : i32
+    ret %res : i32
 }
 
-function $test_lea_x_mul3_plus_c(%x : w) : w {
+function $test_lea_x_mul3_plus_c(%x : i32) : i32 {
 @entry
-    %t = mul %x, w 3 : w
-    %res = add %t, w 15 : w
-    ret %res : w
+    %t = mul %x, i32 3 : i32
+    %res = add %t, i32 15 : i32
+    ret %res : i32
 }
 
-function $test_lea_x_mul4_plus_c(%x : w) : w {
+function $test_lea_x_mul4_plus_c(%x : i32) : i32 {
 @entry
-    %t = mul %x, w 4 : w
-    %res = add %t, w 20 : w
-    ret %res : w
+    %t = mul %x, i32 4 : i32
+    %res = add %t, i32 20 : i32
+    ret %res : i32
 }
 
-function $test_lea_x_mul5_plus_c(%x : w) : w {
+function $test_lea_x_mul5_plus_c(%x : i32) : i32 {
 @entry
-    %t = mul %x, w 5 : w
-    %res = add %t, w 25 : w
-    ret %res : w
+    %t = mul %x, i32 5 : i32
+    %res = add %t, i32 25 : i32
+    ret %res : i32
 }
 
-function $test_lea_x_mul8_plus_c(%x : w) : w {
+function $test_lea_x_mul8_plus_c(%x : i32) : i32 {
 @entry
-    %t = mul %x, w 8 : w
-    %res = add %t, w 30 : w
-    ret %res : w
+    %t = mul %x, i32 8 : i32
+    %res = add %t, i32 30 : i32
+    ret %res : i32
 }
 
-function $test_lea_unsupported_multiplier(%x : w) : w {
+function $test_lea_unsupported_multiplier(%x : i32) : i32 {
 @entry
-    %t = mul %x, w 7 : w
-    %res = add %t, w 10 : w
-    ret %res : w
+    %t = mul %x, i32 7 : i32
+    %res = add %t, i32 10 : i32
+    ret %res : i32
 }
 
-function $test_lea_mismatched_width(%x : w) : l {
+function $test_lea_mismatched_width(%x : i32) : i64 {
 @entry
-    %t = mul %x, w 2 : w
-    %t_ext = extsw %t : l
-    %res = add %t_ext, l 10 : l
-    ret %res : l
+    %t = mul %x, i32 2 : i32
+    %t_ext = extsw %t : i64
+    %res = add %t_ext, i64 10 : i64
+    ret %res : i64
 }
 
-function $test_lea_float(%x : s) : s {
+function $test_lea_float(%x : f32) : f32 {
 @entry
-    %t = fmul %x, s 2.0 : s
-    %res = fadd %t, s 10.0 : s
-    ret %res : s
+    %t = fmul %x, f32 2.0 : f32
+    %res = fadd %t, f32 10.0 : f32
+    ret %res : f32
 }
 )";
         std::istringstream lea_stream(lea_ir);
@@ -156,32 +156,32 @@ function $test_lea_float(%x : s) : s {
 
     // Test 32-bit arithmetic with overflow sign-extension semantics and parameter preservation
     std::string test_dot_ir = R"(
-function $test_dot_overflow(%n : w) : l {
+function $test_dot_overflow(%n : i32) : i64 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry w 0, @body %i_next : w
-    %sum = phi @entry l 0, @body %sum_next : l
-    %cond = slt %i, %n : w
+    %i = phi @entry i32 0, @body %i_next : i32
+    %sum = phi @entry i64 0, @body %sum_next : i64
+    %cond = slt %i, %n : i32
     jnz %cond, @body, @exit
 
 @body
-    %t3 = mul %i, w 3 : w
-    %a_w = add %t3, w 1 : w
-    %a = extsw %a_w : l
+    %t3 = mul %i, i32 3 : i32
+    %a_w = add %t3, i32 1 : i32
+    %a = extsw %a_w : i64
 
-    %t7 = mul %i, w 7 : w
-    %b_w = add %t7, w 2 : w
-    %b = extsw %b_w : l
+    %t7 = mul %i, i32 7 : i32
+    %b_w = add %t7, i32 2 : i32
+    %b = extsw %b_w : i64
 
-    %prod = mul %a, %b : l
-    %sum_next = add %sum, %prod : l
-    %i_next = add %i, w 1 : w
+    %prod = mul %a, %b : i64
+    %sum_next = add %sum, %prod : i64
+    %i_next = add %i, i32 1 : i32
     jmp @loop
 
 @exit
-    ret %sum : l
+    ret %sum : i64
 }
 )";
     std::istringstream dot_stream(test_dot_ir);
@@ -206,37 +206,37 @@ function $test_dot_overflow(%n : w) : l {
         using namespace ::transforms;
 
         std::string liveness_ir = R"(
-function $test_straight_line(%p : w) : w {
+function $test_straight_line(%p : i32) : i32 {
 @entry
-    %x = add %p, w 1 : w
-    %y = add %x, w 2 : w
-    ret %y : w
+    %x = add %p, i32 1 : i32
+    %y = add %x, i32 2 : i32
+    ret %y : i32
 }
 
-function $test_later_use(%p : w) : w {
+function $test_later_use(%p : i32) : i32 {
 @entry
-    %x = add %p, w 1 : w
-    %a = add %x, w 10 : w
-    %b = add %x, w 20 : w
-    ret %b : w
+    %x = add %p, i32 1 : i32
+    %a = add %x, i32 10 : i32
+    %b = add %x, i32 20 : i32
+    ret %b : i32
 }
 
-function $test_branch(%cond : w, %p : w) : w {
+function $test_branch(%cond : i32, %p : i32) : i32 {
 @entry
-    %x = add %p, w 1 : w
+    %x = add %p, i32 1 : i32
     jnz %cond, @left, @right
 
 @left
-    %a = add %x, w 10 : w
-    ret %a : w
+    %a = add %x, i32 10 : i32
+    ret %a : i32
 
 @right
-    ret w 0 : w
+    ret i32 0 : i32
 }
 
-function $test_join(%cond : w, %p : w) : w {
+function $test_join(%cond : i32, %p : i32) : i32 {
 @entry
-    %x = add %p, w 1 : w
+    %x = add %p, i32 1 : i32
     jnz %cond, @b1, @b2
 
 @b1
@@ -246,57 +246,57 @@ function $test_join(%cond : w, %p : w) : w {
     jmp @join
 
 @join
-    %use_x = add %x, w 5 : w
-    ret %use_x : w
+    %use_x = add %x, i32 5 : i32
+    ret %use_x : i32
 }
 
-function $test_loop_backedge(%p : w) : w {
+function $test_loop_backedge(%p : i32) : i32 {
 @entry
-    %limit = add %p, w 10 : w
+    %limit = add %p, i32 10 : i32
     jmp @header
 
 @header
-    %phi = phi @entry w 0, @body %next : w
-    %cond = slt %phi, %limit : w
+    %phi = phi @entry i32 0, @body %next : i32
+    %cond = slt %phi, %limit : i32
     jnz %cond, @body, @exit
 
 @body
-    %next = add %phi, w 1 : w
+    %next = add %phi, i32 1 : i32
     jmp @header
 
 @exit
-    ret %phi : w
+    ret %phi : i32
 }
 
-function $test_phi_edges(%cond : w, %p : w) : w {
+function $test_phi_edges(%cond : i32, %p : i32) : i32 {
 @entry
     jnz %cond, @bA, @bB
 
 @bA
-    %valA = add %p, w 1 : w
+    %valA = add %p, i32 1 : i32
     jmp @header
 
 @bB
-    %valB = add %p, w 2 : w
+    %valB = add %p, i32 2 : i32
     jmp @header
 
 @header
-    %phi = phi @bA %valA, @bB %valB : w
-    ret %phi : w
+    %phi = phi @bA %valA, @bB %valB : i32
+    ret %phi : i32
 }
 
-function $test_cfg_vs_linear(%cond : w, %p : w) : w {
+function $test_cfg_vs_linear(%cond : i32, %p : i32) : i32 {
 @entry
-    %x = add %p, w 100 : w
+    %x = add %p, i32 100 : i32
     jnz %cond, @b_live, @b_dead
 
 @b_dead
-    %dead_inst = add %p, w 1 : w
-    ret %dead_inst : w
+    %dead_inst = add %p, i32 1 : i32
+    ret %dead_inst : i32
 
 @b_live
-    %live_inst = add %x, w 2 : w
-    ret %live_inst : w
+    %live_inst = add %x, i32 2 : i32
+    ret %live_inst : i32
 }
 )";
         std::istringstream stream(liveness_ir);
@@ -463,38 +463,38 @@ function $test_cfg_vs_linear(%cond : w, %p : w) : w {
         using namespace transforms;
 
         std::string spill_ir = R"(
-function $test_spill_provenance(%p : w) : w {
+function $test_spill_provenance(%p : i32) : i32 {
 @entry
-    %v0 = add %p, w 1 : w
-    %v1 = add %v0, w 2 : w
-    %v2 = add %v1, w 3 : w
-    %v3 = add %v2, w 4 : w
-    %v4 = add %v3, w 5 : w
-    %v5 = add %v4, w 6 : w
-    %v6 = add %v5, w 7 : w
-    %v7 = add %v6, w 8 : w
-    %v8 = add %v7, w 9 : w
-    %v9 = add %v8, w 10 : w
-    %v10 = add %v9, w 11 : w
-    %v11 = add %v10, w 12 : w
-    %v12 = add %v11, w 13 : w
-    %v13 = add %v12, w 14 : w
-    %v14 = add %v13, w 15 : w
-    %sum1 = add %v0, %v1 : w
-    %sum2 = add %v2, %v3 : w
-    %sum3 = add %v4, %v5 : w
-    %sum4 = add %v6, %v7 : w
-    %sum5 = add %v8, %v9 : w
-    %sum6 = add %v10, %v11 : w
-    %sum7 = add %v12, %v13 : w
-    %total = add %sum1, %sum2 : w
-    %total2 = add %total, %sum3 : w
-    %total3 = add %total2, %sum4 : w
-    %total4 = add %total3, %sum5 : w
-    %total5 = add %total4, %sum6 : w
-    %total6 = add %total5, %sum7 : w
-    %total7 = add %total6, %v14 : w
-    ret %total7 : w
+    %v0 = add %p, i32 1 : i32
+    %v1 = add %v0, i32 2 : i32
+    %v2 = add %v1, i32 3 : i32
+    %v3 = add %v2, i32 4 : i32
+    %v4 = add %v3, i32 5 : i32
+    %v5 = add %v4, i32 6 : i32
+    %v6 = add %v5, i32 7 : i32
+    %v7 = add %v6, i32 8 : i32
+    %v8 = add %v7, i32 9 : i32
+    %v9 = add %v8, i32 10 : i32
+    %v10 = add %v9, i32 11 : i32
+    %v11 = add %v10, i32 12 : i32
+    %v12 = add %v11, i32 13 : i32
+    %v13 = add %v12, i32 14 : i32
+    %v14 = add %v13, i32 15 : i32
+    %sum1 = add %v0, %v1 : i32
+    %sum2 = add %v2, %v3 : i32
+    %sum3 = add %v4, %v5 : i32
+    %sum4 = add %v6, %v7 : i32
+    %sum5 = add %v8, %v9 : i32
+    %sum6 = add %v10, %v11 : i32
+    %sum7 = add %v12, %v13 : i32
+    %total = add %sum1, %sum2 : i32
+    %total2 = add %total, %sum3 : i32
+    %total3 = add %total2, %sum4 : i32
+    %total4 = add %total3, %sum5 : i32
+    %total5 = add %total4, %sum6 : i32
+    %total6 = add %total5, %sum7 : i32
+    %total7 = add %total6, %v14 : i32
+    ret %total7 : i32
 }
 )";
         std::istringstream stream(spill_ir);
@@ -552,34 +552,34 @@ function $test_spill_provenance(%p : w) : w {
     // Focused tests for two-address arithmetic lowering safety and emission
     {
         std::string lowering_ir = R"(
-function $test_safe_inplace_add(%p : w, %q : w) : w {
+function $test_safe_inplace_add(%p : i32, %q : i32) : i32 {
 @entry
-    %x = add %p, %q : w
-    %y = add %x, w 5 : w
-    ret %y : w
+    %x = add %p, %q : i32
+    %y = add %x, i32 5 : i32
+    ret %y : i32
 }
 
-function $test_unsafe_inplace_add(%p : w, %q : w) : w {
+function $test_unsafe_inplace_add(%p : i32, %q : i32) : i32 {
 @entry
-    %x = add %p, %q : w
-    %y = add %x, w 5 : w
-    %z = add %x, w 10 : w
-    %res = add %y, %z : w
-    ret %res : w
+    %x = add %p, %q : i32
+    %y = add %x, i32 5 : i32
+    %z = add %x, i32 10 : i32
+    %res = add %y, %z : i32
+    ret %res : i32
 }
 
-function $test_inplace_sub(%p : w, %q : w) : w {
+function $test_inplace_sub(%p : i32, %q : i32) : i32 {
 @entry
-    %x = add %p, %q : w
-    %y = sub %x, w 3 : w
-    ret %y : w
+    %x = add %p, %q : i32
+    %y = sub %x, i32 3 : i32
+    ret %y : i32
 }
 
-function $test_inplace_mul(%p : w, %q : w) : w {
+function $test_inplace_mul(%p : i32, %q : i32) : i32 {
 @entry
-    %x = add %p, %q : w
-    %y = mul %x, w 7 : w
-    ret %y : w
+    %x = add %p, %q : i32
+    %y = mul %x, i32 7 : i32
+    ret %y : i32
 }
 )";
         std::istringstream stream(lowering_ir);
@@ -600,45 +600,212 @@ function $test_inplace_mul(%p : w, %q : w) : w {
         std::cout << "Two-address lowering tests completed successfully!" << std::endl;
     }
 
+    // Focused regression & safety tests for targeted loop-aware liveness interval handling
+    {
+        using namespace ir;
+        using namespace ::transforms;
+
+        // Test A: Short-lived intra-loop temporary (must NOT be extended to loop latch)
+        // Test B: Loop-carried Phi value (must remain live through predecessor edge)
+        // Test C: Non-Phi loop-invariant (must be extended to loop latch)
+        std::string targeted_liveness_ir = R"(
+function $test_liveness_precision(%n : i32, %inv : i32) : i32 {
+@entry
+    %vec_const = add %inv, i32 10 : i32
+    jmp @loop
+
+@loop
+    %i = phi @entry i32 0, @body %i_next : i32
+    %sum = phi @entry i32 0, @body %sum_next : i32
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %temp_intra = add %i, i32 1 : i32
+    %use_inv = add %temp_intra, %vec_const : i32
+    %sum_next = add %sum, %use_inv : i32
+    %i_next = add %i, i32 1 : i32
+    jmp @loop
+
+@exit
+    ret %sum : i32
+}
+)";
+        std::istringstream stream(targeted_liveness_ir);
+        parser::Parser l_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> l_module = l_parser.parseModule();
+        assert(l_module != nullptr);
+
+        Function* f = l_module->getFunction("test_liveness_precision");
+        assert(f != nullptr);
+
+        transforms::CFGBuilder::run(*f);
+        transforms::LivenessAnalysis liveness;
+        liveness.run(*f);
+
+        auto liveRanges = liveness.getLiveRanges();
+
+        // Identify instructions
+        Instruction *vec_const = nullptr, *temp_intra = nullptr, *i_next = nullptr;
+        for (auto& bb : f->getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->getName() == "vec_const") vec_const = instr.get();
+                else if (instr->getName() == "temp_intra") temp_intra = instr.get();
+                else if (instr->getName() == "i_next") i_next = instr.get();
+            }
+        }
+        assert(vec_const && temp_intra && i_next);
+
+        // Find loop latch end site (i_next instruction site in @body)
+        int body_latch_site = liveRanges.at(i_next).start;
+        assert(body_latch_site > 0);
+
+        // Test C: Non-Phi loop-invariant %vec_const IS extended to loop latch
+        assert(liveRanges.at(vec_const).end >= body_latch_site);
+
+        // Test A: Intra-loop temporary %temp_intra is NOT extended to loop latch
+        assert(liveRanges.at(temp_intra).end < body_latch_site);
+
+        // Test B: Loop-carried Phi %i_next IS extended to loop latch
+        assert(liveRanges.at(i_next).end >= body_latch_site);
+
+        std::cout << "Targeted loop-aware liveness precision unit tests passed successfully!" << std::endl;
+    }
+
     std::cout << "All CFG-aware liveness tests passed successfully!" << std::endl;
+
+    // Focused VExtract Register-Class Allocation Unit Tests
+    {
+        using namespace ir;
+        using namespace transforms;
+
+        std::cout << "--- Testing VExtract Register-Class Allocation ---" << std::endl;
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("test_vextract_regclass", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        ir::Type* i8Ty = ctx->getIntegerType(8);
+        ir::Type* i16Ty = ctx->getIntegerType(16);
+        ir::Type* i32Ty = ctx->getIntegerType(32);
+        ir::Type* i64Ty = ctx->getIntegerType(64);
+        ir::Type* f32Ty = ctx->getFloatType();
+        ir::Type* f64Ty = ctx->getDoubleType();
+
+        ir::VectorType* v16i8Ty = ctx->getVectorType(i8Ty, 16);
+        ir::VectorType* v8i16Ty = ctx->getVectorType(i16Ty, 8);
+        ir::VectorType* v4i32Ty = ctx->getVectorType(i32Ty, 4);
+        ir::VectorType* v2i64Ty = ctx->getVectorType(i64Ty, 2);
+        ir::VectorType* v4f32Ty = ctx->getVectorType(f32Ty, 4);
+        ir::VectorType* v2f64Ty = ctx->getVectorType(f64Ty, 2);
+
+        ir::Function* func = builder.createFunction("test_vextract_func", i32Ty, {});
+        ir::BasicBlock* bb = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(bb);
+
+        // Vector loads/arithmetic (XMM control cases)
+        ir::Instruction* v1 = new ir::VectorInstruction(v4i32Ty, Instruction::VLoad, {});
+        ir::Instruction* v2 = new ir::VectorInstruction(v4i32Ty, Instruction::VBroadcast, {ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 42)});
+        ir::Instruction* vAdd = new ir::VectorInstruction(v4i32Ty, Instruction::VAdd, {v1, v2});
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(v1));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(v2));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(vAdd));
+
+        // Integer VExtract instructions (scalar integer return types -> MUST get GPR physical registers < 100)
+        ir::Instruction* ext8 = new ir::VectorInstruction(i8Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 0)});
+        ir::Instruction* ext16 = new ir::VectorInstruction(i16Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1)});
+        ir::Instruction* ext32 = new ir::VectorInstruction(i32Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 2)});
+        ir::Instruction* ext64 = new ir::VectorInstruction(i64Ty, Instruction::VExtract, {vAdd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 3)});
+
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext8));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext16));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext32));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(ext64));
+
+        // Casts to give uses (builder automatically appends to bb)
+        ir::Instruction* c8 = builder.createCast(ext8, i32Ty);
+        ir::Instruction* c16 = builder.createCast(ext16, i32Ty);
+        ir::Instruction* c64 = builder.createCast(ext64, i32Ty);
+
+        // Floating-point VExtract instructions (scalar float/double return types -> MUST get XMM physical registers >= 100)
+        ir::Instruction* vf = new ir::VectorInstruction(v4f32Ty, Instruction::VLoad, {});
+        ir::Instruction* vd = new ir::VectorInstruction(v2f64Ty, Instruction::VLoad, {});
+        ir::Instruction* extF32 = new ir::VectorInstruction(f32Ty, Instruction::VExtract, {vf, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1)});
+        ir::Instruction* extF64 = new ir::VectorInstruction(f64Ty, Instruction::VExtract, {vd, ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1)});
+
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(vf));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(vd));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(extF32));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(extF64));
+
+        builder.createFAdd(extF32, ctx->getConstantFP(ctx->getFloatType(), 1.0f));
+        builder.createFAdd(extF64, ctx->getConstantFP(ctx->getDoubleType(), 2.0));
+
+        ir::Instruction* sum1 = builder.createAdd(c8, c16);
+        ir::Instruction* sum2 = builder.createAdd(sum1, ext32);
+        ir::Instruction* sum3 = builder.createAdd(sum2, c64);
+
+        builder.createRet(sum3);
+
+        transforms::CFGBuilder::run(*func);
+        transforms::LinearScanAllocator allocator;
+        allocator.run(*func);
+
+        // Prove XMM Control cases received XMM physical registers (>= 100)
+        assert(v1->hasPhysicalRegister() && v1->getPhysicalRegister() >= 100 && v1->getPhysicalRegister() <= 115);
+        assert(v2->hasPhysicalRegister() && v2->getPhysicalRegister() >= 100 && v2->getPhysicalRegister() <= 115);
+        assert(vAdd->hasPhysicalRegister() && vAdd->getPhysicalRegister() >= 100 && vAdd->getPhysicalRegister() <= 115);
+
+        // Prove Integer VExtract received GPR physical registers (< 100)
+        assert(ext8->hasPhysicalRegister() && ext8->getPhysicalRegister() < 100);
+        assert(ext16->hasPhysicalRegister() && ext16->getPhysicalRegister() < 100);
+        assert(ext32->hasPhysicalRegister() && ext32->getPhysicalRegister() < 100);
+        assert(ext64->hasPhysicalRegister() && ext64->getPhysicalRegister() < 100);
+
+        // Prove Floating-Point VExtract received scalar physical registers (< 100)
+        assert(extF32->hasPhysicalRegister());
+        assert(extF64->hasPhysicalRegister());
+
+        std::cout << "--- VExtract Register-Class Allocation Unit Tests Passed ---" << std::endl;
+    }
 
     // Fixed-Register Intermediate Copy Elimination Unit Tests (2-Address Binary Copy Elimination)
     {
         std::string copy_elim_ir = R"(
-function $test_add_direct(%a : w, %b : w) : w {
+function $test_add_direct(%a : i32, %b : i32) : i32 {
 @entry
-    %res = add %a, %b : w
-    ret %res : w
+    %res = add %a, %b : i32
+    ret %res : i32
 }
 
-function $test_sub_direct(%a : w, %b : w) : w {
+function $test_sub_direct(%a : i32, %b : i32) : i32 {
 @entry
-    %res = sub %a, %b : w
-    ret %res : w
+    %res = sub %a, %b : i32
+    ret %res : i32
 }
 
-function $test_mul_direct(%a : w, %b : w) : w {
+function $test_mul_direct(%a : i32, %b : i32) : i32 {
 @entry
-    %res = mul %a, %b : w
-    ret %res : w
+    %res = mul %a, %b : i32
+    ret %res : i32
 }
 
-function $test_add_64bit(%a : l, %b : l) : l {
+function $test_add_64bit(%a : i64, %b : i64) : i64 {
 @entry
-    %res = add %a, %b : l
-    ret %res : l
+    %res = add %a, %b : i64
+    ret %res : i64
 }
 
-function $test_sub_64bit(%a : l, %b : l) : l {
+function $test_sub_64bit(%a : i64, %b : i64) : i64 {
 @entry
-    %res = sub %a, %b : l
-    ret %res : l
+    %res = sub %a, %b : i64
+    ret %res : i64
 }
 
-function $test_mul_64bit(%a : l, %b : l) : l {
+function $test_mul_64bit(%a : i64, %b : i64) : i64 {
 @entry
-    %res = mul %a, %b : l
-    ret %res : l
+    %res = mul %a, %b : i64
+    ret %res : i64
 }
 )";
         std::istringstream stream(copy_elim_ir);
@@ -686,24 +853,24 @@ function $test_mul_64bit(%a : l, %b : l) : l {
     // ExtSW Direct movslq Lowering Unit Tests
     {
         std::string extsw_ir = R"(
-function $test_extsw_reg(%x : w) : l {
+function $test_extsw_reg(%x : i32) : i64 {
 @entry
-    %res = extsw %x : l
-    ret %res : l
+    %res = extsw %x : i64
+    ret %res : i64
 }
 
-function $test_extsw_positive() : l {
+function $test_extsw_positive() : i64 {
 @entry
-    %a = add w 100, w 200 : w
-    %res = extsw %a : l
-    ret %res : l
+    %a = add i32 100, i32 200 : i32
+    %res = extsw %a : i64
+    ret %res : i64
 }
 
-function $test_extsw_negative() : l {
+function $test_extsw_negative() : i64 {
 @entry
-    %a = sub w 10, w 20 : w
-    %res = extsw %a : l
-    ret %res : l
+    %a = sub i32 10, i32 20 : i32
+    %res = extsw %a : i64
+    ret %res : i64
 }
 )";
         std::istringstream extsw_stream(extsw_ir);
@@ -724,43 +891,43 @@ function $test_extsw_negative() : l {
     // Sign/Zero-Extension Direct Destination Lowering Unit Tests
     {
         std::string ext_direct_ir = R"(
-function $test_extsb_direct(%x : w) : l {
+function $test_extsb_direct(%x : i32) : i64 {
 @entry
-    %res = extsb %x : l
-    ret %res : l
+    %res = extsb %x : i64
+    ret %res : i64
 }
 
-function $test_extub_direct(%x : w) : l {
+function $test_extub_direct(%x : i32) : i64 {
 @entry
-    %res = extub %x : l
-    ret %res : l
+    %res = extub %x : i64
+    ret %res : i64
 }
 
-function $test_extsh_direct(%x : w) : l {
+function $test_extsh_direct(%x : i32) : i64 {
 @entry
-    %res = extsh %x : l
-    ret %res : l
+    %res = extsh %x : i64
+    ret %res : i64
 }
 
-function $test_extuh_direct(%x : w) : l {
+function $test_extuh_direct(%x : i32) : i64 {
 @entry
-    %res = extuh %x : l
-    ret %res : l
+    %res = extuh %x : i64
+    ret %res : i64
 }
 
-function $test_extuw_direct(%x : w) : l {
+function $test_extuw_direct(%x : i32) : i64 {
 @entry
-    %res = extuw %x : l
-    ret %res : l
+    %res = extuw %x : i64
+    ret %res : i64
 }
 
-function $test_ext_alias(%x : w) : l {
+function $test_ext_alias(%x : i32) : i64 {
 @entry
-    %a = extsb %x : l
-    %b = extub %a : l
-    %c = extsh %b : l
-    %d = extuh %c : l
-    ret %d : l
+    %a = extsb %x : i64
+    %b = extub %a : i64
+    %c = extsh %b : i64
+    %d = extuh %c : i64
+    ret %d : i64
 }
 )";
         std::istringstream ext_stream(ext_direct_ir);
@@ -840,16 +1007,16 @@ function $test_ext_alias(%x : w) : l {
         // Memory destination fallback test (unallocated register IR fallback path)
         {
             std::string mem_ir = R"(
-function $test_ext_mem(%x : w) : l {
+function $test_ext_mem(%x : i32) : i64 {
 @entry
-    %res = extsb %x : l
-    ret %res : l
+    %res = extsb %x : i64
+    ret %res : i64
 }
 
-function $test_extuw_mem(%x : w) : l {
+function $test_extuw_mem(%x : i32) : i64 {
 @entry
-    %res = extuw %x : l
-    ret %res : l
+    %res = extuw %x : i64
+    ret %res : i64
 }
 )";
             std::istringstream mem_stream(mem_ir);
@@ -877,34 +1044,34 @@ function $test_extuw_mem(%x : w) : l {
     // Tail-Call Optimization (TCO) Unit Tests
     {
         std::string tco_ir = R"(
-function $test_tco_positive(%n : l, %acc : l) : l {
+function $test_tco_positive(%n : i64, %acc : i64) : i64 {
 @start
-    %cond = sle %n, 1 : l
+    %cond = sle %n, 1 : i64
     jnz %cond, @base, @recur
 
 @base
-    ret %acc : l
+    ret %acc : i64
 
 @recur
-    %n_next = sub %n, 1 : l
-    %acc_next = mul %acc, %n : l
-    %res = call $test_tco_positive(%n_next, %acc_next) : l
-    ret %res : l
+    %n_next = sub %n, 1 : i64
+    %acc_next = mul %acc, %n : i64
+    %res = call $test_tco_positive(%n_next, %acc_next) : i64
+    ret %res : i64
 }
 
-function $test_tco_negative_used(%n : l, %acc : l) : l {
+function $test_tco_negative_used(%n : i64, %acc : i64) : i64 {
 @entry
-    %n_next = sub %n, 1 : l
-    %res = call $test_tco_positive(%n_next, %acc) : l
-    %extra = add %res, l 5 : l
-    ret %extra : l
+    %n_next = sub %n, 1 : i64
+    %res = call $test_tco_positive(%n_next, %acc) : i64
+    %extra = add %res, i64 5 : i64
+    ret %extra : i64
 }
 
-function $test_tco_negative_stack_args(%a1 : l, %a2 : l, %a3 : l, %a4 : l, %a5 : l, %a6 : l, %a7 : l) : l {
+function $test_tco_negative_stack_args(%a1 : i64, %a2 : i64, %a3 : i64, %a4 : i64, %a5 : i64, %a6 : i64, %a7 : i64) : i64 {
 @entry
-    %res = call $test_tco_positive(%a1, %a2) : l
-    %unused = add %a7, l 1 : l
-    ret %res : l
+    %res = call $test_tco_positive(%a1, %a2) : i64
+    %unused = add %a7, i64 1 : i64
+    ret %res : i64
 }
 )";
         std::istringstream tco_stream(tco_ir);
@@ -1013,6 +1180,153 @@ function $test_tco_negative_stack_args(%a1 : l, %a2 : l, %a3 : l, %a4 : l, %a5 :
         assert(asm_str.find("sarq") != std::string::npos);
 
         std::cout << "--- Direct 3-Address Move Reduction Unit Tests Passed ---" << std::endl;
+    }
+
+    // Target-Agnostic SIMD IR Unit Tests (createVShuffle, createVCmp, createVSelect, createCast)
+    {
+        using namespace ir;
+        std::cout << "--- Testing Target-Agnostic SIMD IR Refinement APIs ---" << std::endl;
+
+        auto ctx = std::make_shared<IRContext>();
+        Module module("test_simd_ir_refinement", ctx);
+        IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        Type* i8Ty = ctx->getIntegerType(8);
+        Type* i16Ty = ctx->getIntegerType(16);
+        Type* i32Ty = ctx->getIntegerType(32);
+        Type* i64Ty = ctx->getIntegerType(64);
+        Type* f32Ty = ctx->getFloatType();
+        Type* f64Ty = ctx->getDoubleType();
+
+        VectorType* v16i8Ty = ctx->getVectorType(i8Ty, 16);
+        VectorType* v8i16Ty = ctx->getVectorType(i16Ty, 8);
+        VectorType* v4i32Ty = ctx->getVectorType(i32Ty, 4);
+        VectorType* v2i64Ty = ctx->getVectorType(i64Ty, 2);
+        VectorType* v4f32Ty = ctx->getVectorType(f32Ty, 4);
+        VectorType* v2f64Ty = ctx->getVectorType(f64Ty, 2);
+
+        Function* func = builder.createFunction("test_simd_ir_func", ctx->getVoidType(), {});
+        BasicBlock* bb = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(bb);
+
+        Instruction* load32_A = new VectorInstruction(v4i32Ty, Instruction::VLoad, {});
+        Instruction* load32_B = new VectorInstruction(v4i32Ty, Instruction::VLoad, {});
+        Instruction* loadF32_A = new VectorInstruction(v4f32Ty, Instruction::VLoad, {});
+        Instruction* loadF32_B = new VectorInstruction(v4f32Ty, Instruction::VLoad, {});
+        Instruction* load64_A = new VectorInstruction(v2i64Ty, Instruction::VLoad, {});
+
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(load32_A));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(load32_B));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(loadF32_A));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(loadF32_B));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(load64_A));
+
+        // 1. Test createVShuffle
+        // Valid binary shuffle
+        ShuffleMask maskBin({0, 2, 4, 6}, 4);
+        VectorInstruction* shufBin = builder.createVShuffle(load32_A, load32_B, maskBin);
+        assert(shufBin->getOpcode() == Instruction::VShuffle);
+        assert(shufBin->getType() == v4i32Ty);
+        assert(shufBin->getOperands().size() == 2);
+
+        // Valid unary permutation (lhs == rhs)
+        ShuffleMask maskUnary({3, 2, 1, 0}, 4);
+        VectorInstruction* shufUnary = builder.createVShuffle(load32_A, load32_A, maskUnary);
+        assert(shufUnary->getOpcode() == Instruction::VShuffle);
+
+        // Invalid mask index rejection (index >= 2N = 8)
+        bool caughtShufOOB = false;
+        try {
+            ShuffleMask maskOOB({0, 1, 8, 3}, 4);
+            builder.createVShuffle(load32_A, load32_B, maskOOB);
+        } catch (const std::out_of_range& e) {
+            caughtShufOOB = true;
+        }
+        assert(caughtShufOOB && "VShuffle index >= 2N must be rejected!");
+
+        // Invalid mask length rejection (3 elements instead of 4)
+        bool caughtShufLen = false;
+        try {
+            ShuffleMask maskShort({0, 1, 2}, 3);
+            builder.createVShuffle(load32_A, load32_B, maskShort);
+        } catch (const std::invalid_argument& e) {
+            caughtShufLen = true;
+        }
+        assert(caughtShufLen && "VShuffle mask length mismatch must be rejected!");
+
+        // Incompatible types rejection (<4 x i32> and <4 x f32>)
+        bool caughtShufType = false;
+        try {
+            ShuffleMask maskType({0, 1, 2, 3}, 4);
+            builder.createVShuffle(load32_A, loadF32_A, maskType);
+        } catch (const std::invalid_argument& e) {
+            caughtShufType = true;
+        }
+        assert(caughtShufType && "VShuffle incompatible types must be rejected!");
+
+        // 2. Test createVCmp
+        // Valid integer comparison
+        VectorInstruction* cmp32 = builder.createVCmp(load32_A, load32_B, VectorCompareOp::LT);
+        assert(cmp32->getOpcode() == Instruction::VCmp);
+        assert(cmp32->getType() == v4i32Ty); // Result type is <4 x i32>
+
+        // Valid FP comparison (<4 x f32> comparison -> <4 x i32> integer mask)
+        VectorInstruction* cmpF32 = builder.createVCmp(loadF32_A, loadF32_B, VectorCompareOp::EQ);
+        assert(cmpF32->getOpcode() == Instruction::VCmp);
+        assert(cmpF32->getType() == v4i32Ty); // Result type is <4 x i32>
+
+        // Invalid FP predicate rejection (ULT is unsigned integer predicate)
+        bool caughtCmpPred = false;
+        try {
+            builder.createVCmp(loadF32_A, loadF32_B, VectorCompareOp::ULT);
+        } catch (const std::invalid_argument& e) {
+            caughtCmpPred = true;
+        }
+        assert(caughtCmpPred && "VCmp invalid FP predicate must be rejected!");
+
+        // Incompatible types rejection (<4 x i32> and <2 x i64>)
+        bool caughtCmpType = false;
+        try {
+            builder.createVCmp(load32_A, load64_A, VectorCompareOp::EQ);
+        } catch (const std::invalid_argument& e) {
+            caughtCmpType = true;
+        }
+        assert(caughtCmpType && "VCmp type mismatch must be rejected!");
+
+        // 3. Test createVSelect
+        // Valid selection with integer mask and float value vectors
+        VectorInstruction* selF32 = builder.createVSelect(cmpF32, loadF32_A, loadF32_B);
+        assert(selF32->getOpcode() == Instruction::VSelect);
+        assert(selF32->getType() == v4f32Ty);
+
+        // Invalid mask type rejection (using float vector as mask)
+        bool caughtSelMask = false;
+        try {
+            builder.createVSelect(loadF32_A, loadF32_A, loadF32_B);
+        } catch (const std::invalid_argument& e) {
+            caughtSelMask = true;
+        }
+        assert(caughtSelMask && "VSelect non-integer mask must be rejected!");
+
+        // Mismatched mask element bitwidth rejection (mask <2 x i64> with trueVal <4 x f32>)
+        VectorInstruction* cmp64 = builder.createVCmp(load64_A, load64_A, VectorCompareOp::EQ);
+        bool caughtSelBitwidth = false;
+        try {
+            builder.createVSelect(cmp64, loadF32_A, loadF32_B);
+        } catch (const std::invalid_argument& e) {
+            caughtSelBitwidth = true;
+        }
+        assert(caughtSelBitwidth && "VSelect mismatched mask bitwidth must be rejected!");
+
+        // 4. Test generic Cast for equal-width vector bitwise reinterpretation
+        Instruction* castVec = builder.createCast(loadF32_A, v4i32Ty);
+        assert(castVec->getOpcode() == Instruction::Cast);
+        assert(castVec->getType() == v4i32Ty);
+
+        builder.createRet(nullptr);
+
+        std::cout << "--- Target-Agnostic SIMD IR Refinement API Tests Passed ---" << std::endl;
     }
 
     return 0;
