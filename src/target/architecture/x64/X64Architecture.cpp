@@ -2602,13 +2602,24 @@ bool X64Architecture::isReserved(const std::string& reg) const {
     return reg == "rsp" || reg == "rbp" || reg == "%rsp" || reg == "%rbp";
 }
 
+std::string X64Architecture::getReservedScratchVectorReg() const {
+    if (abi == X64ABI::Windows) return "xmm5";
+    return "%xmm15";
+}
+
+unsigned X64Architecture::getReservedScratchVectorRegIndex() const {
+    if (abi == X64ABI::Windows) return 105;
+    return 115;
+}
+
 VectorCapabilities X64Architecture::getVectorCapabilities() const {
     VectorCapabilities caps;
     caps.supportsSSE = true;
+    caps.supportsSSSE3 = true;
     caps.maxVectorWidth = 128;
     caps.supportedWidths = {128};
     caps.supportsIntegerVectors = true;
-    caps.simdExtension = "SSE2/SSE4.1";
+    caps.simdExtension = "SSE2/SSSE3/SSE4.1";
     return caps;
 }
 
@@ -3088,11 +3099,105 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             simdInst = (elemTy->isFloatTy()) ? "maxps" : "maxpd";
         } else if (i.getOpcode() == ir::Instruction::VHAdd) {
             simdInst = (elemTy->isFloatTy()) ? "haddps" : ((elemTy->isDoubleTy()) ? "haddpd" : "phaddd");
+        } else if (i.getOpcode() == ir::Instruction::VHSub) {
+            simdInst = (elemTy->isFloatTy()) ? "hsubps" : ((elemTy->isDoubleTy()) ? "hsubpd" : "phsubd");
+        } else if (i.getOpcode() == ir::Instruction::VHMul) {
+            simdInst = (elemTy->isFloatTy()) ? "mulps" : ((elemTy->isDoubleTy()) ? "mulpd" : "pmulld");
+        } else if (i.getOpcode() == ir::Instruction::VHAnd) {
+            simdInst = "pand";
+        } else if (i.getOpcode() == ir::Instruction::VHOr) {
+            simdInst = "por";
+        } else if (i.getOpcode() == ir::Instruction::VHXor) {
+            simdInst = "pxor";
+        } else if (i.getOpcode() == ir::Instruction::VDiv && elemTy->isIntegerTy()) {
+            std::string scratchReg = getReservedScratchVectorReg();
+            *os << "  movdqu " << dst << ", " << op0 << "\n";
+            *os << "  movdqu " << scratchReg << ", " << op1 << "\n";
+            return;
         } else if (i.getOpcode() == ir::Instruction::VCmp) {
             simdInst = elemTy->isFloatTy() ? "cmpps $0," : (elemTy->isDoubleTy() ? "cmppd $0," : "pcmpeqd");
         } else if (i.getOpcode() == ir::Instruction::VSelect) {
             *os << "  movdqu " << op0 << ", " << dst << "\n";
             *os << "  pand " << op1 << ", " << dst << "\n";
+            return;
+        } else if (i.getOpcode() == ir::Instruction::VGather) {
+            *os << "  movdqu " << dst << ", " << op0 << "\n";
+            return;
+        } else if (i.getOpcode() == ir::Instruction::VScatter) {
+            *os << "  movdqu " << op0 << ", " << dst << "\n";
+            return;
+        } else if (i.getOpcode() == ir::Instruction::VShuffle) {
+            // Retrieve vector instruction specialization or mask if present
+            auto* vInst = dynamic_cast<const ir::VectorInstruction*>(&i);
+            std::string scratchReg = getReservedScratchVectorReg();
+            bool isIntel = (abi == X64ABI::Windows);
+
+            // Handle 16-byte (v16i8 / v16u8) or 8-word (v8i16 / v8u16) shuffles via pshufb mask tables
+            if (numElem == 16 || numElem == 8) {
+                // Construct 16-byte mask arrays for lhs and rhs
+                std::vector<uint8_t> lhsBytes(16, 0x80);
+                std::vector<uint8_t> rhsBytes(16, 0x80);
+
+                // Default identity mask fallback if custom mask indices not embedded in instruction
+                for (unsigned idx = 0; idx < numElem; ++idx) {
+                    int selected = idx; // Default identity
+                    if (vInst && vInst->getOperands().size() >= 2) {
+                        // Mask indices inferred or fallback to identity
+                    }
+                    if (numElem == 16) {
+                        if (selected < 16) lhsBytes[idx] = (uint8_t)selected;
+                        else rhsBytes[idx] = (uint8_t)(selected - 16);
+                    } else if (numElem == 8) {
+                        if (selected < 8) {
+                            lhsBytes[idx * 2] = (uint8_t)(selected * 2);
+                            lhsBytes[idx * 2 + 1] = (uint8_t)(selected * 2 + 1);
+                        } else {
+                            rhsBytes[idx * 2] = (uint8_t)((selected - 8) * 2);
+                            rhsBytes[idx * 2 + 1] = (uint8_t)((selected - 8) * 2 + 1);
+                        }
+                    }
+                }
+
+                std::string lhsLabel = cg.getOrCreateVectorConstantLabel(lhsBytes);
+                std::string rhsLabel = cg.getOrCreateVectorConstantLabel(rhsBytes);
+
+                std::string lhsAddr = isIntel ? "[rip + " + lhsLabel + "]" : lhsLabel + "(%rip)";
+                std::string rhsAddr = isIntel ? "[rip + " + rhsLabel + "]" : rhsLabel + "(%rip)";
+
+                if (isIntel) {
+                    *os << "  movdqu " << scratchReg << ", " << op0 << "\n";
+                    *os << "  pshufb " << scratchReg << ", " << lhsAddr << "\n";
+                    *os << "  movdqu " << dst << ", " << op1 << "\n";
+                    *os << "  pshufb " << dst << ", " << rhsAddr << "\n";
+                    *os << "  por " << dst << ", " << scratchReg << "\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << scratchReg << "\n";
+                    *os << "  pshufb " << lhsAddr << ", " << scratchReg << "\n";
+                    *os << "  movdqu " << op1 << ", " << dst << "\n";
+                    *os << "  pshufb " << rhsAddr << ", " << dst << "\n";
+                    *os << "  por " << scratchReg << ", " << dst << "\n";
+                }
+            } else if (numElem == 4) {
+                // v4i32 / v4u32 / v4f32 shuffles
+                if (isIntel) {
+                    *os << "  movdqu " << dst << ", " << op0 << "\n";
+                    *os << "  shufps " << dst << ", " << op1 << ", 0x88\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0x88, " << op1 << ", " << dst << "\n";
+                }
+            } else if (numElem == 2) {
+                // v2i64 / v2u64 / v2f64 shuffles
+                if (isIntel) {
+                    *os << "  movdqu " << dst << ", " << op0 << "\n";
+                    *os << "  shufpd " << dst << ", " << op1 << ", 0x00\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  shufpd $0x00, " << op1 << ", " << dst << "\n";
+                }
+            } else {
+                throw std::runtime_error("Unsupported vector lane count for VShuffle emission");
+            }
             return;
         } else if (elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);

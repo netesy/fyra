@@ -1,5 +1,6 @@
 #include "codegen/regalloc/LinearScanAllocator.h"
 #include "codegen/regalloc/LiveIntervalAnalysis.h"
+#include "target/core/TargetInfo.h"
 #include "ir/Function.h"
 #include "ir/Use.h"
 #include <algorithm>
@@ -15,10 +16,14 @@ namespace transforms {
 const unsigned int NUM_PHYSICAL_REGISTERS = 13;
 
 void LinearScanAllocator::run(ir::Function& func) {
-    linearScan(func);
+    run(func, nullptr);
 }
 
-void LinearScanAllocator::linearScan(ir::Function& func) {
+void LinearScanAllocator::run(ir::Function& func, const ::target::TargetInfo* targetInfo) {
+    linearScan(func, targetInfo);
+}
+
+void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetInfo* targetInfo) {
     LiveIntervalAnalysis interval_analysis;
     interval_analysis.run(func);
     const auto& intervals = interval_analysis.getIntervals();
@@ -39,7 +44,17 @@ void LinearScanAllocator::linearScan(ir::Function& func) {
     // Callee-saved registers: indices 8..12 (rbx, r12, r13, r14, r15)
     for (int i = 12; i >= 8; --i) free_callee_regs.push_back({(unsigned int)i});
     // XMM registers: indices 100..115 (xmm0..xmm15)
-    for (int i = 115; i >= 100; --i) free_xmm_regs.push_back({(unsigned int)i});
+    // Exclude reserved scratch XMM register if target specifies one
+    unsigned int reserved_xmm_idx = 0;
+    if (targetInfo) {
+        reserved_xmm_idx = targetInfo->getReservedScratchVectorRegIndex();
+    } else {
+        reserved_xmm_idx = 115; // Default SystemV xmm15
+    }
+    for (int i = 115; i >= 100; --i) {
+        if (reserved_xmm_idx != 0 && (unsigned int)i == reserved_xmm_idx) continue;
+        free_xmm_regs.push_back({(unsigned int)i});
+    }
 
     for (const auto& current_interval : intervals) {
         if (current_interval.isLiveAcrossCall()) {

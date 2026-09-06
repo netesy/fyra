@@ -189,8 +189,10 @@ public:
     // For stack-based allocation of virtual registers
     std::map<ir::Value*, int> stackOffsets;
 
-    // For floating point constants
+    // For floating point and 16-byte vector constants
     std::map<ir::ConstantFP*, std::string> floatConstantLabels;
+    std::map<std::vector<uint8_t>, std::string> vectorConstantLabels;
+    std::string getOrCreateVectorConstantLabel(const std::vector<uint8_t>& bytes);
     
     // Enhanced code generation state
     bool emittedHeader = false;

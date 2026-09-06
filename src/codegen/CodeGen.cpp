@@ -431,9 +431,29 @@ void CodeGen::emitTargetSpecificHeader() {
             *os << ".att_syntax prefix\n";
     }
 }
+std::string CodeGen::getOrCreateVectorConstantLabel(const std::vector<uint8_t>& bytes) {
+    if (auto it = vectorConstantLabels.find(bytes); it != vectorConstantLabels.end()) {
+        return it->second;
+    }
+    std::string label = ".LCvec_" + std::to_string(vectorConstantLabels.size());
+    vectorConstantLabels[bytes] = label;
+    return label;
+}
+
 void CodeGen::emitDataSection() {
-    if (module.getGlobalVariables().empty() && !usesHeap) return;
+    if (module.getGlobalVariables().empty() && !usesHeap && vectorConstantLabels.empty()) return;
     if (os) {
+        if (!vectorConstantLabels.empty()) {
+            *os << "\n.section .rodata\n";
+            for (const auto& [bytes, label] : vectorConstantLabels) {
+                *os << ".align 16\n" << label << ":\n  .byte ";
+                for (size_t b = 0; b < bytes.size(); ++b) {
+                    if (b > 0) *os << ", ";
+                    *os << std::to_string((unsigned)bytes[b]);
+                }
+                *os << "\n";
+            }
+        }
         *os << "\n.data\n";
         if (usesHeap) {
             *os << ".align 16\n__heap_base:\n  .zero 67108864\n";

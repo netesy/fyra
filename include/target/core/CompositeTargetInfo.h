@@ -136,6 +136,8 @@ public:
     bool isCallerSaved(const std::string& r) const override;
     bool isCalleeSaved(const std::string& r) const override;
     bool isReserved(const std::string& r) const override;
+    std::string getReservedScratchVectorReg() const override;
+    unsigned getReservedScratchVectorRegIndex() const override;
     std::string getRegisterName(const std::string& b, const ir::Type* t) const override;
 
 protected:

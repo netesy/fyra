@@ -262,10 +262,11 @@ int main(int argc, char** argv) {
     if (!error_reporter->hasCriticalErrors()) {
         if (desc->arch != target::Arch::WASM32) {
             std::cout << "--- Running Register Allocation... ---\n" << std::flush;
+            auto targetInfoForAlloc = target::TargetResolver::resolve(*desc);
             for (auto& func : module->getFunctions()) {
                 if (func->getBasicBlocks().empty()) continue;
                 transforms::RegAllocRewriter rewriter;
-                rewriter.run(*func);
+                rewriter.run(*func, targetInfoForAlloc.get());
             }
             std::cout << "--- Register Allocation complete. ---\n" << std::flush;
         }

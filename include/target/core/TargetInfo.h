@@ -15,7 +15,7 @@ namespace codegen { class CodeGen; }
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
 enum class FusedPattern { MultiplyAdd, MultiplySubtract, LoadAndOperate, CompareAndBranch, AddressCalculation };
-struct VectorCapabilities { bool supportsSSE = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
+struct VectorCapabilities { bool supportsSSE = false, supportsSSSE3 = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
 struct TypeInfo { uint64_t size, align; RegisterClass regClass; bool isFloatingPoint, isSigned; };
 struct SIMDContext { unsigned vectorWidth; ir::VectorType* vectorType; std::string elementSuffix, widthSuffix; };
 class TargetInfo {
@@ -148,6 +148,8 @@ public:
     virtual bool isCallerSaved(const std::string&) const = 0;
     virtual bool isCalleeSaved(const std::string&) const = 0;
     virtual bool isReserved(const std::string&) const { return false; }
+    virtual std::string getReservedScratchVectorReg() const { return ""; }
+    virtual unsigned getReservedScratchVectorRegIndex() const { return 0; }
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
     virtual int32_t getStackOffset(const codegen::CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
