@@ -1,5 +1,6 @@
 #include "codegen/regalloc/RegAllocRewriter.h"
 #include "codegen/regalloc/LinearScanAllocator.h"
+#include "target/core/TargetInfo.h"
 #include "ir/Function.h"
 #include "ir/BasicBlock.h"
 #include "ir/Instruction.h"
@@ -13,9 +14,13 @@
 namespace transforms {
 
 bool RegAllocRewriter::run(ir::Function& func) {
+    return run(func, nullptr);
+}
+
+bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targetInfo) {
     // 1. Run the allocator
     LinearScanAllocator allocator;
-    allocator.run(func);
+    allocator.run(func, targetInfo);
     const auto& location_map = allocator.getRegisterMap();
 
     // 2. Update the function's stack frame information

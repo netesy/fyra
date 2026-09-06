@@ -1,5 +1,6 @@
 #include "codegen/regalloc/LinearScanAllocator.h"
 #include "codegen/regalloc/LiveIntervalAnalysis.h"
+#include "target/core/TargetInfo.h"
 #include "ir/Function.h"
 #include "ir/Use.h"
 #include <algorithm>
@@ -15,10 +16,14 @@ namespace transforms {
 const unsigned int NUM_PHYSICAL_REGISTERS = 13;
 
 void LinearScanAllocator::run(ir::Function& func) {
-    linearScan(func);
+    run(func, nullptr);
 }
 
-void LinearScanAllocator::linearScan(ir::Function& func) {
+void LinearScanAllocator::run(ir::Function& func, const ::target::TargetInfo* targetInfo) {
+    linearScan(func, targetInfo);
+}
+
+void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetInfo* targetInfo) {
     LiveIntervalAnalysis interval_analysis;
     interval_analysis.run(func);
     const auto& intervals = interval_analysis.getIntervals();

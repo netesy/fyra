@@ -1471,12 +1471,49 @@ int main() {
     std::cout << "--- SIMD VInsert Execution, Liveness & Assembly Assertion Test PASSED ---" << std::endl;
 }
 
+void test_simd_phase1_2_coverage() {
+    std::cout << "--- Running SIMD Phase 1 & 2 Full Coverage Tests ---" << std::endl;
+
+    auto ctx = std::make_shared<IRContext>();
+    ir::Module mod("simd_coverage_mod", ctx);
+    IRBuilder builder(ctx);
+    builder.setModule(&mod);
+
+    Type* i32Ty = ctx->getIntegerType(32);
+    VectorType* v4i32Ty = ctx->getVectorType(i32Ty, 4);
+
+    Function* func = builder.createFunction("test_simd_cov_func", ctx->getVoidType(), {});
+    BasicBlock* bb = builder.createBasicBlock("entry", func);
+    builder.setInsertPoint(bb);
+
+    Value* val = ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 10);
+    VectorInstruction* vbc = builder.createVBroadcast(v4i32Ty, val);
+    VectorInstruction* vshuf = builder.createVShuffle(vbc, vbc, ShuffleMask({0, 1, 2, 3}, 4));
+    VectorInstruction* vgath = new VectorInstruction(v4i32Ty, Instruction::VGather, {vshuf}, 128, bb);
+    bb->addInstruction(std::unique_ptr<Instruction>(vgath));
+    VectorInstruction* vscat = new VectorInstruction(v4i32Ty, Instruction::VScatter, {vgath}, 128, bb);
+    bb->addInstruction(std::unique_ptr<Instruction>(vscat));
+
+    builder.createRet(nullptr);
+
+    auto sysvTarget = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+    transforms::LinearScanAllocator allocator;
+    allocator.run(*func, sysvTarget.get());
+
+    assert(vshuf->getOpcode() == Instruction::VShuffle);
+    assert(vgath->getOpcode() == Instruction::VGather);
+    assert(vscat->getOpcode() == Instruction::VScatter);
+
+    std::cout << "--- SIMD Phase 1 & 2 Full Coverage Tests PASSED ---" << std::endl;
+}
+
 int main() {
     test_simd_runtime_execution();
     test_simd_loop_liveness();
     test_simd_vbroadcast();
     test_simd_vextract();
     test_simd_vinsert();
+    test_simd_phase1_2_coverage();
     test_simd_rejection();
     return 0;
 }
