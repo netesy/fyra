@@ -74,6 +74,100 @@ Instruction* IRBuilder::createRet(Value* val) {
     return instrPtr;
 }
 
+VectorInstruction* IRBuilder::createVShuffle(Value* lhs, Value* rhs, const ShuffleMask& mask) {
+    if (!lhs || !rhs) {
+        throw std::invalid_argument("VShuffle operands cannot be null");
+    }
+    auto* vtLhs = dynamic_cast<VectorType*>(lhs->getType());
+    auto* vtRhs = dynamic_cast<VectorType*>(rhs->getType());
+    if (!vtLhs || !vtRhs) {
+        throw std::invalid_argument("VShuffle operands must be vector types");
+    }
+    if (vtLhs->getElementType()->toString() != vtRhs->getElementType()->toString() ||
+        vtLhs->getNumElements() != vtRhs->getNumElements()) {
+        throw std::invalid_argument("VShuffle operands must have identical vector types");
+    }
+    unsigned numElements = vtLhs->getNumElements();
+    if (mask.resultElements != numElements || !mask.isValid()) {
+        throw std::invalid_argument("VShuffle mask length must match vector lane count");
+    }
+    int maxAllowedIdx = static_cast<int>(2 * numElements);
+    for (int idx : mask.indices) {
+        if (idx < 0 || idx >= maxAllowedIdx) {
+            throw std::out_of_range("VShuffle mask index out of bounds");
+        }
+    }
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vtLhs, Instruction::VShuffle, {lhs, rhs}, vtLhs->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVCmp(Value* lhs, Value* rhs, VectorCompareOp op) {
+    if (!lhs || !rhs) {
+        throw std::invalid_argument("VCmp operands cannot be null");
+    }
+    auto* vtLhs = dynamic_cast<VectorType*>(lhs->getType());
+    auto* vtRhs = dynamic_cast<VectorType*>(rhs->getType());
+    if (!vtLhs || !vtRhs) {
+        throw std::invalid_argument("VCmp operands must be vector types");
+    }
+    if (vtLhs->getElementType()->toString() != vtRhs->getElementType()->toString() ||
+        vtLhs->getNumElements() != vtRhs->getNumElements()) {
+        throw std::invalid_argument("VCmp operands must have identical vector types");
+    }
+
+    bool isFloatElem = vtLhs->isFloatingPointVector();
+    if (isFloatElem) {
+        if (op != VectorCompareOp::EQ && op != VectorCompareOp::NE &&
+            op != VectorCompareOp::LT && op != VectorCompareOp::LE &&
+            op != VectorCompareOp::GT && op != VectorCompareOp::GE) {
+            throw std::invalid_argument("Invalid vector comparison predicate for floating-point vectors");
+        }
+    }
+
+    Type* elemIntTy = context->getIntegerType(vtLhs->getElementBitWidth());
+    VectorType* resVecTy = context->getVectorType(elemIntTy, vtLhs->getNumElements());
+
+    Value* opVal = context->getConstantInt(context->getIntegerType(32), static_cast<uint64_t>(op));
+
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(resVecTy, Instruction::VCmp, {lhs, rhs, opVal}, resVecTy->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVSelect(Value* mask, Value* trueVal, Value* falseVal) {
+    if (!mask || !trueVal || !falseVal) {
+        throw std::invalid_argument("VSelect operands cannot be null");
+    }
+    auto* vtMask = dynamic_cast<VectorType*>(mask->getType());
+    auto* vtTrue = dynamic_cast<VectorType*>(trueVal->getType());
+    auto* vtFalse = dynamic_cast<VectorType*>(falseVal->getType());
+    if (!vtMask || !vtTrue || !vtFalse) {
+        throw std::invalid_argument("VSelect operands must be vector types");
+    }
+    if (vtTrue->getElementType()->toString() != vtFalse->getElementType()->toString() ||
+        vtTrue->getNumElements() != vtFalse->getNumElements()) {
+        throw std::invalid_argument("VSelect true/false values must have identical vector types");
+    }
+    if (!vtMask->isIntegerVector()) {
+        throw std::invalid_argument("VSelect mask must be an integer vector type");
+    }
+    if (vtMask->getNumElements() != vtTrue->getNumElements() ||
+        vtMask->getElementBitWidth() != vtTrue->getElementBitWidth()) {
+        throw std::invalid_argument("VSelect mask element width and lane count must match value vectors");
+    }
+
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vtTrue, Instruction::VSelect, {mask, trueVal, falseVal}, vtTrue->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
 VectorInstruction* IRBuilder::createVInsert(Value* vec, Value* val, Value* idx) {
     Type* vecType = vec->getType();
     auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vecType, Instruction::VInsert, {vec, val, idx}, 128, insertPoint));

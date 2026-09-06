@@ -1182,5 +1182,152 @@ function $test_tco_negative_stack_args(%a1 : l, %a2 : l, %a3 : l, %a4 : l, %a5 :
         std::cout << "--- Direct 3-Address Move Reduction Unit Tests Passed ---" << std::endl;
     }
 
+    // Target-Agnostic SIMD IR Unit Tests (createVShuffle, createVCmp, createVSelect, createCast)
+    {
+        using namespace ir;
+        std::cout << "--- Testing Target-Agnostic SIMD IR Refinement APIs ---" << std::endl;
+
+        auto ctx = std::make_shared<IRContext>();
+        Module module("test_simd_ir_refinement", ctx);
+        IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        Type* i8Ty = ctx->getIntegerType(8);
+        Type* i16Ty = ctx->getIntegerType(16);
+        Type* i32Ty = ctx->getIntegerType(32);
+        Type* i64Ty = ctx->getIntegerType(64);
+        Type* f32Ty = ctx->getFloatType();
+        Type* f64Ty = ctx->getDoubleType();
+
+        VectorType* v16i8Ty = ctx->getVectorType(i8Ty, 16);
+        VectorType* v8i16Ty = ctx->getVectorType(i16Ty, 8);
+        VectorType* v4i32Ty = ctx->getVectorType(i32Ty, 4);
+        VectorType* v2i64Ty = ctx->getVectorType(i64Ty, 2);
+        VectorType* v4f32Ty = ctx->getVectorType(f32Ty, 4);
+        VectorType* v2f64Ty = ctx->getVectorType(f64Ty, 2);
+
+        Function* func = builder.createFunction("test_simd_ir_func", ctx->getVoidType(), {});
+        BasicBlock* bb = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(bb);
+
+        Instruction* load32_A = new VectorInstruction(v4i32Ty, Instruction::VLoad, {});
+        Instruction* load32_B = new VectorInstruction(v4i32Ty, Instruction::VLoad, {});
+        Instruction* loadF32_A = new VectorInstruction(v4f32Ty, Instruction::VLoad, {});
+        Instruction* loadF32_B = new VectorInstruction(v4f32Ty, Instruction::VLoad, {});
+        Instruction* load64_A = new VectorInstruction(v2i64Ty, Instruction::VLoad, {});
+
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(load32_A));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(load32_B));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(loadF32_A));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(loadF32_B));
+        bb->getInstructions().push_back(std::unique_ptr<Instruction>(load64_A));
+
+        // 1. Test createVShuffle
+        // Valid binary shuffle
+        ShuffleMask maskBin({0, 2, 4, 6}, 4);
+        VectorInstruction* shufBin = builder.createVShuffle(load32_A, load32_B, maskBin);
+        assert(shufBin->getOpcode() == Instruction::VShuffle);
+        assert(shufBin->getType() == v4i32Ty);
+        assert(shufBin->getOperands().size() == 2);
+
+        // Valid unary permutation (lhs == rhs)
+        ShuffleMask maskUnary({3, 2, 1, 0}, 4);
+        VectorInstruction* shufUnary = builder.createVShuffle(load32_A, load32_A, maskUnary);
+        assert(shufUnary->getOpcode() == Instruction::VShuffle);
+
+        // Invalid mask index rejection (index >= 2N = 8)
+        bool caughtShufOOB = false;
+        try {
+            ShuffleMask maskOOB({0, 1, 8, 3}, 4);
+            builder.createVShuffle(load32_A, load32_B, maskOOB);
+        } catch (const std::out_of_range& e) {
+            caughtShufOOB = true;
+        }
+        assert(caughtShufOOB && "VShuffle index >= 2N must be rejected!");
+
+        // Invalid mask length rejection (3 elements instead of 4)
+        bool caughtShufLen = false;
+        try {
+            ShuffleMask maskShort({0, 1, 2}, 3);
+            builder.createVShuffle(load32_A, load32_B, maskShort);
+        } catch (const std::invalid_argument& e) {
+            caughtShufLen = true;
+        }
+        assert(caughtShufLen && "VShuffle mask length mismatch must be rejected!");
+
+        // Incompatible types rejection (<4 x i32> and <4 x f32>)
+        bool caughtShufType = false;
+        try {
+            ShuffleMask maskType({0, 1, 2, 3}, 4);
+            builder.createVShuffle(load32_A, loadF32_A, maskType);
+        } catch (const std::invalid_argument& e) {
+            caughtShufType = true;
+        }
+        assert(caughtShufType && "VShuffle incompatible types must be rejected!");
+
+        // 2. Test createVCmp
+        // Valid integer comparison
+        VectorInstruction* cmp32 = builder.createVCmp(load32_A, load32_B, VectorCompareOp::LT);
+        assert(cmp32->getOpcode() == Instruction::VCmp);
+        assert(cmp32->getType() == v4i32Ty); // Result type is <4 x i32>
+
+        // Valid FP comparison (<4 x f32> comparison -> <4 x i32> integer mask)
+        VectorInstruction* cmpF32 = builder.createVCmp(loadF32_A, loadF32_B, VectorCompareOp::EQ);
+        assert(cmpF32->getOpcode() == Instruction::VCmp);
+        assert(cmpF32->getType() == v4i32Ty); // Result type is <4 x i32>
+
+        // Invalid FP predicate rejection (ULT is unsigned integer predicate)
+        bool caughtCmpPred = false;
+        try {
+            builder.createVCmp(loadF32_A, loadF32_B, VectorCompareOp::ULT);
+        } catch (const std::invalid_argument& e) {
+            caughtCmpPred = true;
+        }
+        assert(caughtCmpPred && "VCmp invalid FP predicate must be rejected!");
+
+        // Incompatible types rejection (<4 x i32> and <2 x i64>)
+        bool caughtCmpType = false;
+        try {
+            builder.createVCmp(load32_A, load64_A, VectorCompareOp::EQ);
+        } catch (const std::invalid_argument& e) {
+            caughtCmpType = true;
+        }
+        assert(caughtCmpType && "VCmp type mismatch must be rejected!");
+
+        // 3. Test createVSelect
+        // Valid selection with integer mask and float value vectors
+        VectorInstruction* selF32 = builder.createVSelect(cmpF32, loadF32_A, loadF32_B);
+        assert(selF32->getOpcode() == Instruction::VSelect);
+        assert(selF32->getType() == v4f32Ty);
+
+        // Invalid mask type rejection (using float vector as mask)
+        bool caughtSelMask = false;
+        try {
+            builder.createVSelect(loadF32_A, loadF32_A, loadF32_B);
+        } catch (const std::invalid_argument& e) {
+            caughtSelMask = true;
+        }
+        assert(caughtSelMask && "VSelect non-integer mask must be rejected!");
+
+        // Mismatched mask element bitwidth rejection (mask <2 x i64> with trueVal <4 x f32>)
+        VectorInstruction* cmp64 = builder.createVCmp(load64_A, load64_A, VectorCompareOp::EQ);
+        bool caughtSelBitwidth = false;
+        try {
+            builder.createVSelect(cmp64, loadF32_A, loadF32_B);
+        } catch (const std::invalid_argument& e) {
+            caughtSelBitwidth = true;
+        }
+        assert(caughtSelBitwidth && "VSelect mismatched mask bitwidth must be rejected!");
+
+        // 4. Test generic Cast for equal-width vector bitwise reinterpretation
+        Instruction* castVec = builder.createCast(loadF32_A, v4i32Ty);
+        assert(castVec->getOpcode() == Instruction::Cast);
+        assert(castVec->getType() == v4i32Ty);
+
+        builder.createRet(nullptr);
+
+        std::cout << "--- Target-Agnostic SIMD IR Refinement API Tests Passed ---" << std::endl;
+    }
+
     return 0;
 }

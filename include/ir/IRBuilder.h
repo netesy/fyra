@@ -13,6 +13,8 @@
 namespace ir {
 
 class VectorInstruction;
+struct ShuffleMask;
+enum class VectorCompareOp;
 
 class IRBuilder {
 public:
@@ -148,6 +150,9 @@ public:
     VectorInstruction* createVBroadcast(VectorType* type, Value* val);
     VectorInstruction* createVExtract(Value* vec, Value* idx);
     VectorInstruction* createVInsert(Value* vec, Value* val, Value* idx);
+    VectorInstruction* createVShuffle(Value* lhs, Value* rhs, const ShuffleMask& mask);
+    VectorInstruction* createVCmp(Value* lhs, Value* rhs, VectorCompareOp op);
+    VectorInstruction* createVSelect(Value* mask, Value* trueVal, Value* falseVal);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);
