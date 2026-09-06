@@ -7,7 +7,7 @@ This manual provides a comprehensive comparison between QBE IL and Fyra IL, cove
 ### Key Similarities
 - **SSA-based design** with explicit typing
 - **Three-address instruction format** for most operations
-- **Similar type system** with integers, floats, and pointers
+- **Similar type system** with explicit scalar types (`i8`–`i64`, `f32`, `f64`) and compositional vector SIMD types (`v4i32`, `v4f32`, etc.)
 - **Compatible control flow** constructs
 - **Function and basic block organization**
 
@@ -424,6 +424,19 @@ After migration, consider leveraging Fyra's enhanced features:
 | Call Syntax | `%d =w call $f()` | `%d = call $f() : i32` | Syntax update required |
 | Target Support | Single target | Multi-target | Fyra enhancement |
 | File Formats | `.qbe` only | `.qbe`, `.fyra`, `.fy` | Fyra enhancement |
+
+### Vector Types Reference
+
+Fyra introduces a compositional vector syntax `v<lanes><scalar_type>` over QBE's scalar model:
+
+| Vector Type | Meaning |
+| ----------- | ------- |
+| `v16i8`     | 16 × 8-bit signed integers |
+| `v8i16`     | 8 × 16-bit signed integers |
+| `v4i32`     | 4 × 32-bit signed integers |
+| `v2i64`     | 2 × 64-bit signed integers |
+| `v4f32`     | 4 × 32-bit floating point numbers |
+| `v2f64`     | 2 × 64-bit floating point numbers |
 
 ### Compatibility Level
 
