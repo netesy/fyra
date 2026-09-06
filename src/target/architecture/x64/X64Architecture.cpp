@@ -2602,6 +2602,16 @@ bool X64Architecture::isReserved(const std::string& reg) const {
     return reg == "rsp" || reg == "rbp" || reg == "%rsp" || reg == "%rbp";
 }
 
+std::string X64Architecture::getReservedScratchVectorReg() const {
+    if (abi == X64ABI::Windows) return "xmm5";
+    return "%xmm15";
+}
+
+unsigned X64Architecture::getReservedScratchVectorRegIndex() const {
+    if (abi == X64ABI::Windows) return 105;
+    return 115;
+}
+
 VectorCapabilities X64Architecture::getVectorCapabilities() const {
     VectorCapabilities caps;
     caps.supportsSSE = true;

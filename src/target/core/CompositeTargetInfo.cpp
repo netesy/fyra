@@ -134,6 +134,8 @@ std::string CompositeTargetInfo::getDataRelocationType() const { return architec
 bool CompositeTargetInfo::isCallerSaved(const std::string& r) const { return architecture->isCallerSaved(r); }
 bool CompositeTargetInfo::isCalleeSaved(const std::string& r) const { return architecture->isCalleeSaved(r); }
 bool CompositeTargetInfo::isReserved(const std::string& r) const { return architecture->isReserved(r); }
+std::string CompositeTargetInfo::getReservedScratchVectorReg() const { return architecture->getReservedScratchVectorReg(); }
+unsigned CompositeTargetInfo::getReservedScratchVectorRegIndex() const { return architecture->getReservedScratchVectorRegIndex(); }
 std::string CompositeTargetInfo::getRegisterName(const std::string& b, const ir::Type* t) const { return architecture->getRegisterName(b, t); }
 
 }

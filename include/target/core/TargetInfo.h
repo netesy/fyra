@@ -148,6 +148,8 @@ public:
     virtual bool isCallerSaved(const std::string&) const = 0;
     virtual bool isCalleeSaved(const std::string&) const = 0;
     virtual bool isReserved(const std::string&) const { return false; }
+    virtual std::string getReservedScratchVectorReg() const { return ""; }
+    virtual unsigned getReservedScratchVectorRegIndex() const { return 0; }
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
     virtual int32_t getStackOffset(const codegen::CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }

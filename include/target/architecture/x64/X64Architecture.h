@@ -79,6 +79,8 @@ public:
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
     bool isReserved(const std::string& reg) const override;
+    std::string getReservedScratchVectorReg() const override;
+    unsigned getReservedScratchVectorRegIndex() const override;
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
 
     VectorCapabilities getVectorCapabilities() const override;
