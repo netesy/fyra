@@ -1,5 +1,5 @@
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %t0 = mul 10, 5 : w
-    ret %t0 : w
+    %t0 = mul 10, 5 : i32
+    ret %t0 : i32
 }

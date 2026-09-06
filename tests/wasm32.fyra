@@ -1,60 +1,60 @@
-function $leaf_func(%a : w, %b : w) : w {
+function $leaf_func(%a : i32, %b : i32) : i32 {
 @start
-    %sum = add %a, %b : w
-    ret %sum : w
+    %sum = add %a, %b : i32
+    ret %sum : i32
 }
 
-function $fibonacci(%n : w) : w {
+function $fibonacci(%n : i32) : i32 {
 @start
-    %t0 = sle %n, 1 : w
+    %t0 = sle %n, 1 : i32
     jnz %t0, @base_case, @recursive_case
 
 @base_case
-    ret %n : w
+    ret %n : i32
 
 @recursive_case
-    %t1 = sub %n, 1 : w
-    %t2 = call $fibonacci(%t1) : w
-    %t3 = sub %n, 2 : w
-    %t4 = call $fibonacci(%t3) : w
-    %t5 = add %t2, %t4 : w
-    ret %t5 : w
+    %t1 = sub %n, 1 : i32
+    %t2 = call $fibonacci(%t1) : i32
+    %t3 = sub %n, 2 : i32
+    %t4 = call $fibonacci(%t3) : i32
+    %t5 = add %t2, %t4 : i32
+    ret %t5 : i32
 }
 
-function $fibonacci_iterative(%n : w) : w {
+function $fibonacci_iterative(%n : i32) : i32 {
 @start
-    %t0 = sle %n, 1 : w
+    %t0 = sle %n, 1 : i32
     jnz %t0, @return_n, @loop_init
 
 @return_n
-    ret %n : w
+    ret %n : i32
 
 @loop_init
-    %a = copy 0 : w
-    %b = copy 1 : w
-    %i = copy 2 : w
+    %a = copy 0 : i32
+    %b = copy 1 : i32
+    %i = copy 2 : i32
     jmp @loop_check
 
 @loop_check
-    %cond = sle %i, %n : w
+    %cond = sle %i, %n : i32
     jnz %cond, @loop_body, @loop_end
 
 @loop_body
-    %temp = add %a, %b : w
-    %a = copy %b : w
-    %b = copy %temp : w
-    %i = add %i, 1 : w
+    %temp = add %a, %b : i32
+    %a = copy %b : i32
+    %b = copy %temp : i32
+    %i = add %i, 1 : i32
     jmp @loop_check
 
 @loop_end
-    ret %b : w
+    ret %b : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %leaf = call $leaf_func(w 10, w 20) : w
-    %result = call $fibonacci(w 10) : w
-    %iter_result = call $fibonacci_iterative(w 10) : w
-    %sum = add %result, %iter_result : w
-    ret %sum : w
+    %leaf = call $leaf_func(i32 10, i32 20) : i32
+    %result = call $fibonacci(i32 10) : i32
+    %iter_result = call $fibonacci_iterative(i32 10) : i32
+    %sum = add %result, %iter_result : i32
+    ret %sum : i32
 }

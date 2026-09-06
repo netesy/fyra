@@ -12,7 +12,7 @@
 #include <sstream>
 
 int main() {
-    std::string source_code = "export function $main() : w {\n@start\n    ret 42 : w\n}";
+    std::string source_code = "export function $main() : i32 {\n@start\n    ret 42 : i32\n}";
     std::stringstream input(source_code);
 
     parser::Parser parser(input, parser::FileFormat::FYRA);

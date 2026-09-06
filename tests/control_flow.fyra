@@ -1,13 +1,13 @@
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %i = copy 0 : w
+    %i = copy 0 : i32
     jmp @loop_cond
 @loop_cond
-    %cond = slt %i, 10 : w
+    %cond = slt %i, 10 : i32
     jnz %cond, @loop_body, @loop_end
 @loop_body
-    %i = add %i, 1 : w
+    %i = add %i, 1 : i32
     jmp @loop_cond
 @loop_end
-    ret %i : w
+    ret %i : i32
 }

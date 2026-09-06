@@ -1,7 +1,7 @@
-function $test_forward_ref(%base : l, %val : w) : w {
+function $test_forward_ref(%base : i64, %val : i32) : i32 {
 @entry
     # Store val into computed ptr which is forward referenced (defined after use)
-    store %val, %ptr : w
-    %ptr = add %base, 8 : l
-    ret 0 : w
+    store %val, %ptr : i32
+    %ptr = add %base, 8 : i64
+    ret 0 : i32
 }

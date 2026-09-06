@@ -1,26 +1,26 @@
-function $sum8(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : w, %h : w) : w {
+function $sum8(%a : i32, %b : i32, %c : i32, %d : i32, %e : i32, %f : i32, %g : i32, %h : i32) : i32 {
 @entry
-    %t0 = add %a, %b : w
-    %t1 = add %t0, %c : w
-    %t2 = add %t1, %d : w
-    %t3 = add %t2, %e : w
-    %t4 = add %t3, %f : w
-    %t5 = add %t4, %g : w
-    %t6 = add %t5, %h : w
-    ret %t6 : w
+    %t0 = add %a, %b : i32
+    %t1 = add %t0, %c : i32
+    %t2 = add %t1, %d : i32
+    %t3 = add %t2, %e : i32
+    %t4 = add %t3, %f : i32
+    %t5 = add %t4, %g : i32
+    %t6 = add %t5, %h : i32
+    ret %t6 : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
-    %t0 = call $sum8(w 1, w 2, w 3, w 4, w 5, w 6, w 7, w 8) : w
-    ret %t0 : w
+    %t0 = call $sum8(i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8) : i32
+    ret %t0 : i32
 }
 
-function $mixed_args(%a : w, %b : d, %c : w, %d : d, %e : w, %f : d, %g : w, %h : d, %i : w, %j : d) : w {
+function $mixed_args(%a : i32, %b : f64, %c : i32, %d : f64, %e : i32, %f : f64, %g : i32, %h : f64, %i : i32, %j : f64) : i32 {
 @entry
-    %t0 = add %a, %c : w
-    %t1 = add %t0, %e : w
-    %t2 = add %t1, %g : w
-    %t3 = add %t2, %i : w
-    ret %t3 : w
+    %t0 = add %a, %c : i32
+    %t1 = add %t0, %e : i32
+    %t2 = add %t1, %g : i32
+    %t3 = add %t2, %i : i32
+    ret %t3 : i32
 }

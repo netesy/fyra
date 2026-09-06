@@ -82,5 +82,5 @@ For branches and global accesses, use `CodeGen::addRelocation`.
 ### Example (Linux x64 `write`):
 ```fyra
 # write(fd=1, buf=$msg, len=13) -> syscall 1
-%res = syscall(l 1, l 1, l $msg, l 13) : l
+%res = syscall(i64 1, i64 1, i64 $msg, i64 13) : i64
 ```

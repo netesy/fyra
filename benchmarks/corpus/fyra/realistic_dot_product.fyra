@@ -1,48 +1,48 @@
-function $dot_product(%n : w) : l {
+function $dot_product(%n : i32) : i64 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry w 0, @body %i_next : w
-    %sum = phi @entry l 0, @body %sum_next : l
-    %cond = slt %i, %n : w
+    %i = phi @entry i32 0, @body %i_next : i32
+    %sum = phi @entry i64 0, @body %sum_next : i64
+    %cond = slt %i, %n : i32
     jnz %cond, @body, @exit
 
 @body
-    %t3 = mul %i, w 3 : w
-    %a_w = add %t3, w 1 : w
-    %a = extsw %a_w : l
+    %t3 = mul %i, i32 3 : i32
+    %a_w = add %t3, i32 1 : i32
+    %a = extsw %a_w : i64
 
-    %t7 = mul %i, w 7 : w
-    %b_w = add %t7, w 2 : w
-    %b = extsw %b_w : l
+    %t7 = mul %i, i32 7 : i32
+    %b_w = add %t7, i32 2 : i32
+    %b = extsw %b_w : i64
 
-    %prod = mul %a, %b : l
-    %sum_next = add %sum, %prod : l
-    %i_next = add %i, w 1 : w
+    %prod = mul %a, %b : i64
+    %sum_next = add %sum, %prod : i64
+    %i_next = add %i, i32 1 : i32
     jmp @loop
 
 @exit
-    ret %sum : l
+    ret %sum : i64
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
     jmp @loop
 
 @loop
-    %k = phi @entry w 0, @body %k_next : w
-    %res = phi @entry l 0, @body %res_next : l
-    %cond = slt %k, w 20 : w
+    %k = phi @entry i32 0, @body %k_next : i32
+    %res = phi @entry i64 0, @body %res_next : i64
+    %cond = slt %k, i32 20 : i32
     jnz %cond, @body, @exit
 
 @body
-    %v = call $dot_product(w 5000000) : l
-    %res_next = add %res, %v : l
-    %k_next = add %k, w 1 : w
+    %v = call $dot_product(i32 5000000) : i64
+    %res_next = add %res, %v : i64
+    %k_next = add %k, i32 1 : i32
     jmp @loop
 
 @exit
-    call $print_checksum(l %res)
-    ret w 0 : w
+    call $print_checksum(i64 %res)
+    ret i32 0 : i32
 }

@@ -1,11 +1,11 @@
-function $sum2(%a : w, %b : w) : w {
+function $sum2(%a : i32, %b : i32) : i32 {
 @entry
-    %t0 = add %a, %b : w
-    ret %t0 : w
+    %t0 = add %a, %b : i32
+    ret %t0 : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
-    %t0 = call $sum2(w 1, w 2) : w
-    ret %t0 : w
+    %t0 = call $sum2(i32 1, i32 2) : i32
+    ret %t0 : i32
 }
