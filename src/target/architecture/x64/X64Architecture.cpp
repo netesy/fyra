@@ -2697,6 +2697,139 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                            cg.getValueAsOperand(i.getOperands()[1]->get()) : "";
         std::string dst = cg.getValueAsOperand(&i);
 
+        // VInsert handling
+        if (i.getOpcode() == ir::Instruction::VInsert) {
+            if (i.getOperands().size() < 3 || !i.getOperands()[0] || !i.getOperands()[1] || !i.getOperands()[2]) {
+                throw std::runtime_error("VInsert requires vector, scalar, and lane index operands");
+            }
+
+            auto* vecVal = i.getOperands()[0]->get();
+            auto* valVal = i.getOperands()[1]->get();
+            auto* idxVal = i.getOperands()[2]->get();
+
+            auto* constIdx = dynamic_cast<const ir::ConstantInt*>(idxVal);
+            if (!constIdx) {
+                throw std::runtime_error("VInsert requires constant lane index");
+            }
+
+            auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+            if (!vecType || !vecType->getElementType()) {
+                throw std::runtime_error("Invalid vector type for VInsert");
+            }
+
+            int idx = static_cast<int>(constIdx->getValue());
+            int numElem = static_cast<int>(vecType->getNumElements());
+            if (idx < 0 || idx >= numElem) {
+                throw std::runtime_error("VInsert lane index out of bounds");
+            }
+
+            std::string opVal = cg.getValueAsOperand(valVal);
+            bool inPlace = canUseInPlace(cg, i, vecVal);
+
+            if (!inPlace && dst != op0) {
+                if (abi == X64ABI::Windows) {
+                    *os << "  movdqu " << dst << ", " << op0 << "\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                }
+            }
+
+            auto* elemTy = vecType->getElementType();
+            if (elemTy->isIntegerTy()) {
+                auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+                unsigned bw = intTy ? intTy->getBitwidth() : 32;
+
+                bool isImm = (!opVal.empty() && opVal[0] == '$');
+                std::string reg32 = isImm ? "%eax" : to32BitReg(opVal);
+                std::string reg64 = isImm ? "%rax" : to64BitReg(opVal);
+
+                if (isImm) {
+                    if (bw == 64) {
+                        if (abi == X64ABI::Windows) {
+                            *os << "  mov rax, " << opVal.substr(1) << "\n";
+                        } else {
+                            *os << "  movabsq " << opVal << ", %rax\n";
+                        }
+                    } else {
+                        if (abi == X64ABI::Windows) {
+                            *os << "  mov eax, " << opVal.substr(1) << "\n";
+                        } else {
+                            *os << "  movl " << opVal << ", %eax\n";
+                        }
+                    }
+                }
+
+                if (abi == X64ABI::Windows) {
+                    if (bw == 8) *os << "  pinsrb " << dst << ", " << reg32 << ", " << idx << "\n";
+                    else if (bw == 16) *os << "  pinsrw " << dst << ", " << reg32 << ", " << idx << "\n";
+                    else if (bw == 32) *os << "  pinsrd " << dst << ", " << reg32 << ", " << idx << "\n";
+                    else if (bw == 64) *os << "  pinsrq " << dst << ", " << reg64 << ", " << idx << "\n";
+                    else throw std::runtime_error("Unsupported integer bitwidth for VInsert");
+                } else {
+                    if (bw == 8) *os << "  pinsrb $" << idx << ", " << reg32 << ", " << dst << "\n";
+                    else if (bw == 16) *os << "  pinsrw $" << idx << ", " << reg32 << ", " << dst << "\n";
+                    else if (bw == 32) *os << "  pinsrd $" << idx << ", " << reg32 << ", " << dst << "\n";
+                    else if (bw == 64) *os << "  pinsrq $" << idx << ", " << reg64 << ", " << dst << "\n";
+                    else throw std::runtime_error("Unsupported integer bitwidth for VInsert");
+                }
+            } else if (elemTy->isFloatTy()) {
+                std::string srcXmm = opVal;
+                if (!isXmmRegisterName(opVal)) {
+                    srcXmm = (abi == X64ABI::Windows) ? "xmm1" : "%xmm1";
+                    if (abi == X64ABI::Windows) {
+                        *os << "  movss xmm1, " << opVal << "\n";
+                    } else {
+                        if (isDirectGprRegister(opVal)) *os << "  movd " << to32BitReg(opVal) << ", %xmm1\n";
+                        else *os << "  movss " << opVal << ", %xmm1\n";
+                    }
+                }
+
+                if (abi == X64ABI::Windows) {
+                    if (idx == 0) {
+                        *os << "  movss " << dst << ", " << srcXmm << "\n";
+                    } else {
+                        int imm = (idx << 4);
+                        *os << "  insertps " << dst << ", " << srcXmm << ", " << imm << "\n";
+                    }
+                } else {
+                    if (idx == 0) {
+                        *os << "  movss " << srcXmm << ", " << dst << "\n";
+                    } else {
+                        int imm = (idx << 4);
+                        *os << "  insertps $" << imm << ", " << srcXmm << ", " << dst << "\n";
+                    }
+                }
+            } else if (elemTy->isDoubleTy()) {
+                std::string srcXmm = opVal;
+                if (!isXmmRegisterName(opVal)) {
+                    srcXmm = (abi == X64ABI::Windows) ? "xmm1" : "%xmm1";
+                    if (abi == X64ABI::Windows) {
+                        *os << "  movsd xmm1, " << opVal << "\n";
+                    } else {
+                        if (isDirectGprRegister(opVal)) *os << "  movq " << to64BitReg(opVal) << ", %xmm1\n";
+                        else *os << "  movsd " << opVal << ", %xmm1\n";
+                    }
+                }
+
+                if (abi == X64ABI::Windows) {
+                    if (idx == 0) {
+                        *os << "  movsd " << dst << ", " << srcXmm << "\n";
+                    } else if (idx == 1) {
+                        *os << "  movlhps " << dst << ", " << srcXmm << "\n";
+                    }
+                } else {
+                    if (idx == 0) {
+                        *os << "  movsd " << srcXmm << ", " << dst << "\n";
+                    } else if (idx == 1) {
+                        *os << "  movlhps " << srcXmm << ", " << dst << "\n";
+                    }
+                }
+            } else {
+                throw std::runtime_error("Unsupported element type for VInsert");
+            }
+            return;
+        }
+
         // VExtract handling
         if (i.getOpcode() == ir::Instruction::VExtract) {
             auto* vecVal = i.getOperands()[0]->get();

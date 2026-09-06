@@ -74,6 +74,15 @@ Instruction* IRBuilder::createRet(Value* val) {
     return instrPtr;
 }
 
+VectorInstruction* IRBuilder::createVInsert(Value* vec, Value* val, Value* idx) {
+    Type* vecType = vec->getType();
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vecType, Instruction::VInsert, {vec, val, idx}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
 VectorInstruction* IRBuilder::createVBroadcast(VectorType* type, Value* val) {
     auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VBroadcast, {val}, 128, insertPoint));
     auto* instrPtr = instr.get();
