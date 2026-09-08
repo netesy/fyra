@@ -7,12 +7,30 @@
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
 #include "transforms/CFGBuilder.h"
+#include "target/core/TargetInfo.h"
 #include <iostream>
 #include <vector>
 
 namespace transforms {
 
 bool LoopVectorizer::performTransformation(ir::Function& func) {
+    // The transform deliberately knows nothing about an ISA.  It asks the
+    // selected target whether a legal vector type exists and leaves lowering
+    // of the resulting target-neutral vector IR to that target's backend.
+    auto ctx = func.getParent()->getContextShared();
+    ir::IntegerType* candidateElementType = ctx->getIntegerType(32);
+    const unsigned vectorWidth = target.getOptimalVectorWidth(candidateElementType);
+    if (vectorWidth == 0 || vectorWidth % 32 != 0)
+        return false;
+    const unsigned vectorLanes = vectorWidth / 32;
+    if (vectorLanes < 2 || (vectorLanes & (vectorLanes - 1)) != 0)
+        return false;
+    ir::VectorType* candidateVectorType =
+        ctx->getVectorType(candidateElementType, vectorLanes);
+    if (!target.supportsVectorWidth(vectorWidth) ||
+        !target.supportsVectorType(candidateVectorType))
+        return false;
+
     bool changed = false;
 
     // Search for canonical $loop_sum reduction pattern:
@@ -164,10 +182,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         if (condOp0 != iPhi || !boundN) continue;
 
         // All semantic proofs hold!
-        auto ctx = func.getParent()->getContextShared();
         ir::IntegerType* i32Ty = ctx->getIntegerType(32);
         ir::IntegerType* i64Ty = ctx->getIntegerType(64);
-        ir::VectorType* vec4i32Ty = ctx->getVectorType(i32Ty, 4);
+        ir::VectorType* vectorType = candidateVectorType;
 
         ir::IRBuilder builder(ctx);
         builder.setModule(func.getParent());
@@ -179,8 +196,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Instruction* boundNCopy = builder.createCopy(boundN);
         boundN = boundNCopy;
 
-        ir::Instruction* hasVec = builder.createCsgt(boundN, ctx->getConstantInt(i32Ty, 3));
-        ir::Instruction* nVec = builder.createAnd(boundN, ctx->getConstantInt(i32Ty, (uint64_t)-4));
+        ir::Instruction* hasVec = builder.createCsgt(
+            boundN, ctx->getConstantInt(i32Ty, vectorLanes - 1));
+        ir::Instruction* nVec = builder.createAnd(
+            boundN, ctx->getConstantInt(i32Ty, static_cast<uint64_t>(-static_cast<int64_t>(vectorLanes))));
 
         // Create new blocks
         ir::BasicBlock* vPreheaderBB = builder.createBasicBlock("v_preheader", &func);
@@ -195,33 +214,35 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // 1. vPreheaderBB: Materialize vector constants via Alloc16 + Store + VLoad
         builder.setInsertPoint(vPreheaderBB);
 
-        auto buildVectorConst = [&](uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3) -> ir::VectorInstruction* {
+        auto buildVectorConst = [&](const std::vector<uint32_t>& values) -> ir::VectorInstruction* {
             ir::Instruction* buf = builder.createAlloc16(i64Ty);
-            builder.createStore(ctx->getConstantInt(i32Ty, c0), buf);
-            ir::Instruction* p4 = builder.createAdd(buf, ctx->getConstantInt(i64Ty, 4));
-            builder.createStore(ctx->getConstantInt(i32Ty, c1), p4);
-            ir::Instruction* p8 = builder.createAdd(buf, ctx->getConstantInt(i64Ty, 8));
-            builder.createStore(ctx->getConstantInt(i32Ty, c2), p8);
-            ir::Instruction* p12 = builder.createAdd(buf, ctx->getConstantInt(i64Ty, 12));
-            builder.createStore(ctx->getConstantInt(i32Ty, c3), p12);
-            return builder.createVLoad(vec4i32Ty, buf);
+            for (unsigned lane = 0; lane < vectorLanes; ++lane) {
+                ir::Value* address = buf;
+                if (lane != 0)
+                    address = builder.createAdd(buf, ctx->getConstantInt(i64Ty, lane * 4));
+                builder.createStore(ctx->getConstantInt(i32Ty, values[lane]), address);
+            }
+            return builder.createVLoad(vectorType, buf);
         };
 
-        ir::VectorInstruction* vInitI = buildVectorConst(0, 1, 2, 3);
-        ir::VectorInstruction* vStep = buildVectorConst(4, 4, 4, 4);
-        ir::VectorInstruction* vTwo = buildVectorConst(2, 2, 2, 2);
-        ir::VectorInstruction* vSumZero = buildVectorConst(0, 0, 0, 0);
+        std::vector<uint32_t> init(vectorLanes), step(vectorLanes, vectorLanes);
+        std::vector<uint32_t> two(vectorLanes, 2), zero(vectorLanes, 0);
+        for (unsigned lane = 0; lane < vectorLanes; ++lane) init[lane] = lane;
+        ir::VectorInstruction* vInitI = buildVectorConst(init);
+        ir::VectorInstruction* vStep = buildVectorConst(step);
+        ir::VectorInstruction* vTwo = buildVectorConst(two);
+        ir::VectorInstruction* vSumZero = buildVectorConst(zero);
 
         builder.createJmp(vLoopHeaderBB);
 
         // 2. vLoopHeaderBB: Vector PHIs and loop check
         builder.setInsertPoint(vLoopHeaderBB);
 
-        auto phiVI = std::make_unique<ir::PhiNode>(vec4i32Ty, 0, nullptr, vLoopHeaderBB);
+        auto phiVI = std::make_unique<ir::PhiNode>(vectorType, 0, nullptr, vLoopHeaderBB);
         ir::PhiNode* rawPhiVI = phiVI.get();
         vLoopHeaderBB->getInstructions().push_back(std::move(phiVI));
 
-        auto phiVSum = std::make_unique<ir::PhiNode>(vec4i32Ty, 0, nullptr, vLoopHeaderBB);
+        auto phiVSum = std::make_unique<ir::PhiNode>(vectorType, 0, nullptr, vLoopHeaderBB);
         ir::PhiNode* rawPhiVSum = phiVSum.get();
         vLoopHeaderBB->getInstructions().push_back(std::move(phiVSum));
 
@@ -242,7 +263,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::VectorInstruction* vTerm = builder.createVMul(rawPhiVI, vTwo);
         ir::VectorInstruction* vSumNext = builder.createVAdd(rawPhiVSum, vTerm);
         ir::VectorInstruction* vINext = builder.createVAdd(rawPhiVI, vStep);
-        ir::Instruction* iCntNext = builder.createAdd(rawPhiICnt, ctx->getConstantInt(i32Ty, 4));
+        ir::Instruction* iCntNext = builder.createAdd(
+            rawPhiICnt, ctx->getConstantInt(i32Ty, vectorLanes));
 
         rawPhiVI->addIncoming(vINext, vLoopBodyBB);
         rawPhiVSum->addIncoming(vSumNext, vLoopBodyBB);
@@ -256,17 +278,12 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Instruction* redBuf = builder.createAlloc16(i64Ty);
         builder.createVStore(rawPhiVSum, redBuf);
 
-        ir::Instruction* r0 = builder.createLoaduw(redBuf);
-        ir::Instruction* rp4 = builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 4));
-        ir::Instruction* r1 = builder.createLoaduw(rp4);
-        ir::Instruction* rp8 = builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 8));
-        ir::Instruction* r2 = builder.createLoaduw(rp8);
-        ir::Instruction* rp12 = builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 12));
-        ir::Instruction* r3 = builder.createLoaduw(rp12);
-
-        ir::Instruction* s01 = builder.createAdd(r0, r1);
-        ir::Instruction* s012 = builder.createAdd(s01, r2);
-        ir::Instruction* sumReduced = builder.createAdd(s012, r3);
+        ir::Instruction* sumReduced = builder.createLoaduw(redBuf);
+        for (unsigned lane = 1; lane < vectorLanes; ++lane) {
+            ir::Instruction* address = builder.createAdd(
+                redBuf, ctx->getConstantInt(i64Ty, lane * 4));
+            sumReduced = builder.createAdd(sumReduced, builder.createLoaduw(address));
+        }
 
         builder.createJmp(epiHeaderBB);
 

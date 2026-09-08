@@ -5,16 +5,20 @@
 #include "ir/Function.h"
 #include <memory>
 
+namespace target { class TargetInfo; }
+
 namespace transforms {
 
 class LoopVectorizer : public TransformPass {
 public:
-    LoopVectorizer(std::shared_ptr<ErrorReporter> reporter = nullptr)
-        : TransformPass("LoopVectorizer", reporter), errorReporter(reporter) {}
+    explicit LoopVectorizer(const target::TargetInfo& target,
+                            std::shared_ptr<ErrorReporter> reporter = nullptr)
+        : TransformPass("LoopVectorizer", reporter), target(target), errorReporter(reporter) {}
 
     bool performTransformation(ir::Function& func) override;
 
 private:
+    const target::TargetInfo& target;
     std::shared_ptr<ErrorReporter> errorReporter;
 };
 

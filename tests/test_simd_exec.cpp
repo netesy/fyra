@@ -9,6 +9,7 @@
 #include "target/architecture/x64/X64Architecture.h"
 #include "target/os/linux/LinuxOS.h"
 #include "target/core/CompositeTargetInfo.h"
+#include "target/core/TargetResolver.h"
 #include "transforms/CFGBuilder.h"
 #include <cassert>
 #include <iostream>
@@ -1497,6 +1498,14 @@ void test_simd_phase1_2_coverage() {
     builder.createRet(nullptr);
 
     auto sysvTarget = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+    const auto capabilities = sysvTarget->getVectorCapabilities();
+    assert(capabilities.supportsIntegerVectors);
+    assert(capabilities.supportsFloatVectors);
+    assert(capabilities.supportsDoubleVectors);
+    assert(capabilities.supportsHorizontalOps);
+    assert(sysvTarget->supportsVectorWidth(128));
+    assert(sysvTarget->getOptimalVectorWidth(i32Ty) == 128);
+    assert(sysvTarget->supportsVectorType(v4i32Ty));
     transforms::LinearScanAllocator allocator;
     allocator.run(*func, sysvTarget.get());
 

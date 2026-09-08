@@ -2619,8 +2619,21 @@ VectorCapabilities X64Architecture::getVectorCapabilities() const {
     caps.maxVectorWidth = 128;
     caps.supportedWidths = {128};
     caps.supportsIntegerVectors = true;
+    caps.supportsFloatVectors = true;
+    caps.supportsDoubleVectors = true;
+    caps.supportsHorizontalOps = true;
     caps.simdExtension = "SSE2/SSSE3/SSE4.1";
     return caps;
+}
+
+unsigned X64Architecture::getOptimalVectorWidth(const ir::Type* type) const {
+    if (!type) return 0;
+    if (type->isFloatTy() || type->isDoubleTy()) return 128;
+    if (auto* integer = dynamic_cast<const ir::IntegerType*>(type)) {
+        const unsigned bits = integer->getBitwidth();
+        if (bits == 8 || bits == 16 || bits == 32 || bits == 64) return 128;
+    }
+    return 0;
 }
 
 bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
