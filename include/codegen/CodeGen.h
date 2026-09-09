@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <array>
 #include <functional>
 #include <chrono>
 #include <filesystem>
@@ -109,6 +110,7 @@ public:
     // Enhanced assembly emission
     void emitTargetSpecificHeader();
     void emitDataSection();
+    void emitVectorConstantPool();
     void emitTextSection();
     void emitFunctionAlignment();
     
@@ -189,10 +191,11 @@ public:
     // For stack-based allocation of virtual registers
     std::map<ir::Value*, int> stackOffsets;
 
-    // For floating point and 16-byte vector constants
+    // For floating point constants
     std::map<ir::ConstantFP*, std::string> floatConstantLabels;
-    std::map<std::vector<uint8_t>, std::string> vectorConstantLabels;
-    std::string getOrCreateVectorConstantLabel(const std::vector<uint8_t>& bytes);
+    using VectorConstant = std::array<uint8_t, 16>;
+    std::map<VectorConstant, std::string> vectorConstantLabels;
+    std::string getOrCreateVectorConstantLabel(const VectorConstant& bytes);
     
     // Enhanced code generation state
     bool emittedHeader = false;

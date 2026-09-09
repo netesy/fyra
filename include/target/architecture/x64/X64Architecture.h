@@ -84,8 +84,6 @@ public:
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
 
     VectorCapabilities getVectorCapabilities() const override;
-    bool supportsVectorWidth(unsigned width) const override { return width == 128; }
-    unsigned getOptimalVectorWidth(const ir::Type* type) const override;
     bool supportsVectorType(const ir::VectorType* type) const override;
     void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;

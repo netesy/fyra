@@ -216,11 +216,6 @@ int main(int argc, char** argv) {
         inliner.runOnModule(*module);
     }
 
-    // Vectorization is target-informed rather than target-specific: the pass
-    // emits portable vector IR only when the selected target advertises a
-    // legal width/type.  Instruction selection remains in the backend.
-    auto targetInfoForOptimization = target::TargetResolver::resolve(*desc);
-
     for (auto& func : module->getFunctions()) {
         if (func->getBasicBlocks().empty()) continue;
         if (optimizationLevel == 0) continue;
@@ -233,7 +228,6 @@ int main(int argc, char** argv) {
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
         transforms::LoopUnroll loop_unroll(error_reporter);
-        transforms::LoopVectorizer loop_vectorizer(*targetInfoForOptimization, error_reporter);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
         
         bool optimization_changed = true;
@@ -242,8 +236,6 @@ int main(int argc, char** argv) {
         bool isWasm = (desc->arch == target::Arch::WASM32);
 
         if (!isWasm) {
-            if (optimizationLevel >= 2)
-                loop_vectorizer.run(*func);
             while (optimization_changed && iteration <= maxIterations) {
                 optimization_changed = false;
                 if (div_sr.run(*func)) optimization_changed = true;

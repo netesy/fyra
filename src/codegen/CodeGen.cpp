@@ -91,6 +91,9 @@ void CodeGen::emit(bool forExecutable) {
     emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
     if (forExecutable) targetInfo->emitStartFunction(*this);
     for (auto& func : module.getFunctions()) emitFunction(*func);
+    // Targets may intern constants while lowering functions, so finalize the
+    // pool only after instruction emission has discovered every entry.
+    emitVectorConstantPool();
     targetInfo->emitFooter(*this);
     emitDebugInfo();
 }
@@ -431,29 +434,18 @@ void CodeGen::emitTargetSpecificHeader() {
             *os << ".att_syntax prefix\n";
     }
 }
-std::string CodeGen::getOrCreateVectorConstantLabel(const std::vector<uint8_t>& bytes) {
-    if (auto it = vectorConstantLabels.find(bytes); it != vectorConstantLabels.end()) {
-        return it->second;
-    }
-    std::string label = ".LCvec_" + std::to_string(vectorConstantLabels.size());
-    vectorConstantLabels[bytes] = label;
+std::string CodeGen::getOrCreateVectorConstantLabel(const VectorConstant& bytes) {
+    auto existing = vectorConstantLabels.find(bytes);
+    if (existing != vectorConstantLabels.end()) return existing->second;
+
+    const std::string label = ".LCvec_" + std::to_string(vectorConstantLabels.size());
+    vectorConstantLabels.emplace(bytes, label);
     return label;
 }
 
 void CodeGen::emitDataSection() {
-    if (module.getGlobalVariables().empty() && !usesHeap && vectorConstantLabels.empty()) return;
+    if (module.getGlobalVariables().empty() && !usesHeap) return;
     if (os) {
-        if (!vectorConstantLabels.empty()) {
-            *os << "\n.section .rodata\n";
-            for (const auto& [bytes, label] : vectorConstantLabels) {
-                *os << ".align 16\n" << label << ":\n  .byte ";
-                for (size_t b = 0; b < bytes.size(); ++b) {
-                    if (b > 0) *os << ", ";
-                    *os << std::to_string((unsigned)bytes[b]);
-                }
-                *os << "\n";
-            }
-        }
         *os << "\n.data\n";
         if (usesHeap) {
             *os << ".align 16\n__heap_base:\n  .zero 67108864\n";
@@ -590,6 +582,31 @@ void CodeGen::emitDataSection() {
         }
     }
 }
+void CodeGen::emitVectorConstantPool() {
+    if (vectorConstantLabels.empty()) return;
+    if (os) {
+        *os << "\n.section .rodata\n";
+        for (const auto& [bytes, label] : vectorConstantLabels) {
+            *os << ".balign 16\n" << label << ":\n  .byte ";
+            for (size_t index = 0; index < bytes.size(); ++index) {
+                if (index != 0) *os << ", ";
+                *os << static_cast<unsigned>(bytes[index]);
+            }
+            *os << "\n";
+        }
+        return;
+    }
+
+    if (!rodataAssembler) return;
+    for (const auto& [bytes, label] : vectorConstantLabels) {
+        while (rodataAssembler->getCodeSize() % 16 != 0)
+            rodataAssembler->emitByte(0);
+        const uint64_t offset = rodataAssembler->getCodeSize();
+        symbols.push_back({label, offset, bytes.size(), 0, 0, ".rodata"});
+        for (uint8_t byte : bytes) rodataAssembler->emitByte(byte);
+    }
+}
+
 void CodeGen::emitTextSection() {
     if (os) {
         *os << ".text\n.globl main\n";

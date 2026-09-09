@@ -84,10 +84,7 @@ void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false) {
     transforms::CFGBuilder::run(*func);
 
     // Run LoopVectorizer
-    auto vectorizerArch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
-    auto vectorizerOS = std::make_unique<target::LinuxOS>();
-    target::CompositeTargetInfo vectorizerTarget(std::move(vectorizerArch), std::move(vectorizerOS));
-    transforms::LoopVectorizer vectorizer(vectorizerTarget);
+    transforms::LoopVectorizer vectorizer;
     bool vectorized = vectorizer.performTransformation(*func);
 
     if (n_val >= 4) {
@@ -161,10 +158,6 @@ int main(int argc, char** argv) {
 void test_rejection_cases() {
     std::cout << "--- Testing Negative Rejection Cases ---" << std::endl;
 
-    auto arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
-    auto os = std::make_unique<target::LinuxOS>();
-    target::CompositeTargetInfo vectorizerTarget(std::move(arch), std::move(os));
-
     auto makeBaseModule = [](std::shared_ptr<IRContext>& ctx, Module*& module, Function*& func, BasicBlock*& entry, BasicBlock*& loopHeader, BasicBlock*& loopBody, BasicBlock*& exit, PhiNode*& rawPhiI, PhiNode*& rawPhiSum) {
         ctx = std::make_shared<IRContext>();
         module = new Module("test_rej_mod", ctx);
@@ -211,7 +204,7 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(extra, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
-        transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject extra body arithmetic");
+        transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject extra body arithmetic");
         delete mod;
     }
 
@@ -228,7 +221,7 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
-        transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject Load in body");
+        transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject Load in body");
         delete mod;
     }
 
@@ -245,7 +238,7 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
-        transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject Store in body");
+        transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject Store in body");
         delete mod;
     }
 
@@ -261,7 +254,7 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
-        transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject Call in body");
+        transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject Call in body");
         delete mod;
     }
 
@@ -276,7 +269,7 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
-        transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject wrong multiplier 3");
+        transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject wrong multiplier 3");
         delete mod;
     }
 
@@ -292,7 +285,7 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
-        transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject non-zero initial accumulator");
+        transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject non-zero initial accumulator");
         delete mod;
     }
 

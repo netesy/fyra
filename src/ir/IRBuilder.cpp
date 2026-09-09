@@ -99,6 +99,7 @@ VectorInstruction* IRBuilder::createVShuffle(Value* lhs, Value* rhs, const Shuff
     }
     auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vtLhs, Instruction::VShuffle, {lhs, rhs}, vtLhs->getBitWidth(), insertPoint));
     auto* instrPtr = instr.get();
+    instrPtr->setShuffleMask(mask);
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
