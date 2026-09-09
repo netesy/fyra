@@ -1329,5 +1329,106 @@ function $test_tco_negative_stack_args(%a1 : i64, %a2 : i64, %a3 : i64, %a4 : i6
         std::cout << "--- Target-Agnostic SIMD IR Refinement API Tests Passed ---" << std::endl;
     }
 
+    // Milestone 0A: x86-64 Function Frame and Return Path Lowering Tests
+    {
+        std::cout << "--- Testing Milestone 0A Frame & Return Lowering Invariants ---" << std::endl;
+        std::string frame_ir = R"(
+export function $test_frameless_leaf() : i32 {
+@entry
+    ret 42 : i32
+}
+
+export function $test_framed_leaf() : i32 {
+@entry
+    %slot = alloc 8 : i32
+    %val = copy 100 : i32
+    store %val, %slot
+    %v = load %slot : i32
+    ret %v : i32
+}
+
+export function $test_nested_call() : i32 {
+@entry
+    %res = call $test_frameless_leaf() : i32
+    ret %res : i32
+}
+
+export function $test_multiple_returns(%cond : i32) : i32 {
+@entry
+    %c = copy %cond : i32
+    jnz %c, @b1, @b2
+
+@b1
+    ret 10 : i32
+
+@b2
+    ret 20 : i32
+}
+)";
+        std::istringstream stream(frame_ir);
+        parser::Parser parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> module = parser.parseModule();
+        assert(module != nullptr);
+
+        for (auto& func : module->getFunctions()) {
+            transforms::CFGBuilder::run(*func);
+            transforms::LivenessAnalysis liveness;
+            liveness.run(*func);
+            transforms::RegAllocRewriter rewriter;
+            rewriter.run(*func);
+        }
+
+        std::stringstream ss;
+        codegen::CodeGen codeGen(*module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss);
+        codeGen.emit();
+
+        std::string asm_str = ss.str();
+
+        auto getFunctionBody = [](const std::string& asm_str, const std::string& func_name) -> std::string {
+            size_t pos = asm_str.find(func_name + ":");
+            if (pos == std::string::npos) return "";
+            size_t end_pos = asm_str.find(".Lfunc_end_" + func_name, pos);
+            if (end_pos == std::string::npos) end_pos = asm_str.size();
+            return asm_str.substr(pos, end_pos - pos);
+        };
+
+        // Negative Assembly Invariant Check:
+        // A function with frame setup (pushq %rbp or subq $N, %rsp) MUST NOT emit an un-teardown bare 'ret'
+        auto checkFrameSafety = [](const std::string& body) {
+            bool hasFrameSetup = (body.find("pushq %rbp") != std::string::npos || body.find("subq $") != std::string::npos);
+            if (hasFrameSetup) {
+                size_t entryPos = body.find("_entry:");
+                if (entryPos == std::string::npos) entryPos = 0;
+                size_t epiloguePos = body.find("_epilogue:");
+                std::string entryBody = (epiloguePos != std::string::npos) ? body.substr(entryPos, epiloguePos - entryPos) : body.substr(entryPos);
+
+                std::istringstream iss(entryBody);
+                std::string line;
+                while (std::getline(iss, line)) {
+                    size_t first = line.find_first_not_of(" \t");
+                    if (first != std::string::npos) line = line.substr(first);
+                    assert(line != "ret" && "Framed function body contains an unsafe direct bare 'ret'!");
+                }
+            }
+        };
+
+        std::string body_frameless = getFunctionBody(asm_str, "test_frameless_leaf");
+        checkFrameSafety(body_frameless);
+
+        std::string body_framed = getFunctionBody(asm_str, "test_framed_leaf");
+        checkFrameSafety(body_framed);
+        assert(body_framed.find("jmp test_framed_leaf_epilogue") != std::string::npos);
+
+        std::string body_nested = getFunctionBody(asm_str, "test_nested_call");
+        checkFrameSafety(body_nested);
+        assert(body_nested.find("jmp test_frameless_leaf") != std::string::npos || body_nested.find("jmp test_nested_call_epilogue") != std::string::npos);
+
+        std::string body_multiret = getFunctionBody(asm_str, "test_multiple_returns");
+        checkFrameSafety(body_multiret);
+        assert(body_multiret.find("jmp test_multiple_returns_epilogue") != std::string::npos);
+
+        std::cout << "--- Milestone 0A Frame & Return Lowering Invariants Passed ---" << std::endl;
+    }
+
     return 0;
 }

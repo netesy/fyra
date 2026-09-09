@@ -11,6 +11,17 @@ using namespace codegen;
 
 enum class X64ABI { SystemV, Windows };
 
+struct X64FrameLayout {
+    bool makesCalls = false;
+    std::vector<std::string> usedCalleeRegs;
+    int stackAlloc = 0;
+    bool isZeroFrame = false;
+
+    bool permitsBareReturn() const {
+        return isZeroFrame;
+    }
+};
+
 class X64Architecture : public ArchitectureInfo {
 public:
     X64Architecture(X64ABI abi);
@@ -88,6 +99,8 @@ public:
     void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+
+    X64FrameLayout computeFrameLayout(CodeGen& cg, ir::Function& func) const;
 
 private:
     X64ABI abi;

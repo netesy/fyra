@@ -232,21 +232,20 @@ const std::string& X64Architecture::getReturnRegister(const ir::Type* type) cons
 void X64Architecture::emitHeader(CodeGen& cg) {
 }
 
-void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
+X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& func) const {
+    X64FrameLayout layout;
     if (abi == X64ABI::SystemV) {
-        bool makesCalls = false;
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 auto opc = instr->getOpcode();
                 if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                    makesCalls = true;
+                    layout.makesCalls = true;
                     break;
                 }
             }
-            if (makesCalls) break;
+            if (layout.makesCalls) break;
         }
 
-        std::vector<std::string> usedCalleeRegs;
         static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
@@ -255,8 +254,8 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                     if (regIdx < integerRegs.size()) {
                         const std::string& regName = integerRegs[regIdx];
                         if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                usedCalleeRegs.push_back(regName);
+                            if (std::find(layout.usedCalleeRegs.begin(), layout.usedCalleeRegs.end(), regName) == layout.usedCalleeRegs.end()) {
+                                layout.usedCalleeRegs.push_back(regName);
                             }
                         }
                     }
@@ -264,12 +263,12 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
 
-        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
+        int current_offset = -8 - 8 * (int)layout.usedCalleeRegs.size();
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
                     if (func.hasStackSlot(instr.get())) {
-                        cg.getStackOffsets()[instr.get()] = -8 - 8 * (int)usedCalleeRegs.size() - func.getStackSlotForVreg(instr.get());
+                        cg.getStackOffsets()[instr.get()] = -8 - 8 * (int)layout.usedCalleeRegs.size() - func.getStackSlotForVreg(instr.get());
                     } else if (!instr->hasPhysicalRegister()) {
                         cg.getStackOffsets()[instr.get()] = current_offset;
                         current_offset -= 8;
@@ -281,27 +280,42 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         if (total_frame % 16 != 0) {
             total_frame += (16 - (total_frame % 16));
         }
-        int stack_alloc = total_frame - 8 * (1 + (int)usedCalleeRegs.size());
-        bool isZeroFrame = (!makesCalls && stack_alloc <= 0 && usedCalleeRegs.empty());
+        layout.stackAlloc = total_frame - 8 * (1 + (int)layout.usedCalleeRegs.size());
+        layout.isZeroFrame = (!layout.makesCalls && layout.stackAlloc <= 0 && layout.usedCalleeRegs.empty());
+    } else {
+        layout.makesCalls = true;
+        layout.usedCalleeRegs = {"rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"};
+        int current_offset = -64;
+        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
+        layout.stackAlloc = std::abs(current_offset + 56) + 32; // Shadow space
+        if ((layout.stackAlloc + 64 + 8) % 16 != 0) layout.stackAlloc += 16 - ((layout.stackAlloc + 64 + 8) % 16);
+        layout.isZeroFrame = false;
+    }
+    return layout;
+}
 
+void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
+    X64FrameLayout layout = computeFrameLayout(cg, func);
+    if (abi == X64ABI::SystemV) {
         if (auto* os = cg.getTextStream()) {
             *os << "  .cfi_startproc\n";
-            if (!isZeroFrame) {
+            if (!layout.isZeroFrame) {
                 *os << "  pushq %rbp\n";
                 *os << "  .cfi_def_cfa_offset 16\n";
                 *os << "  .cfi_offset 6, -16\n";
                 *os << "  movq %rsp, %rbp\n";
                 *os << "  .cfi_def_cfa_register 6\n";
-                for (const auto& reg : usedCalleeRegs) {
+                for (const auto& reg : layout.usedCalleeRegs) {
                     *os << "  pushq %" << reg << "\n";
                 }
             }
         } else {
             auto& as = cg.getAssembler();
-            if (!isZeroFrame) {
+            if (!layout.isZeroFrame) {
                 as.emitByte(0x55);
                 as.emitBytes({0x48, 0x89, 0xE5});
-                for (const auto& reg : usedCalleeRegs) {
+                for (const auto& reg : layout.usedCalleeRegs) {
                     uint8_t r = getArchRegIndex(reg);
                     if (r >= 8) as.emitByte(0x41);
                     as.emitByte(0x50 + (r & 7));
@@ -309,14 +323,14 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
 
-        if (!isZeroFrame) {
+        if (!layout.isZeroFrame) {
             if (auto* os = cg.getTextStream()) {
-                if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
+                if (layout.stackAlloc > 0) *os << "  subq $" << layout.stackAlloc << ", %rsp\n";
             } else {
                 auto& as = cg.getAssembler();
-                if (stack_alloc > 0) {
-                    if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc});
-                    else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); }
+                if (layout.stackAlloc > 0) {
+                    if (layout.stackAlloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)layout.stackAlloc});
+                    else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(layout.stackAlloc); }
                 }
             }
         }
@@ -330,13 +344,8 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             as.emitByte(0x53); as.emitByte(0x56); as.emitByte(0x57);
             as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57});
         }
-        int current_offset = -64;
-        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
-        int stack_alloc = std::abs(current_offset + 56) + 32; // Shadow space
-        if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
-            if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
+            if (layout.stackAlloc > 0) *os << "  sub rsp, " << layout.stackAlloc << "\n";
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
@@ -350,7 +359,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         } else {
             auto& as = cg.getAssembler();
-            if (stack_alloc > 0) { if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); } }
+            if (layout.stackAlloc > 0) { if (layout.stackAlloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)layout.stackAlloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(layout.stackAlloc); } }
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
@@ -368,61 +377,18 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    X64FrameLayout layout = computeFrameLayout(cg, func);
     if (abi == X64ABI::SystemV) {
-        bool makesCalls = false;
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                auto opc = instr->getOpcode();
-                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                    makesCalls = true;
-                    break;
-                }
-            }
-            if (makesCalls) break;
-        }
-
-        std::vector<std::string> usedCalleeRegs;
-        static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->hasPhysicalRegister()) {
-                    size_t regIdx = instr->getPhysicalRegister();
-                    if (regIdx < integerRegs.size()) {
-                        const std::string& regName = integerRegs[regIdx];
-                        if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                usedCalleeRegs.push_back(regName);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->getType() && !instr->getType()->isVoidTy()) {
-                    if (func.hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
-                        current_offset -= 8;
-                    }
-                }
-            }
-        }
-        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
-
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
-
         if (auto* os = cg.getTextStream()) {
             *os << func.getName() << "_epilogue" << ":\n";
-            if (!usedCalleeRegs.empty()) {
-                size_t bytes = usedCalleeRegs.size() * 8;
+            if (!layout.usedCalleeRegs.empty()) {
+                size_t bytes = layout.usedCalleeRegs.size() * 8;
                 *os << "  leaq -" << bytes << "(%rbp), %rsp\n";
-                for (auto it = usedCalleeRegs.rbegin(); it != usedCalleeRegs.rend(); ++it) {
+                for (auto it = layout.usedCalleeRegs.rbegin(); it != layout.usedCalleeRegs.rend(); ++it) {
                     *os << "  popq %" << *it << "\n";
                 }
                 *os << "  popq %rbp\n";
-            } else if (!isZeroFrame) {
+            } else if (!layout.isZeroFrame) {
                 *os << "  leave\n";
             }
             *os << "  .cfi_def_cfa 7, 8\n";
@@ -438,16 +404,16 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             epilogue_sym.binding = 0; // STB_LOCAL
             cg.addSymbol(epilogue_sym);
 
-            if (!usedCalleeRegs.empty()) {
-                size_t bytes = usedCalleeRegs.size() * 8;
+            if (!layout.usedCalleeRegs.empty()) {
+                size_t bytes = layout.usedCalleeRegs.size() * 8;
                 emitRegMem(as, 0x48, 0x8D, 4, -(int32_t)bytes); // leaq -N(%rbp), %rsp
-                for (auto it = usedCalleeRegs.rbegin(); it != usedCalleeRegs.rend(); ++it) {
+                for (auto it = layout.usedCalleeRegs.rbegin(); it != layout.usedCalleeRegs.rend(); ++it) {
                     uint8_t r = getArchRegIndex(*it);
                     if (r >= 8) as.emitByte(0x41);
                     as.emitByte(0x58 + (r & 7));
                 }
                 as.emitByte(0x5D); // pop rbp
-            } else if (!isZeroFrame) {
+            } else if (!layout.isZeroFrame) {
                 as.emitByte(0xC9); // leave
             }
             as.emitByte(0xC3); // ret
@@ -489,48 +455,9 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
                 emitMov(cg, os, src, rax, is32);
             }
         }
-        bool makesCalls = false;
         ir::Function* func = i.getParent()->getParent();
-        for (auto& bb : func->getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                auto opc = instr->getOpcode();
-                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                    makesCalls = true;
-                    break;
-                }
-            }
-            if (makesCalls) break;
-        }
-        std::vector<std::string> usedCalleeRegs;
-        static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
-        for (auto& bb : func->getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->hasPhysicalRegister()) {
-                    size_t regIdx = instr->getPhysicalRegister();
-                    if (regIdx < integerRegs.size()) {
-                        const std::string& regName = integerRegs[regIdx];
-                        if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                usedCalleeRegs.push_back(regName);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
-        for (auto& bb : func->getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->getType() && !instr->getType()->isVoidTy()) {
-                    if (func->hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
-                        current_offset -= 8;
-                    }
-                }
-            }
-        }
-        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
-        if (isZeroFrame) {
+        X64FrameLayout layout = computeFrameLayout(cg, *func);
+        if (layout.permitsBareReturn()) {
             *os << "  ret\n";
         } else {
             *os << "  jmp " << func->getName() << "_epilogue\n";
@@ -1404,52 +1331,13 @@ bool X64Architecture::emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::I
 
         // Frame Teardown
         ir::Function* func = callInst.getParent()->getParent();
+        X64FrameLayout layout = computeFrameLayout(cg, *func);
         if (abi == X64ABI::SystemV) {
-            std::vector<std::string> usedCalleeRegs;
-            static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
-            for (auto& bb : func->getBasicBlocks()) {
-                for (auto& instr : bb->getInstructions()) {
-                    if (instr->hasPhysicalRegister()) {
-                        size_t regIdx = instr->getPhysicalRegister();
-                        if (regIdx < integerRegs.size()) {
-                            const std::string& regName = integerRegs[regIdx];
-                            if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                                if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                    usedCalleeRegs.push_back(regName);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if (!usedCalleeRegs.empty()) {
+            if (!layout.usedCalleeRegs.empty()) {
                 *os << "  jmp " << func->getName() << "_epilogue\n";
                 return true;
             }
-            bool makesCalls = false;
-            for (auto& bb : func->getBasicBlocks()) {
-                for (auto& instr : bb->getInstructions()) {
-                    auto opc = instr->getOpcode();
-                    if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                        makesCalls = true;
-                        break;
-                    }
-                }
-                if (makesCalls) break;
-            }
-            int current_offset = -8;
-            for (auto& bb : func->getBasicBlocks()) {
-                for (auto& instr : bb->getInstructions()) {
-                    if (instr->getType() && !instr->getType()->isVoidTy()) {
-                        if (func->hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
-                            current_offset -= 8;
-                        }
-                    }
-                }
-            }
-            int stack_alloc = std::abs(current_offset + 8);
-            bool isZeroFrame = (!makesCalls && stack_alloc == 0);
-            if (!isZeroFrame) {
+            if (!layout.isZeroFrame) {
                 *os << "  leave\n";
             }
             *os << "  jmp " << calleeVal->getName() << "\n";
