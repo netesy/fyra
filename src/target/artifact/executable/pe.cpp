@@ -14,6 +14,7 @@
 #include <ios>
 #include <iomanip>
 #include <set>
+#include <limits>
 
 #pragma pack(push, 1)
 struct DOSHeader {
@@ -74,7 +75,8 @@ public:
                           const std::vector<PEGenerator::Symbol>& symbols_in,
                           const std::vector<PEGenerator::Relocation>& relocs_in,
                           const std::string& outputPath) {
-        sections_.clear(); imports_.clear(); modIatOffsets_.clear(); importedSymbols_.clear(); entryPoint_ = 0;
+        lastError_.clear();
+        sections_.clear(); imports_.clear(); modIatOffsets_.clear(); importedSymbols_.clear(); entryPoint_ = 0; importDirectoryRVA_ = 0;
 
         // 1. Identify Imports
         std::set<std::string> defined;
@@ -104,7 +106,10 @@ public:
                 } else if (sym == "socket" || sym == "connect" || sym == "listen" || sym == "accept" ||
                            sym == "send" || sym == "recv" || sym == "closesocket" || sym == "bind") {
                     addImport("ws2_32.dll", sym);
-                } else {
+                } else if (sym == "printf" || sym == "malloc" || sym == "free" || sym == "strlen" ||
+                           sym == "strcpy" || sym == "strcmp" || sym == "puts" || sym == "exit" ||
+                           sym == "memcpy" || sym == "memset" || sym == "sin" || sym == "cos" ||
+                           sym == "atan2" || sym == "pow" || sym == "sqrt" || sym == "ceil" || sym == "floor") {
                     addImport("msvcrt.dll", sym);
                 }
             }
@@ -208,7 +213,9 @@ public:
         // 6. Relocations
         std::vector<PEGenerator::Symbol> allSymbols = symbols_in;
         allSymbols.insert(allSymbols.end(), importedSymbols_.begin(), importedSymbols_.end());
-        processRelocations(relocs_in, allSymbols);
+        if (!processRelocations(relocs_in, allSymbols)) {
+            return false;
+        }
 
         // 7. Finalize File Layout Pointers
         uint32_t headerSize = align(sizeof(DOSHeader) + 64 + 4 + sizeof(FileHeader) + sizeof(OptionalHeader64) + sections_.size() * sizeof(SectionHeader), fileAlignment_);
@@ -233,7 +240,7 @@ public:
     void setBaseAddress(uint64_t a) { baseAddress_ = a; }
     void setSectionAlignment(uint32_t a) { sectionAlignment_ = a; }
     void setFileAlignment(uint32_t a) { fileAlignment_ = a; }
-    std::string getLastError() const { return ""; }
+    std::string getLastError() const { return lastError_; }
     void setEntryPoint(uint64_t a) { entryPoint_ = (uint32_t)a; }
     void setSubsystem(uint16_t s) { subsystem_ = s; }
     void setPageSize(uint64_t s) { (void)s; }
@@ -247,6 +254,7 @@ private:
     std::map<std::string, std::vector<std::string>> imports_;
     std::map<std::string, uint32_t> modIatOffsets_;
     std::vector<PEGenerator::Symbol> importedSymbols_;
+    std::string lastError_;
 
     uint32_t align(uint32_t v, uint32_t a) { return (v + a - 1) & ~(a - 1); }
     Section* findSection(const std::string& n) { for (auto& s : sections_) if (s.name == n) return &s; return nullptr; }
@@ -290,7 +298,14 @@ private:
         return data;
     }
 
-    void processRelocations(const std::vector<PEGenerator::Relocation>& relocs, const std::vector<PEGenerator::Symbol>& symbols) {
+    struct RelocationPatch {
+        Section* target;
+        size_t offset;
+        size_t width;
+        uint64_t encodedValue;
+    };
+
+    bool processRelocations(const std::vector<PEGenerator::Relocation>& relocs, const std::vector<PEGenerator::Symbol>& symbols) {
         std::map<std::string, uint32_t> symbolRva;
         for (auto const& s : symbols) {
             Section* sec = findSection(s.sectionName);
@@ -300,18 +315,76 @@ private:
             if (symbolRva.count("_start")) entryPoint_ = symbolRva["_start"];
             else if (symbolRva.count("main")) entryPoint_ = symbolRva["main"];
         }
+
+        std::vector<RelocationPatch> patches;
+        patches.reserve(relocs.size());
+
+        // Pass 1: Validate all relocations and compute patch values without mutating section data
         for (auto const& r : relocs) {
             Section* target = findSection(r.sectionName);
-            if (!target || !symbolRva.count(r.symbolName)) continue;
+            if (!target) {
+                lastError_ = "Relocation target section '" + r.sectionName + "' not found in internal PE executable generator";
+                return false;
+            }
+            if (!symbolRva.count(r.symbolName)) {
+                lastError_ = "Unresolved symbol '" + r.symbolName + "' in internal PE executable generator";
+                return false;
+            }
             uint32_t S = symbolRva[r.symbolName], P = target->virtualAddress + (uint32_t)r.offset;
             if (r.type == "R_X86_64_PC32" || r.type == "R_X86_64_PLT32") {
-                int32_t delta = (int32_t)S + (int32_t)r.addend - (int32_t)P;
-                std::memcpy(target->data.data() + r.offset, &delta, 4);
+                size_t width = 4;
+                if (r.offset > target->data.size() || width > target->data.size() - r.offset) {
+                    lastError_ = "Relocation offset out of bounds in section '" + r.sectionName + "' in internal PE executable generator";
+                    return false;
+                }
+                int64_t delta = static_cast<int64_t>(S) + r.addend - static_cast<int64_t>(P);
+                if (delta < -2147483648LL || delta > 2147483647LL) {
+                    lastError_ = "Relocation overflow for symbol '" + r.symbolName + "' in internal PE executable generator";
+                    return false;
+                }
+                uint32_t val32 = static_cast<uint32_t>(static_cast<int32_t>(delta));
+                patches.push_back({target, r.offset, width, static_cast<uint64_t>(val32)});
             } else if (r.type == "R_X86_64_64") {
-                uint64_t val = baseAddress_ + S + r.addend;
-                std::memcpy(target->data.data() + r.offset, &val, 8);
+                size_t width = 8;
+                if (r.offset > target->data.size() || width > target->data.size() - r.offset) {
+                    lastError_ = "Relocation offset out of bounds in section '" + r.sectionName + "' in internal PE executable generator";
+                    return false;
+                }
+                uint64_t baseAndSymbol = 0;
+                if (static_cast<uint64_t>(S) > std::numeric_limits<uint64_t>::max() - baseAddress_) {
+                    lastError_ = "Relocation overflow for symbol '" + r.symbolName + "' in internal PE executable generator";
+                    return false;
+                }
+                baseAndSymbol = baseAddress_ + static_cast<uint64_t>(S);
+
+                uint64_t finalValue = 0;
+                if (r.addend >= 0) {
+                    uint64_t positiveAddend = static_cast<uint64_t>(r.addend);
+                    if (positiveAddend > std::numeric_limits<uint64_t>::max() - baseAndSymbol) {
+                        lastError_ = "Relocation overflow for symbol '" + r.symbolName + "' in internal PE executable generator";
+                        return false;
+                    }
+                    finalValue = baseAndSymbol + positiveAddend;
+                } else {
+                    uint64_t magnitude = static_cast<uint64_t>(-(r.addend + 1)) + 1;
+                    if (magnitude > baseAndSymbol) {
+                        lastError_ = "Relocation underflow for symbol '" + r.symbolName + "' in internal PE executable generator";
+                        return false;
+                    }
+                    finalValue = baseAndSymbol - magnitude;
+                }
+                patches.push_back({target, r.offset, width, finalValue});
+            } else {
+                lastError_ = "Unsupported relocation '" + r.type + "' in internal PE executable generator";
+                return false;
             }
         }
+
+        // Pass 2: Apply relocation bytes (only pre-calculated validated patches are written)
+        for (auto const& patch : patches) {
+            std::memcpy(patch.target->data.data() + patch.offset, &patch.encodedValue, patch.width);
+        }
+        return true;
     }
 
     void writeDOSHeader(std::ofstream& f) {

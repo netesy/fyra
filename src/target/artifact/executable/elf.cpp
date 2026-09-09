@@ -9,6 +9,7 @@
 #include <vector>
 #include <regex>
 #include <stdexcept>
+#include <limits>
 
 // ELF constants
 namespace {
@@ -222,6 +223,7 @@ private:
 };
 
 bool ElfGenerator::Impl::generate(const std::string& assemblyPath, const std::string& outputPath, bool generateRelocatable) {
+    lastError_.clear();
     if (!is64Bit_) {
         lastError_ = "32-bit ELF generation is not supported.";
         return false;
@@ -256,15 +258,24 @@ bool ElfGenerator::Impl::generateFromCode(const std::map<std::string, std::vecto
                                         const std::vector<ElfGenerator::Symbol>& symbols_in,
                                         const std::vector<ElfGenerator::Relocation>& relocations_in,
                                         const std::string& outputPath) {
+    lastError_.clear();
     if (!is64Bit_) {
         lastError_ = "32-bit ELF generation is not supported.";
         return false;
     }
-
     sections_.clear();
     symbols_.clear();
     relocations_.clear();
     sectionOrder_.clear();
+    finalSectionHeaders_.clear();
+    finalSectionIndexMap_.clear();
+    finalProgramHeaders_.clear();
+    finalSymbols_.clear();
+    finalSymbolIndexMap_.clear();
+    stringTable_ = "\0";
+    shStringTable_ = "\0";
+    sectionHeadersOffset_ = 0;
+    entryPointAddr_ = 0;
 
     const std::vector<std::string> ordered_sections = {".text", ".rodata", ".data", ".bss"};
     for(const auto& name : ordered_sections) {
@@ -535,115 +546,184 @@ void ElfGenerator::Impl::layoutSectionsForExecutable() {
 }
 
 bool ElfGenerator::Impl::applyRelocations() {
+    struct ElfPatch {
+        Section* target;
+        size_t offset;
+        size_t width;
+        std::vector<uint8_t> bytes;
+    };
+
+    std::vector<ElfPatch> patches;
+    patches.reserve(relocations_.size());
+
+    // Pass 1: Validate all relocations and compute patch values without mutating section bytes
     for (const auto& reloc : relocations_) {
         Section* p_section = findSection(reloc.sectionName);
-        if (!p_section) { lastError_ = "Relocation in unknown section " + reloc.sectionName; return false; }
+        if (!p_section) { lastError_ = "Relocation target section '" + reloc.sectionName + "' not found in internal ELF executable generator"; return false; }
 
         auto sym_it = symbols_.find(reloc.symbolName);
         if (sym_it == symbols_.end()) {
             std::string localName = reloc.sectionName + "_" + reloc.symbolName;
             sym_it = symbols_.find(localName);
-            if (sym_it == symbols_.end()) {
-                // Synthesize external runtime symbol
-                Symbol synthetic;
-                synthetic.name = reloc.symbolName;
-                synthetic.value = 0;
-                synthetic.size = 0;
-                synthetic.type = STT_NOTYPE;
-                synthetic.binding = STB_GLOBAL;
-                synthetic.sectionName = "*UND*";
-                synthetic.isDefined = false;
-                symbols_[reloc.symbolName] = synthetic;
-                sym_it = symbols_.find(reloc.symbolName);
-            }
         }
+        if (sym_it == symbols_.end() || !sym_it->second.isDefined) {
+            lastError_ = "Unresolved symbol '" + reloc.symbolName + "' in internal ELF executable generator";
+            return false;
+        }
+
         Symbol& symbol = sym_it->second;
+        Section* s_section = findSection(symbol.sectionName);
+        if (!s_section) { lastError_ = "Symbol " + symbol.name + " in unknown section " + symbol.sectionName; return false; }
 
-        uint64_t S = 0;
-        if(symbol.isDefined) {
-            Section* s_section = findSection(symbol.sectionName);
-            if (!s_section) { lastError_ = "Symbol " + symbol.name + " in unknown section " + symbol.sectionName; return false; }
-            S = s_section->header.sh_addr + symbol.value;
-        }
-
+        uint64_t S = s_section->header.sh_addr + symbol.value;
         uint64_t P = p_section->header.sh_addr + reloc.offset;
         int64_t A = reloc.addend;
 
-        if (reloc.type == "R_X86_64_64" || reloc.type == "R_RISCV_64") {
-            uint64_t value = S + A;
-            std::cout << "[DEBUG applyRelocations64] symbol: " << reloc.symbolName << " S: " << std::hex << S << " A: " << A << " value: " << value << std::dec << std::endl;
-            if (reloc.offset + 8 <= p_section->data.size())
-                *reinterpret_cast<uint64_t*>(&p_section->data[reloc.offset]) = value;
+        if (reloc.type == "R_X86_64_64" || reloc.type == "R_RISCV_64" || reloc.type == "R_AARCH64_ABS64") {
+            size_t width = 8;
+            if (reloc.offset > p_section->data.size() || width > p_section->data.size() - reloc.offset) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "' in internal ELF executable generator";
+                return false;
+            }
+            uint64_t value = 0;
+            if (A >= 0) {
+                uint64_t positiveA = static_cast<uint64_t>(A);
+                if (positiveA > std::numeric_limits<uint64_t>::max() - S) {
+                    lastError_ = "Relocation overflow for symbol '" + reloc.symbolName + "' in internal ELF executable generator";
+                    return false;
+                }
+                value = S + positiveA;
+            } else {
+                uint64_t magnitude = static_cast<uint64_t>(-(A + 1)) + 1;
+                if (magnitude > S) {
+                    lastError_ = "Relocation underflow for symbol '" + reloc.symbolName + "' in internal ELF executable generator";
+                    return false;
+                }
+                value = S - magnitude;
+            }
+            std::vector<uint8_t> b(8);
+            std::memcpy(b.data(), &value, 8);
+            patches.push_back({p_section, reloc.offset, 8, b});
         } else if (reloc.type == "R_X86_64_PC32" || reloc.type == "R_X86_64_PLT32") {
-            uint32_t value = static_cast<uint32_t>(S + A - P);
-            if (reloc.offset + 4 <= p_section->data.size())
-                *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = value;
+            size_t width = 4;
+            if (reloc.offset > p_section->data.size() || width > p_section->data.size() - reloc.offset) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "' in internal ELF executable generator";
+                return false;
+            }
+            int64_t delta = static_cast<int64_t>(S) + A - static_cast<int64_t>(P);
+            if (delta < -2147483648LL || delta > 2147483647LL) {
+                lastError_ = "Relocation overflow for symbol '" + reloc.symbolName + "' in internal ELF executable generator";
+                return false;
+            }
+            uint32_t val32 = static_cast<uint32_t>(static_cast<int32_t>(delta));
+            std::vector<uint8_t> b(4);
+            std::memcpy(b.data(), &val32, 4);
+            patches.push_back({p_section, reloc.offset, 4, b});
         } else if (reloc.type == "R_RISCV_JAL" || reloc.type == "R_RISCV_CALL" || reloc.type == "R_RISCV_CALL_PLT") {
-            int64_t offset = S + A - P;
+            int64_t offset = static_cast<int64_t>(S) + A - static_cast<int64_t>(P);
             if (reloc.type == "R_RISCV_JAL") {
-                // J-type instruction (jal)
-                uint32_t inst = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+                if (reloc.offset + 4 > p_section->data.size()) {
+                    lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                    return false;
+                }
+                uint32_t inst = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
                 uint32_t imm = static_cast<uint32_t>(offset);
                 inst |= (imm & 0x100000) << 11;
                 inst |= (imm & 0x7FE) << 20;
                 inst |= (imm & 0x800) << 9;
                 inst |= (imm & 0xFF000);
-                *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = inst;
+                std::vector<uint8_t> b(4);
+                std::memcpy(b.data(), &inst, 4);
+                patches.push_back({p_section, reloc.offset, 4, b});
             } else {
-                // R_RISCV_CALL expects auipc + jalr pair.
-                // auipc ra, imm[31:12]
-                // jalr ra, ra, imm[11:0]
+                if (reloc.offset < 4 || reloc.offset + 4 > p_section->data.size()) {
+                    lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                    return false;
+                }
                 int32_t hi = (static_cast<int32_t>(offset) + 0x800) & 0xFFFFF000;
                 int32_t lo = static_cast<int32_t>(offset) - hi;
 
-                uint32_t auipc = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset - 4]);
-                uint32_t jalr = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+                uint32_t auipc = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset - 4]);
+                uint32_t jalr = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
 
                 auipc |= (hi & 0xFFFFF000);
                 jalr |= ((lo & 0xFFF) << 20);
 
-                *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset - 4]) = auipc;
-                *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = jalr;
+                std::vector<uint8_t> b(8);
+                std::memcpy(b.data(), &auipc, 4);
+                std::memcpy(b.data() + 4, &jalr, 4);
+                patches.push_back({p_section, reloc.offset - 4, 8, b});
             }
         } else if (reloc.type == "R_RISCV_BRANCH") {
-            int32_t offset = static_cast<int32_t>(S + A - P);
-            uint32_t inst = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+            if (reloc.offset + 4 > p_section->data.size()) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                return false;
+            }
+            int32_t offset = static_cast<int32_t>(static_cast<int64_t>(S) + A - static_cast<int64_t>(P));
+            uint32_t inst = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
             inst |= ((offset >> 12) & 0x1) << 31;
             inst |= ((offset >> 5) & 0x3F) << 25;
             inst |= ((offset >> 1) & 0xF) << 8;
             inst |= ((offset >> 11) & 0x1) << 7;
-            *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = inst;
-        } else if (reloc.type == "R_AARCH64_ABS64") {
-            uint64_t value = S + A;
-            if (reloc.offset + 8 <= p_section->data.size())
-                *reinterpret_cast<uint64_t*>(&p_section->data[reloc.offset]) = value;
+            std::vector<uint8_t> b(4);
+            std::memcpy(b.data(), &inst, 4);
+            patches.push_back({p_section, reloc.offset, 4, b});
         } else if (reloc.type == "R_AARCH64_CALL26" || reloc.type == "R_AARCH64_JUMP26") {
-            int64_t offset = S + A - P;
-            uint32_t inst = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+            if (reloc.offset + 4 > p_section->data.size()) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                return false;
+            }
+            int64_t offset = static_cast<int64_t>(S) + A - static_cast<int64_t>(P);
+            uint32_t inst = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
             inst |= (static_cast<uint32_t>(offset >> 2) & 0x03FFFFFF);
-            *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = inst;
+            std::vector<uint8_t> b(4);
+            std::memcpy(b.data(), &inst, 4);
+            patches.push_back({p_section, reloc.offset, 4, b});
         } else if (reloc.type == "R_AARCH64_CONDBR19") {
-            int64_t offset = S + A - P;
-            uint32_t inst = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+            if (reloc.offset + 4 > p_section->data.size()) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                return false;
+            }
+            int64_t offset = static_cast<int64_t>(S) + A - static_cast<int64_t>(P);
+            uint32_t inst = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
             inst |= (static_cast<uint32_t>(offset >> 2) & 0x7FFFF) << 5;
-            *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = inst;
+            std::vector<uint8_t> b(4);
+            std::memcpy(b.data(), &inst, 4);
+            patches.push_back({p_section, reloc.offset, 4, b});
         } else if (reloc.type == "R_AARCH64_ADR_PREL_PG_HI21") {
+            if (reloc.offset + 4 > p_section->data.size()) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                return false;
+            }
             int64_t offset = (S & ~0xFFFLL) - (P & ~0xFFFLL);
-            uint32_t inst = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+            uint32_t inst = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
             uint32_t imm = static_cast<uint32_t>(offset >> 12);
             inst |= (imm & 0x3) << 29;
             inst |= (imm & 0x1FFFFC) << 3;
-            *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = inst;
+            std::vector<uint8_t> b(4);
+            std::memcpy(b.data(), &inst, 4);
+            patches.push_back({p_section, reloc.offset, 4, b});
         } else if (reloc.type == "R_AARCH64_LDST64_ABS_LO12_NC") {
+            if (reloc.offset + 4 > p_section->data.size()) {
+                lastError_ = "Relocation offset out of bounds in section '" + reloc.sectionName + "'";
+                return false;
+            }
             uint64_t addr = S + A;
-            uint32_t inst = *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]);
+            uint32_t inst = *reinterpret_cast<const uint32_t*>(&p_section->data[reloc.offset]);
             uint32_t imm = static_cast<uint32_t>(addr & 0xFFF);
-            inst |= (imm >> 3) << 10; // For 64-bit ldr/str, imm is scaled by 8
-            *reinterpret_cast<uint32_t*>(&p_section->data[reloc.offset]) = inst;
+            inst |= (imm >> 3) << 10;
+            std::vector<uint8_t> b(4);
+            std::memcpy(b.data(), &inst, 4);
+            patches.push_back({p_section, reloc.offset, 4, b});
         } else {
             lastError_ = "Unsupported relocation type: " + reloc.type;
             return false;
         }
+    }
+
+    // Pass 2: Apply relocation bytes (only pre-calculated validated patches are written)
+    for (const auto& patch : patches) {
+        std::memcpy(patch.target->data.data() + patch.offset, patch.bytes.data(), patch.width);
     }
     return true;
 }
