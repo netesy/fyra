@@ -74,6 +74,9 @@ public:
     virtual bool supportsVectorOperation(ir::Instruction::Opcode opcode,
                                          const ir::VectorType* type,
                                          VectorLoweringMode mode) const { return false; }
+    virtual bool supportsVectorCompare(ir::VectorCompareOp predicate,
+                                       const ir::VectorType* type,
+                                       VectorLoweringMode mode) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type* type) const { return 0; }
     virtual void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {}
     virtual void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {}

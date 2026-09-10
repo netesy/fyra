@@ -297,3 +297,7 @@ add_executable(test_loop_vectorizer test_loop_vectorizer.cpp)
 target_link_libraries(test_loop_vectorizer PRIVATE fyra)
 add_test(NAME LoopVectorizerTest COMMAND test_loop_vectorizer)
 set_tests_properties(LoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_vector_compare_select test_vector_compare_select.cpp)
+target_link_libraries(test_vector_compare_select PRIVATE fyra)
+add_test(NAME VectorCompareSelectTest COMMAND test_vector_compare_select)

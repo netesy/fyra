@@ -62,8 +62,8 @@ public:
         VExtract,      // Extract element from vector
         VInsert,       // Insert element into vector
         VShuffle,      // Vector shuffle
-        VCmp,          // Vector comparison
-        VSelect,       // Vector select based on mask
+        VCmp,          // Lane comparison; canonical all-ones/all-zero mask result
+        VSelect,       // Lane select using a canonical VCmp-style mask
         VGather,       // Vector gather from memory
         VScatter,      // Vector scatter to memory
         VHAdd,         // Horizontal vector addition

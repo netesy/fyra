@@ -111,6 +111,9 @@ public:
     virtual bool supportsVectorOperation(ir::Instruction::Opcode,
                                          const ir::VectorType*,
                                          VectorLoweringMode) const { return false; }
+    virtual bool supportsVectorCompare(ir::VectorCompareOp,
+                                       const ir::VectorType*,
+                                       VectorLoweringMode) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type*) const { return 0; }
     virtual void emitVectorLoad(codegen::CodeGen&, ir::VectorInstruction&) {}
     virtual void emitVectorStore(codegen::CodeGen&, ir::VectorInstruction&) {}

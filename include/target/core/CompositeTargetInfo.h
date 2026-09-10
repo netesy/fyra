@@ -98,6 +98,9 @@ public:
     bool supportsVectorOperation(ir::Instruction::Opcode opcode,
                                  const ir::VectorType* type,
                                  VectorLoweringMode mode) const override;
+    bool supportsVectorCompare(ir::VectorCompareOp predicate,
+                               const ir::VectorType* type,
+                               VectorLoweringMode mode) const override;
     unsigned getOptimalVectorWidth(const ir::Type* t) const override;
     void emitVectorLoad(codegen::CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorStore(codegen::CodeGen& cg, ir::VectorInstruction& i) override;

@@ -141,6 +141,9 @@ VectorInstruction* IRBuilder::createVCmp(Value* lhs, Value* rhs, VectorCompareOp
 }
 
 VectorInstruction* IRBuilder::createVSelect(Value* mask, Value* trueVal, Value* falseVal) {
+    // The mask is semantically required to contain all-zero or all-one lanes.
+    // Producers such as VCmp guarantee this; arbitrary runtime masks have this
+    // as a precondition because VSelect is a lane select, not a bitwise blend.
     if (!mask || !trueVal || !falseVal) {
         throw std::invalid_argument("VSelect operands cannot be null");
     }

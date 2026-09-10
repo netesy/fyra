@@ -567,12 +567,28 @@ void test_simd_rejection() {
             assert(x64Arch->supportsVectorOperation(op, type, M::TextAssembly));
             assert(x64Arch->supportsVectorOperation(op, type, M::Binary));
         }
-        for (auto op : {O::VCmp, O::VSelect, O::VNot, O::VDiv, O::VGather,
+        assert(x64Arch->supportsVectorOperation(O::VSelect, type, M::TextAssembly));
+        assert(x64Arch->supportsVectorOperation(O::VSelect, type, M::Binary));
+        for (auto op : {O::VCmp, O::VNot, O::VDiv, O::VGather,
                         O::VScatter, O::VShl, O::VShr, O::VMin, O::VMax,
                         O::VHAdd, O::VHSub, O::VHMul, O::VHAnd, O::VHOr, O::VHXor})
             assert(!x64Arch->supportsVectorOperation(op, type, M::TextAssembly));
     }
     assert(!x64Arch->supportsVectorOperation(O::VAdd, vec4i32, M::Binary));
+    for (auto predicate : {VectorCompareOp::EQ, VectorCompareOp::NE})
+        for (auto* type : {vec16i8, vec8i16, vec4i32, vec2i64, vec4f32, vec2f64}) {
+            assert(x64Arch->supportsVectorCompare(predicate, type, M::TextAssembly));
+            assert(x64Arch->supportsVectorCompare(predicate, type, M::Binary));
+        }
+    for (auto predicate : {VectorCompareOp::LT, VectorCompareOp::LE,
+                           VectorCompareOp::GT, VectorCompareOp::GE}) {
+        for (auto* type : {vec16i8, vec8i16, vec4i32, vec4f32, vec2f64})
+            assert(x64Arch->supportsVectorCompare(predicate, type, M::TextAssembly));
+        assert(!x64Arch->supportsVectorCompare(predicate, vec2i64, M::TextAssembly));
+    }
+    for (auto predicate : {VectorCompareOp::ULT, VectorCompareOp::ULE,
+                           VectorCompareOp::UGT, VectorCompareOp::UGE})
+        assert(!x64Arch->supportsVectorCompare(predicate, vec4i32, M::TextAssembly));
 
     for (auto arch : {target::Arch::AArch64, target::Arch::RISCV64, target::Arch::WASM32}) {
         target::TargetDescriptor descriptor;

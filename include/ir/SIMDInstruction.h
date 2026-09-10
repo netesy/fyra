@@ -8,7 +8,12 @@
 
 namespace ir {
 
-// SIMD comparison operations
+// Authoritative Fyra comparison semantics:
+//  * integer LT/LE/GT/GE are signed; ULT/ULE/UGT/UGE are unsigned;
+//  * floating EQ/LT/LE/GT/GE are ordered, while NE is unordered-or-not-equal;
+//  * ordinary floating comparisons are quiet at the language level;
+//  * VCmp produces an integer mask of the same lane shape, with every bit in a
+//    true lane set and every bit in a false lane clear.
 enum class VectorCompareOp {
     EQ,    // Equal
     NE,    // Not equal

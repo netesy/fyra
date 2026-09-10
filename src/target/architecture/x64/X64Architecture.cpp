@@ -1592,12 +1592,16 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
                 *os << "  movsd xmm0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
                 *os << "  ucomisd xmm0, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
                 *os << "  " << set << " " << al << "\n";
+                if (i.getOpcode() == ir::Instruction::Cnef) *os << "  setp dl\n  or al, dl\n";
+                else *os << "  setnp dl\n  and al, dl\n";
                 *os << "  movzx " << eax << ", " << al << "\n";
                 *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
             } else {
                 *os << "  movsd " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
                 *os << "  ucomisd " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
                 *os << "  " << set << " " << al << "\n";
+                if (i.getOpcode() == ir::Instruction::Cnef) *os << "  setp %dl\n  orb %dl, %al\n";
+                else *os << "  setnp %dl\n  andb %dl, %al\n";
                 *os << "  movzbq " << al << ", " << rax << "\n";
                 *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
             }
@@ -1658,7 +1662,13 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             case ir::Instruction::Cuge: s = 0x93; break;
             default:                    s = 0x94; break;
         }
-        cg.getAssembler().emitBytes({0x0F, s, 0xC0, 0x48, 0x0F, 0xB6, 0xC0});
+        cg.getAssembler().emitBytes({0x0F, s, 0xC0});
+        if (isFloatCmp) {
+            const bool unorderedTrue = i.getOpcode() == ir::Instruction::Cnef;
+            cg.getAssembler().emitBytes({0x0F, static_cast<uint8_t>(unorderedTrue ? 0x9A : 0x9B), 0xC2,
+                                         static_cast<uint8_t>(unorderedTrue ? 0x08 : 0x20), 0xD0});
+        }
+        cg.getAssembler().emitBytes({0x48, 0x0F, 0xB6, 0xC0});
         emitStoreResult(cg, i, 0);
     }
 }
@@ -2672,7 +2682,8 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode opcode,
     if (mode == VectorLoweringMode::Binary)
         return opcode == ir::Instruction::VLoad ||
                opcode == ir::Instruction::VStore ||
-               opcode == ir::Instruction::VShuffle;
+               opcode == ir::Instruction::VShuffle ||
+               opcode == ir::Instruction::VSelect;
 
     const auto* element = type->getElementType();
     const bool integer = element->isIntegerTy();
@@ -2685,6 +2696,7 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode opcode,
         case ir::Instruction::VBroadcast:
         case ir::Instruction::VExtract:
         case ir::Instruction::VInsert:
+        case ir::Instruction::VSelect:
             return true;
         case ir::Instruction::VAdd:
         case ir::Instruction::VSub:
@@ -2706,6 +2718,23 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode opcode,
         default:
             return false;
     }
+}
+
+bool X64Architecture::supportsVectorCompare(ir::VectorCompareOp predicate,
+                                            const ir::VectorType* type,
+                                            VectorLoweringMode) const {
+    if (!supportsVectorType(type)) return false;
+    const auto* element = type->getElementType();
+    if (element->isFloatTy() || element->isDoubleTy())
+        return predicate == ir::VectorCompareOp::EQ || predicate == ir::VectorCompareOp::NE ||
+               predicate == ir::VectorCompareOp::LT || predicate == ir::VectorCompareOp::LE ||
+               predicate == ir::VectorCompareOp::GT || predicate == ir::VectorCompareOp::GE;
+    const auto* integer = dynamic_cast<const ir::IntegerType*>(element);
+    if (!integer) return false;
+    if (predicate == ir::VectorCompareOp::EQ || predicate == ir::VectorCompareOp::NE) return true;
+    if (integer->getBitwidth() == 64) return false;
+    return predicate == ir::VectorCompareOp::LT || predicate == ir::VectorCompareOp::LE ||
+           predicate == ir::VectorCompareOp::GT || predicate == ir::VectorCompareOp::GE;
 }
 
 void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
@@ -3180,10 +3209,88 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         } else if (i.getOpcode() == ir::Instruction::VHAdd) {
             simdInst = (elemTy->isFloatTy()) ? "haddps" : ((elemTy->isDoubleTy()) ? "haddpd" : "phaddd");
         } else if (i.getOpcode() == ir::Instruction::VCmp) {
-            simdInst = elemTy->isFloatTy() ? "cmpps $0," : (elemTy->isDoubleTy() ? "cmppd $0," : "pcmpeqd");
+            if (i.getOperands().size() != 3) throw std::runtime_error("VCmp requires two values and a predicate");
+            auto* predicateValue = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get());
+            if (!predicateValue) throw std::runtime_error("VCmp predicate must be constant");
+            auto predicate = static_cast<ir::VectorCompareOp>(predicateValue->getValue());
+            if (!supportsVectorCompare(predicate, vecType, VectorLoweringMode::TextAssembly))
+                throw std::runtime_error("Unsupported x64 vector comparison");
+            const std::string scratch = getReservedScratchVectorReg();
+            bool invert = predicate == ir::VectorCompareOp::NE ||
+                          predicate == ir::VectorCompareOp::LE || predicate == ir::VectorCompareOp::GE;
+            bool swap = predicate == ir::VectorCompareOp::LT || predicate == ir::VectorCompareOp::GE;
+            if (elemTy->isFloatTy() || elemTy->isDoubleTy()) {
+                unsigned immediate = 0;
+                bool fpSwap = false;
+                switch (predicate) {
+                    case ir::VectorCompareOp::EQ: immediate = 0; break; // ordered equal
+                    case ir::VectorCompareOp::NE: immediate = 4; break; // unordered or not equal
+                    case ir::VectorCompareOp::LT: immediate = 1; break;
+                    case ir::VectorCompareOp::LE: immediate = 2; break;
+                    case ir::VectorCompareOp::GT: immediate = 1; fpSwap = true; break;
+                    case ir::VectorCompareOp::GE: immediate = 2; fpSwap = true; break;
+                    default: throw std::runtime_error("Invalid floating VCmp predicate");
+                }
+                const std::string& base = fpSwap ? op1 : op0;
+                const std::string& source = fpSwap ? op0 : op1;
+                if (abi == X64ABI::Windows) {
+                    *os << "  movdqu " << scratch << ", " << base << "\n";
+                    *os << "  " << (elemTy->isFloatTy() ? "cmpps " : "cmppd ")
+                        << scratch << ", " << source << ", " << immediate << "\n";
+                    if (dst != scratch) *os << "  movdqu " << dst << ", " << scratch << "\n";
+                } else {
+                    *os << "  movdqu " << base << ", " << scratch << "\n";
+                    *os << "  " << (elemTy->isFloatTy() ? "cmpps $" : "cmppd $")
+                        << immediate << ", " << source << ", " << scratch << "\n";
+                    if (dst != scratch) *os << "  movdqu " << scratch << ", " << dst << "\n";
+                }
+                return;
+            }
+            auto* intType = dynamic_cast<ir::IntegerType*>(elemTy);
+            unsigned bits = intType->getBitwidth();
+            std::string mnemonic;
+            if (predicate == ir::VectorCompareOp::EQ || predicate == ir::VectorCompareOp::NE)
+                mnemonic = bits == 8 ? "pcmpeqb" : bits == 16 ? "pcmpeqw" : bits == 32 ? "pcmpeqd" : "pcmpeqq";
+            else
+                mnemonic = bits == 8 ? "pcmpgtb" : bits == 16 ? "pcmpgtw" : "pcmpgtd";
+            const std::string& base = swap ? op1 : op0;
+            const std::string& source = swap ? op0 : op1;
+            if (abi == X64ABI::Windows) {
+                *os << "  movdqu " << scratch << ", " << base << "\n";
+                *os << "  " << mnemonic << " " << scratch << ", " << source << "\n";
+                if (invert) { *os << "  pcmpeqd " << dst << ", " << dst << "\n"; *os << "  pxor " << dst << ", " << scratch << "\n"; }
+                else if (dst != scratch) *os << "  movdqu " << dst << ", " << scratch << "\n";
+            } else {
+                *os << "  movdqu " << base << ", " << scratch << "\n";
+                *os << "  " << mnemonic << " " << source << ", " << scratch << "\n";
+                if (invert) { *os << "  pcmpeqd " << dst << ", " << dst << "\n"; *os << "  pxor " << scratch << ", " << dst << "\n"; }
+                else if (dst != scratch) *os << "  movdqu " << scratch << ", " << dst << "\n";
+            }
+            return;
         } else if (i.getOpcode() == ir::Instruction::VSelect) {
-            *os << "  movdqu " << op0 << ", " << dst << "\n";
-            *os << "  pand " << op1 << ", " << dst << "\n";
+            if (i.getOperands().size() != 3) throw std::runtime_error("VSelect requires mask, true, and false values");
+            const std::string falseValue = cg.getValueAsOperand(i.getOperands()[2]->get());
+            const std::string scratch = getReservedScratchVectorReg();
+            auto move = [&](const std::string& to, const std::string& from) {
+                if (to == from) return;
+                if (abi == X64ABI::Windows) *os << "  movdqu " << to << ", " << from << "\n";
+                else *os << "  movdqu " << from << ", " << to << "\n";
+            };
+            auto binary = [&](const char* opcode, const std::string& to, const std::string& from) {
+                if (abi == X64ABI::Windows) *os << "  " << opcode << " " << to << ", " << from << "\n";
+                else *os << "  " << opcode << " " << from << ", " << to << "\n";
+            };
+            if (op1 == falseValue) { move(dst, op1); return; }
+            if (dst == op0) {
+                move(scratch, op1); binary("pxor", scratch, falseValue);
+                binary("pand", scratch, op0); move(dst, falseValue); binary("pxor", dst, scratch);
+            } else if (dst == op1) {
+                move(scratch, op1); move(dst, falseValue); binary("pxor", scratch, dst);
+                binary("pand", scratch, op0); binary("pxor", dst, scratch);
+            } else {
+                move(dst, falseValue); move(scratch, op1); binary("pxor", scratch, dst);
+                binary("pand", scratch, op0); binary("pxor", dst, scratch);
+            }
             return;
         } else if (i.getOpcode() == ir::Instruction::VShuffle) {
             const auto capabilities = getVectorCapabilities();
@@ -3296,6 +3403,102 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         } else {
             *os << "  movdqu " << op0 << ", " << dst << "\n";
             *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+        }
+        return;
+    }
+
+    auto& binaryAssembler = cg.getAssembler();
+    auto emitXmmMoveBinary = [&](unsigned destination, unsigned source) {
+        if (destination == source) return;
+        binaryAssembler.emitByte(0xF3);
+        const uint8_t rex = 0x40 | (destination >= 8 ? 0x04 : 0) | (source >= 8 ? 0x01 : 0);
+        if (rex != 0x40) binaryAssembler.emitByte(rex);
+        binaryAssembler.emitBytes({0x0F, 0x6F,
+            static_cast<uint8_t>(0xC0 | ((destination & 7) << 3) | (source & 7))});
+    };
+    auto emitXmmBinary = [&](unsigned destination, unsigned source, uint8_t opcode,
+                             bool prefix66 = true, bool map38 = false) {
+        if (prefix66) binaryAssembler.emitByte(0x66);
+        const uint8_t rex = 0x40 | (destination >= 8 ? 0x04 : 0) | (source >= 8 ? 0x01 : 0);
+        if (rex != 0x40) binaryAssembler.emitByte(rex);
+        binaryAssembler.emitByte(0x0F);
+        if (map38) binaryAssembler.emitByte(0x38);
+        binaryAssembler.emitBytes({opcode,
+            static_cast<uint8_t>(0xC0 | ((destination & 7) << 3) | (source & 7))});
+    };
+
+    if (i.getOpcode() == ir::Instruction::VCmp) {
+        if (!i.hasPhysicalRegister() || i.getOperands().size() != 3)
+            throw std::runtime_error("Binary VCmp requires allocated operands and predicate");
+        auto* lhs = i.getOperands()[0]->get(); auto* rhs = i.getOperands()[1]->get();
+        auto* predicateValue = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get());
+        auto* operandType = dynamic_cast<ir::VectorType*>(lhs->getType());
+        if (!lhs->hasPhysicalRegister() || !rhs->hasPhysicalRegister() || !predicateValue || !operandType)
+            throw std::runtime_error("Malformed binary VCmp");
+        auto predicate = static_cast<ir::VectorCompareOp>(predicateValue->getValue());
+        if (!supportsVectorCompare(predicate, operandType, VectorLoweringMode::Binary))
+            throw std::runtime_error("Unsupported binary x64 VCmp");
+        unsigned dst = i.getPhysicalRegister() - 100, left = lhs->getPhysicalRegister() - 100;
+        unsigned right = rhs->getPhysicalRegister() - 100, scratch = getReservedScratchVectorRegIndex() - 100;
+        auto* element = operandType->getElementType();
+        bool swap = predicate == ir::VectorCompareOp::LT || predicate == ir::VectorCompareOp::GE;
+        if (element->isFloatTy() || element->isDoubleTy()) {
+            uint8_t immediate;
+            bool fpSwap = false;
+            switch (predicate) {
+                case ir::VectorCompareOp::EQ: immediate = 0; break;
+                case ir::VectorCompareOp::NE: immediate = 4; break;
+                case ir::VectorCompareOp::LT: immediate = 1; break;
+                case ir::VectorCompareOp::LE: immediate = 2; break;
+                case ir::VectorCompareOp::GT: immediate = 1; fpSwap = true; break;
+                case ir::VectorCompareOp::GE: immediate = 2; fpSwap = true; break;
+                default: throw std::runtime_error("Invalid binary FP VCmp predicate");
+            }
+            emitXmmMoveBinary(scratch, fpSwap ? right : left);
+            if (element->isDoubleTy()) binaryAssembler.emitByte(0x66);
+            const unsigned source = fpSwap ? left : right;
+            const uint8_t rex = 0x40 | (scratch >= 8 ? 0x04 : 0) | (source >= 8 ? 0x01 : 0);
+            if (rex != 0x40) binaryAssembler.emitByte(rex);
+            binaryAssembler.emitBytes({0x0F, 0xC2,
+                static_cast<uint8_t>(0xC0 | ((scratch & 7) << 3) | (source & 7)), immediate});
+            emitXmmMoveBinary(dst, scratch);
+            return;
+        }
+        auto* integer = dynamic_cast<ir::IntegerType*>(element);
+        unsigned bits = integer->getBitwidth();
+        bool invert = predicate == ir::VectorCompareOp::NE || predicate == ir::VectorCompareOp::LE || predicate == ir::VectorCompareOp::GE;
+        emitXmmMoveBinary(scratch, swap ? right : left);
+        unsigned source = swap ? left : right;
+        if (predicate == ir::VectorCompareOp::EQ || predicate == ir::VectorCompareOp::NE) {
+            if (bits == 64) emitXmmBinary(scratch, source, 0x29, true, true);
+            else emitXmmBinary(scratch, source, bits == 8 ? 0x74 : bits == 16 ? 0x75 : 0x76);
+        } else {
+            emitXmmBinary(scratch, source, bits == 8 ? 0x64 : bits == 16 ? 0x65 : 0x66);
+        }
+        if (invert) { emitXmmBinary(dst, dst, 0x76); emitXmmBinary(dst, scratch, 0xEF); }
+        else emitXmmMoveBinary(dst, scratch);
+        return;
+    }
+
+    if (i.getOpcode() == ir::Instruction::VSelect) {
+        if (!i.hasPhysicalRegister() || i.getOperands().size() != 3)
+            throw std::runtime_error("Binary VSelect requires allocated mask, true, and false values");
+        auto* mask = i.getOperands()[0]->get(); auto* yes = i.getOperands()[1]->get(); auto* no = i.getOperands()[2]->get();
+        if (!mask->hasPhysicalRegister() || !yes->hasPhysicalRegister() || !no->hasPhysicalRegister())
+            throw std::runtime_error("Binary VSelect operands require XMM registers");
+        unsigned dst = i.getPhysicalRegister()-100, m=mask->getPhysicalRegister()-100;
+        unsigned y=yes->getPhysicalRegister()-100, n=no->getPhysicalRegister()-100;
+        unsigned scratch=getReservedScratchVectorRegIndex()-100;
+        if (y == n) { emitXmmMoveBinary(dst, y); return; }
+        if (dst == m) {
+            emitXmmMoveBinary(scratch, y); emitXmmBinary(scratch, n, 0xEF);
+            emitXmmBinary(scratch, m, 0xDB); emitXmmMoveBinary(dst, n); emitXmmBinary(dst, scratch, 0xEF);
+        } else if (dst == y) {
+            emitXmmMoveBinary(scratch, y); emitXmmMoveBinary(dst, n); emitXmmBinary(scratch, dst, 0xEF);
+            emitXmmBinary(scratch, m, 0xDB); emitXmmBinary(dst, scratch, 0xEF);
+        } else {
+            emitXmmMoveBinary(dst, n); emitXmmMoveBinary(scratch, y); emitXmmBinary(scratch, dst, 0xEF);
+            emitXmmBinary(scratch, m, 0xDB); emitXmmBinary(dst, scratch, 0xEF);
         }
         return;
     }
