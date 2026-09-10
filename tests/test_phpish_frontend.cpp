@@ -26,7 +26,7 @@
 #include "ir/Module.h"
 #include "ir/Parameter.h"
 #include "ir/Type.h"
-#include "target/artifact/executable/elf.hh"
+#include "LinkedElfTestUtils.h"
 
 namespace {
 
@@ -1131,29 +1131,12 @@ void emitInMemoryElfFromModule(ir::Module& module, BackendTarget t, const std::s
     codegen::CodeGen cg(module, makeTarget(t), nullptr);
     cg.emit(true);
 
-    std::map<std::string, std::vector<uint8_t>> sections;
-    sections[".text"] = cg.getAssembler().getCode();
-    sections[".data"] = cg.getRodataAssembler().getCode();
-
-    ElfGenerator elfGen("phpish_frontend_test");
-    elfGen.setMachine(machineForTarget(t));
-    if (t == BackendTarget::X64) {
-        elfGen.setBaseAddress(0x400000);
+    if (t != BackendTarget::X64) {
+        throw std::runtime_error("linked ELF execution is currently supported for x64 only");
     }
-
-    std::vector<ElfGenerator::Symbol> symbols;
-    for (const auto& sym : cg.getSymbols()) {
-        symbols.push_back({sym.name, sym.value, sym.size,
-                           static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
-    }
-
-    std::vector<ElfGenerator::Relocation> relocs;
-    for (const auto& reloc : cg.getRelocations()) {
-        relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-    }
-
-    if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-        throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
+    std::string error;
+    if (!writeLinkedX64Elf(cg, outputPath, error)) {
+        throw std::runtime_error("ELF generation failed: " + error);
     }
 }
 

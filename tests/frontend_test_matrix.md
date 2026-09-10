@@ -29,4 +29,4 @@ While loop | Repeated execution while condition true | `while i <= 5 { ... }`
 For loop | init/cond/step lowered correctly | `for i = 0; i < 5; i = i + 1 { ... }`
 Malformed input diagnostics | Parser rejects invalid syntax | `fn nope( { return 1; }`
 Voilet frontend WAT/WASM validity | Same frontend source lowers to valid WAT text and valid WASM binary header | `test_voilet_frontend` (`arith_and_call`, `if_while`)
-PE backend structural validity | Generated PE has valid DOS/NT signatures and non-zero entry RVA after relocation/symbol processing | `test_pe_generator`
+PE backend structural validity | Linked PE images have valid DOS/NT signatures, entrypoint, and export metadata | `test_linker`

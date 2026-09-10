@@ -1,7 +1,6 @@
 #include "codegen/CodeGen.h"
 #include "codegen/asm/Assembler.h"
 #include "codegen/objectgen/PlatformGenerators.h"
-#include "target/artifact/executable/elf.hh"
 #include "target/artifact/object/ObjectWriter.h"
 #include "ir/Constant.h"
 #include "ir/GlobalValue.h"

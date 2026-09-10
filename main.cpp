@@ -1,13 +1,14 @@
 #include "parser/Parser.h"
 #include "codegen/CodeGen.h"
 #include "ir/Validator.h"
-#include "target/artifact/executable/elf.hh"
-#include "target/artifact/executable/pe.hh"
+#include "target/artifact/executable/ElfImage.h"
 #include "target/artifact/executable/macho.hh"
 #include "target/artifact/object/ObjectReader.h"
+#include "target/artifact/object/ObjectArtifact.h"
 #include "target/artifact/linker/InternalLinker.h"
 #include "target/artifact/linker/TargetDynamicImageBuilder.h"
 #include "target/artifact/linker/DynamicLinkPlan.h"
+#include "target/artifact/executable/PeImage.h"
 #include "target/artifact/archive/ArchiveReader.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
@@ -163,13 +164,9 @@ int main(int argc, char** argv) {
         }
 
         if (desc->os == target::OS::Windows) {
-            PEGenerator peGen(true);
-            std::map<std::string, std::vector<uint8_t>> sections;
-            std::vector<PEGenerator::Symbol> symbols;
-            std::vector<PEGenerator::Relocation> relocs;
-            for (const auto& [name, sec] : image.sections) sections[name] = sec.data;
-            if (!peGen.generateFromCode(sections, symbols, relocs, outputFile)) {
-                std::cerr << "PE Executable generation failed: " << peGen.getLastError() << std::endl;
+            target::artifact::executable::PeExecutableImageBuilder builder;
+            if (!builder.build(image, outputFile)) {
+                std::cerr << "PE Executable generation failed: " << builder.getLastError() << std::endl;
                 return 1;
             }
         } else if (desc->os == target::OS::MacOS) {
@@ -183,9 +180,9 @@ int main(int argc, char** argv) {
                 return 1;
             }
         } else {
-            ElfGenerator elfGen("input.fyra");
-            if (!elfGen.generateExecutableFromLinkedImage(image, outputFile)) {
-                std::cerr << "ELF Executable generation failed: " << elfGen.getLastError() << std::endl;
+            target::artifact::linker::ElfExecutableImageBuilder builder;
+            if (!builder.build(image, outputFile)) {
+                std::cerr << "ELF Executable generation failed: " << builder.getLastError() << std::endl;
                 return 1;
             }
         }
@@ -405,21 +402,57 @@ int main(int argc, char** argv) {
     if (generateExecutable) {
         std::cout << "--- Generating Executable (In-Memory) ---\n" << std::flush;
         codegen::CodeGen codeGenerator(*module, std::move(targetInfo), nullptr);
-        codeGenerator.emit(true);
+        // The internal linker owns executable composition; code generation emits
+        // a relocatable object payload rather than a target-format startup image.
+        codeGenerator.emit(false);
 
         std::map<std::string, std::vector<uint8_t>> sections;
         sections[".text"] = codeGenerator.getAssembler().getCode();
         sections[".rodata"] = codeGenerator.getRodataAssembler().getCode();
 
         if (desc->os == target::OS::Windows) {
-            PEGenerator peGen(true);
-            if (desc->arch == target::Arch::AArch64) peGen.setMachine(IMAGE_FILE_MACHINE_ARM64);
-            std::vector<PEGenerator::Symbol> symbols;
-            for (const auto& sym : codeGenerator.getSymbols()) symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
-            std::vector<PEGenerator::Relocation> relocs;
-            for (const auto& reloc : codeGenerator.getRelocations()) relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-            if (peGen.generateFromCode(sections, symbols, relocs, outputFile + ".exe")) std::cout << "PE Executable generated successfully: " << outputFile << ".exe" << std::endl;
-            else { std::cerr << "Error generating PE: " << peGen.getLastError() << std::endl; return 1; }
+            if (desc->arch != target::Arch::X64) {
+                std::cerr << "PE final-image generation currently supports x64 only" << std::endl;
+                return 1;
+            }
+            target::artifact::object::ObjectArtifact artifact;
+            artifact.format = target::artifact::object::ObjectFormat::COFF;
+            artifact.arch = desc->arch;
+            artifact.os = desc->os;
+            target::artifact::object::ObjectSection text;
+            text.name = ".text"; text.data = sections[".text"]; text.alignment = 16; text.flags = 0x6;
+            artifact.addSection(text);
+            if (!sections[".rodata"].empty()) {
+                target::artifact::object::ObjectSection rodata;
+                rodata.name = ".rodata"; rodata.data = sections[".rodata"]; rodata.alignment = 8; rodata.flags = 0x2;
+                artifact.addSection(rodata);
+            }
+            for (const auto& sym : codeGenerator.getSymbols()) {
+                target::artifact::object::ObjectSymbol out;
+                out.name = sym.name; out.value = sym.value; out.size = sym.size;
+                out.type = sym.type == 2 ? target::artifact::object::SymbolType::Function
+                                         : target::artifact::object::SymbolType::NoType;
+                out.binding = sym.binding == 1 ? target::artifact::object::SymbolBinding::Global
+                                               : target::artifact::object::SymbolBinding::Local;
+                out.sectionName = sym.sectionName; out.isDefined = true;
+                artifact.addSymbol(out);
+            }
+            for (const auto& reloc : codeGenerator.getRelocations()) {
+                artifact.addRelocation({reloc.offset, reloc.type, reloc.addend,
+                                        reloc.symbolName, reloc.sectionName});
+            }
+            target::artifact::linker::InternalLinker linker;
+            target::artifact::linker::LinkedImage linked;
+            if (!linker.link({artifact}, linked, target::artifact::linker::LinkOutputKind::Executable)) {
+                std::cerr << "Error linking PE: " << linker.getLastError() << std::endl;
+                return 1;
+            }
+            target::artifact::executable::PeExecutableImageBuilder builder;
+            if (!builder.build(linked, outputFile)) {
+                std::cerr << "Error generating PE: " << builder.getLastError() << std::endl;
+                return 1;
+            }
+            std::cout << "PE Executable generated successfully: " << outputFile << std::endl;
         } else if (desc->os == target::OS::MacOS) {
             MachOGenerator machoGen(inputFile);
             if (desc->arch == target::Arch::AArch64) machoGen.setCpuType(0x0100000c);
@@ -430,16 +463,42 @@ int main(int argc, char** argv) {
             if (machoGen.generateFromCode(sections, symbols, relocs, outputFile)) std::cout << "Mach-O Executable generated successfully: " << outputFile << std::endl;
             else { std::cerr << "Error generating Mach-O: " << machoGen.getLastError() << std::endl; return 1; }
         } else {
-            ElfGenerator elfGen(inputFile);
-            if (desc->arch == target::Arch::X64) elfGen.setMachine(62);
-            else if (desc->arch == target::Arch::RISCV64) elfGen.setMachine(243);
-            else if (desc->arch == target::Arch::AArch64) elfGen.setMachine(183);
-            std::vector<ElfGenerator::Symbol> symbols;
-            for (const auto& sym : codeGenerator.getSymbols()) symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
-            std::vector<ElfGenerator::Relocation> relocations;
-            for (const auto& reloc : codeGenerator.getRelocations()) relocations.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-            if (elfGen.generateFromCode(sections, symbols, relocations, outputFile)) std::cout << "Executable generated successfully: " << outputFile << std::endl;
-            else { std::cerr << "Error generating executable: " << elfGen.getLastError() << std::endl; return 1; }
+            if (desc->arch != target::Arch::X64 || desc->os != target::OS::Linux) {
+                std::cerr << "ELF final-image generation currently supports Linux x64 only" << std::endl;
+                return 1;
+            }
+            target::artifact::object::ObjectArtifact artifact;
+            artifact.format = target::artifact::object::ObjectFormat::ELF;
+            artifact.arch = desc->arch; artifact.os = desc->os;
+            target::artifact::object::ObjectSection text;
+            text.name = ".text"; text.data = sections[".text"]; text.alignment = 16; text.flags = 0x6;
+            artifact.addSection(text);
+            if (!sections[".rodata"].empty()) {
+                target::artifact::object::ObjectSection rodata;
+                rodata.name = ".rodata"; rodata.data = sections[".rodata"]; rodata.alignment = 8; rodata.flags = 0x2;
+                artifact.addSection(rodata);
+            }
+            for (const auto& sym : codeGenerator.getSymbols()) {
+                target::artifact::object::ObjectSymbol out;
+                out.name = sym.name; out.value = sym.value; out.size = sym.size;
+                out.type = sym.type == 2 ? target::artifact::object::SymbolType::Function
+                                         : target::artifact::object::SymbolType::NoType;
+                out.binding = sym.binding == 1 ? target::artifact::object::SymbolBinding::Global
+                                               : target::artifact::object::SymbolBinding::Local;
+                out.sectionName = sym.sectionName; artifact.addSymbol(out);
+            }
+            for (const auto& reloc : codeGenerator.getRelocations())
+                artifact.addRelocation({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+            target::artifact::linker::InternalLinker linker;
+            target::artifact::linker::LinkedImage linked;
+            if (!linker.link({artifact}, linked, target::artifact::linker::LinkOutputKind::Executable)) {
+                std::cerr << "Error linking ELF: " << linker.getLastError() << std::endl; return 1;
+            }
+            target::artifact::linker::ElfExecutableImageBuilder builder;
+            if (!builder.build(linked, outputFile)) {
+                std::cerr << "Error generating executable: " << builder.getLastError() << std::endl; return 1;
+            }
+            std::cout << "Executable generated successfully: " << outputFile << std::endl;
         }
     } else {
         codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);

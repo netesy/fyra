@@ -130,11 +130,13 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
 
             symbolNames[i] = symName;
 
-            if (!symName.empty() && s.StorageClass == IMAGE_SYM_CLASS_EXTERNAL) {
+            if (!symName.empty() && (s.StorageClass == IMAGE_SYM_CLASS_EXTERNAL ||
+                                     s.StorageClass == IMAGE_SYM_CLASS_STATIC)) {
                 ObjectSymbol osym;
                 osym.name = symName;
                 osym.value = s.Value;
-                osym.binding = SymbolBinding::Global;
+                osym.binding = s.StorageClass == IMAGE_SYM_CLASS_EXTERNAL
+                                   ? SymbolBinding::Global : SymbolBinding::Local;
                 osym.type = (s.Type == 0x20) ? SymbolType::Function : SymbolType::NoType;
 
                 if (s.SectionNumber > 0 && static_cast<size_t>(s.SectionNumber) <= sectionNames.size()) {
@@ -166,6 +168,8 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                     orel.symbolName = symbolNames[rel.SymbolTableIndex];
                 }
                 orel.type = (rel.Type == 0x0004) ? "R_X86_64_PC32" : "R_TYPE_" + std::to_string(rel.Type);
+                // AMD64 REL32 is relative to the end of its four-byte field.
+                if (rel.Type == 0x0004) orel.addend = -4;
                 outArtifact.addRelocation(orel);
             }
         }

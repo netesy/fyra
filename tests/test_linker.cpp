@@ -5,6 +5,7 @@
 #include "target/artifact/linker/LinkedImage.h"
 #include "target/artifact/linker/TargetDynamicImageBuilder.h"
 #include "target/artifact/linker/DynamicLinkPlan.h"
+#include "target/artifact/executable/PeImage.h"
 #include <dlfcn.h>
 #include "target/artifact/archive/ArchiveWriter.h"
 #include "target/artifact/archive/UnixArchiveWriter.h"
@@ -13,6 +14,9 @@
 #include <cassert>
 #include <vector>
 #include <string>
+#include <algorithm>
+#include <cstring>
+#include <fstream>
 
 using namespace target::artifact::object;
 using namespace target::artifact::linker;
@@ -383,9 +387,47 @@ void test_common_dynamic_harness() {
     pePlan.os = target::OS::Windows;
     auto peBuilder = TargetDynamicImageBuilder::createForTarget(target::Arch::X64, target::OS::Windows);
     assert(peBuilder != nullptr);
-    bool peOk = peBuilder->buildSharedLibrary(pePlan, "test_libanswer.dll");
-    assert(!peOk);
-    assert(peBuilder->getLastError().find("not implemented for target: Windows/PE") != std::string::npos);
+    const std::string dllPath = "test_libanswer.dll";
+    bool peOk = peBuilder->buildSharedLibrary(pePlan, dllPath);
+    assert(peOk);
+    std::ifstream peFile(dllPath, std::ios::binary);
+    std::vector<uint8_t> peBytes((std::istreambuf_iterator<char>(peFile)), {});
+    assert(peBytes.size() >= 0x200);
+    assert(peBytes[0] == 'M' && peBytes[1] == 'Z');
+    uint32_t peOffset = 0;
+    std::memcpy(&peOffset, peBytes.data() + 0x3c, 4);
+    assert(std::memcmp(peBytes.data() + peOffset, "PE\0\0", 4) == 0);
+    uint16_t machine = 0, characteristics = 0, optionalMagic = 0;
+    std::memcpy(&machine, peBytes.data() + peOffset + 4, 2);
+    std::memcpy(&characteristics, peBytes.data() + peOffset + 4 + 18, 2);
+    std::memcpy(&optionalMagic, peBytes.data() + peOffset + 4 + 20, 2);
+    assert(machine == 0x8664 && optionalMagic == 0x20b);
+    assert((characteristics & 0x2000) != 0);
+    uint32_t entryRva = 1, exportRva = 0, exportSize = 0;
+    std::memcpy(&entryRva, peBytes.data() + peOffset + 4 + 20 + 16, 4);
+    std::memcpy(&exportRva, peBytes.data() + peOffset + 4 + 20 + 112, 4);
+    std::memcpy(&exportSize, peBytes.data() + peOffset + 4 + 20 + 116, 4);
+    assert(entryRva == 0 && exportRva != 0 && exportSize >= 40);
+    uint32_t ordinalBase = 0, functionRva = 0;
+    std::memcpy(&ordinalBase, peBytes.data() + 0x400 + 16, 4);
+    std::memcpy(&functionRva, peBytes.data() + 0x400 + 40, 4);
+    assert(ordinalBase == 1 && functionRva == 0x1000);
+    assert(std::search(peBytes.begin(), peBytes.end(), pePlan.exports[0].symbol.begin(),
+                       pePlan.exports[0].symbol.end()) != peBytes.end());
+
+    // The executable facade consumes the neutral LinkedImage and reaches the same writer.
+    ObjectArtifact winArtifact = art;
+    winArtifact.format = ObjectFormat::COFF;
+    winArtifact.os = target::OS::Windows;
+    LinkedImage exeImage;
+    assert(linker.link({winArtifact}, exeImage, LinkOutputKind::Executable));
+    target::artifact::executable::PeExecutableImageBuilder exeBuilder;
+    assert(exeBuilder.build(exeImage, "test_linked.exe"));
+    std::ifstream exeFile("test_linked.exe", std::ios::binary);
+    std::vector<uint8_t> exeBytes((std::istreambuf_iterator<char>(exeFile)), {});
+    assert(exeBytes.size() >= 0x200 && exeBytes[0] == 'M' && exeBytes[1] == 'Z');
+    std::remove("test_linked.exe");
+    std::remove(dllPath.c_str());
 
     // 3. Dispatch to Mach-O Builder with same neutral plan
     DynamicLinkPlan machoPlan = neutralPlan;

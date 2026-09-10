@@ -1,6 +1,4 @@
 #include "codegen/objectgen/PlatformGenerators.h"
-#include "target/artifact/executable/elf.hh"
-#include "target/artifact/executable/pe.hh"
 #include "target/artifact/executable/macho.hh"
 #include "target/artifact/object/ObjectReader.h"
 #include <iostream>
@@ -34,25 +32,6 @@ ObjectGenResult LinuxObjectGenerator::generate(const std::string& asmPath, const
         }
     }
     
-    return result;
-}
-
-ObjectGenResult LinuxObjectGenerator::generateNativeELF(const std::map<std::string, std::vector<uint8_t>>& sections,
-                                                          const std::vector<ElfGenerator::Symbol>& symbols,
-                                                          const std::vector<ElfGenerator::Relocation>& relocations,
-                                                          const std::string& objPath) {
-    ObjectGenResult result;
-    ElfGenerator elfGen("input.fyra");
-    elfGen.setMachine(62); // EM_X86_64
-
-    if (elfGen.generateRelocatableFromCode(sections, symbols, relocations, objPath)) {
-        result.success = true;
-        result.objectPath = objPath;
-    } else {
-        result.success = false;
-        result.errorOutput = "Native ELF relocatable serialization failed: " + elfGen.getLastError();
-    }
-
     return result;
 }
 
@@ -174,25 +153,6 @@ ObjectGenResult WindowsObjectGenerator::generate(const std::string& asmPath, con
     result.success = fileExists(objPath);
     result.objectPath = objPath;
     
-    return result;
-}
-
-ObjectGenResult WindowsObjectGenerator::generateNativeCOFF(const std::map<std::string, std::vector<uint8_t>>& sections,
-                                                           const std::vector<PEGenerator::Symbol>& symbols,
-                                                           const std::vector<PEGenerator::Relocation>& relocations,
-                                                           const std::string& objPath) {
-    ObjectGenResult result;
-    PEGenerator peGen(true);
-    peGen.setMachine(0x8664);
-
-    if (peGen.generateRelocatableFromCode(sections, symbols, relocations, objPath)) {
-        result.success = true;
-        result.objectPath = objPath;
-    } else {
-        result.success = false;
-        result.errorOutput = "Native COFF relocatable serialization failed: " + peGen.getLastError();
-    }
-
     return result;
 }
 

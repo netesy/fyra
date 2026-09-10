@@ -153,27 +153,11 @@ set_tests_properties(SimpleWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_
 # set_tests_properties(RiscVInMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 if(FYRA_ENABLE_EXTENDED_TESTS)
-    add_executable(test_inmemory_aarch64_exec test_inmemory_aarch64_exec.cpp)
-    target_link_libraries(test_inmemory_aarch64_exec PRIVATE fyra)
-
-    add_test(NAME AArch64InMemoryExecTest COMMAND test_inmemory_aarch64_exec)
-    set_tests_properties(AArch64InMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-endif()
-
-if(FYRA_ENABLE_EXTENDED_TESTS)
     add_executable(test_benchmark_suite test_benchmark_suite.cpp)
     target_link_libraries(test_benchmark_suite PRIVATE fyra)
 
     add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
     set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-endif()
-
-if(FYRA_ENABLE_EXTENDED_TESTS)
-    add_executable(test_sqlite_clone test_sqlite_clone.cpp)
-    target_link_libraries(test_sqlite_clone PRIVATE fyra)
-
-    add_test(NAME SqliteCloneTest COMMAND test_sqlite_clone)
-    set_tests_properties(SqliteCloneTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
 
 add_executable(test_http_server test_http_server.cpp)
@@ -182,9 +166,13 @@ target_link_libraries(test_http_server PRIVATE fyra)
 add_test(NAME HttpServerTest COMMAND test_http_server)
 set_tests_properties(HttpServerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_sqlite_clone test_sqlite_clone.cpp)
+    target_link_libraries(test_sqlite_clone PRIVATE fyra)
+    add_test(NAME SqliteCloneTest COMMAND test_sqlite_clone)
+    set_tests_properties(SqliteCloneTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     add_executable(test_phpish_frontend test_phpish_frontend.cpp)
     target_link_libraries(test_phpish_frontend PRIVATE fyra)
-
     add_test(NAME PhpishFrontendTest COMMAND test_phpish_frontend)
     set_tests_properties(PhpishFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -195,11 +183,11 @@ if(FYRA_ENABLE_EXTENDED_TESTS)
     set_tests_properties(VoiletFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
 
-add_executable(test_pe_generator test_pe_generator.cpp)
-target_link_libraries(test_pe_generator PRIVATE fyra)
+add_executable(test_elf_image test_elf_image.cpp)
+target_link_libraries(test_elf_image PRIVATE fyra)
 
-add_test(NAME PEGeneratorTest COMMAND test_pe_generator)
-set_tests_properties(PEGeneratorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME ELFImageTest COMMAND test_elf_image)
+set_tests_properties(ELFImageTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_extern test_extern.cpp)
 target_link_libraries(test_extern PRIVATE fyra)

@@ -16,8 +16,9 @@
 #include "target/core/TargetInfo.h"
 #include "target/core/TargetDescriptor.h"
 
-#include "target/artifact/executable/elf.hh"
-#include "target/artifact/executable/pe.hh"
+#include "target/artifact/executable/ElfImage.h"
+#include "target/artifact/linker/InternalLinker.h"
+#include "target/artifact/object/ObjectArtifact.h"
 
 namespace {
 
@@ -68,7 +69,7 @@ MiniProgram parseMiniPhpLike(const std::string& source) {
     return program;
 }
 
-int compileAndRun(const MiniProgram& program, bool isWindows = false) {
+int compileAndRun(const MiniProgram& program) {
     using namespace ir;
     using namespace codegen;
     using namespace target;
@@ -112,12 +113,7 @@ int compileAndRun(const MiniProgram& program, bool isWindows = false) {
     auto* methodResult = builder.createCall(methodFn, {obj, argVal}, i32);
     builder.createRet(methodResult);
 
-    std::unique_ptr<TargetInfo> target;
-    if (isWindows) {
-        target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
-    } else {
-        target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
-    }
+    auto target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
 
     CodeGen cg(module, std::move(target), nullptr);
     cg.emit(true);
@@ -126,62 +122,49 @@ int compileAndRun(const MiniProgram& program, bool isWindows = false) {
     sections[".text"] = cg.getAssembler().getCode();
     sections[".data"] = cg.getRodataAssembler().getCode();
 
-    const std::string outputPath = isWindows ? "./example_phpish.exe" : "./example_phpish";
-
-    if (isWindows) {
-        PEGenerator peGen(true); // 64-bit
-        std::vector<PEGenerator::Symbol> symbols;
-        for (const auto& sym : cg.getSymbols()) {
-            symbols.push_back({sym.name, sym.value, sym.size, static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
-        }
-        std::vector<PEGenerator::Relocation> relocs;
-        for (const auto& reloc : cg.getRelocations()) {
-            relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-        }
-        if (!peGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-             throw std::runtime_error("PE generation failed: " + peGen.getLastError());
-        }
-    } else {
-        ElfGenerator elfGen("phpish_oop_inmemory");
-        elfGen.setMachine(62); // EM_X86_64
-        elfGen.setBaseAddress(0x400000);
-
-        std::vector<ElfGenerator::Symbol> symbols;
-        for (const auto& sym : cg.getSymbols()) {
-            symbols.push_back({sym.name, sym.value, sym.size,
-                               static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
-        }
-
-        std::vector<ElfGenerator::Relocation> relocs;
-        for (const auto& reloc : cg.getRelocations()) {
-            relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-        }
-
-        if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-            throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
-        }
-        std::string chmodCmd = "chmod +x " + outputPath;
-        if (std::system(chmodCmd.c_str()) != 0) {
-            throw std::runtime_error("chmod failed for generated executable.");
-        }
+    const std::string outputPath = "./example_phpish";
+    target::artifact::object::ObjectArtifact artifact;
+    artifact.format = target::artifact::object::ObjectFormat::ELF;
+    artifact.arch = target::Arch::X64;
+    artifact.os = target::OS::Linux;
+    target::artifact::object::ObjectSection text;
+    text.name = ".text"; text.data = sections[".text"]; text.alignment = 16; text.flags = 0x6;
+    artifact.addSection(text);
+    for (const auto& sym : cg.getSymbols()) {
+        target::artifact::object::ObjectSymbol objectSymbol;
+        objectSymbol.name = sym.name; objectSymbol.value = sym.value; objectSymbol.size = sym.size;
+        objectSymbol.type = sym.type == 2 ? target::artifact::object::SymbolType::Function
+                                          : target::artifact::object::SymbolType::NoType;
+        objectSymbol.binding = sym.binding == 1 ? target::artifact::object::SymbolBinding::Global
+                                                 : target::artifact::object::SymbolBinding::Local;
+        objectSymbol.sectionName = sym.sectionName;
+        artifact.addSymbol(objectSymbol);
+    }
+    for (const auto& reloc : cg.getRelocations()) {
+        artifact.addRelocation({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
+    }
+    target::artifact::linker::InternalLinker linker;
+    target::artifact::linker::LinkedImage image;
+    if (!linker.link({artifact}, image, target::artifact::linker::LinkOutputKind::Executable)) {
+        throw std::runtime_error("ELF link failed: " + linker.getLastError());
+    }
+    target::artifact::linker::ElfExecutableImageBuilder imageBuilder;
+    if (!imageBuilder.build(image, outputPath)) {
+        throw std::runtime_error("ELF generation failed: " + imageBuilder.getLastError());
     }
 
-    std::string runCmd = isWindows ? "wine " + outputPath : outputPath;
+    std::string runCmd = outputPath;
     int result = std::system(runCmd.c_str());
     if (result == -1) {
         throw std::runtime_error("Failed to run generated executable.");
     }
 
-    return isWindows ? (result & 0xFF) : WEXITSTATUS(result);
+    return WEXITSTATUS(result);
 }
 
 } // namespace
 
-int main(int argc, char** argv) {
-    bool testWindows = false;
-    if (argc > 1 && std::string(argv[1]) == "--windows") {
-        testWindows = true;
-    }
+int main() {
     const std::string source = R"(
 class Counter {
     var value;
@@ -200,9 +183,9 @@ main {
 
     try {
         MiniProgram program = parseMiniPhpLike(source);
-        int exitCode = compileAndRun(program, testWindows);
+        int exitCode = compileAndRun(program);
 
-        std::cout << (testWindows ? "Windows" : "Linux") << " program returned: " << exitCode << '\n';
+        std::cout << "Linux program returned: " << exitCode << '\n';
         std::cout << "Expected: " << (program.initValue + program.methodArg) << '\n';
 
         if (exitCode != program.initValue + program.methodArg) {
