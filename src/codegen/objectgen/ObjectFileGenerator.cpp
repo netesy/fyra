@@ -1,7 +1,10 @@
 #include "codegen/objectgen/ObjectFileGenerator.h"
 #include "codegen/objectgen/PlatformGenerators.h"
+#include "target/artifact/archive/UnixArchiveWriter.hh"
 #include <filesystem>
 #include <iostream>
+#include <fstream>
+#include <cstring>
 #include <thread>
 #include <future>
 #include <chrono>
@@ -16,37 +19,237 @@
 namespace codegen {
 namespace objectgen {
 
+// Internal Unix Static Archive Writer Implementation
+namespace {
+std::string formatArchiveHeader(const std::string& name, size_t size) {
+    std::string n = name;
+    if (n != "/" && n != "//" && n.back() != '/') {
+        n += "/";
+    }
+    char buf[61];
+    std::memset(buf, ' ', 60);
+    buf[60] = '\0';
+
+    auto writeField = [&](size_t offset, size_t width, const std::string& val) {
+        size_t len = std::min(val.size(), width);
+        std::memcpy(buf + offset, val.c_str(), len);
+    };
+
+    writeField(0, 16, n);
+    writeField(16, 12, "0");
+    writeField(28, 6, "0");
+    writeField(34, 6, "0");
+    writeField(40, 8, (name == "/" || name == "//") ? "0" : "644");
+    writeField(48, 10, std::to_string(size));
+    buf[58] = '`';
+    buf[59] = '\n';
+
+    return std::string(buf, 60);
+}
+
+struct ExtractedSymbol {
+    std::string name;
+    uint32_t memberFileOffset;
+};
+
+std::vector<std::string> extractExportedElfSymbols(const std::vector<uint8_t>& elfData) {
+    std::vector<std::string> syms;
+    if (elfData.size() < 64) return syms;
+    if (elfData[0] != 0x7f || elfData[1] != 'E' || elfData[2] != 'L' || elfData[3] != 'F') return syms;
+
+    uint64_t shoff = *reinterpret_cast<const uint64_t*>(&elfData[40]);
+    uint16_t shentsize = *reinterpret_cast<const uint16_t*>(&elfData[58]);
+    uint16_t shnum = *reinterpret_cast<const uint16_t*>(&elfData[60]);
+    uint16_t shstrndx = *reinterpret_cast<const uint16_t*>(&elfData[62]);
+
+    if (shoff + shnum * shentsize > elfData.size()) return syms;
+    if (shstrndx >= shnum) return syms;
+
+    uint64_t shstr_off = *reinterpret_cast<const uint64_t*>(&elfData[shoff + shstrndx * shentsize + 24]);
+    uint64_t shstr_size = *reinterpret_cast<const uint64_t*>(&elfData[shoff + shstrndx * shentsize + 32]);
+
+    uint64_t symtab_off = 0, symtab_size = 0, symtab_entsize = 24, symtab_link = 0;
+    uint64_t strtab_off = 0, strtab_size = 0;
+
+    for (uint16_t i = 0; i < shnum; ++i) {
+        uint64_t hdr = shoff + i * shentsize;
+        uint32_t type = *reinterpret_cast<const uint32_t*>(&elfData[hdr + 4]);
+        if (type == 2) { // SHT_SYMTAB
+            symtab_off = *reinterpret_cast<const uint64_t*>(&elfData[hdr + 24]);
+            symtab_size = *reinterpret_cast<const uint64_t*>(&elfData[hdr + 32]);
+            symtab_link = *reinterpret_cast<const uint32_t*>(&elfData[hdr + 40]);
+            symtab_entsize = *reinterpret_cast<const uint64_t*>(&elfData[hdr + 56]);
+            if (symtab_entsize == 0) symtab_entsize = 24;
+        }
+    }
+
+    if (symtab_off > 0 && symtab_link < shnum) {
+        uint64_t str_hdr = shoff + symtab_link * shentsize;
+        strtab_off = *reinterpret_cast<const uint64_t*>(&elfData[str_hdr + 24]);
+        strtab_size = *reinterpret_cast<const uint64_t*>(&elfData[str_hdr + 32]);
+    }
+
+    if (symtab_off > 0 && strtab_off > 0 && symtab_size >= symtab_entsize) {
+        size_t count = symtab_size / symtab_entsize;
+        for (size_t i = 1; i < count; ++i) {
+            uint64_t entry = symtab_off + i * symtab_entsize;
+            if (entry + 24 > elfData.size()) break;
+            uint32_t nameIdx = *reinterpret_cast<const uint32_t*>(&elfData[entry]);
+            uint8_t info = *reinterpret_cast<const uint8_t*>(&elfData[entry + 4]);
+            uint16_t shndx = *reinterpret_cast<const uint16_t*>(&elfData[entry + 6]);
+
+            uint8_t bind = info >> 4;
+            if ((bind == 1 || bind == 2) && shndx != 0 && shndx < 0xFF00) { // STB_GLOBAL or STB_WEAK, defined
+                if (strtab_off + nameIdx < elfData.size()) {
+                    const char* sname = reinterpret_cast<const char*>(&elfData[strtab_off + nameIdx]);
+                    if (sname[0] != '\0') {
+                        syms.push_back(std::string(sname));
+                    }
+                }
+            }
+        }
+    }
+
+    return syms;
+}
+} // namespace
+
+bool UnixArchiveWriter::createArchive(const std::vector<ArchiveMember>& members,
+                                       const std::string& outputPath,
+                                       std::string& errorOutput) {
+    if (members.empty()) {
+        errorOutput = "Cannot create empty static archive";
+        return false;
+    }
+
+    // Pass 1: Extract symbols per member to build GNU archive symbol index ('/' member)
+    std::vector<std::pair<std::string, size_t>> allSymbolsWithMemberIndex;
+    for (size_t mIdx = 0; mIdx < members.size(); ++mIdx) {
+        auto syms = extractExportedElfSymbols(members[mIdx].data);
+        for (const auto& sym : syms) {
+            allSymbolsWithMemberIndex.push_back({sym, mIdx});
+        }
+    }
+
+    struct MemberPosition {
+        ArchiveMember member;
+        uint64_t fileOffset = 0;
+    };
+    std::vector<MemberPosition> memberPositions;
+
+    const bool hasSymbols = !allSymbolsWithMemberIndex.empty();
+    uint64_t memberOffsetCursor = 8;
+
+    if (hasSymbols) {
+        size_t indexPayloadSize = 4 + (allSymbolsWithMemberIndex.size() * 4);
+        for (const auto& [sym, mIdx] : allSymbolsWithMemberIndex) {
+            indexPayloadSize += sym.size() + 1;
+        }
+
+        uint64_t indexMemberSize = 60 + indexPayloadSize;
+        if (indexMemberSize % 2 != 0) indexMemberSize++;
+        memberOffsetCursor += indexMemberSize;
+    }
+
+    for (const auto& m : members) {
+        MemberPosition pos;
+        pos.member = m;
+        pos.fileOffset = memberOffsetCursor;
+        memberPositions.push_back(pos);
+
+        uint64_t size = m.data.size();
+        uint64_t paddedSize = 60 + size + (size % 2 != 0 ? 1 : 0);
+        memberOffsetCursor += paddedSize;
+    }
+
+    // Open file and write archive
+    std::ofstream file(outputPath, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        errorOutput = "Cannot open output archive file: " + outputPath;
+        return false;
+    }
+
+    // Write Magic
+    file.write("!<arch>\n", 8);
+
+    if (hasSymbols) {
+        // Build binary '/' symbol index payload
+        std::vector<uint8_t> indexPayload;
+        uint32_t numSymsBE = __builtin_bswap32(static_cast<uint32_t>(allSymbolsWithMemberIndex.size()));
+        const uint8_t* numBytes = reinterpret_cast<const uint8_t*>(&numSymsBE);
+        indexPayload.insert(indexPayload.end(), numBytes, numBytes + 4);
+
+        for (const auto& [sym, mIdx] : allSymbolsWithMemberIndex) {
+            uint32_t offBE = __builtin_bswap32(static_cast<uint32_t>(memberPositions[mIdx].fileOffset));
+            const uint8_t* offBytes = reinterpret_cast<const uint8_t*>(&offBE);
+            indexPayload.insert(indexPayload.end(), offBytes, offBytes + 4);
+        }
+
+        for (const auto& [sym, mIdx] : allSymbolsWithMemberIndex) {
+            indexPayload.insert(indexPayload.end(), sym.begin(), sym.end());
+            indexPayload.push_back(0);
+        }
+
+        // Write Symbol Index '/' Member Header and Payload
+        std::string indexHdr = formatArchiveHeader("/", indexPayload.size());
+        file.write(indexHdr.data(), 60);
+        file.write(reinterpret_cast<const char*>(indexPayload.data()), indexPayload.size());
+        if (indexPayload.size() % 2 != 0) {
+            file.put('\n');
+        }
+    } else {
+        // GNU ar empty symbol table '/' member
+        uint32_t zeroSyms = 0;
+        std::string indexHdr = formatArchiveHeader("/", 4);
+        file.write(indexHdr.data(), 60);
+        file.write(reinterpret_cast<const char*>(&zeroSyms), 4);
+    }
+
+    // Write Member Headers and Data
+    for (const auto& pos : memberPositions) {
+        std::string memberHdr = formatArchiveHeader(pos.member.name, pos.member.data.size());
+        file.write(memberHdr.data(), 60);
+        file.write(reinterpret_cast<const char*>(pos.member.data.data()), pos.member.data.size());
+        if (pos.member.data.size() % 2 != 0) {
+            file.put('\n');
+        }
+    }
+
+    file.close();
+    return !file.fail();
+}
+
 // PlatformObjectGenerator base implementation
 ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<std::string>& objPaths,
                                                               const std::string& libPath) {
     ObjectGenResult result;
-    std::string arTool = getToolPath("ar");
-    if (arTool.empty()) arTool = getToolPath("llvm-ar");
-    if (arTool.empty()) arTool = getToolPath("lib.exe");
-    if (arTool.empty()) {
-        result.success = false;
-        result.errorOutput = "Archiver tool (ar/llvm-ar/lib) not found in PATH";
-        return result;
+    std::vector<ArchiveMember> members;
+    for (const auto& p : objPaths) {
+        std::ifstream file(p, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            result.success = false;
+            result.errorOutput = "Cannot open member object file: " + p;
+            return result;
+        }
+        std::streamsize sz = file.tellg();
+        file.seekg(0, std::ios::beg);
+        std::vector<uint8_t> buf(sz);
+        file.read(reinterpret_cast<char*>(buf.data()), sz);
+
+        std::filesystem::path fpath(p);
+        ArchiveMember m;
+        m.name = fpath.filename().string();
+        m.data = std::move(buf);
+        members.push_back(std::move(m));
     }
 
-    std::string cmd;
-    if (arTool.find("lib.exe") != std::string::npos || arTool.find("LIB.EXE") != std::string::npos) {
-        cmd = arTool + " /OUT:\"" + libPath + "\"";
-        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
-    } else {
-        cmd = arTool + " rcs \"" + libPath + "\"";
-        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
-    }
-
-    std::string output, errorOutput;
-    int exitCode = 0;
-    if (executeCommand(cmd, output, errorOutput, exitCode) && exitCode == 0) {
+    std::string err;
+    if (UnixArchiveWriter::createArchive(members, libPath, err)) {
         result.success = true;
         result.objectPath = libPath;
-        result.assemblerOutput = output;
     } else {
         result.success = false;
-        result.errorOutput = "Archiver command failed with exit code " + std::to_string(exitCode) + ": " + output + " " + errorOutput;
+        result.errorOutput = err;
     }
     return result;
 }

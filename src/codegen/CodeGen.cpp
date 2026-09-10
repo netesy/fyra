@@ -123,7 +123,8 @@ void CodeGen::emitFunction(ir::Function& func) {
                 *os << "\n";
             }
             *os << ".globl " << func.getName() << "\n" << func.getName() << ":\n";
-        } else if (assembler) {
+        }
+        if (assembler) {
             SymbolInfo func_sym;
             func_sym.name = func.getName();
             func_sym.sectionName = ".text";

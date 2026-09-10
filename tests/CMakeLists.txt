@@ -12,6 +12,12 @@ target_link_libraries(test_codegen PRIVATE fyra)
 add_test(NAME CodeGenTest COMMAND test_codegen)
 set_tests_properties(CodeGenTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_archive_writers test_archive_writers.cpp)
+target_link_libraries(test_archive_writers PRIVATE fyra)
+
+add_test(NAME ArchiveWritersTest COMMAND test_archive_writers)
+set_tests_properties(ArchiveWritersTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_add test_add.cpp)
 target_link_libraries(test_add PRIVATE fyra)
 
@@ -41,18 +47,6 @@ target_link_libraries(test_windows PRIVATE fyra)
 
 add_test(NAME WindowsTest COMMAND test_windows)
 set_tests_properties(WindowsTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# add_executable(test_windows_arm64 test_windows_arm64.cpp)
-# target_link_libraries(test_windows_arm64 PRIVATE fyra)
-
-# add_test(NAME WindowsArm64Test COMMAND test_windows_arm64)
-# set_tests_properties(WindowsArm64Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# add_executable(test_windows_amd64 test_windows_amd64.cpp)
-# target_link_libraries(test_windows_amd64 PRIVATE fyra)
-
-# add_test(NAME WindowsAmd64Test COMMAND test_windows_amd64)
-# set_tests_properties(WindowsAmd64Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_aarch64 test_aarch64.cpp)
 target_link_libraries(test_aarch64 PRIVATE fyra)
@@ -133,24 +127,6 @@ target_link_libraries(simple_wasm_test PRIVATE fyra)
 
 add_test(NAME SimpleWasmTest COMMAND simple_wasm_test)
 set_tests_properties(SimpleWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# add_executable(test_linux_exec test_linux_exec.cpp)
-# target_link_libraries(test_linux_exec PRIVATE fyra)
-
-# add_test(NAME LinuxExecTest COMMAND test_linux_exec)
-# set_tests_properties(LinuxExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# add_executable(test_inmemory_linux_exec test_inmemory_linux_exec.cpp)
-# target_link_libraries(test_inmemory_linux_exec PRIVATE fyra)
-
-# add_test(NAME LinuxInMemoryExecTest COMMAND test_inmemory_linux_exec)
-# set_tests_properties(LinuxInMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-# add_executable(test_inmemory_riscv_exec test_inmemory_riscv_exec.cpp)
-# target_link_libraries(test_inmemory_riscv_exec PRIVATE fyra)
-
-# add_test(NAME RiscVInMemoryExecTest COMMAND test_inmemory_riscv_exec)
-# set_tests_properties(RiscVInMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 if(FYRA_ENABLE_EXTENDED_TESTS)
     add_executable(test_inmemory_aarch64_exec test_inmemory_aarch64_exec.cpp)
