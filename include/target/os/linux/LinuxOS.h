@@ -30,7 +30,12 @@ public:
     void emitSecurityCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
     void emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
 
+    bool supportsGNUAssemblyMetadata() const override { return true; }
+    std::string formatFunctionTypeDirective(const std::string& name, const ArchitectureInfo& arch) const override;
+    std::string formatFunctionSizeDirective(const std::string& name) const override;
+
     void emitHeader(CodeGen& cg) override;
+    void emitFooter(CodeGen& cg) override;
     void emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) override;
 };
 

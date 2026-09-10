@@ -127,6 +127,9 @@ public:
 
     std::string formatStackOperand(int o) const override;
     std::string formatGlobalOperand(const std::string& n) const override;
+    bool supportsGNUAssemblyMetadata() const override;
+    std::string formatFunctionTypeDirective(const std::string& name) const override;
+    std::string formatFunctionSizeDirective(const std::string& name) const override;
     std::string getImmediatePrefix() const override;
     std::string getLabelPrefix() const override;
     std::string getAssemblyFileExtension() const override;

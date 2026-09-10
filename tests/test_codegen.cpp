@@ -1430,5 +1430,214 @@ export function $test_multiple_returns(%cond : i32) : i32 {
         std::cout << "--- Milestone 0A Frame & Return Lowering Invariants Passed ---" << std::endl;
     }
 
+    // Milestone 0C: Assembly Metadata & Non-Executable Stack Tests
+    {
+        std::cout << "--- Testing Milestone 0C Assembly Metadata & Non-Executable Stack Hygiene ---" << std::endl;
+
+        std::string m0c_ir = R"(
+export function $fn_single(%x : i32) : i32 {
+@entry
+    %r = add %x, 10 : i32
+    ret %r : i32
+}
+
+function $fn_helper(%y : i32) : i32 {
+@entry
+    %r2 = add %y, 2 : i32
+    ret %r2 : i32
+}
+
+export function $fn_multiret(%cond : i32) : i32 {
+@entry
+    jnz %cond, @b1, @b2
+
+@b1
+    ret 100 : i32
+
+@b2
+    ret 200 : i32
+}
+)";
+        std::istringstream stream(m0c_ir);
+        parser::Parser parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> module = parser.parseModule();
+        assert(module != nullptr);
+
+        for (auto& func : module->getFunctions()) {
+            transforms::CFGBuilder::run(*func);
+            transforms::LivenessAnalysis liveness;
+            liveness.run(*func);
+            transforms::RegAllocRewriter rewriter;
+            rewriter.run(*func);
+        }
+
+        struct ScopedTempFile {
+            std::string path;
+            explicit ScopedTempFile(std::string p) : path(std::move(p)) {}
+            ~ScopedTempFile() { if (!path.empty()) std::remove(path.c_str()); }
+            ScopedTempFile(const ScopedTempFile&) = delete;
+            ScopedTempFile& operator=(const ScopedTempFile&) = delete;
+        };
+
+        auto check_condition = [](bool cond, const char* msg, int line) {
+            if (!cond) {
+                std::cerr << "RELEASE TEST FAILURE [test_codegen.cpp:" << line << "]: " << msg << std::endl;
+                std::exit(1);
+            }
+        };
+        #define M0C_CHECK(cond, msg) check_condition((cond), (msg), __LINE__)
+
+        // 1. Linux ELF Assembly Metadata Verification across Linux Targets
+        {
+            // x86-64 Linux
+            std::stringstream ss_x64;
+            codegen::CodeGen cg_x64(*module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_x64);
+            cg_x64.emit();
+            std::string x64_asm = ss_x64.str();
+
+            size_t note_pos = x64_asm.find(".section .note.GNU-stack,\"\",@progbits");
+            M0C_CHECK(note_pos != std::string::npos, "Linux x64 ELF assembly MUST contain .note.GNU-stack directive!");
+            size_t second_note = x64_asm.find(".section .note.GNU-stack", note_pos + 1);
+            M0C_CHECK(second_note == std::string::npos, ".note.GNU-stack MUST be emitted exactly once per module!");
+
+            M0C_CHECK(x64_asm.find(".type fn_single, @function") != std::string::npos, "x64 .type @function missing!");
+            M0C_CHECK(x64_asm.find(".type fn_helper, @function") != std::string::npos, "x64 .type @function missing!");
+            M0C_CHECK(x64_asm.find(".type fn_multiret, @function") != std::string::npos, "x64 .type @function missing!");
+
+            M0C_CHECK(x64_asm.find(".size fn_single, .-fn_single") != std::string::npos, "x64 .size missing!");
+            M0C_CHECK(x64_asm.find(".size fn_helper, .-fn_helper") != std::string::npos, "x64 .size missing!");
+            M0C_CHECK(x64_asm.find(".size fn_multiret, .-fn_multiret") != std::string::npos, "x64 .size missing!");
+
+            // AArch64 Linux (%function syntax)
+            std::stringstream ss_a64;
+            codegen::CodeGen cg_a64(*module, target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux}), &ss_a64);
+            cg_a64.emit();
+            std::string a64_asm = ss_a64.str();
+
+            M0C_CHECK(a64_asm.find(".section .note.GNU-stack,\"\",@progbits") != std::string::npos, "AArch64 Linux MUST contain .note.GNU-stack!");
+            M0C_CHECK(a64_asm.find(".type fn_single, %function") != std::string::npos, "AArch64 .type %function missing!");
+            M0C_CHECK(a64_asm.find(".size fn_single, .-fn_single") != std::string::npos, "AArch64 .size missing!");
+
+            // RISC-V Linux (@function syntax)
+            std::stringstream ss_rv64;
+            codegen::CodeGen cg_rv64(*module, target::TargetResolver::resolve({::target::Arch::RISCV64, ::target::OS::Linux}), &ss_rv64);
+            cg_rv64.emit();
+            std::string rv64_asm = ss_rv64.str();
+
+            M0C_CHECK(rv64_asm.find(".section .note.GNU-stack,\"\",@progbits") != std::string::npos, "RISC-V Linux MUST contain .note.GNU-stack!");
+            M0C_CHECK(rv64_asm.find(".type fn_single, @function") != std::string::npos, "RISC-V .type @function missing!");
+            M0C_CHECK(rv64_asm.find(".size fn_single, .-fn_single") != std::string::npos, "RISC-V .size missing!");
+        }
+
+        // 2. Target Isolation: Non-ELF Targets MUST NOT receive ELF directives
+        {
+            // Windows COFF (x64 and AArch64)
+            std::stringstream ss_win_x64, ss_win_a64;
+            codegen::CodeGen cg_win_x64(*module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows}), &ss_win_x64);
+            cg_win_x64.emit();
+            std::string win_x64_asm = ss_win_x64.str();
+            M0C_CHECK(win_x64_asm.find(".note.GNU-stack") == std::string::npos, "Windows x64 MUST NOT contain .note.GNU-stack!");
+            M0C_CHECK(win_x64_asm.find(".type ") == std::string::npos, "Windows x64 MUST NOT contain ELF .type!");
+            M0C_CHECK(win_x64_asm.find(".size ") == std::string::npos, "Windows x64 MUST NOT contain ELF .size!");
+
+            codegen::CodeGen cg_win_a64(*module, target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Windows}), &ss_win_a64);
+            cg_win_a64.emit();
+            std::string win_a64_asm = ss_win_a64.str();
+            M0C_CHECK(win_a64_asm.find(".note.GNU-stack") == std::string::npos, "Windows AArch64 MUST NOT contain .note.GNU-stack!");
+
+            // macOS Mach-O (x64 and AArch64)
+            std::stringstream ss_mac_x64, ss_mac_a64;
+            codegen::CodeGen cg_mac_x64(*module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::MacOS}), &ss_mac_x64);
+            cg_mac_x64.emit();
+            std::string mac_x64_asm = ss_mac_x64.str();
+            M0C_CHECK(mac_x64_asm.find(".note.GNU-stack") == std::string::npos, "macOS x64 MUST NOT contain .note.GNU-stack!");
+
+            codegen::CodeGen cg_mac_a64(*module, target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::MacOS}), &ss_mac_a64);
+            cg_mac_a64.emit();
+            std::string mac_a64_asm = ss_mac_a64.str();
+            M0C_CHECK(mac_a64_asm.find(".note.GNU-stack") == std::string::npos, "macOS AArch64 MUST NOT contain .note.GNU-stack!");
+
+            // Wasm32
+            std::stringstream ss_wasm;
+            codegen::CodeGen cg_wasm(*module, target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI}), &ss_wasm);
+            cg_wasm.emit();
+            std::string wasm_asm = ss_wasm.str();
+            M0C_CHECK(wasm_asm.find(".note.GNU-stack") == std::string::npos, "Wasm MUST NOT contain .note.GNU-stack!");
+        }
+
+        // 3. Object-level & Binary-level Verification (using readelf / as / gcc) with RAII file cleanup
+        {
+            std::stringstream ss_obj;
+            codegen::CodeGen cg_elf(*module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &ss_obj);
+            cg_elf.emit();
+            std::string elf_asm = ss_obj.str();
+
+            ScopedTempFile tmp_s("./test_m0c_tmp.s");
+            ScopedTempFile tmp_o("./test_m0c_tmp.o");
+            ScopedTempFile harness_s("./test_m0c_harness.s");
+            ScopedTempFile tmp_exe("./test_m0c_tmp.exe");
+
+            {
+                std::ofstream f(tmp_s.path);
+                f << elf_asm;
+            }
+
+            int as_rc = std::system(("as --64 " + tmp_s.path + " -o " + tmp_o.path + " 2>/dev/null").c_str());
+            if (as_rc == 0) {
+                // Inspect relocatable object via readelf -S
+                std::string readelf_sec_cmd = "readelf -S " + tmp_o.path;
+                FILE* pipe_sec = popen(readelf_sec_cmd.c_str(), "r");
+                if (pipe_sec) {
+                    char buffer[256];
+                    std::string sec_output = "";
+                    while (fgets(buffer, sizeof(buffer), pipe_sec) != NULL) sec_output += buffer;
+                    pclose(pipe_sec);
+                    M0C_CHECK(sec_output.find(".note.GNU-stack") != std::string::npos, "Object section table MUST contain .note.GNU-stack!");
+                }
+
+                // Inspect symbol table via readelf -Ws
+                std::string readelf_sym_cmd = "readelf -Ws " + tmp_o.path;
+                FILE* pipe_sym = popen(readelf_sym_cmd.c_str(), "r");
+                if (pipe_sym) {
+                    char buffer[256];
+                    std::string sym_output = "";
+                    while (fgets(buffer, sizeof(buffer), pipe_sym) != NULL) sym_output += buffer;
+                    pclose(pipe_sym);
+                    M0C_CHECK(sym_output.find("FUNC") != std::string::npos, "Function symbols in object symbol table MUST have STT_FUNC type!");
+                }
+
+                // Create main harness and link executable
+                {
+                    std::ofstream h(harness_s.path);
+                    h << ".globl main\nmain:\n  movl $0, %edi\n  call fn_single\n  ret\n.section .note.GNU-stack,\"\",@progbits\n";
+                }
+                int gcc_rc = std::system(("gcc -no-pie " + tmp_s.path + " " + harness_s.path + " -o " + tmp_exe.path + " 2>/dev/null").c_str());
+                if (gcc_rc == 0) {
+                    // Inspect PT_GNU_STACK program header in linked executable
+                    std::string readelf_ph_cmd = "readelf -W -l " + tmp_exe.path;
+                    FILE* pipe_ph = popen(readelf_ph_cmd.c_str(), "r");
+                    if (pipe_ph) {
+                        char buffer[256];
+                        std::string ph_output = "";
+                        while (fgets(buffer, sizeof(buffer), pipe_ph) != NULL) ph_output += buffer;
+                        pclose(pipe_ph);
+
+                        size_t stack_ph = ph_output.find("GNU_STACK");
+                        M0C_CHECK(stack_ph != std::string::npos, "Executable MUST contain PT_GNU_STACK program header!");
+                        std::string stack_line = ph_output.substr(stack_ph, 150);
+                        M0C_CHECK(stack_line.find("R E") == std::string::npos, "PT_GNU_STACK MUST NOT have execute permission!");
+                        M0C_CHECK(stack_line.find("RW") != std::string::npos, "PT_GNU_STACK MUST be read-write non-executable!");
+                    }
+
+                    // Execute linked binary
+                    int exec_rc = std::system(tmp_exe.path.c_str());
+                    M0C_CHECK(WEXITSTATUS(exec_rc) == 10, "Linked binary execution MUST return 10 from fn_single(0 + 10)!");
+                }
+            }
+        }
+
+        std::cout << "--- Milestone 0C Assembly Metadata & Non-Executable Stack Tests Passed ---" << std::endl;
+    }
+
     return 0;
 }

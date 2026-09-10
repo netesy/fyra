@@ -140,6 +140,9 @@ public:
     virtual std::string formatStackOperand(int offset) const = 0;
     virtual std::string formatGlobalOperand(const std::string& name) const = 0;
     virtual std::string getImmediatePrefix() const { return "$"; }
+    virtual bool supportsGNUAssemblyMetadata() const { return false; }
+    virtual std::string formatFunctionTypeDirective(const std::string& name) const { return ""; }
+    virtual std::string formatFunctionSizeDirective(const std::string& name) const { return ""; }
     virtual std::string getLabelPrefix() const { return "L"; }
     virtual std::string getAssemblyFileExtension() const { return ".s"; }
     virtual std::string getObjectFileExtension() const { return ".o"; }

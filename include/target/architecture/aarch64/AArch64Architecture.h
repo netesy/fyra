@@ -71,6 +71,7 @@ public:
     bool isCalleeSaved(const std::string& reg) const override;
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
     std::string getImmediatePrefix() const override { return "#"; }
+    std::string getFunctionTypeSpecifier() const override { return "%function"; }
 
 private:
     void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);

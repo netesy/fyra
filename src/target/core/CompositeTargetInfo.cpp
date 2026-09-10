@@ -125,6 +125,13 @@ void CompositeTargetInfo::emitStackUnwindInfo(codegen::CodeGen& cg, const ir::Fu
 
 std::string CompositeTargetInfo::formatStackOperand(int o) const { return architecture->formatStackOperand(o); }
 std::string CompositeTargetInfo::formatGlobalOperand(const std::string& n) const { return architecture->formatGlobalOperand(n); }
+bool CompositeTargetInfo::supportsGNUAssemblyMetadata() const { return os->supportsGNUAssemblyMetadata(); }
+std::string CompositeTargetInfo::formatFunctionTypeDirective(const std::string& name) const {
+    return os->formatFunctionTypeDirective(name, *architecture);
+}
+std::string CompositeTargetInfo::formatFunctionSizeDirective(const std::string& name) const {
+    return os->formatFunctionSizeDirective(name);
+}
 std::string CompositeTargetInfo::getImmediatePrefix() const { return architecture->getImmediatePrefix(); }
 std::string CompositeTargetInfo::getLabelPrefix() const { return architecture->getLabelPrefix(); }
 std::string CompositeTargetInfo::getAssemblyFileExtension() const { return architecture->getAssemblyFileExtension(); }

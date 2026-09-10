@@ -115,7 +115,12 @@ void CodeGen::emitFunction(ir::Function& func) {
             debugInfoManager->beforeFunctionEmission(*this, *os, func);
         }
         if (os) {
-            *os << "\n.globl " << func.getName() << "\n" << func.getName() << ":\n";
+            if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
+                *os << "\n" << targetInfo->formatFunctionTypeDirective(func.getName()) << "\n";
+            } else {
+                *os << "\n";
+            }
+            *os << ".globl " << func.getName() << "\n" << func.getName() << ":\n";
         } else if (assembler) {
             SymbolInfo func_sym;
             func_sym.name = func.getName();
@@ -130,6 +135,9 @@ void CodeGen::emitFunction(ir::Function& func) {
         targetInfo->emitFunctionEpilogue(*this, func);
         if (os) {
             *os << ".Lfunc_end_" << func.getName() << ":\n";
+            if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
+                *os << targetInfo->formatFunctionSizeDirective(func.getName()) << "\n";
+            }
         } else if (assembler) {
             SymbolInfo end_sym;
             end_sym.name = ".Lfunc_end_" + func.getName();

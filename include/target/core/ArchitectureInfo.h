@@ -105,6 +105,7 @@ public:
     virtual std::string formatGlobalOperand(const std::string& name) const = 0;
     virtual std::string getImmediatePrefix() const { return "$"; }
     virtual std::string getLabelPrefix() const { return "L"; }
+    virtual std::string getFunctionTypeSpecifier() const { return "@function"; }
     virtual std::string getAssemblyFileExtension() const { return ".s"; }
     virtual std::string getObjectFileExtension() const { return ".o"; }
     virtual std::string getDataRelocationType() const { return "R_X86_64_64"; }
