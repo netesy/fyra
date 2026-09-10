@@ -7,16 +7,17 @@ namespace artifact {
 namespace linker {
 
 RelocationKind TargetRelocationEvaluator::normalizeType(const std::string& typeStr) {
-    if (typeStr == "R_X86_64_PC32" || typeStr == "R_X86_64_PLT32" || typeStr == "IMAGE_REL_AMD64_REL32") {
+    if (typeStr == "R_X86_64_PC32" || typeStr == "R_X86_64_PLT32" || typeStr == "IMAGE_REL_AMD64_REL32" ||
+        typeStr == "X86_64_RELOC_BRANCH" || typeStr == "X86_64_RELOC_SIGNED") {
         return RelocationKind::PcRelative;
     }
-    if (typeStr == "R_X86_64_64" || typeStr == "R_AARCH64_ABS64" || typeStr == "R_RISCV_64") {
+    if (typeStr == "R_X86_64_64" || typeStr == "IMAGE_REL_AMD64_ADDR64" || typeStr == "R_AARCH64_ABS64" || typeStr == "R_RISCV_64") {
         return RelocationKind::Absolute;
     }
     if (typeStr == "R_AARCH64_CALL26" || typeStr == "R_AARCH64_JUMP26" || typeStr == "R_RISCV_JAL" || typeStr == "R_RISCV_CALL") {
         return RelocationKind::CallRelative;
     }
-    return RelocationKind::PcRelative; // Default fallback
+    return RelocationKind::Unknown;
 }
 
 bool TargetRelocationEvaluator::evaluate(RelocationKind kind,

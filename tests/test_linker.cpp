@@ -181,6 +181,151 @@ void test_archive_linking() {
     std::cout << "  -> Archive Reader and Member Linking PASSED." << std::endl;
 }
 
+void test_unknown_relocation_rejection() {
+    std::cout << "[Test] Linker Unknown Relocation Rejection..." << std::endl;
+
+    ObjectArtifact art;
+    art.format = ObjectFormat::ELF;
+    art.arch = target::Arch::X64;
+    art.os = target::OS::Linux;
+
+    ObjectSection sec;
+    sec.name = ".text";
+    sec.data = {0xE8, 0x00, 0x00, 0x00, 0x00};
+    art.addSection(sec);
+
+    ObjectSymbol sym;
+    sym.name = "target_fn";
+    sym.value = 0;
+    sym.size = 4;
+    sym.binding = SymbolBinding::Global;
+    sym.type = SymbolType::Function;
+    sym.sectionName = ".text";
+    sym.isDefined = true;
+    art.addSymbol(sym);
+
+    ObjectRelocation reloc;
+    reloc.offset = 1;
+    reloc.type = "R_X86_64_UNSUPPORTED_TEST_FOO";
+    reloc.symbolName = "target_fn";
+    reloc.sectionName = ".text";
+    art.addRelocation(reloc);
+
+    InternalLinker linker;
+    LinkedImage image;
+    bool ok = linker.link({art}, image);
+    assert(!ok);
+    assert(linker.getLastError().find("unknown/unsupported relocation type") != std::string::npos);
+
+    std::cout << "  -> Unknown Relocation Rejection PASSED." << std::endl;
+}
+
+void test_startup_target_gating() {
+    std::cout << "[Test] Linker Startup Target Gating..." << std::endl;
+
+    // 1. Linux x86-64 -> _start should be synthesized if missing and main exists
+    ObjectArtifact artLinux;
+    artLinux.format = ObjectFormat::ELF;
+    artLinux.arch = target::Arch::X64;
+    artLinux.os = target::OS::Linux;
+
+    ObjectSection secL;
+    secL.name = ".text";
+    secL.data = {0x31, 0xC0, 0xC3};
+    artLinux.addSection(secL);
+
+    ObjectSymbol mainSym;
+    mainSym.name = "main";
+    mainSym.value = 0;
+    mainSym.size = 3;
+    mainSym.binding = SymbolBinding::Global;
+    mainSym.type = SymbolType::Function;
+    mainSym.sectionName = ".text";
+    mainSym.isDefined = true;
+    artLinux.addSymbol(mainSym);
+
+    InternalLinker linker;
+    LinkedImage imgLinux;
+    bool okL = linker.link({artLinux}, imgLinux);
+    assert(okL);
+    assert(imgLinux.findSymbol("_start") != nullptr);
+
+    // 2. Windows x86-64 -> _start should NOT be synthesized
+    ObjectArtifact artWin = artLinux;
+    artWin.format = ObjectFormat::COFF;
+    artWin.os = target::OS::Windows;
+
+    LinkedImage imgWin;
+    bool okW = linker.link({artWin}, imgWin);
+    assert(okW);
+    assert(imgWin.findSymbol("_start") == nullptr);
+
+    // 3. macOS x86-64 -> _start should NOT be synthesized
+    ObjectArtifact artMac = artLinux;
+    artMac.format = ObjectFormat::MachO;
+    artMac.os = target::OS::MacOS;
+
+    LinkedImage imgMac;
+    bool okM = linker.link({artMac}, imgMac);
+    assert(okM);
+    assert(imgMac.findSymbol("_start") == nullptr);
+
+    std::cout << "  -> Startup Target Gating PASSED." << std::endl;
+}
+
+void test_lazy_archive_extraction() {
+    std::cout << "[Test] Lazy Archive Member Extraction..." << std::endl;
+
+    // Member 1: answer.o (provides answer)
+    ObjectArtifact memArt1;
+    memArt1.format = ObjectFormat::ELF;
+    memArt1.arch = target::Arch::X64;
+    memArt1.os = target::OS::Linux;
+    ObjectSection sec1; sec1.name = ".text"; sec1.data = {0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3}; memArt1.addSection(sec1);
+    ObjectSymbol sym1; sym1.name = "answer"; sym1.value = 0; sym1.size = 6; sym1.binding = SymbolBinding::Global; sym1.type = SymbolType::Function; sym1.sectionName = ".text"; sym1.isDefined = true;
+    memArt1.addSymbol(sym1);
+
+    // Member 2: unused.o (provides unneeded_symbol)
+    ObjectArtifact memArt2;
+    memArt2.format = ObjectFormat::ELF;
+    memArt2.arch = target::Arch::X64;
+    memArt2.os = target::OS::Linux;
+    ObjectSection sec2; sec2.name = ".text"; sec2.data = {0x31, 0xC0, 0xC3}; memArt2.addSection(sec2);
+    ObjectSymbol sym2; sym2.name = "unneeded_symbol"; sym2.value = 0; sym2.size = 3; sym2.binding = SymbolBinding::Global; sym2.type = SymbolType::Function; sym2.sectionName = ".text"; sym2.isDefined = true;
+    memArt2.addSymbol(sym2);
+
+    ArchiveObjectMember am1; am1.name = "answer.o"; am1.artifact = memArt1;
+    ArchiveObjectMember am2; am2.name = "unused.o"; am2.artifact = memArt2;
+
+    std::vector<std::vector<ArchiveObjectMember>> archives = {{am1, am2}};
+
+    // Primary object: main.o (calls answer)
+    ObjectArtifact mainArt;
+    mainArt.format = ObjectFormat::ELF;
+    mainArt.arch = target::Arch::X64;
+    mainArt.os = target::OS::Linux;
+    ObjectSection mainSec; mainSec.name = ".text"; mainSec.data = {0xE8, 0x00, 0x00, 0x00, 0x00, 0xC3}; mainArt.addSection(mainSec);
+    ObjectSymbol mainSym; mainSym.name = "main"; mainSym.value = 0; mainSym.size = 6; mainSym.binding = SymbolBinding::Global; mainSym.type = SymbolType::Function; mainSym.sectionName = ".text"; mainSym.isDefined = true;
+    mainArt.addSymbol(mainSym);
+    ObjectRelocation reloc; reloc.offset = 1; reloc.type = "R_X86_64_PC32"; reloc.addend = -4; reloc.symbolName = "answer"; reloc.sectionName = ".text";
+    mainArt.addRelocation(reloc);
+
+    std::vector<ObjectArtifact> artifacts = {mainArt};
+
+    InternalLinker linker;
+    bool extracted = linker.extractLazyArchiveMembers(artifacts, archives);
+    assert(extracted);
+    assert(artifacts.size() == 2); // main.o + answer.o
+    assert(artifacts[1].findSymbol("answer") != nullptr);
+    assert(artifacts[1].findSymbol("unneeded_symbol") == nullptr);
+
+    LinkedImage image;
+    bool linked = linker.link(artifacts, image);
+    assert(linked);
+
+    std::cout << "  -> Lazy Archive Member Extraction PASSED." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << " Running Internal Linker Unit Tests     " << std::endl;
@@ -190,6 +335,9 @@ int main() {
     test_duplicate_symbol_error();
     test_undefined_symbol_error();
     test_archive_linking();
+    test_unknown_relocation_rejection();
+    test_startup_target_gating();
+    test_lazy_archive_extraction();
 
     std::cout << "All Internal Linker Tests Passed!" << std::endl;
     return 0;

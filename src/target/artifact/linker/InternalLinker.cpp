@@ -19,6 +19,68 @@ uint64_t alignUp(uint64_t offset, uint64_t align) {
 
 } // namespace
 
+bool InternalLinker::extractLazyArchiveMembers(
+    std::vector<target::artifact::object::ObjectArtifact>& inOutArtifacts,
+    std::vector<std::vector<target::artifact::archive::ArchiveObjectMember>>& archives) {
+
+    bool extractedAny = false;
+    bool progress = true;
+
+    while (progress) {
+        progress = false;
+
+        std::unordered_set<std::string> definedGlobals;
+        for (const auto& art : inOutArtifacts) {
+            for (const auto& sym : art.symbols) {
+                if (sym.isDefined && sym.binding != target::artifact::object::SymbolBinding::Local) {
+                    definedGlobals.insert(sym.name);
+                }
+            }
+        }
+
+        std::unordered_set<std::string> unresolvedGlobals;
+        for (const auto& art : inOutArtifacts) {
+            for (const auto& reloc : art.relocations) {
+                if (!definedGlobals.count(reloc.symbolName)) {
+                    unresolvedGlobals.insert(reloc.symbolName);
+                }
+            }
+            for (const auto& sym : art.symbols) {
+                if (!sym.isDefined && !definedGlobals.count(sym.name)) {
+                    unresolvedGlobals.insert(sym.name);
+                }
+            }
+        }
+
+        if (unresolvedGlobals.empty()) {
+            break;
+        }
+
+        for (auto& archiveMembers : archives) {
+            for (auto& member : archiveMembers) {
+                if (member.extracted) continue;
+
+                bool providesNeededSymbol = false;
+                for (const auto& sym : member.artifact.symbols) {
+                    if (sym.isDefined && sym.binding != target::artifact::object::SymbolBinding::Local && unresolvedGlobals.count(sym.name)) {
+                        providesNeededSymbol = true;
+                        break;
+                    }
+                }
+
+                if (providesNeededSymbol) {
+                    member.extracted = true;
+                    inOutArtifacts.push_back(member.artifact);
+                    progress = true;
+                    extractedAny = true;
+                }
+            }
+        }
+    }
+
+    return extractedAny;
+}
+
 bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
                            LinkedImage& outImage) {
     lastError_.clear();
@@ -106,52 +168,47 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         }
     }
 
-    // Global symbol resolution
-    std::map<std::string, std::pair<size_t, target::artifact::object::ObjectSymbol>> resolvedGlobals;
-
+    // Symbol resolution and rebasing (both global and local symbols)
     for (size_t aIdx = 0; aIdx < artifacts.size(); ++aIdx) {
         for (const auto& sym : artifacts[aIdx].symbols) {
             if (!sym.isDefined) continue;
 
-            if (sym.binding != target::artifact::object::SymbolBinding::Local) {
-                if (resolvedGlobals.count(sym.name)) {
+            uint64_t outputOffset = 0;
+            for (const auto& p : placements) {
+                if (p.artifactIndex == aIdx && p.sectionName == sym.sectionName) {
+                    outputOffset = p.outputOffset;
+                    break;
+                }
+            }
+
+            const auto* lsec = outImage.findSection(sym.sectionName);
+            uint64_t secVma = lsec ? lsec->virtualAddress : baseVma;
+
+            LinkedSymbol lsym;
+            lsym.name = sym.name;
+            lsym.virtualAddress = secVma + outputOffset + sym.value;
+            lsym.size = sym.size;
+            lsym.isFunction = (sym.type == target::artifact::object::SymbolType::Function);
+            lsym.isGlobal = (sym.binding != target::artifact::object::SymbolBinding::Local);
+            lsym.sectionName = sym.sectionName;
+
+            if (lsym.isGlobal) {
+                if (outImage.symbols.count(sym.name) && outImage.symbols[sym.name].isGlobal) {
                     lastError_ = "Duplicate global symbol definition: '" + sym.name + "'";
                     return false;
                 }
-                resolvedGlobals[sym.name] = {aIdx, sym};
+                outImage.symbols[sym.name] = lsym;
+            } else {
+                if (!outImage.symbols.count(sym.name)) {
+                    outImage.symbols[sym.name] = lsym;
+                }
             }
         }
     }
 
-    // Rebase symbol addresses
-    for (const auto& [symName, pair] : resolvedGlobals) {
-        size_t aIdx = pair.first;
-        const auto& sym = pair.second;
-
-        uint64_t outputOffset = 0;
-        for (const auto& p : placements) {
-            if (p.artifactIndex == aIdx && p.sectionName == sym.sectionName) {
-                outputOffset = p.outputOffset;
-                break;
-            }
-        }
-
-        const auto* lsec = outImage.findSection(sym.sectionName);
-        uint64_t secVma = lsec ? lsec->virtualAddress : baseVma;
-
-        LinkedSymbol lsym;
-        lsym.name = symName;
-        lsym.virtualAddress = secVma + outputOffset + sym.value;
-        lsym.size = sym.size;
-        lsym.isFunction = (sym.type == target::artifact::object::SymbolType::Function);
-        lsym.isGlobal = true;
-        lsym.sectionName = sym.sectionName;
-
-        outImage.symbols[symName] = lsym;
-    }
-
-    // Add Linux _start entry stub if main is present and _start is missing
-    if (!outImage.symbols.count("_start") && (outImage.symbols.count("main") || outImage.symbols.count("$main"))) {
+    // Add Linux x86-64 _start entry stub if main is present and _start is missing (Linux x86-64 only)
+    if (outImage.os == target::OS::Linux && outImage.arch == target::Arch::X64) {
+        if (!outImage.symbols.count("_start") && (outImage.symbols.count("main") || outImage.symbols.count("$main"))) {
         std::string mainName = outImage.symbols.count("main") ? "main" : "$main";
         uint64_t mainAddr = outImage.symbols[mainName].virtualAddress;
 
@@ -196,6 +253,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             outImage.symbols["_start"] = startSym;
         }
     }
+    }
 
     // Set entry point
     if (outImage.symbols.count("_start")) {
@@ -236,6 +294,10 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             uint64_t sectionDataOffset = outputOffset + reloc.offset;
 
             RelocationKind kind = TargetRelocationEvaluator::normalizeType(reloc.type);
+            if (kind == RelocationKind::Unknown) {
+                lastError_ = "Relocation evaluation failed for symbol '" + reloc.symbolName + "' in section '" + reloc.sectionName + "': unknown/unsupported relocation type '" + reloc.type + "'";
+                return false;
+            }
             std::string evalError;
             if (!TargetRelocationEvaluator::evaluate(kind, targetSymAddr, placeAddress, reloc.addend, lsec->data, sectionDataOffset, evalError)) {
                 lastError_ = "Relocation evaluation failed for '" + reloc.symbolName + "': " + evalError;

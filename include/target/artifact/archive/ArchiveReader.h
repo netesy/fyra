@@ -14,6 +14,7 @@ struct ArchiveObjectMember {
     std::string name;
     std::vector<uint8_t> bytes;
     target::artifact::object::ObjectArtifact artifact;
+    bool extracted = false;
 };
 
 class ArchiveReader {

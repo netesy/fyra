@@ -2,6 +2,7 @@
 
 #include "target/artifact/object/ObjectArtifact.h"
 #include "target/artifact/linker/LinkedImage.h"
+#include "target/artifact/archive/ArchiveReader.h"
 #include <vector>
 #include <string>
 #include <memory>
@@ -14,6 +15,10 @@ class InternalLinker {
 public:
     InternalLinker() = default;
     ~InternalLinker() = default;
+
+    bool extractLazyArchiveMembers(
+        std::vector<target::artifact::object::ObjectArtifact>& inOutArtifacts,
+        std::vector<std::vector<target::artifact::archive::ArchiveObjectMember>>& archives);
 
     bool link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
               LinkedImage& outImage);

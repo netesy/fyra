@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
 
         std::cout << "--- Linking " << linkInputs.size() << " object/archive inputs ---" << std::endl;
         std::vector<target::artifact::object::ObjectArtifact> artifacts;
+        std::vector<std::vector<target::artifact::archive::ArchiveObjectMember>> archives;
 
         for (const auto& path : linkInputs) {
             std::ifstream f(path, std::ios::binary);
@@ -108,9 +109,10 @@ int main(int argc, char** argv) {
                 target::artifact::archive::ArchiveReader arReader;
                 std::vector<target::artifact::archive::ArchiveObjectMember> members;
                 if (arReader.parse(bytes, members)) {
-                    for (const auto& m : members) {
-                        artifacts.push_back(m.artifact);
-                    }
+                    archives.push_back(std::move(members));
+                } else {
+                    std::cerr << "Error: failed to parse archive file " << path << ": " << arReader.getLastError() << std::endl;
+                    return 1;
                 }
             } else {
                 auto objReader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
@@ -125,6 +127,8 @@ int main(int argc, char** argv) {
         }
 
         target::artifact::linker::InternalLinker linker;
+        linker.extractLazyArchiveMembers(artifacts, archives);
+
         target::artifact::linker::LinkedImage image;
         if (!linker.link(artifacts, image)) {
             std::cerr << "Linker error: " << linker.getLastError() << std::endl;
