@@ -401,11 +401,11 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
     result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
     if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {
-        std::string objExt = ".o";
-        if (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win") != std::string::npos) {
-            objExt = ".obj";
+        std::string objPath = outputPrefix;
+        if (objPath.rfind(".s") != std::string::npos && objPath.rfind(".s") == objPath.size() - 2) {
+            std::string objExt = (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win") != std::string::npos) ? ".obj" : ".o";
+            objPath = objPath.substr(0, objPath.size() - 2) + objExt;
         }
-        std::string objPath = outputPrefix + objExt;
 
         ::target::artifact::object::ObjectArtifact artifact;
         if (auto desc = ::target::TargetDescriptor::fromString(targetInfo->getName())) {

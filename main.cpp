@@ -422,10 +422,6 @@ int main(int argc, char** argv) {
             else { std::cerr << "Error generating executable: " << elfGen.getLastError() << std::endl; return 1; }
         }
     } else {
-        std::string outputPrefix = outputFile;
-        if (outputPrefix.find_last_of('.') != std::string::npos) {
-            outputPrefix = outputPrefix.substr(0, outputPrefix.find_last_of('.'));
-        }
         codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
         codeGen.enableVerboseOutput(verboseOutput);
         codeGen.enableDebugInfo(true);
@@ -440,13 +436,6 @@ int main(int argc, char** argv) {
             if (createStaticLib) {
                 std::cout << "--- Creating Static Library ---\n" << std::flush;
                 std::string libPath = outputFile;
-                if (libPath == result.assemblyPath) {
-                    if (desc->os == target::OS::Windows) {
-                        libPath = outputPrefix + ".lib";
-                    } else {
-                        libPath = outputPrefix + ".a";
-                    }
-                }
                 auto libRes = codeGen.getObjectGenerator().createStaticLibrary({result.objectPath}, libPath, desc->toString());
                 if (libRes.success) {
                     std::cout << "Static Library generated successfully: " << libPath << std::endl;
