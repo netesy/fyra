@@ -65,6 +65,15 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
     if (!target.supportsVectorWidth(vectorWidth) ||
         !target.supportsVectorType(candidateVectorType))
         return false;
+    // The current plan creates exactly these generic operations.  Type support
+    // alone is not evidence that the selected backend path can lower them.
+    constexpr ir::Instruction::Opcode requiredOperations[] = {
+        ir::Instruction::VLoad, ir::Instruction::VStore,
+        ir::Instruction::VMul, ir::Instruction::VAdd
+    };
+    for (auto opcode : requiredOperations)
+        if (!target.supportsVectorOperation(opcode, candidateVectorType, loweringMode))
+            return false;
 
     bool changed = false;
 

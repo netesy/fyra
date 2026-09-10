@@ -2662,6 +2662,52 @@ bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
     return false;
 }
 
+bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode opcode,
+                                              const ir::VectorType* type,
+                                              VectorLoweringMode mode) const {
+    if (!supportsVectorType(type)) return false;
+
+    // The direct encoder currently implements only these operations.  Keep
+    // this separate from ISA metadata: hardware support is not backend support.
+    if (mode == VectorLoweringMode::Binary)
+        return opcode == ir::Instruction::VLoad ||
+               opcode == ir::Instruction::VStore ||
+               opcode == ir::Instruction::VShuffle;
+
+    const auto* element = type->getElementType();
+    const bool integer = element->isIntegerTy();
+    const bool floating = element->isFloatTy() || element->isDoubleTy();
+
+    switch (opcode) {
+        case ir::Instruction::VLoad:
+        case ir::Instruction::VStore:
+        case ir::Instruction::VShuffle:
+        case ir::Instruction::VBroadcast:
+        case ir::Instruction::VExtract:
+        case ir::Instruction::VInsert:
+            return true;
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+            return integer;
+        case ir::Instruction::VMul: {
+            if (!integer) return false;
+            const auto* intType = dynamic_cast<const ir::IntegerType*>(element);
+            return intType && (intType->getBitwidth() == 16 || intType->getBitwidth() == 32);
+        }
+        case ir::Instruction::VFAdd:
+        case ir::Instruction::VFSub:
+        case ir::Instruction::VFMul:
+        case ir::Instruction::VFDiv:
+            return floating;
+        case ir::Instruction::VAnd:
+        case ir::Instruction::VOr:
+        case ir::Instruction::VXor:
+            return true; // Bitwise XMM operations preserve all 128 bits.
+        default:
+            return false;
+    }
+}
+
 void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
     if (auto* os = cg.getTextStream()) {
         std::string ptrOp = cg.getValueAsOperand(i.getOperands()[0]->get());

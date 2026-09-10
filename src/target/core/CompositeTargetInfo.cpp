@@ -93,6 +93,7 @@ void CompositeTargetInfo::emitJmp(codegen::CodeGen& cg, ir::Instruction& i) { ar
 VectorCapabilities CompositeTargetInfo::getVectorCapabilities() const { return architecture->getVectorCapabilities(); }
 bool CompositeTargetInfo::supportsVectorWidth(unsigned w) const { return architecture->supportsVectorWidth(w); }
 bool CompositeTargetInfo::supportsVectorType(const ir::VectorType* t) const { return architecture->supportsVectorType(t); }
+bool CompositeTargetInfo::supportsVectorOperation(ir::Instruction::Opcode opcode, const ir::VectorType* type, VectorLoweringMode mode) const { return architecture->supportsVectorOperation(opcode, type, mode); }
 unsigned CompositeTargetInfo::getOptimalVectorWidth(const ir::Type* t) const { return architecture->getOptimalVectorWidth(t); }
 void CompositeTargetInfo::emitVectorLoad(codegen::CodeGen& cg, ir::VectorInstruction& i) { architecture->emitVectorLoad(cg, i); }
 void CompositeTargetInfo::emitVectorStore(codegen::CodeGen& cg, ir::VectorInstruction& i) { architecture->emitVectorStore(cg, i); }

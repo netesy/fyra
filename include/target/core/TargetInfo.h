@@ -15,6 +15,9 @@ namespace codegen { class CodeGen; }
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
 enum class FusedPattern { MultiplyAdd, MultiplySubtract, LoadAndOperate, CompareAndBranch, AddressCalculation };
+// Describes the backend path that must be able to lower an operation.  This is
+// intentionally independent of object format and target instruction sets.
+enum class VectorLoweringMode { TextAssembly, Binary };
 struct VectorCapabilities { bool supportsSSE = false, supportsSSSE3 = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
 struct TypeInfo { uint64_t size, align; RegisterClass regClass; bool isFloatingPoint, isSigned; };
 struct SIMDContext { unsigned vectorWidth; ir::VectorType* vectorType; std::string elementSuffix, widthSuffix; };
@@ -105,6 +108,9 @@ public:
     virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
     virtual bool supportsVectorWidth(unsigned) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType*) const { return false; }
+    virtual bool supportsVectorOperation(ir::Instruction::Opcode,
+                                         const ir::VectorType*,
+                                         VectorLoweringMode) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type*) const { return 0; }
     virtual void emitVectorLoad(codegen::CodeGen&, ir::VectorInstruction&) {}
     virtual void emitVectorStore(codegen::CodeGen&, ir::VectorInstruction&) {}

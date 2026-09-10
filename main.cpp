@@ -233,7 +233,11 @@ int main(int argc, char** argv) {
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
         transforms::LoopUnroll loop_unroll(error_reporter);
-        transforms::LoopVectorizer loop_vectorizer(*targetInfoForOptimization, error_reporter);
+        const auto vectorMode = generateExecutable
+            ? target::VectorLoweringMode::Binary
+            : target::VectorLoweringMode::TextAssembly;
+        transforms::LoopVectorizer loop_vectorizer(*targetInfoForOptimization,
+                                                    error_reporter, vectorMode);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
         
         bool optimization_changed = true;

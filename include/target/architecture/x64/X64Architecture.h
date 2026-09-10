@@ -87,6 +87,9 @@ public:
     bool supportsVectorWidth(unsigned width) const override { return width == 128; }
     unsigned getOptimalVectorWidth(const ir::Type* type) const override;
     bool supportsVectorType(const ir::VectorType* type) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode opcode,
+                                 const ir::VectorType* type,
+                                 VectorLoweringMode mode) const override;
     void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;

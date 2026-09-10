@@ -20,6 +20,16 @@
 
 using namespace ir;
 
+class MissingMultiplyArchitecture final : public target::X64Architecture {
+public:
+    MissingMultiplyArchitecture() : X64Architecture(target::X64ABI::SystemV) {}
+    bool supportsVectorOperation(Instruction::Opcode opcode, const VectorType* type,
+                                 target::VectorLoweringMode mode) const override {
+        return opcode != Instruction::VMul &&
+               X64Architecture::supportsVectorOperation(opcode, type, mode);
+    }
+};
+
 // Scalar reference implementation for sum = sum + 2*i for i in 0..n-1
 int32_t scalar_loop_sum_ref(int32_t n) {
     int32_t sum = 0;
@@ -29,7 +39,9 @@ int32_t scalar_loop_sum_ref(int32_t n) {
     return sum;
 }
 
-void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false) {
+void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false,
+                               bool allowMultiply = true,
+                               target::VectorLoweringMode mode = target::VectorLoweringMode::TextAssembly) {
     auto ctx = std::make_shared<IRContext>();
     Module module("test_vec_module", ctx);
     IRBuilder builder(ctx);
@@ -84,14 +96,20 @@ void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false) {
     transforms::CFGBuilder::run(*func);
 
     // Run LoopVectorizer
-    auto vectorizerArch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    std::unique_ptr<target::ArchitectureInfo> vectorizerArch;
+    if (allowMultiply)
+        vectorizerArch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    else
+        vectorizerArch = std::make_unique<MissingMultiplyArchitecture>();
     auto vectorizerOS = std::make_unique<target::LinuxOS>();
     target::CompositeTargetInfo vectorizerTarget(std::move(vectorizerArch), std::move(vectorizerOS));
-    transforms::LoopVectorizer vectorizer(vectorizerTarget);
+    transforms::LoopVectorizer vectorizer(vectorizerTarget, nullptr, mode);
     bool vectorized = vectorizer.performTransformation(*func);
 
-    if (n_val >= 4) {
+    if (n_val >= 4 && allowMultiply && mode == target::VectorLoweringMode::TextAssembly) {
         assert(vectorized && "Loop should have been vectorized for n >= 4");
+    } else if (!allowMultiply || mode == target::VectorLoweringMode::Binary) {
+        assert(!vectorized && "Loop must remain scalar without complete operation support");
     }
 
     transforms::LinearScanAllocator allocator;
@@ -400,6 +418,8 @@ int main() {
     test_loop_vectorizer_case(9);
     test_loop_vectorizer_case(10000);
     test_loop_vectorizer_case(100000); // i32 wraparound test
+    test_loop_vectorizer_case(8, false, false); // type yes, VMul no
+    test_loop_vectorizer_case(8, false, true, target::VectorLoweringMode::Binary);
 
     test_rejection_cases();
 

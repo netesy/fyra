@@ -9,6 +9,7 @@
 #include "target/architecture/x64/X64Architecture.h"
 #include "target/os/linux/LinuxOS.h"
 #include "target/core/CompositeTargetInfo.h"
+#include "target/core/TargetResolver.h"
 #include "transforms/CFGBuilder.h"
 #include <cassert>
 #include <iostream>
@@ -538,6 +539,48 @@ void test_simd_rejection() {
     assert(x64Arch->supportsVectorType(vec3i32) == false); // Unsupported lane count
     assert(x64Arch->supportsVectorType(vec3f32) == false); // Unsupported float lane count
     assert(x64Arch->supportsVectorType(vec4f64) == false); // Unsupported double lane count
+
+    auto* i16Ty = ctx->getIntegerType(16);
+    auto* i32Ty = ctx->getIntegerType(32);
+    auto* vec8i16 = ctx->getVectorType(i16Ty, 8);
+    auto* vec4i32 = ctx->getVectorType(i32Ty, 4);
+    auto* vec4f32 = ctx->getVectorType(f32Ty, 4);
+    auto* vec2f64 = ctx->getVectorType(f64Ty, 2);
+    using O = Instruction::Opcode;
+    using M = target::VectorLoweringMode;
+    for (auto* type : {vec16i8, vec8i16, vec4i32, vec2i64}) {
+        assert(x64Arch->supportsVectorOperation(O::VAdd, type, M::TextAssembly));
+        assert(x64Arch->supportsVectorOperation(O::VSub, type, M::TextAssembly));
+    }
+    for (auto* type : {vec16i8, vec8i16, vec4i32, vec2i64, vec4f32, vec2f64})
+        for (auto op : {O::VAnd, O::VOr, O::VXor})
+            assert(x64Arch->supportsVectorOperation(op, type, M::TextAssembly));
+    assert(x64Arch->supportsVectorOperation(O::VMul, vec8i16, M::TextAssembly));
+    assert(x64Arch->supportsVectorOperation(O::VMul, vec4i32, M::TextAssembly));
+    assert(!x64Arch->supportsVectorOperation(O::VMul, vec16i8, M::TextAssembly));
+    assert(!x64Arch->supportsVectorOperation(O::VMul, vec2i64, M::TextAssembly));
+    for (auto* type : {vec4f32, vec2f64})
+        for (auto op : {O::VFAdd, O::VFSub, O::VFMul, O::VFDiv})
+            assert(x64Arch->supportsVectorOperation(op, type, M::TextAssembly));
+    for (auto* type : {vec16i8, vec8i16, vec4i32, vec2i64, vec4f32, vec2f64}) {
+        for (auto op : {O::VLoad, O::VStore, O::VShuffle}) {
+            assert(x64Arch->supportsVectorOperation(op, type, M::TextAssembly));
+            assert(x64Arch->supportsVectorOperation(op, type, M::Binary));
+        }
+        for (auto op : {O::VCmp, O::VSelect, O::VNot, O::VDiv, O::VGather,
+                        O::VScatter, O::VShl, O::VShr, O::VMin, O::VMax,
+                        O::VHAdd, O::VHSub, O::VHMul, O::VHAnd, O::VHOr, O::VHXor})
+            assert(!x64Arch->supportsVectorOperation(op, type, M::TextAssembly));
+    }
+    assert(!x64Arch->supportsVectorOperation(O::VAdd, vec4i32, M::Binary));
+
+    for (auto arch : {target::Arch::AArch64, target::Arch::RISCV64, target::Arch::WASM32}) {
+        target::TargetDescriptor descriptor;
+        descriptor.arch = arch;
+        descriptor.os = arch == target::Arch::WASM32 ? target::OS::WASI : target::OS::Linux;
+        auto other = target::TargetResolver::resolve(descriptor);
+        assert(!other->supportsVectorOperation(O::VAdd, vec4i32, M::TextAssembly));
+    }
 
     // VInsert non-constant index rejection check
     {
