@@ -16,6 +16,8 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/FunctionInliner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopUnroll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopVectorizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/InstructionSafety.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/DiamondMatcher.cpp
 )
 
 target_sources(fyra PRIVATE ${TRANSFORMS_SOURCES})

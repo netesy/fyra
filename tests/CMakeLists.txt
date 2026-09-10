@@ -301,3 +301,7 @@ set_tests_properties(LoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOU
 add_executable(test_vector_compare_select test_vector_compare_select.cpp)
 target_link_libraries(test_vector_compare_select PRIVATE fyra)
 add_test(NAME VectorCompareSelectTest COMMAND test_vector_compare_select)
+
+add_executable(test_speculation_and_diamond test_speculation_and_diamond.cpp)
+target_link_libraries(test_speculation_and_diamond PRIVATE fyra)
+add_test(NAME SpeculationAndDiamondTest COMMAND test_speculation_and_diamond)

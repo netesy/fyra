@@ -20,13 +20,17 @@ public:
         Hlt,
 
         // Binary Operators
+        //
+        // Fixed-width integer Add/Sub/Mul/Neg use modulo-2^N arithmetic. They
+        // neither trap nor make signed overflow undefined. This is an IR
+        // semantic guarantee shared by every target, not an x64 accident.
         Add,
         Sub,
         Mul,
-        Div,
-        Udiv,
-        Rem,
-        Urem,
+        Div,   // Signed division; traps on zero and MIN / -1
+        Udiv,  // Unsigned division; traps on zero
+        Rem,   // Signed remainder; traps on zero and MIN / -1
+        Urem,  // Unsigned remainder; traps on zero
         And,
         Or,
         Xor,
