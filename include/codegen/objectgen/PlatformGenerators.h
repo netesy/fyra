@@ -2,6 +2,8 @@
 
 #include "ObjectFileGenerator.h"
 #include "target/artifact/executable/elf.hh"
+#include "target/artifact/executable/pe.hh"
+#include "target/artifact/executable/macho.hh"
 
 namespace codegen {
 namespace objectgen {
@@ -45,6 +47,12 @@ public:
     // PlatformObjectGenerator interface
     ObjectGenResult generate(const std::string& asmPath, const std::string& objPath) override;
     ObjectValidationResult validateObject(const std::string& objPath) override;
+
+    // Native COFF object generator
+    ObjectGenResult generateNativeCOFF(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                      const std::vector<PEGenerator::Symbol>& symbols,
+                                      const std::vector<PEGenerator::Relocation>& relocations,
+                                      const std::string& objPath);
     
     std::string getPlatformName() const override { return "Windows x64"; }
     std::string getObjectFormat() const override { return "COFF"; }

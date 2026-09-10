@@ -34,6 +34,11 @@ public:
                           const std::vector<Relocation>& relocations,
                           const std::string& outputPath);
 
+    bool generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                     const std::vector<Symbol>& symbols,
+                                     const std::vector<Relocation>& relocations,
+                                     const std::string& outputPath);
+
     void setCpuType(uint32_t type);
 
     std::string getLastError() const;

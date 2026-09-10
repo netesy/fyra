@@ -109,7 +109,6 @@ public:
                 return false;
             }
 
-            // Calculate .bss size
             uint64_t bss_size = sections_data.count(".bss") ? sections_data.at(".bss").size() : 0;
             for (auto const& sym : symbols_in) {
                 if (sym.sectionName == ".bss" || sym.sectionName == "__bss") {
@@ -120,11 +119,10 @@ public:
             uint32_t data_nsects = (sections_data.count(".data") ? 1 : 0) + (bss_size > 0 ? 1 : 0);
             if (data_nsects == 0) data_nsects = 1;
 
-            // Mach-O segments: __PAGEZERO, __TEXT, __DATA, LC_MAIN, LC_SYMTAB
             uint32_t ncmds = 5;
-            uint32_t sizeofcmds = sizeof(segment_command_64) + // __PAGEZERO
-                                  (sizeof(segment_command_64) + sizeof(section_64) * 2) + // __TEXT (__text, __const)
-                                  (sizeof(segment_command_64) + sizeof(section_64) * data_nsects) + // __DATA (__data, __bss)
+            uint32_t sizeofcmds = sizeof(segment_command_64) +
+                                  (sizeof(segment_command_64) + sizeof(section_64) * 2) +
+                                  (sizeof(segment_command_64) + sizeof(section_64) * data_nsects) +
                                   sizeof(entry_point_command) +
                                   sizeof(symtab_command);
 
@@ -135,14 +133,13 @@ public:
             header.filetype = MH_EXECUTE;
             header.ncmds = ncmds;
             header.sizeofcmds = sizeofcmds;
-            header.flags = 0x1; // MH_NOUNDEFS
+            header.flags = 0x1;
 
             file.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
             uint64_t currentFileOff = sizeof(header) + sizeofcmds;
             uint64_t currentVMAddr = 0x100000000ULL;
 
-            // 1. __PAGEZERO
             segment_command_64 pagezero = {};
             pagezero.cmd = LC_SEGMENT_64;
             pagezero.cmdsize = sizeof(segment_command_64);
@@ -150,7 +147,6 @@ public:
             pagezero.vmsize = 0x100000000ULL;
             file.write(reinterpret_cast<const char*>(&pagezero), sizeof(pagezero));
 
-            // 2. __TEXT
             uint64_t text_sects_size = 0;
             if (sections_data.count(".text")) text_sects_size += sections_data.at(".text").size();
             if (sections_data.count(".rodata") || sections_data.count(".rdata")) {
@@ -179,7 +175,7 @@ public:
             text_sect.size = sections_data.count(".text") ? sections_data.at(".text").size() : 0;
             text_sect.offset = currentFileOff;
             text_sect.align = 4;
-            text_sect.flags = 0x80000400; // S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS
+            text_sect.flags = 0x80000400;
             file.write(reinterpret_cast<const char*>(&text_sect), sizeof(text_sect));
 
             currentFileOff += (text_sect.size + 15) & ~15;
@@ -196,7 +192,6 @@ public:
             currentFileOff += (const_sect.size + 0xFFF) & ~0xFFFULL;
             currentVMAddr += text_vmsize;
 
-            // 3. __DATA
             uint64_t data_sects_size = sections_data.count(".data") ? sections_data.at(".data").size() : 0;
             uint64_t data_vmsize = (data_sects_size + bss_size + 0xFFF) & ~0xFFFULL;
 
@@ -230,27 +225,24 @@ public:
                 bss_sect.size = bss_size;
                 bss_sect.offset = 0;
                 bss_sect.align = 4;
-                bss_sect.flags = 0x1; // S_ZEROFILL
+                bss_sect.flags = 0x1;
                 file.write(reinterpret_cast<const char*>(&bss_sect), sizeof(bss_sect));
             }
 
             currentFileOff += (data_sects_size + 0xFFF) & ~0xFFFULL;
             currentVMAddr += data_vmsize;
 
-            // 4. LC_MAIN
             entry_point_command main_cmd = {};
             main_cmd.cmd = LC_MAIN;
             main_cmd.cmdsize = sizeof(entry_point_command);
             main_cmd.entryoff = text_sect.offset;
             file.write(reinterpret_cast<const char*>(&main_cmd), sizeof(main_cmd));
 
-            // 5. LC_SYMTAB
             symtab_command sym_cmd = {};
             sym_cmd.cmd = LC_SYMTAB;
             sym_cmd.cmdsize = sizeof(symtab_command);
             file.write(reinterpret_cast<const char*>(&sym_cmd), sizeof(sym_cmd));
 
-            // Write Section Data
             file.seekp(text_sect.offset);
             if (sections_data.count(".text")) {
                 file.write(reinterpret_cast<const char*>(sections_data.at(".text").data()), sections_data.at(".text").size());
@@ -273,6 +265,153 @@ public:
         }
     }
 
+    bool generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections_data,
+                                     const std::vector<MachOGenerator::Symbol>& symbols_in,
+                                     const std::vector<MachOGenerator::Relocation>& relocations_in,
+                                     const std::string& outputPath) {
+        try {
+            std::ofstream file(outputPath, std::ios::binary | std::ios::trunc);
+            if (!file) {
+                lastError_ = "Cannot open output file: " + outputPath;
+                return false;
+            }
+
+            uint64_t bss_size = sections_data.count(".bss") ? sections_data.at(".bss").size() : 0;
+            for (auto const& sym : symbols_in) {
+                if (sym.sectionName == ".bss" || sym.sectionName == "__bss") {
+                    bss_size = std::max(bss_size, sym.value + sym.size);
+                }
+            }
+
+            uint32_t data_nsects = (sections_data.count(".data") ? 1 : 0) + (bss_size > 0 ? 1 : 0);
+            uint32_t total_nsects = (sections_data.count(".text") ? 1 : 0) + data_nsects;
+            if (total_nsects == 0) total_nsects = 1;
+
+            uint32_t ncmds = 2;
+            uint32_t sizeofcmds = (sizeof(segment_command_64) + sizeof(section_64) * total_nsects) + sizeof(symtab_command);
+
+            mach_header_64 header = {};
+            header.magic = MH_MAGIC_64;
+            header.cputype = cpuType_;
+            header.cpusubtype = (cpuType_ == CPU_TYPE_ARM64) ? CPU_SUBTYPE_ARM64_ALL : CPU_SUBTYPE_X86_64_ALL;
+            header.filetype = 0x1; // MH_OBJECT
+            header.ncmds = ncmds;
+            header.sizeofcmds = sizeofcmds;
+            header.flags = 0;
+
+            file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+
+            uint64_t currentFileOff = sizeof(header) + sizeofcmds;
+
+            segment_command_64 seg = {};
+            seg.cmd = LC_SEGMENT_64;
+            seg.cmdsize = sizeof(segment_command_64) + sizeof(section_64) * total_nsects;
+            seg.segname[0] = '\0';
+            seg.vmaddr = 0;
+            seg.vmsize = 0;
+            seg.fileoff = currentFileOff;
+            seg.filesize = 0;
+            seg.maxprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+            seg.initprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+            seg.nsects = total_nsects;
+            file.write(reinterpret_cast<const char*>(&seg), sizeof(seg));
+
+            std::vector<section_64> sects;
+            if (sections_data.count(".text")) {
+                section_64 text_sect = {};
+                strcpy(text_sect.sectname, "__text");
+                strcpy(text_sect.segname, "__TEXT");
+                text_sect.addr = 0;
+                text_sect.size = sections_data.at(".text").size();
+                text_sect.offset = static_cast<uint32_t>(currentFileOff);
+                text_sect.align = 4;
+                text_sect.flags = 0x80000400;
+                sects.push_back(text_sect);
+                currentFileOff += (text_sect.size + 7) & ~7;
+            }
+
+            if (sections_data.count(".data")) {
+                section_64 data_sect = {};
+                strcpy(data_sect.sectname, "__data");
+                strcpy(data_sect.segname, "__DATA");
+                data_sect.addr = 0;
+                data_sect.size = sections_data.at(".data").size();
+                data_sect.offset = static_cast<uint32_t>(currentFileOff);
+                data_sect.align = 3;
+                sects.push_back(data_sect);
+                currentFileOff += (data_sect.size + 7) & ~7;
+            }
+
+            if (bss_size > 0) {
+                section_64 bss_sect = {};
+                strcpy(bss_sect.sectname, "__bss");
+                strcpy(bss_sect.segname, "__DATA");
+                bss_sect.addr = 0;
+                bss_sect.size = bss_size;
+                bss_sect.offset = 0;
+                bss_sect.align = 3;
+                bss_sect.flags = 0x1;
+                sects.push_back(bss_sect);
+            }
+
+            for (const auto& s : sects) {
+                file.write(reinterpret_cast<const char*>(&s), sizeof(s));
+            }
+
+            std::vector<nlist_64> nlists;
+            std::string stringTable = "\0";
+
+            for (const auto& sym : symbols_in) {
+                nlist_64 nl = {};
+                nl.n_strx = static_cast<uint32_t>(stringTable.size());
+                stringTable += "_" + sym.name;
+                stringTable.push_back('\0');
+
+                nl.n_type = 0x0F;
+                nl.n_sect = 1;
+                nl.n_desc = 0;
+                nl.n_value = sym.value;
+                nlists.push_back(nl);
+            }
+
+            uint64_t symOff = currentFileOff;
+            uint64_t strOff = symOff + nlists.size() * sizeof(nlist_64);
+
+            symtab_command sym_cmd = {};
+            sym_cmd.cmd = LC_SYMTAB;
+            sym_cmd.cmdsize = sizeof(symtab_command);
+            sym_cmd.symoff = static_cast<uint32_t>(symOff);
+            sym_cmd.nsyms = static_cast<uint32_t>(nlists.size());
+            sym_cmd.stroff = static_cast<uint32_t>(strOff);
+            sym_cmd.strsize = static_cast<uint32_t>(stringTable.size());
+            file.write(reinterpret_cast<const char*>(&sym_cmd), sizeof(sym_cmd));
+
+            for (const auto& s : sects) {
+                if (s.offset > 0 && s.size > 0) {
+                    file.seekp(s.offset);
+                    if (strcmp(s.sectname, "__text") == 0 && sections_data.count(".text")) {
+                        file.write(reinterpret_cast<const char*>(sections_data.at(".text").data()), sections_data.at(".text").size());
+                    } else if (strcmp(s.sectname, "__data") == 0 && sections_data.count(".data")) {
+                        file.write(reinterpret_cast<const char*>(sections_data.at(".data").data()), sections_data.at(".data").size());
+                    }
+                }
+            }
+
+            file.seekp(symOff);
+            if (!nlists.empty()) {
+                file.write(reinterpret_cast<const char*>(nlists.data()), nlists.size() * sizeof(nlist_64));
+            }
+            file.seekp(strOff);
+            file.write(stringTable.c_str(), stringTable.size());
+
+            file.close();
+            return !file.fail();
+        } catch (const std::exception& e) {
+            lastError_ = std::string("Mach-O relocatable generation failed: ") + e.what();
+            return false;
+        }
+    }
+
     std::string getLastError() const { return lastError_; }
 
 private:
@@ -291,6 +430,13 @@ bool MachOGenerator::generateFromCode(const std::map<std::string, std::vector<ui
                                     const std::vector<Relocation>& relocations,
                                     const std::string& outputPath) {
     return pImpl_->generateFromCode(sections, symbols, relocations, outputPath);
+}
+
+bool MachOGenerator::generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                                 const std::vector<Symbol>& symbols,
+                                                 const std::vector<Relocation>& relocations,
+                                                 const std::string& outputPath) {
+    return pImpl_->generateRelocatableFromCode(sections, symbols, relocations, outputPath);
 }
 
 void MachOGenerator::setCpuType(uint32_t type) { pImpl_->setCpuType(type); }

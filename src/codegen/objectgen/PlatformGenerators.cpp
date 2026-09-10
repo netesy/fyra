@@ -1,5 +1,7 @@
 #include "codegen/objectgen/PlatformGenerators.h"
 #include "target/artifact/executable/elf.hh"
+#include "target/artifact/executable/pe.hh"
+#include "target/artifact/executable/macho.hh"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -147,7 +149,6 @@ std::vector<std::string> LinuxObjectGenerator::extractELFSymbols(const std::stri
         std::istringstream iss(output);
         std::string line;
         while (std::getline(iss, line)) {
-            // Parse symbol table output (simplified)
             if (line.length() > 24 && std::isxdigit(line[0])) {
                 size_t lastSpace = line.find_last_of(' ');
                 if (lastSpace != std::string::npos) {
@@ -182,6 +183,25 @@ ObjectGenResult WindowsObjectGenerator::generate(const std::string& asmPath, con
     result.success = fileExists(objPath);
     result.objectPath = objPath;
     
+    return result;
+}
+
+ObjectGenResult WindowsObjectGenerator::generateNativeCOFF(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                                           const std::vector<PEGenerator::Symbol>& symbols,
+                                                           const std::vector<PEGenerator::Relocation>& relocations,
+                                                           const std::string& objPath) {
+    ObjectGenResult result;
+    PEGenerator peGen(true);
+    peGen.setMachine(0x8664);
+
+    if (peGen.generateRelocatableFromCode(sections, symbols, relocations, objPath)) {
+        result.success = true;
+        result.objectPath = objPath;
+    } else {
+        result.success = false;
+        result.errorOutput = "Native COFF relocatable serialization failed: " + peGen.getLastError();
+    }
+
     return result;
 }
 
@@ -244,23 +264,19 @@ bool WindowsObjectGenerator::checkCOFFHeader(const std::string& objPath) {
     std::ifstream file(objPath, std::ios::binary);
     if (!file.is_open()) return false;
     
-    // Read COFF header signature (simplified check)
     uint16_t machine;
     file.read(reinterpret_cast<char*>(&machine), sizeof(machine));
     
-    // Check for x86-64 machine type
     return machine == 0x8664;
 }
 
 std::vector<std::string> WindowsObjectGenerator::extractCOFFSections(const std::string& objPath) {
     std::vector<std::string> sections;
-    // Implementation would use dumpbin or similar tool
     return sections;
 }
 
 std::vector<std::string> WindowsObjectGenerator::extractCOFFSymbols(const std::string& objPath) {
     std::vector<std::string> symbols;
-    // Implementation would use dumpbin or similar tool
     return symbols;
 }
 
@@ -400,7 +416,6 @@ bool WasmObjectGenerator::checkWasmHeader(const std::string& objPath) {
     std::ifstream file(objPath, std::ios::binary);
     if (!file.is_open()) return false;
     
-    // Check WebAssembly magic number
     char magic[4];
     file.read(magic, 4);
     
@@ -409,7 +424,6 @@ bool WasmObjectGenerator::checkWasmHeader(const std::string& objPath) {
 
 std::vector<std::string> WasmObjectGenerator::extractWasmSections(const std::string& objPath) {
     std::vector<std::string> sections;
-    // Implementation would parse WASM sections
     return sections;
 }
 

@@ -9,7 +9,6 @@
 #include <map>
 #include "assembler.hh"
 
-
 #pragma pack(push, 1)
 
 // COFF structures for object file generation
@@ -58,7 +57,6 @@ struct CoffRelocation {
 };
 
 #pragma pack(pop)
-
 
 namespace {
 // PE constants
@@ -137,6 +135,12 @@ public:
                           const std::vector<Symbol>& symbols,
                           const std::vector<Relocation>& relocations,
                           const std::string& outputPath);
+
+    // Method to generate a native COFF relocatable object (.obj) from in-memory code
+    bool generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                     const std::vector<Symbol>& symbols,
+                                     const std::vector<Relocation>& relocations,
+                                     const std::string& outputPath);
 
     // Section management
     void addSection(const std::string& name, const std::vector<uint8_t>& data,

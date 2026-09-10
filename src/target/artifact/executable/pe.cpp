@@ -235,6 +235,154 @@ public:
         return true;
     }
 
+    bool generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections_in,
+                                     const std::vector<PEGenerator::Symbol>& symbols_in,
+                                     const std::vector<PEGenerator::Relocation>& relocs_in,
+                                     const std::string& outputPath) {
+        lastError_.clear();
+        std::ofstream file(outputPath, std::ios::binary | std::ios::trunc);
+        if (!file.is_open()) {
+            lastError_ = "Failed to open output file: " + outputPath;
+            return false;
+        }
+
+        struct SecInfo {
+            std::string name;
+            std::vector<uint8_t> data;
+            uint32_t characteristics;
+            std::vector<CoffRelocation> relocs;
+        };
+        std::vector<SecInfo> secs;
+
+        for (const auto& kv : sections_in) {
+            if (kv.second.empty()) continue;
+            SecInfo s;
+            s.name = kv.first;
+            s.data = kv.second;
+            if (s.name == ".text" || s.name == "CODE") {
+                s.characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_ALIGN_16BYTES;
+            } else {
+                s.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_8BYTES;
+            }
+            secs.push_back(s);
+        }
+
+        std::vector<CoffSymbol> coffSyms;
+        std::vector<uint8_t> stringTable;
+        stringTable.resize(4, 0);
+
+        auto add_string = [&](const std::string& name) -> uint32_t {
+            uint32_t offset = static_cast<uint32_t>(stringTable.size());
+            stringTable.insert(stringTable.end(), name.begin(), name.end());
+            stringTable.push_back('\0');
+            return offset;
+        };
+
+        std::map<std::string, uint32_t> symIndexMap;
+        for (const auto& sym : symbols_in) {
+            CoffSymbol cs = {};
+            if (sym.name.length() <= 8) {
+                std::memcpy(cs.Name.ShortName, sym.name.c_str(), sym.name.length());
+            } else {
+                cs.Name.LongName.Zeros = 0;
+                cs.Name.LongName.Offset = add_string(sym.name);
+            }
+            cs.Value = static_cast<uint32_t>(sym.value);
+
+            int16_t secNum = 0;
+            for (size_t i = 0; i < secs.size(); ++i) {
+                if (secs[i].name == sym.sectionName) {
+                    secNum = static_cast<int16_t>(i + 1);
+                    break;
+                }
+            }
+            cs.SectionNumber = secNum;
+            cs.Type = (sym.type == 2) ? 0x20 : 0x00;
+            cs.StorageClass = (sym.binding == 0) ? IMAGE_SYM_CLASS_STATIC : IMAGE_SYM_CLASS_EXTERNAL;
+            cs.NumberOfAuxSymbols = 0;
+
+            symIndexMap[sym.name] = static_cast<uint32_t>(coffSyms.size());
+            coffSyms.push_back(cs);
+        }
+
+        for (const auto& r : relocs_in) {
+            for (auto& s : secs) {
+                if (s.name == r.sectionName) {
+                    CoffRelocation cr = {};
+                    cr.VirtualAddress = static_cast<uint32_t>(r.offset);
+                    cr.SymbolTableIndex = symIndexMap.count(r.symbolName) ? symIndexMap[r.symbolName] : 0;
+                    cr.Type = (r.type == "R_X86_64_PC32" || r.type == "R_X86_64_PLT32") ? IMAGE_REL_AMD64_REL32 : 0x0001;
+                    s.relocs.push_back(cr);
+                    break;
+                }
+            }
+        }
+
+        uint32_t strTableSize = static_cast<uint32_t>(stringTable.size());
+        std::memcpy(stringTable.data(), &strTableSize, 4);
+
+        uint32_t headerSize = sizeof(CoffHeader);
+        uint32_t sectionHeadersSize = static_cast<uint32_t>(secs.size() * sizeof(CoffSectionHeader));
+        uint32_t currentOffset = headerSize + sectionHeadersSize;
+
+        std::vector<CoffSectionHeader> cHeaders;
+        for (auto& s : secs) {
+            CoffSectionHeader csh = {};
+            std::strncpy(csh.Name, s.name.c_str(), 8);
+            csh.VirtualSize = 0;
+            csh.VirtualAddress = 0;
+            csh.SizeOfRawData = static_cast<uint32_t>(s.data.size());
+            csh.PointerToRawData = currentOffset;
+            currentOffset += csh.SizeOfRawData;
+
+            if (!s.relocs.empty()) {
+                csh.PointerToRelocations = currentOffset;
+                csh.NumberOfRelocations = static_cast<uint16_t>(s.relocs.size());
+                currentOffset += static_cast<uint32_t>(s.relocs.size() * sizeof(CoffRelocation));
+            } else {
+                csh.PointerToRelocations = 0;
+                csh.NumberOfRelocations = 0;
+            }
+
+            csh.PointerToLinenumbers = 0;
+            csh.NumberOfLinenumbers = 0;
+            csh.Characteristics = s.characteristics;
+            cHeaders.push_back(csh);
+        }
+
+        uint32_t ptrToSymbolTable = currentOffset;
+
+        CoffHeader ch = {};
+        ch.Machine = (machine_ != 0) ? machine_ : IMAGE_FILE_MACHINE_AMD64;
+        ch.NumberOfSections = static_cast<uint16_t>(secs.size());
+        ch.TimeDateStamp = static_cast<uint32_t>(time(0));
+        ch.PointerToSymbolTable = ptrToSymbolTable;
+        ch.NumberOfSymbols = static_cast<uint32_t>(coffSyms.size());
+        ch.SizeOfOptionalHeader = 0;
+        ch.Characteristics = 0;
+
+        file.write(reinterpret_cast<const char*>(&ch), sizeof(ch));
+        file.write(reinterpret_cast<const char*>(cHeaders.data()), cHeaders.size() * sizeof(CoffSectionHeader));
+
+        for (size_t i = 0; i < secs.size(); ++i) {
+            if (!secs[i].data.empty()) {
+                file.seekp(cHeaders[i].PointerToRawData);
+                file.write(reinterpret_cast<const char*>(secs[i].data.data()), secs[i].data.size());
+            }
+            if (!secs[i].relocs.empty()) {
+                file.seekp(cHeaders[i].PointerToRelocations);
+                file.write(reinterpret_cast<const char*>(secs[i].relocs.data()), secs[i].relocs.size() * sizeof(CoffRelocation));
+            }
+        }
+
+        file.seekp(ptrToSymbolTable);
+        file.write(reinterpret_cast<const char*>(coffSyms.data()), coffSyms.size() * sizeof(CoffSymbol));
+        file.write(reinterpret_cast<const char*>(stringTable.data()), stringTable.size());
+
+        file.close();
+        return !file.fail();
+    }
+
     void addImport(const std::string& mod, const std::string& func) { imports_[mod].push_back(func); }
     void setMachine(uint16_t m) { machine_ = m; }
     void setBaseAddress(uint64_t a) { baseAddress_ = a; }
@@ -440,6 +588,7 @@ private:
 PEGenerator::PEGenerator(bool i, uint64_t b) : pImpl_(std::make_unique<Impl>(i, b)) {}
 PEGenerator::~PEGenerator() = default;
 bool PEGenerator::generateFromCode(const std::map<std::string, std::vector<uint8_t>>& s, const std::vector<Symbol>& sy, const std::vector<Relocation>& r, const std::string& o) { return pImpl_->generateFromCode(s, sy, r, o); }
+bool PEGenerator::generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& s, const std::vector<Symbol>& sy, const std::vector<Relocation>& r, const std::string& o) { return pImpl_->generateRelocatableFromCode(s, sy, r, o); }
 void PEGenerator::addSection(const std::string& n, const std::vector<uint8_t>& d, uint32_t v, uint32_t c) { pImpl_->addSection(n, d, v, c); }
 void PEGenerator::addImport(const std::string& m, const std::string& f) { pImpl_->addImport(m, f); }
 void PEGenerator::setMachine(uint16_t m) { pImpl_->setMachine(m); }
