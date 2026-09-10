@@ -1,0 +1,70 @@
+#pragma once
+
+#include "target/artifact/linker/LinkedImage.h"
+#include <string>
+#include <vector>
+#include <map>
+#include <cstdint>
+
+namespace target {
+namespace artifact {
+namespace linker {
+
+struct DynamicExport {
+    std::string symbol;
+    bool isFunction = true;
+    uint64_t address = 0;
+    uint64_t size = 0;
+    std::string sectionName;
+};
+
+struct DynamicImport {
+    std::string symbol;
+    std::string dependencyLibrary;
+    bool isWeak = false;
+};
+
+struct DynamicDependency {
+    std::string libraryName;
+};
+
+enum class DynamicRelocationType {
+    AbsolutePointer,
+    RelativePointer,
+    Copy
+};
+
+struct DynamicRelocation {
+    uint64_t offset = 0;
+    std::string symbol;
+    DynamicRelocationType type = DynamicRelocationType::AbsolutePointer;
+    int64_t addend = 0;
+    std::string sectionName;
+};
+
+class DynamicLinkPlan {
+public:
+    DynamicLinkPlan() = default;
+    ~DynamicLinkPlan() = default;
+
+    static DynamicLinkPlan createFromLinkedImage(const LinkedImage& image);
+
+    target::Arch arch = target::Arch::X64;
+    target::OS os = target::OS::Linux;
+    LinkOutputKind outputKind = LinkOutputKind::SharedLibrary;
+
+    std::map<std::string, LinkedSection> sections;
+    std::vector<DynamicExport> exports;
+    std::vector<DynamicImport> imports;
+    std::vector<DynamicDependency> dependencies;
+    std::vector<DynamicRelocation> relocations;
+
+    uint64_t entryAddress = 0;
+    std::string entrySymbolName;
+
+    const LinkedSection* findSection(const std::string& name) const;
+};
+
+} // namespace linker
+} // namespace artifact
+} // namespace target

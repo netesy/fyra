@@ -7,6 +7,7 @@
 #include "target/artifact/object/ObjectReader.h"
 #include "target/artifact/linker/InternalLinker.h"
 #include "target/artifact/linker/TargetDynamicImageBuilder.h"
+#include "target/artifact/linker/DynamicLinkPlan.h"
 #include "target/artifact/archive/ArchiveReader.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
@@ -151,13 +152,9 @@ int main(int argc, char** argv) {
         }
 
         if (outputKind == target::artifact::linker::LinkOutputKind::SharedLibrary) {
-            if (desc->os != target::OS::Linux || desc->arch != target::Arch::X64) {
-                std::cerr << "Error: shared-library output unsupported for target triple: " << targetTriple << std::endl;
-                return 1;
-            }
-
+            auto plan = target::artifact::linker::DynamicLinkPlan::createFromLinkedImage(image);
             auto builder = target::artifact::linker::TargetDynamicImageBuilder::createForTarget(desc->arch, desc->os);
-            if (!builder || !builder->buildSharedLibrary(image, outputFile)) {
+            if (!builder || !builder->buildSharedLibrary(plan, outputFile)) {
                 std::cerr << "Shared library generation failed: " << (builder ? builder->getLastError() : "Unsupported target") << std::endl;
                 return 1;
             }

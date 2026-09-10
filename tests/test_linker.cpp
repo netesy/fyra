@@ -3,6 +3,9 @@
 #include "target/artifact/object/ElfObjectReader.h"
 #include "target/artifact/linker/InternalLinker.h"
 #include "target/artifact/linker/LinkedImage.h"
+#include "target/artifact/linker/TargetDynamicImageBuilder.h"
+#include "target/artifact/linker/DynamicLinkPlan.h"
+#include <dlfcn.h>
 #include "target/artifact/archive/ArchiveWriter.h"
 #include "target/artifact/archive/UnixArchiveWriter.h"
 #include "target/artifact/archive/ArchiveReader.h"
@@ -326,6 +329,76 @@ void test_lazy_archive_extraction() {
     std::cout << "  -> Lazy Archive Member Extraction PASSED." << std::endl;
 }
 
+void test_common_dynamic_harness() {
+    std::cout << "[Test] Common Dynamic Image Harness Dispatch (ELF/PE/Mach-O)..." << std::endl;
+
+    ObjectArtifact art;
+    art.format = ObjectFormat::ELF;
+    art.arch = target::Arch::X64;
+    art.os = target::OS::Linux;
+
+    ObjectSection sec;
+    sec.name = ".text";
+    sec.data = {0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3}; // mov $42, %eax; ret
+    sec.alignment = 16;
+    art.addSection(sec);
+
+    ObjectSymbol sym;
+    sym.name = "get_answer";
+    sym.value = 0;
+    sym.size = 6;
+    sym.binding = SymbolBinding::Global;
+    sym.type = SymbolType::Function;
+    sym.sectionName = ".text";
+    sym.isDefined = true;
+    art.addSymbol(sym);
+
+    InternalLinker linker;
+    LinkedImage image;
+    bool ok = linker.link({art}, image, LinkOutputKind::SharedLibrary);
+    assert(ok);
+
+    DynamicLinkPlan neutralPlan = DynamicLinkPlan::createFromLinkedImage(image);
+
+    // 1. Dispatch to ELF Builder
+    auto elfBuilder = TargetDynamicImageBuilder::createForTarget(target::Arch::X64, target::OS::Linux);
+    assert(elfBuilder != nullptr);
+    std::string soPath = "test_libanswer.so";
+    bool elfOk = elfBuilder->buildSharedLibrary(neutralPlan, soPath);
+    assert(elfOk);
+
+    // Verify native dlopen / dlsym execution
+    void* handle = dlopen(("./" + soPath).c_str(), RTLD_NOW);
+    assert(handle != nullptr);
+
+    typedef int (*get_answer_fn)();
+    get_answer_fn fn = reinterpret_cast<get_answer_fn>(dlsym(handle, "get_answer"));
+    assert(fn != nullptr);
+    int res = fn();
+    assert(res == 42);
+    dlclose(handle);
+
+    // 2. Dispatch to PE Builder with same neutral plan
+    DynamicLinkPlan pePlan = neutralPlan;
+    pePlan.os = target::OS::Windows;
+    auto peBuilder = TargetDynamicImageBuilder::createForTarget(target::Arch::X64, target::OS::Windows);
+    assert(peBuilder != nullptr);
+    bool peOk = peBuilder->buildSharedLibrary(pePlan, "test_libanswer.dll");
+    assert(!peOk);
+    assert(peBuilder->getLastError().find("not implemented for target: Windows/PE") != std::string::npos);
+
+    // 3. Dispatch to Mach-O Builder with same neutral plan
+    DynamicLinkPlan machoPlan = neutralPlan;
+    machoPlan.os = target::OS::MacOS;
+    auto machoBuilder = TargetDynamicImageBuilder::createForTarget(target::Arch::X64, target::OS::MacOS);
+    assert(machoBuilder != nullptr);
+    bool machoOk = machoBuilder->buildSharedLibrary(machoPlan, "test_libanswer.dylib");
+    assert(!machoOk);
+    assert(machoBuilder->getLastError().find("not implemented for target: macOS/Mach-O") != std::string::npos);
+
+    std::cout << "  -> Common Dynamic Image Harness Dispatch PASSED." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << " Running Internal Linker Unit Tests     " << std::endl;
@@ -338,6 +411,7 @@ int main() {
     test_unknown_relocation_rejection();
     test_startup_target_gating();
     test_lazy_archive_extraction();
+    test_common_dynamic_harness();
 
     std::cout << "All Internal Linker Tests Passed!" << std::endl;
     return 0;

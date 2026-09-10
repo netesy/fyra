@@ -162,8 +162,8 @@ def main():
         fyra_o2_s = os.path.join(out_dir, "fyra_o2.s")
         fyra_exec = os.path.join(out_dir, "fyra_exec")
 
-        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o1_s} -O1")
-        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o2_s} -O2")
+        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o1_s} -O1"); fyra_o1_s = fyra_o1_s + ".s" if os.path.exists(fyra_o1_s + ".s") else fyra_o1_s
+        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o2_s} -O2"); fyra_o2_s = fyra_o2_s + ".s" if os.path.exists(fyra_o2_s + ".s") else fyra_o2_s
         harness_c = os.path.join(BENCHMARKS_DIR, "harness.c")
         run_cmd(f"gcc -static -no-pie {fyra_o2_s} {harness_c} -o {fyra_exec}")
 

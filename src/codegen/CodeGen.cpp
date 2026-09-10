@@ -397,7 +397,11 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
     CompilationTimer timer; CompilationResult result; result.targetName = targetInfo->getName();
     std::stringstream ss; std::ostream* old_os = os; os = &ss; emit(false); os = old_os;
     std::string assembly = ss.str();
-    std::string assemblyPath = outputPrefix + targetInfo->getAssemblyFileExtension();
+    std::string assemblyPath = outputPrefix;
+    std::string asmExt = targetInfo->getAssemblyFileExtension();
+    if (assemblyPath.size() < asmExt.size() || assemblyPath.compare(assemblyPath.size() - asmExt.size(), asmExt.size(), asmExt) != 0) {
+        assemblyPath += asmExt;
+    }
     result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
     if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {

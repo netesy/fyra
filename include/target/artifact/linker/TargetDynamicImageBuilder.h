@@ -1,6 +1,6 @@
 #pragma once
 
-#include "target/artifact/linker/LinkedImage.h"
+#include "target/artifact/linker/DynamicLinkPlan.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -13,7 +13,7 @@ class TargetDynamicImageBuilder {
 public:
     virtual ~TargetDynamicImageBuilder() = default;
 
-    virtual bool buildSharedLibrary(const LinkedImage& image, const std::string& outputPath) = 0;
+    virtual bool buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) = 0;
     virtual std::string getLastError() const { return lastError_; }
 
     static std::unique_ptr<TargetDynamicImageBuilder> createForTarget(target::Arch arch, target::OS os);
@@ -27,7 +27,23 @@ public:
     ElfDynamicImageBuilder() = default;
     ~ElfDynamicImageBuilder() override = default;
 
-    bool buildSharedLibrary(const LinkedImage& image, const std::string& outputPath) override;
+    bool buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) override;
+};
+
+class PeDynamicImageBuilder : public TargetDynamicImageBuilder {
+public:
+    PeDynamicImageBuilder() = default;
+    ~PeDynamicImageBuilder() override = default;
+
+    bool buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) override;
+};
+
+class MachODynamicImageBuilder : public TargetDynamicImageBuilder {
+public:
+    MachODynamicImageBuilder() = default;
+    ~MachODynamicImageBuilder() override = default;
+
+    bool buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) override;
 };
 
 } // namespace linker

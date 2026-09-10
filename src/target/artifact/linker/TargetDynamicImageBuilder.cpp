@@ -123,19 +123,23 @@ uint64_t alignUp(uint64_t val, uint64_t align) {
 std::unique_ptr<TargetDynamicImageBuilder> TargetDynamicImageBuilder::createForTarget(target::Arch arch, target::OS os) {
     if (arch == target::Arch::X64 && os == target::OS::Linux) {
         return std::make_unique<ElfDynamicImageBuilder>();
+    } else if (os == target::OS::Windows) {
+        return std::make_unique<PeDynamicImageBuilder>();
+    } else if (os == target::OS::MacOS) {
+        return std::make_unique<MachODynamicImageBuilder>();
     }
     return nullptr;
 }
 
-bool ElfDynamicImageBuilder::buildSharedLibrary(const LinkedImage& image, const std::string& outputPath) {
+bool ElfDynamicImageBuilder::buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) {
     lastError_.clear();
 
-    if (image.arch != target::Arch::X64 || image.os != target::OS::Linux) {
+    if (plan.arch != target::Arch::X64 || plan.os != target::OS::Linux) {
         lastError_ = "shared-library output unsupported for target architecture/OS";
         return false;
     }
 
-    // Build .dynstr, .dynsym, .hash, and .dynamic tables
+    // Build .dynstr, .dynsym, .hash, and .dynamic tables from neutral plan
     std::string dynstr;
     dynstr.push_back('\0'); // Index 0 is empty string
 
@@ -151,40 +155,24 @@ bool ElfDynamicImageBuilder::buildSharedLibrary(const LinkedImage& image, const 
 
     std::vector<std::pair<std::string, uint32_t>> exportedSymbols;
 
-    std::vector<Symbol64> localSyms, globalSyms;
-
-    for (const auto& [name, sym] : image.symbols) {
+    for (const auto& exp : plan.exports) {
         Symbol64 s64 = {};
-        s64.st_name = add_dynstr(sym.name);
-        s64.st_value = sym.virtualAddress;
-        s64.st_size = sym.size;
-        s64.st_info = (sym.isGlobal ? (STB_GLOBAL << 4) : (STB_LOCAL << 4)) | (sym.isFunction ? STT_FUNC : STT_NOTYPE);
+        s64.st_name = add_dynstr(exp.symbol);
+        s64.st_value = exp.address;
+        s64.st_size = exp.size;
+        s64.st_info = (STB_GLOBAL << 4) | (exp.isFunction ? STT_FUNC : STT_NOTYPE);
         s64.st_other = 0; // STV_DEFAULT
         s64.st_shndx = 1; // Section index (.text)
 
-        if (sym.isGlobal) {
-            globalSyms.push_back(s64);
-        } else {
-            localSyms.push_back(s64);
-        }
+        dynsyms.push_back(s64);
+        exportedSymbols.push_back({exp.symbol, static_cast<uint32_t>(dynsyms.size() - 1)});
     }
 
-    uint32_t firstGlobalIdx = 1 + static_cast<uint32_t>(localSyms.size());
-
-    for (const auto& s : localSyms) {
-        dynsyms.push_back(s);
-    }
-
-    for (const auto& s : globalSyms) {
-        dynsyms.push_back(s);
-        std::string symName = &dynstr[s.st_name];
-        exportedSymbols.push_back({symName, static_cast<uint32_t>(dynsyms.size() - 1)});
-    }
+    uint32_t firstGlobalIdx = 1;
 
     // Build SYSV ELF Hash table
     uint32_t nbucket = exportedSymbols.empty() ? 1 : exportedSymbols.size();
     uint32_t nchain = dynsyms.size();
-    std::vector<uint32_t> hashHeader = {nbucket, nchain};
     std::vector<uint32_t> bucket(nbucket, 0);
     std::vector<uint32_t> chain(nchain, 0);
 
@@ -229,10 +217,10 @@ bool ElfDynamicImageBuilder::buildSharedLibrary(const LinkedImage& image, const 
     uint64_t baseVma = 0x400000ULL;
     uint64_t pageAlign = 0x1000;
 
-    const auto* textSec = image.findSection(".text");
-    const auto* rodataSec = image.findSection(".rodata");
-    const auto* dataSec = image.findSection(".data");
-    const auto* bssSec = image.findSection(".bss");
+    const auto* textSec = plan.findSection(".text");
+    const auto* rodataSec = plan.findSection(".rodata");
+    const auto* dataSec = plan.findSection(".data");
+    const auto* bssSec = plan.findSection(".bss");
 
     std::vector<uint8_t> textBytes = textSec ? textSec->data : std::vector<uint8_t>{};
     std::vector<uint8_t> rodataBytes = rodataSec ? rodataSec->data : std::vector<uint8_t>{};
@@ -293,9 +281,11 @@ bool ElfDynamicImageBuilder::buildSharedLibrary(const LinkedImage& image, const 
     // Fixup symbol virtual addresses in .dynsym
     for (size_t i = 1; i < dynsyms.size(); ++i) {
         std::string symName = &dynstr[dynsyms[i].st_name];
-        const auto* lsym = image.findSymbol(symName);
-        if (lsym) {
-            dynsyms[i].st_value = textVma + (lsym->virtualAddress - (textSec ? textSec->virtualAddress : baseVma));
+        for (const auto& exp : plan.exports) {
+            if (exp.symbol == symName) {
+                dynsyms[i].st_value = textVma + (exp.address - (textSec ? textSec->virtualAddress : baseVma));
+                break;
+            }
         }
     }
 
@@ -409,6 +399,26 @@ bool ElfDynamicImageBuilder::buildSharedLibrary(const LinkedImage& image, const 
 
     file.close();
     return !file.fail();
+}
+
+bool PeDynamicImageBuilder::buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) {
+    (void)outputPath;
+    if (plan.os != target::OS::Windows) {
+        lastError_ = "shared-library output target OS mismatch for PE builder";
+        return false;
+    }
+    lastError_ = "shared-library output not implemented for target: Windows/PE";
+    return false;
+}
+
+bool MachODynamicImageBuilder::buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) {
+    (void)outputPath;
+    if (plan.os != target::OS::MacOS) {
+        lastError_ = "shared-library output target OS mismatch for Mach-O builder";
+        return false;
+    }
+    lastError_ = "shared-library output not implemented for target: macOS/Mach-O";
+    return false;
 }
 
 } // namespace linker

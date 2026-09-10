@@ -38,6 +38,7 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/MachObjectReader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/LinkedImage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/TargetRelocationEvaluator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/DynamicLinkPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/TargetDynamicImageBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/InternalLinker.cpp
 )
