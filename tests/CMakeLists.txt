@@ -302,3 +302,8 @@ add_executable(test_archive test_archive.cpp)
 target_link_libraries(test_archive PRIVATE fyra)
 add_test(NAME ArchiveTest COMMAND test_archive)
 set_tests_properties(ArchiveTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_object test_object.cpp)
+target_link_libraries(test_object PRIVATE fyra)
+add_test(NAME ObjectTest COMMAND test_object)
+set_tests_properties(ObjectTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

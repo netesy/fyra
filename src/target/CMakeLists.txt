@@ -26,6 +26,15 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/UnixArchiveWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/CoffArchiveWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/BsdArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ObjectArtifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ElfObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/CoffObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/MachObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ElfObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/CoffObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/MachObjectReader.cpp
 )
 
 target_sources(fyra PRIVATE ${TARGET_SOURCES})

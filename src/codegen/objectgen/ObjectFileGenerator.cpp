@@ -1,6 +1,7 @@
 #include "codegen/objectgen/ObjectFileGenerator.h"
 #include "codegen/objectgen/PlatformGenerators.h"
 #include "target/artifact/archive/ArchiveWriter.h"
+#include "target/artifact/object/ObjectReader.h"
 #include <filesystem>
 #include <iostream>
 #include <fstream>
@@ -18,138 +19,6 @@
 
 namespace codegen {
 namespace objectgen {
-
-namespace {
-
-std::vector<std::string> extractExportedSymbolsFromObjectBytes(const std::vector<uint8_t>& bytes) {
-    std::vector<std::string> symbols;
-    if (bytes.size() < 16) return symbols;
-
-    // Check for ELF (0x7F 'E' 'L' 'F')
-    if (bytes[0] == 0x7F && bytes[1] == 'E' && bytes[2] == 'L' && bytes[3] == 'F') {
-        if (bytes.size() < 64) return symbols;
-        uint64_t shoff = *reinterpret_cast<const uint64_t*>(&bytes[40]);
-        uint16_t shentsize = *reinterpret_cast<const uint16_t*>(&bytes[58]);
-        uint16_t shnum = *reinterpret_cast<const uint16_t*>(&bytes[60]);
-
-        if (shentsize < 64 || shoff + static_cast<uint64_t>(shnum) * shentsize > bytes.size()) return symbols;
-
-        int symtabIdx = -1;
-        for (uint16_t i = 0; i < shnum; ++i) {
-            const uint8_t* shdr = &bytes[shoff + i * shentsize];
-            uint32_t sh_type = *reinterpret_cast<const uint32_t*>(shdr + 4);
-            if (sh_type == 2) { // SHT_SYMTAB
-                symtabIdx = i;
-                break;
-            }
-        }
-
-        if (symtabIdx != -1) {
-            const uint8_t* symshdr = &bytes[shoff + symtabIdx * shentsize];
-            uint64_t sym_offset = *reinterpret_cast<const uint64_t*>(symshdr + 24);
-            uint64_t sym_size = *reinterpret_cast<const uint64_t*>(symshdr + 32);
-            uint32_t strtabIdx = *reinterpret_cast<const uint32_t*>(symshdr + 40);
-
-            if (strtabIdx < shnum) {
-                const uint8_t* strshdr = &bytes[shoff + strtabIdx * shentsize];
-                uint64_t str_offset = *reinterpret_cast<const uint64_t*>(strshdr + 24);
-                uint64_t str_size = *reinterpret_cast<const uint64_t*>(strshdr + 32);
-
-                if (sym_offset + sym_size <= bytes.size() && str_offset + str_size <= bytes.size()) {
-                    size_t numSyms = sym_size / 24;
-                    for (size_t i = 0; i < numSyms; ++i) {
-                        const uint8_t* sym = &bytes[sym_offset + i * 24];
-                        uint32_t st_name = *reinterpret_cast<const uint32_t*>(sym + 0);
-                        uint8_t st_info = sym[4];
-                        uint16_t st_shndx = *reinterpret_cast<const uint16_t*>(sym + 6);
-
-                        uint8_t binding = st_info >> 4;
-                        if ((binding == 1 || binding == 2) && st_shndx != 0 && st_name < str_size) {
-                            const char* name = reinterpret_cast<const char*>(&bytes[str_offset + st_name]);
-                            symbols.push_back(name);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // Check for COFF x64 (Machine == 0x8664)
-    else if (*reinterpret_cast<const uint16_t*>(&bytes[0]) == 0x8664) {
-        if (bytes.size() < 20) return symbols;
-        uint32_t ptrToSymTable = *reinterpret_cast<const uint32_t*>(&bytes[8]);
-        uint32_t numSyms = *reinterpret_cast<const uint32_t*>(&bytes[12]);
-        uint64_t strTableOffset = ptrToSymTable + static_cast<uint64_t>(numSyms) * 18;
-
-        if (ptrToSymTable + numSyms * 18 <= bytes.size()) {
-            for (uint32_t i = 0; i < numSyms; ++i) {
-                const uint8_t* sym = &bytes[ptrToSymTable + i * 18];
-                int16_t sectionNumber = *reinterpret_cast<const int16_t*>(sym + 12);
-                uint8_t storageClass = sym[16];
-                uint8_t numAuxSymbols = sym[17];
-
-                if (storageClass == 2 && sectionNumber > 0) { // IMAGE_SYM_CLASS_EXTERNAL and defined
-                    uint32_t zeroCheck = *reinterpret_cast<const uint32_t*>(sym);
-                    std::string symName;
-                    if (zeroCheck == 0) {
-                        uint32_t strOffset = *reinterpret_cast<const uint32_t*>(sym + 4);
-                        if (strTableOffset + strOffset < bytes.size()) {
-                            symName = reinterpret_cast<const char*>(&bytes[strTableOffset + strOffset]);
-                        }
-                    } else {
-                        char shortName[9] = {0};
-                        std::memcpy(shortName, sym, 8);
-                        symName = shortName;
-                    }
-                    if (!symName.empty()) {
-                        symbols.push_back(symName);
-                    }
-                }
-                i += numAuxSymbols;
-            }
-        }
-    }
-    // Check for Mach-O 64-bit (0xFEEDFACF)
-    else if (*reinterpret_cast<const uint32_t*>(&bytes[0]) == 0xFEEDFACF) {
-        if (bytes.size() < 32) return symbols;
-        uint32_t ncmds = *reinterpret_cast<const uint32_t*>(&bytes[16]);
-        uint64_t cmdOffset = 32;
-
-        for (uint32_t c = 0; c < ncmds && cmdOffset + 8 <= bytes.size(); ++c) {
-            uint32_t cmd = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset]);
-            uint32_t cmdsize = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 4]);
-
-            if (cmd == 0x02) { // LC_SYMTAB
-                if (cmdOffset + 24 <= bytes.size()) {
-                    uint32_t symoff = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 8]);
-                    uint32_t nsyms = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 12]);
-                    uint32_t stroff = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 16]);
-                    uint32_t strsize = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 20]);
-
-                    if (symoff + nsyms * 16 <= bytes.size() && stroff + strsize <= bytes.size()) {
-                        for (uint32_t i = 0; i < nsyms; ++i) {
-                            const uint8_t* nlist = &bytes[symoff + i * 16];
-                            uint32_t n_strx = *reinterpret_cast<const uint32_t*>(nlist);
-                            uint8_t n_type = nlist[4];
-                            uint8_t n_sect = nlist[5];
-
-                            if ((n_type & 0x01) && n_sect != 0 && n_strx < strsize) { // N_EXT and defined
-                                const char* name = reinterpret_cast<const char*>(&bytes[stroff + n_strx]);
-                                if (name[0] == '_') name++; // Mach-O leading underscore strip
-                                symbols.push_back(name);
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-            cmdOffset += cmdsize;
-        }
-    }
-
-    return symbols;
-}
-
-} // namespace
 
 // PlatformObjectGenerator base implementation
 ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<std::string>& objPaths,
@@ -173,7 +42,16 @@ ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<s
         std::filesystem::path p(objPath);
         member.name = p.filename().string();
         member.bytes = std::move(bytes);
-        member.exportedSymbols = extractExportedSymbolsFromObjectBytes(member.bytes);
+
+        // Parse ObjectArtifact using ObjectReader
+        auto reader = target::artifact::object::ObjectReader::detectAndCreate(member.bytes);
+        if (reader && reader->parse(member.bytes, member.artifact)) {
+            for (const auto& sym : member.artifact.symbols) {
+                if (sym.isDefined && sym.binding != target::artifact::object::SymbolBinding::Local) {
+                    member.exportedSymbols.push_back(sym.name);
+                }
+            }
+        }
 
         members.push_back(std::move(member));
     }
