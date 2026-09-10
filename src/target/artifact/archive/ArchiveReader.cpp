@@ -3,6 +3,7 @@
 #include <fstream>
 #include <cstring>
 #include <cstdlib>
+#include <charconv>
 
 namespace target {
 namespace artifact {
@@ -11,8 +12,23 @@ namespace archive {
 namespace {
 
 uint64_t parseDecimal(const char* buf, size_t len) {
-    std::string s(buf, len);
-    return std::stoull(s.c_str(), nullptr, 10);
+    // Trim spaces
+    size_t start = 0;
+    while (start < len && (buf[start] == ' ' || buf[start] == '\t')) {
+        start++;
+    }
+    size_t end = len;
+    while (end > start && (buf[end - 1] == ' ' || buf[end - 1] == '\t')) {
+        end--;
+    }
+    if (start >= end) return 0;
+
+    uint64_t val = 0;
+    auto result = std::from_chars(buf + start, buf + end, val, 10);
+    if (result.ec != std::errc()) {
+        return 0;
+    }
+    return val;
 }
 
 } // namespace
@@ -58,12 +74,14 @@ bool ArchiveReader::parse(const std::vector<uint8_t>& bytes, std::vector<Archive
             }
 
             if (!memberName.empty() && memberName[0] == '/' && longNamesTable.size() > 0) {
-                uint64_t tblOff = std::stoull(memberName.c_str() + 1, nullptr, 10);
-                if (tblOff < longNamesTable.size()) {
-                    const char* p = longNamesTable.c_str() + tblOff;
+                uint64_t tblOff = 0;
+                auto res = std::from_chars(memberName.c_str() + 1, memberName.c_str() + memberName.size(), tblOff, 10);
+                if (res.ec == std::errc() && tblOff < longNamesTable.size()) {
                     size_t endPos = longNamesTable.find_first_of("/\n\0", tblOff);
                     if (endPos != std::string::npos) {
                         memberName = longNamesTable.substr(tblOff, endPos - tblOff);
+                    } else {
+                        memberName = longNamesTable.substr(tblOff);
                     }
                 }
             }

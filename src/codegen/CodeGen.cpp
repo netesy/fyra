@@ -2,6 +2,7 @@
 #include "codegen/asm/Assembler.h"
 #include "codegen/objectgen/PlatformGenerators.h"
 #include "target/artifact/executable/elf.hh"
+#include "target/artifact/object/ObjectWriter.h"
 #include "ir/Constant.h"
 #include "ir/GlobalValue.h"
 #include "ir/Function.h"
@@ -400,8 +401,72 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
     result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
     if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {
-        result.objGen = objectGenerator_->generateObject(result.assemblyPath, outputPrefix, targetInfo->getName());
-        if (result.objGen.success) result.objectPath = result.objGen.objectPath;
+        std::string objExt = ".o";
+        if (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win") != std::string::npos) {
+            objExt = ".obj";
+        }
+        std::string objPath = outputPrefix + objExt;
+
+        ::target::artifact::object::ObjectArtifact artifact;
+        if (auto desc = ::target::TargetDescriptor::fromString(targetInfo->getName())) {
+            artifact.arch = desc->arch;
+            artifact.os = desc->os;
+        }
+
+        // Text section
+        ::target::artifact::object::ObjectSection textSec;
+        textSec.name = ".text";
+        textSec.flags = 0x6; // SHF_ALLOC | SHF_EXECINSTR
+        textSec.alignment = 16;
+        if (assembler) {
+            textSec.data = assembler->getCode();
+        }
+        artifact.sections[textSec.name] = textSec;
+
+        // Data / Rodata sections
+        if (rodataAssembler && !rodataAssembler->getCode().empty()) {
+            ::target::artifact::object::ObjectSection dataSec;
+            dataSec.name = ".data";
+            dataSec.flags = 0x3; // SHF_WRITE | SHF_ALLOC
+            dataSec.alignment = 8;
+            dataSec.data = rodataAssembler->getCode();
+            artifact.sections[dataSec.name] = dataSec;
+        }
+
+        // Symbols
+        for (const auto& sym : symbols) {
+            ::target::artifact::object::ObjectSymbol s;
+            s.name = sym.name;
+            s.value = sym.value;
+            s.size = sym.size;
+            s.sectionName = sym.sectionName;
+            s.binding = (sym.binding == 1) ? ::target::artifact::object::SymbolBinding::Global : ::target::artifact::object::SymbolBinding::Local;
+            s.type = (sym.type == 2) ? ::target::artifact::object::SymbolType::Function : ::target::artifact::object::SymbolType::Object;
+            s.isDefined = true;
+            artifact.symbols.push_back(s);
+        }
+
+        // Relocations
+        for (const auto& rel : relocations) {
+            ::target::artifact::object::ObjectRelocation r;
+            r.offset = rel.offset;
+            r.symbolName = rel.symbolName;
+            r.type = rel.type;
+            r.sectionName = rel.sectionName;
+            r.addend = rel.addend;
+            artifact.relocations.push_back(r);
+        }
+
+        auto writer = ::target::artifact::object::ObjectWriter::createForTargetTriple(targetInfo->getName());
+
+        if (writer && writer->write(artifact, objPath)) {
+            result.objGen.success = true;
+            result.objGen.objectPath = objPath;
+            result.objectPath = objPath;
+        } else {
+            result.objGen.success = false;
+            result.objGen.errorOutput = writer ? writer->getLastError() : "Failed to create ObjectWriter for target: " + targetInfo->getName();
+        }
     }
     result.success = !result.hasValidationErrors() && (!generateObject || result.objGen.success);
     result.totalTimeMs = timer.getElapsedMs(); return result;
