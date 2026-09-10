@@ -400,33 +400,8 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
     result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
     if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {
-        if (targetInfo->getName().find("linux") != std::string::npos || targetInfo->getName().find("systemv") != std::string::npos) {
-            std::map<std::string, std::vector<uint8_t>> sections;
-            sections[".text"] = assembler->getCode();
-            if (rodataAssembler) sections[".rodata"] = rodataAssembler->getCode();
-
-            std::vector<ElfGenerator::Symbol> syms;
-            for (const auto& sym : symbols) {
-                syms.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
-            }
-            std::vector<ElfGenerator::Relocation> relocs;
-            for (const auto& r : relocations) {
-                relocs.push_back({r.offset, r.type, r.addend, r.symbolName, r.sectionName});
-            }
-
-            objectgen::LinuxObjectGenerator linuxGen;
-            std::string objPath = outputPrefix + ".o";
-            result.objGen = linuxGen.generateNativeELF(sections, syms, relocs, objPath);
-            if (result.objGen.success) {
-                result.objectPath = result.objGen.objectPath;
-            } else {
-                result.objGen = objectGenerator_->generateObject(result.assemblyPath, outputPrefix, targetInfo->getName());
-                if (result.objGen.success) result.objectPath = result.objGen.objectPath;
-            }
-        } else {
-            result.objGen = objectGenerator_->generateObject(result.assemblyPath, outputPrefix, targetInfo->getName());
-            if (result.objGen.success) result.objectPath = result.objGen.objectPath;
-        }
+        result.objGen = objectGenerator_->generateObject(result.assemblyPath, outputPrefix, targetInfo->getName());
+        if (result.objGen.success) result.objectPath = result.objGen.objectPath;
     }
     result.success = !result.hasValidationErrors() && (!generateObject || result.objGen.success);
     result.totalTimeMs = timer.getElapsedMs(); return result;
