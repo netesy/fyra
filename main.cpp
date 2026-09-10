@@ -78,10 +78,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
-        std::cerr << "  --static-lib                                     Create static library using system archiver" << std::endl;
-        std::cerr << "  --link-exec                                      Link executable using external toolchain driver" << std::endl;
-        std::cerr << "  -L<dir>                                          Add library search directory" << std::endl;
-        std::cerr << "  -l<lib>                                          Link with specified library" << std::endl;
+        std::cerr << "  --static-lib                                     Create static library" << std::endl;
         std::cerr << "  --verbose                                        Enable verbose output" << std::endl;
         std::cerr << "  --pipeline                                       Run full compilation pipeline for all targets" << std::endl;
         std::cerr << "  --gen-exec                                       Generate an executable file directly" << std::endl;
@@ -111,13 +108,10 @@ int main(int argc, char** argv) {
     bool enableValidation = true;
     bool generateObject = false;
     bool createStaticLib = false;
-    bool linkExecutableExt = false;
     bool verboseOutput = false;
     bool runPipeline = false;
     bool generateExecutable = false;
     bool enableUnroll = true;
-    std::vector<std::string> libSearchPaths;
-    std::vector<std::string> linkLibraries;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -132,15 +126,6 @@ int main(int argc, char** argv) {
         } else if (arg == "--static-lib") {
             createStaticLib = true;
             generateObject = true;
-        } else if (arg == "--link-exec") {
-            linkExecutableExt = true;
-            generateObject = true;
-        } else if (arg.rfind("-L", 0) == 0) {
-            if (arg.length() > 2) libSearchPaths.push_back(arg.substr(2));
-            else if (i + 1 < argc) { libSearchPaths.push_back(argv[i + 1]); i++; }
-        } else if (arg.rfind("-l", 0) == 0) {
-            if (arg.length() > 2) linkLibraries.push_back(arg.substr(2));
-            else if (i + 1 < argc) { linkLibraries.push_back(argv[i + 1]); i++; }
         } else if (arg == "--verbose") {
             verboseOutput = true;
         } else if (arg == "--pipeline") {
@@ -352,29 +337,20 @@ int main(int argc, char** argv) {
             if (generateObject && !result.objectPath.empty()) std::cout << "Object: " << result.objectPath << std::endl;
 
             if (createStaticLib) {
-                std::cout << "--- Creating Static Library (Toolchain) ---\n" << std::flush;
+                std::cout << "--- Creating Static Library ---\n" << std::flush;
                 std::string libPath = outputFile;
                 if (libPath == result.assemblyPath) {
-                    libPath = outputPrefix + ".a";
+                    if (desc->os == target::OS::Windows) {
+                        libPath = outputPrefix + ".lib";
+                    } else {
+                        libPath = outputPrefix + ".a";
+                    }
                 }
                 auto libRes = codeGen.getObjectGenerator().createStaticLibrary({result.objectPath}, libPath, desc->toString());
                 if (libRes.success) {
                     std::cout << "Static Library generated successfully: " << libPath << std::endl;
                 } else {
                     std::cerr << "Error generating static library: " << libRes.errorOutput << std::endl;
-                    return 1;
-                }
-            } else if (linkExecutableExt) {
-                std::cout << "--- Linking Executable (Toolchain Driver) ---\n" << std::flush;
-                std::string execPath = outputFile;
-                if (execPath == result.objectPath || execPath == result.assemblyPath) {
-                    execPath = outputPrefix + ".exe";
-                }
-                auto linkRes = codeGen.getObjectGenerator().linkExecutable({result.objectPath}, execPath, desc->toString(), libSearchPaths, linkLibraries);
-                if (linkRes.success) {
-                    std::cout << "Executable linked successfully: " << execPath << std::endl;
-                } else {
-                    std::cerr << "Error linking executable: " << linkRes.errorOutput << std::endl;
                     return 1;
                 }
             }

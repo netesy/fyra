@@ -82,15 +82,9 @@ public:
     // Validation interface
     virtual ObjectValidationResult validateObject(const std::string& objPath) = 0;
 
-    // Static library creation interface
-    virtual ObjectGenResult createStaticLibrary(const std::vector<std::string>& objPaths, const std::string& libPath);
+    // Static library creation interface using internal target-aware archive subsystem
+    virtual ObjectGenResult createStaticLibrary(const std::vector<std::string>& objPaths, const std::string& libPath, const std::string& targetName = "");
 
-    // Executable linking interface
-    virtual ObjectGenResult linkExecutable(const std::vector<std::string>& objPaths,
-                                           const std::string& execPath,
-                                           const std::vector<std::string>& libPaths = {},
-                                           const std::vector<std::string>& libs = {});
-    
     // Platform information
     virtual std::string getPlatformName() const = 0;
     virtual std::string getObjectFormat() const = 0;
@@ -134,22 +128,13 @@ public:
         const std::string& targetName
     );
 
-    // Static library creation interface
+    // Static library creation interface using internal target-aware archive subsystem
     ObjectGenResult createStaticLibrary(
         const std::vector<std::string>& objectPaths,
         const std::string& outputPath,
         const std::string& targetName
     );
 
-    // Executable linking interface
-    ObjectGenResult linkExecutable(
-        const std::vector<std::string>& objectPaths,
-        const std::string& outputPath,
-        const std::string& targetName,
-        const std::vector<std::string>& libPaths = {},
-        const std::vector<std::string>& libs = {}
-    );
-    
     // Configuration
     void setVerboseOutput(bool verbose) { verboseOutput_ = verbose; }
     bool isVerboseOutput() const { return verboseOutput_; }

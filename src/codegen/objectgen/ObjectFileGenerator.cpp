@@ -1,10 +1,13 @@
 #include "codegen/objectgen/ObjectFileGenerator.h"
 #include "codegen/objectgen/PlatformGenerators.h"
+#include "target/artifact/archive/ArchiveWriter.h"
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <thread>
 #include <future>
 #include <chrono>
+#include <cstring>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -16,80 +19,180 @@
 namespace codegen {
 namespace objectgen {
 
-// PlatformObjectGenerator base implementation
-ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<std::string>& objPaths,
-                                                              const std::string& libPath) {
-    ObjectGenResult result;
-    std::string arTool = getToolPath("ar");
-    if (arTool.empty()) arTool = getToolPath("llvm-ar");
-    if (arTool.empty()) arTool = getToolPath("lib.exe");
-    if (arTool.empty()) {
-        result.success = false;
-        result.errorOutput = "Archiver tool (ar/llvm-ar/lib) not found in PATH";
-        return result;
+namespace {
+
+std::vector<std::string> extractExportedSymbolsFromObjectBytes(const std::vector<uint8_t>& bytes) {
+    std::vector<std::string> symbols;
+    if (bytes.size() < 16) return symbols;
+
+    // Check for ELF (0x7F 'E' 'L' 'F')
+    if (bytes[0] == 0x7F && bytes[1] == 'E' && bytes[2] == 'L' && bytes[3] == 'F') {
+        if (bytes.size() < 64) return symbols;
+        uint64_t shoff = *reinterpret_cast<const uint64_t*>(&bytes[40]);
+        uint16_t shentsize = *reinterpret_cast<const uint16_t*>(&bytes[58]);
+        uint16_t shnum = *reinterpret_cast<const uint16_t*>(&bytes[60]);
+
+        if (shentsize < 64 || shoff + static_cast<uint64_t>(shnum) * shentsize > bytes.size()) return symbols;
+
+        int symtabIdx = -1;
+        for (uint16_t i = 0; i < shnum; ++i) {
+            const uint8_t* shdr = &bytes[shoff + i * shentsize];
+            uint32_t sh_type = *reinterpret_cast<const uint32_t*>(shdr + 4);
+            if (sh_type == 2) { // SHT_SYMTAB
+                symtabIdx = i;
+                break;
+            }
+        }
+
+        if (symtabIdx != -1) {
+            const uint8_t* symshdr = &bytes[shoff + symtabIdx * shentsize];
+            uint64_t sym_offset = *reinterpret_cast<const uint64_t*>(symshdr + 24);
+            uint64_t sym_size = *reinterpret_cast<const uint64_t*>(symshdr + 32);
+            uint32_t strtabIdx = *reinterpret_cast<const uint32_t*>(symshdr + 40);
+
+            if (strtabIdx < shnum) {
+                const uint8_t* strshdr = &bytes[shoff + strtabIdx * shentsize];
+                uint64_t str_offset = *reinterpret_cast<const uint64_t*>(strshdr + 24);
+                uint64_t str_size = *reinterpret_cast<const uint64_t*>(strshdr + 32);
+
+                if (sym_offset + sym_size <= bytes.size() && str_offset + str_size <= bytes.size()) {
+                    size_t numSyms = sym_size / 24;
+                    for (size_t i = 0; i < numSyms; ++i) {
+                        const uint8_t* sym = &bytes[sym_offset + i * 24];
+                        uint32_t st_name = *reinterpret_cast<const uint32_t*>(sym + 0);
+                        uint8_t st_info = sym[4];
+                        uint16_t st_shndx = *reinterpret_cast<const uint16_t*>(sym + 6);
+
+                        uint8_t binding = st_info >> 4;
+                        if ((binding == 1 || binding == 2) && st_shndx != 0 && st_name < str_size) {
+                            const char* name = reinterpret_cast<const char*>(&bytes[str_offset + st_name]);
+                            symbols.push_back(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Check for COFF x64 (Machine == 0x8664)
+    else if (*reinterpret_cast<const uint16_t*>(&bytes[0]) == 0x8664) {
+        if (bytes.size() < 20) return symbols;
+        uint32_t ptrToSymTable = *reinterpret_cast<const uint32_t*>(&bytes[8]);
+        uint32_t numSyms = *reinterpret_cast<const uint32_t*>(&bytes[12]);
+        uint64_t strTableOffset = ptrToSymTable + static_cast<uint64_t>(numSyms) * 18;
+
+        if (ptrToSymTable + numSyms * 18 <= bytes.size()) {
+            for (uint32_t i = 0; i < numSyms; ++i) {
+                const uint8_t* sym = &bytes[ptrToSymTable + i * 18];
+                int16_t sectionNumber = *reinterpret_cast<const int16_t*>(sym + 12);
+                uint8_t storageClass = sym[16];
+                uint8_t numAuxSymbols = sym[17];
+
+                if (storageClass == 2 && sectionNumber > 0) { // IMAGE_SYM_CLASS_EXTERNAL and defined
+                    uint32_t zeroCheck = *reinterpret_cast<const uint32_t*>(sym);
+                    std::string symName;
+                    if (zeroCheck == 0) {
+                        uint32_t strOffset = *reinterpret_cast<const uint32_t*>(sym + 4);
+                        if (strTableOffset + strOffset < bytes.size()) {
+                            symName = reinterpret_cast<const char*>(&bytes[strTableOffset + strOffset]);
+                        }
+                    } else {
+                        char shortName[9] = {0};
+                        std::memcpy(shortName, sym, 8);
+                        symName = shortName;
+                    }
+                    if (!symName.empty()) {
+                        symbols.push_back(symName);
+                    }
+                }
+                i += numAuxSymbols;
+            }
+        }
+    }
+    // Check for Mach-O 64-bit (0xFEEDFACF)
+    else if (*reinterpret_cast<const uint32_t*>(&bytes[0]) == 0xFEEDFACF) {
+        if (bytes.size() < 32) return symbols;
+        uint32_t ncmds = *reinterpret_cast<const uint32_t*>(&bytes[16]);
+        uint64_t cmdOffset = 32;
+
+        for (uint32_t c = 0; c < ncmds && cmdOffset + 8 <= bytes.size(); ++c) {
+            uint32_t cmd = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset]);
+            uint32_t cmdsize = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 4]);
+
+            if (cmd == 0x02) { // LC_SYMTAB
+                if (cmdOffset + 24 <= bytes.size()) {
+                    uint32_t symoff = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 8]);
+                    uint32_t nsyms = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 12]);
+                    uint32_t stroff = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 16]);
+                    uint32_t strsize = *reinterpret_cast<const uint32_t*>(&bytes[cmdOffset + 20]);
+
+                    if (symoff + nsyms * 16 <= bytes.size() && stroff + strsize <= bytes.size()) {
+                        for (uint32_t i = 0; i < nsyms; ++i) {
+                            const uint8_t* nlist = &bytes[symoff + i * 16];
+                            uint32_t n_strx = *reinterpret_cast<const uint32_t*>(nlist);
+                            uint8_t n_type = nlist[4];
+                            uint8_t n_sect = nlist[5];
+
+                            if ((n_type & 0x01) && n_sect != 0 && n_strx < strsize) { // N_EXT and defined
+                                const char* name = reinterpret_cast<const char*>(&bytes[stroff + n_strx]);
+                                if (name[0] == '_') name++; // Mach-O leading underscore strip
+                                symbols.push_back(name);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            cmdOffset += cmdsize;
+        }
     }
 
-    std::string cmd;
-    if (arTool.find("lib.exe") != std::string::npos || arTool.find("LIB.EXE") != std::string::npos) {
-        cmd = arTool + " /OUT:\"" + libPath + "\"";
-        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
-    } else {
-        cmd = arTool + " rcs \"" + libPath + "\"";
-        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
-    }
-
-    std::string output, errorOutput;
-    int exitCode = 0;
-    if (executeCommand(cmd, output, errorOutput, exitCode) && exitCode == 0) {
-        result.success = true;
-        result.objectPath = libPath;
-        result.assemblerOutput = output;
-    } else {
-        result.success = false;
-        result.errorOutput = "Archiver command failed with exit code " + std::to_string(exitCode) + ": " + output + " " + errorOutput;
-    }
-    return result;
+    return symbols;
 }
 
-ObjectGenResult PlatformObjectGenerator::linkExecutable(const std::vector<std::string>& objPaths,
-                                                        const std::string& execPath,
-                                                        const std::vector<std::string>& libPaths,
-                                                        const std::vector<std::string>& libs) {
+} // namespace
+
+// PlatformObjectGenerator base implementation
+ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<std::string>& objPaths,
+                                                              const std::string& libPath,
+                                                              const std::string& targetName) {
     ObjectGenResult result;
-    std::string ccTool = getToolPath("gcc");
-    if (ccTool.empty()) ccTool = getToolPath("clang");
-    if (ccTool.empty()) ccTool = getToolPath("cc");
-    if (ccTool.empty()) ccTool = getToolPath("cl.exe");
-    if (ccTool.empty()) {
+    std::vector<target::artifact::archive::ArchiveMember> members;
+
+    for (const auto& objPath : objPaths) {
+        std::ifstream file(objPath, std::ios::binary);
+        if (!file.is_open()) {
+            result.success = false;
+            result.errorOutput = "Could not open object file for archive member: " + objPath;
+            return result;
+        }
+
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        target::artifact::archive::ArchiveMember member;
+        std::filesystem::path p(objPath);
+        member.name = p.filename().string();
+        member.bytes = std::move(bytes);
+        member.exportedSymbols = extractExportedSymbolsFromObjectBytes(member.bytes);
+
+        members.push_back(std::move(member));
+    }
+
+    auto writer = target::artifact::archive::ArchiveWriter::createForTargetTriple(targetName.empty() ? getPlatformName() : targetName);
+    if (!writer) {
         result.success = false;
-        result.errorOutput = "Compiler driver (gcc/clang/cc/cl) not found in PATH";
+        result.errorOutput = "Failed to create archive writer for target: " + targetName;
         return result;
     }
 
-    std::string cmd;
-    if (ccTool.find("cl.exe") != std::string::npos || ccTool.find("CL.EXE") != std::string::npos) {
-        cmd = ccTool + " /Fe:\"" + execPath + "\"";
-        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
-        for (const auto& lp : libPaths) cmd += " /LIBPATH:\"" + lp + "\"";
-        for (const auto& l : libs) cmd += " \"" + l + ".lib\"";
-    } else {
-        cmd = ccTool + " -no-pie";
-        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
-        cmd += " -o \"" + execPath + "\"";
-        for (const auto& lp : libPaths) cmd += " -L\"" + lp + "\"";
-        for (const auto& l : libs) cmd += " -l\"" + l + "\"";
-    }
-
-    std::string output, errorOutput;
-    int exitCode = 0;
-    if (executeCommand(cmd, output, errorOutput, exitCode) && exitCode == 0) {
+    if (writer->write(members, libPath)) {
         result.success = true;
-        result.objectPath = execPath;
-        result.assemblerOutput = output;
+        result.objectPath = libPath;
     } else {
         result.success = false;
-        result.errorOutput = "Linker command failed with exit code " + std::to_string(exitCode) + ": " + output + " " + errorOutput;
+        result.errorOutput = "Archive serialization failed: " + writer->getLastError();
     }
+
     return result;
 }
 
@@ -102,7 +205,6 @@ bool PlatformObjectGenerator::executeCommand(const std::string& command,
                                            std::string& errorOutput, 
                                            int& exitCode) const {
 #ifdef _WIN32
-    // Windows implementation using CreateProcess
     STARTUPINFOA si = {sizeof(si)};
     PROCESS_INFORMATION pi;
     si.dwFlags = STARTF_USESTDHANDLES;
@@ -121,7 +223,6 @@ bool PlatformObjectGenerator::executeCommand(const std::string& command,
     }
     return false;
 #else
-    // Unix implementation using popen
     FILE* pipe = popen((command + " 2>&1").c_str(), "r");
     if (!pipe) {
         exitCode = -1;
@@ -139,7 +240,6 @@ bool PlatformObjectGenerator::executeCommand(const std::string& command,
 }
 
 std::string PlatformObjectGenerator::getToolPath(const std::string& toolName) const {
-    // Try to find tool in PATH
     std::string command = "which " + toolName;
 #ifdef _WIN32
     command = "where " + toolName;
@@ -149,7 +249,6 @@ std::string PlatformObjectGenerator::getToolPath(const std::string& toolName) co
     int exitCode;
     
     if (executeCommand(command, output, errorOutput, exitCode) && exitCode == 0) {
-        // Extract first line as tool path
         size_t newlinePos = output.find('\n');
         if (newlinePos != std::string::npos) {
             return output.substr(0, newlinePos);
@@ -157,7 +256,7 @@ std::string PlatformObjectGenerator::getToolPath(const std::string& toolName) co
         return output;
     }
     
-    return ""; // Tool not found
+    return "";
 }
 
 bool PlatformObjectGenerator::createDirectoryIfNeeded(const std::string& path) const {
@@ -212,17 +311,14 @@ ObjectGenResult ObjectFileGenerator::generateObject(
     logVerbose("Input: " + assemblyPath);
     logVerbose("Output: " + outputPath);
     
-    // Create output directory if needed
     if (!createDirectoryIfNeeded(outputPath)) {
         result.success = false;
         result.errorOutput = "Failed to create output directory";
         return result;
     }
     
-    // Generate object file
     result = generator->generate(assemblyPath, outputPath);
     
-    // Calculate generation time
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
     result.generationTimeMs = duration.count() / 1000.0;
@@ -230,7 +326,6 @@ ObjectGenResult ObjectFileGenerator::generateObject(
     if (result.success) {
         logVerbose("Object generation successful in " + std::to_string(result.generationTimeMs) + "ms");
         
-        // Validate generated object
         ObjectValidationResult validation = generator->validateObject(outputPath);
         if (!validation.isValid) {
             result.addWarning("Generated object file has validation issues");
@@ -252,7 +347,6 @@ std::map<std::string, ObjectGenResult> ObjectFileGenerator::generateForAllTarget
     std::map<std::string, ObjectGenResult> results;
     
     if (parallelGeneration_) {
-        // Parallel generation
         std::vector<std::future<std::pair<std::string, ObjectGenResult>>> futures;
         
         for (const auto& [targetName, generator] : generators_) {
@@ -268,7 +362,6 @@ std::map<std::string, ObjectGenResult> ObjectFileGenerator::generateForAllTarget
             results[targetName] = result;
         }
     } else {
-        // Sequential generation
         for (const auto& [targetName, generator] : generators_) {
             std::string outputPath = outputPrefix + "_" + targetName + generator->getDefaultExtension();
             results[targetName] = generateObject(assemblyPath, outputPath, targetName);
@@ -309,27 +402,7 @@ ObjectGenResult ObjectFileGenerator::createStaticLibrary(
         return result;
     }
 
-    return generator->createStaticLibrary(objectPaths, outputPath);
-}
-
-ObjectGenResult ObjectFileGenerator::linkExecutable(
-    const std::vector<std::string>& objectPaths,
-    const std::string& outputPath,
-    const std::string& targetName,
-    const std::vector<std::string>& libPaths,
-    const std::vector<std::string>& libs) {
-
-    std::string normalizedTarget = normalizeTargetName(targetName);
-    PlatformObjectGenerator* generator = findGenerator(normalizedTarget);
-
-    if (!generator) {
-        ObjectGenResult result;
-        result.success = false;
-        result.errorOutput = "No generator available for target: " + targetName;
-        return result;
-    }
-
-    return generator->linkExecutable(objectPaths, outputPath, targetName == "windows" ? libPaths : libPaths, libs);
+    return generator->createStaticLibrary(objectPaths, outputPath, targetName);
 }
 
 std::vector<std::string> ObjectFileGenerator::getSupportedTargets() const {
@@ -410,10 +483,10 @@ void ObjectFileGenerator::initializeDefaultGenerators() {
     registerPlatformGenerator("riscv64", ObjectGeneratorFactory::createRiscVGenerator());
     registerPlatformGenerator("riscv64-unknown-linux-gnu", ObjectGeneratorFactory::createRiscVGenerator());
 
-    registerPlatformGenerator("macos", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
-    registerPlatformGenerator("macos-aarch64", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
-    registerPlatformGenerator("macos-amd64", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
-    registerPlatformGenerator("macos-arm64", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
+    registerPlatformGenerator("macos", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("macos-aarch64", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("macos-amd64", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("macos-arm64", ObjectGeneratorFactory::createLinuxGenerator());
 }
 
 std::string ObjectFileGenerator::normalizeTargetName(const std::string& targetName) const {

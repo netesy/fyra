@@ -22,6 +22,10 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/macho.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/pe.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/platform_utils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/ArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/UnixArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/CoffArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/BsdArchiveWriter.cpp
 )
 
 target_sources(fyra PRIVATE ${TARGET_SOURCES})
