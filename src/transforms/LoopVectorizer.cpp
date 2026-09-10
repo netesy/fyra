@@ -9,9 +9,42 @@
 #include "transforms/CFGBuilder.h"
 #include "target/core/TargetInfo.h"
 #include <iostream>
+#include <set>
 #include <vector>
 
 namespace transforms {
+
+namespace {
+
+ir::Instruction* terminator(ir::BasicBlock* block) {
+    if (!block || block->getInstructions().empty()) return nullptr;
+    return block->getInstructions().back().get();
+}
+
+bool hasOnlyUses(ir::Value* value, const std::set<ir::User*>& allowed) {
+    for (ir::Use* use : value->getUseList()) {
+        if (!use || allowed.count(use->getUser()) == 0) return false;
+    }
+    return true;
+}
+
+bool hasNoDanglingInstructionOperands(ir::Function& function) {
+    std::set<const ir::Instruction*> live;
+    for (auto& block : function.getBasicBlocks())
+        for (auto& instruction : block->getInstructions())
+            live.insert(instruction.get());
+    for (auto& block : function.getBasicBlocks()) {
+        for (auto& instruction : block->getInstructions()) {
+            for (auto& operand : instruction->getOperands()) {
+                if (auto* referenced = dynamic_cast<ir::Instruction*>(operand->get()))
+                    if (live.count(referenced) == 0) return false;
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 bool LoopVectorizer::performTransformation(ir::Function& func) {
     // The transform deliberately knows nothing about an ISA.  It asks the
@@ -66,12 +99,35 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
         if (!bodyBB || !exitBB) continue;
 
+        // Require the branch to be the actual terminator and the header to
+        // contain exactly the two PHIs, comparison, and branch.  This rejects
+        // every unproven operation, including observable header side effects.
+        if (terminator(headerBB) != brInst || headerBB->getInstructions().size() != 4)
+            continue;
+        if (headerBB->getSuccessors().size() != 2 ||
+            headerBB->getSuccessors()[0] == headerBB->getSuccessors()[1])
+            continue;
+
         // Find entry block (preheader)
         ir::BasicBlock* entryBB = nullptr;
+        unsigned preheaderCount = 0;
         for (auto* pred : headerBB->getPredecessors()) {
-            if (pred != bodyBB) { entryBB = pred; break; }
+            if (pred != bodyBB) { entryBB = pred; ++preheaderCount; }
         }
-        if (!entryBB) continue;
+        if (!entryBB || preheaderCount != 1 || headerBB->getPredecessors().size() != 2)
+            continue;
+        if (entryBB->getSuccessors().size() != 1 ||
+            entryBB->getSuccessors()[0] != headerBB ||
+            terminator(entryBB) == nullptr ||
+            terminator(entryBB)->getOpcode() != ir::Instruction::Jmp)
+            continue;
+        if (bodyBB->getPredecessors().size() != 1 ||
+            bodyBB->getPredecessors()[0] != headerBB ||
+            bodyBB->getSuccessors().size() != 1 ||
+            bodyBB->getSuccessors()[0] != headerBB ||
+            exitBB->getPredecessors().size() != 1 ||
+            exitBB->getPredecessors()[0] != headerBB)
+            continue;
 
         // --- BLOCKER 3: Strict Loop Body Legality Validation ---
         // Body must contain ONLY canonical operations for $loop_sum:
@@ -96,6 +152,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
         }
         if (nonJmpCount != 3) continue; // Must have exactly 3 non-jmp instructions in body
+        if (bodyBB->getInstructions().size() != 4 ||
+            terminator(bodyBB)->getOpcode() != ir::Instruction::Jmp ||
+            terminator(bodyBB)->getOperands().empty() ||
+            terminator(bodyBB)->getOperands()[0]->get() != headerBB)
+            continue;
 
         // --- BLOCKER 2: Semantic PHI Identification & Dependency Verification ---
         ir::PhiNode* iPhi = nullptr;
@@ -182,6 +243,23 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Value* condOp0 = sltCond->getOperands()[0]->get();
         ir::Value* boundN = sltCond->getOperands()[1]->get();
         if (condOp0 != iPhi || !boundN) continue;
+
+        // The rewrite currently supports one direct return of the reduction.
+        // Reject every other external use rather than leaving an operand that
+        // references an instruction in a block that is about to be erased.
+        if (exitBB->getInstructions().size() != 1) continue;
+        ir::Instruction* exitRet = exitBB->getInstructions().front().get();
+        if (exitRet->getOpcode() != ir::Instruction::Ret ||
+            exitRet->getOperands().size() != 1 ||
+            exitRet->getOperands()[0]->get() != sumPhi)
+            continue;
+        if (!hasOnlyUses(iPhi, {sltCond, mulInst, addINextInst}) ||
+            !hasOnlyUses(sumPhi, {addSumInst, exitRet}) ||
+            !hasOnlyUses(mulInst, {addSumInst}) ||
+            !hasOnlyUses(addSumInst, {sumPhi}) ||
+            !hasOnlyUses(addINextInst, {iPhi}) ||
+            !hasOnlyUses(sltCond, {brInst}))
+            continue;
 
         // All semantic proofs hold!
         ir::IntegerType* i32Ty = ctx->getIntegerType(32);
@@ -344,6 +422,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         removeBB(bodyBB);
 
         CFGBuilder::run(func);
+        if (!hasNoDanglingInstructionOperands(func))
+            throw std::runtime_error("LoopVectorizer produced a dangling instruction operand");
         changed = true;
         break; // Processed single candidate
     }

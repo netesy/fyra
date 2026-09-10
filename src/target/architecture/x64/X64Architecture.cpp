@@ -2684,6 +2684,15 @@ void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
                 *os << "  movdqu (%rax), " << dstOp << "\n";
             }
         }
+    } else {
+        if (!i.hasPhysicalRegister() || i.getPhysicalRegister() < 100)
+            throw std::runtime_error("Binary VLoad requires an allocated XMM destination");
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[0]->get(), 0); // pointer in rax
+        const unsigned dst = static_cast<unsigned>(i.getPhysicalRegister() - 100);
+        as.emitByte(0xF3);
+        if (dst >= 8) as.emitByte(0x44); // REX.R
+        as.emitBytes({0x0F, 0x6F, static_cast<uint8_t>(((dst & 7) << 3) | 0x00)});
     }
 }
 
@@ -2709,6 +2718,16 @@ void X64Architecture::emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {
                 *os << "  movdqu " << srcOp << ", (%rax)\n";
             }
         }
+    } else {
+        auto* source = i.getOperands()[0]->get();
+        if (!source->hasPhysicalRegister() || source->getPhysicalRegister() < 100)
+            throw std::runtime_error("Binary VStore requires an allocated XMM source");
+        auto& as = cg.getAssembler();
+        emitLoadValue(cg, as, i.getOperands()[1]->get(), 0); // pointer in rax
+        const unsigned src = static_cast<unsigned>(source->getPhysicalRegister() - 100);
+        as.emitByte(0xF3);
+        if (src >= 8) as.emitByte(0x44); // REX.R
+        as.emitBytes({0x0F, 0x7F, static_cast<uint8_t>(((src & 7) << 3) | 0x00)});
     }
 }
 
@@ -3162,7 +3181,7 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                 // dst and rhs to the same physical register.
                 *os << "  movdqu " << scratch << ", " << op1 << "\n";
                 *os << "  pshufb " << scratch << ", " << rhsAddress << "\n";
-                *os << "  movdqu " << dst << ", " << op0 << "\n";
+                if (dst != op0) *os << "  movdqu " << dst << ", " << op0 << "\n";
                 *os << "  pshufb " << dst << ", " << lhsAddress << "\n";
                 *os << "  por " << dst << ", " << scratch << "\n";
             } else {
@@ -3170,7 +3189,7 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                 const std::string rhsAddress = rhsLabel + "(%rip)";
                 *os << "  movdqu " << op1 << ", " << scratch << "\n";
                 *os << "  pshufb " << rhsAddress << ", " << scratch << "\n";
-                *os << "  movdqu " << op0 << ", " << dst << "\n";
+                if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
                 *os << "  pshufb " << lhsAddress << ", " << dst << "\n";
                 *os << "  por " << scratch << ", " << dst << "\n";
             }
@@ -3232,7 +3251,81 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             *os << "  movdqu " << op0 << ", " << dst << "\n";
             *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
         }
+        return;
     }
+
+    if (i.getOpcode() != ir::Instruction::VShuffle) return;
+    if (!i.hasPhysicalRegister() || i.getPhysicalRegister() < 100)
+        throw std::runtime_error("Binary VShuffle requires an allocated XMM destination");
+    if (i.getOperands().size() != 2)
+        throw std::runtime_error("VShuffle requires two vector operands");
+    auto* lhs = i.getOperands()[0]->get();
+    auto* rhs = i.getOperands()[1]->get();
+    if (!lhs->hasPhysicalRegister() || lhs->getPhysicalRegister() < 100 ||
+        !rhs->hasPhysicalRegister() || rhs->getPhysicalRegister() < 100)
+        throw std::runtime_error("Binary VShuffle requires allocated XMM operands");
+
+    auto* vectorType = dynamic_cast<ir::VectorType*>(i.getType());
+    const ir::ShuffleMask* mask = i.getShuffleMask();
+    if (!vectorType || !mask || !mask->isValid() ||
+        mask->resultElements != vectorType->getNumElements())
+        throw std::runtime_error("VShuffle requires a valid compile-time mask");
+    const unsigned lanes = vectorType->getNumElements();
+    const unsigned elementBytes = vectorType->getElementType()->getSize();
+    if (lanes * elementBytes != 16)
+        throw std::runtime_error("Binary x64 VShuffle requires a 128-bit vector");
+
+    CodeGen::VectorConstant lhsMask{}, rhsMask{};
+    lhsMask.fill(0x80); rhsMask.fill(0x80);
+    for (unsigned outputLane = 0; outputLane < lanes; ++outputLane) {
+        const int selected = mask->indices[outputLane];
+        if (selected < 0 || selected >= static_cast<int>(2 * lanes))
+            throw std::runtime_error("VShuffle mask index is out of bounds");
+        const bool fromRhs = selected >= static_cast<int>(lanes);
+        const unsigned sourceLane = fromRhs ? selected - lanes : selected;
+        auto& byteMask = fromRhs ? rhsMask : lhsMask;
+        for (unsigned byte = 0; byte < elementBytes; ++byte)
+            byteMask[outputLane * elementBytes + byte] = sourceLane * elementBytes + byte;
+    }
+
+    const std::string lhsLabel = cg.getOrCreateVectorConstantLabel(lhsMask);
+    const std::string rhsLabel = cg.getOrCreateVectorConstantLabel(rhsMask);
+    const unsigned dst = static_cast<unsigned>(i.getPhysicalRegister() - 100);
+    const unsigned lhsReg = static_cast<unsigned>(lhs->getPhysicalRegister() - 100);
+    const unsigned rhsReg = static_cast<unsigned>(rhs->getPhysicalRegister() - 100);
+    const unsigned scratch = getReservedScratchVectorRegIndex() - 100;
+    auto& as = cg.getAssembler();
+
+    auto emitXmmMove = [&](unsigned destination, unsigned source) {
+        if (destination == source) return;
+        as.emitByte(0xF3);
+        const uint8_t rex = 0x40 | (destination >= 8 ? 0x04 : 0) | (source >= 8 ? 0x01 : 0);
+        if (rex != 0x40) as.emitByte(rex);
+        as.emitBytes({0x0F, 0x6F,
+            static_cast<uint8_t>(0xC0 | ((destination & 7) << 3) | (source & 7))});
+    };
+    auto emitPshufbRip = [&](unsigned destination, const std::string& label) {
+        as.emitByte(0x66);
+        if (destination >= 8) as.emitByte(0x44);
+        as.emitBytes({0x0F, 0x38, 0x00,
+            static_cast<uint8_t>(((destination & 7) << 3) | 0x05)});
+        const uint64_t displacement = as.getCodeSize();
+        as.emitDWord(0);
+        cg.addRelocation(CodeGen::RelocationInfo{
+            displacement, "R_X86_64_PC32", -4, label, ".text"});
+    };
+
+    // Preserve rhs before dst can overwrite it, then form both masked
+    // contributions and combine them in dst.
+    emitXmmMove(scratch, rhsReg);
+    emitPshufbRip(scratch, rhsLabel);
+    emitXmmMove(dst, lhsReg);
+    emitPshufbRip(dst, lhsLabel);
+    as.emitByte(0x66);
+    const uint8_t rex = 0x40 | (dst >= 8 ? 0x04 : 0) | (scratch >= 8 ? 0x01 : 0);
+    if (rex != 0x40) as.emitByte(rex);
+    as.emitBytes({0x0F, 0xEB,
+        static_cast<uint8_t>(0xC0 | ((dst & 7) << 3) | (scratch & 7))});
 }
 
 std::string X64Architecture::getRegisterName(const std::string& base, const ir::Type* type) const {

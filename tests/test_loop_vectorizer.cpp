@@ -198,6 +198,16 @@ void test_rejection_cases() {
         Instruction* cond = builder.createCslt(rawPhiI, pN);
         builder.createBr(cond, loopBody, exit);
     };
+    auto finishCanonical = [](std::shared_ptr<IRContext> ctx, Module* mod,
+                              BasicBlock* header, BasicBlock* body, BasicBlock* exit,
+                              PhiNode* induction, PhiNode* sum) {
+        IRBuilder builder(ctx); builder.setModule(mod); builder.setInsertPoint(body);
+        auto* term = builder.createMul(induction, ctx->getConstantInt(ctx->getIntegerType(32), 2));
+        auto* sumNext = builder.createAdd(sum, term);
+        auto* iNext = builder.createAdd(induction, ctx->getConstantInt(ctx->getIntegerType(32), 1));
+        induction->addIncoming(iNext, body); sum->addIncoming(sumNext, body);
+        builder.createJmp(header); builder.setInsertPoint(exit); builder.createRet(sum);
+    };
 
     // 1. Extra arithmetic in loop
     {
@@ -293,6 +303,80 @@ void test_rejection_cases() {
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
         transforms::LoopVectorizer vec(vectorizerTarget); assert(!vec.performTransformation(*func) && "Must reject non-zero initial accumulator");
+        delete mod;
+    }
+
+    // 7. Observable header operation must survive conservative rejection.
+    {
+        std::shared_ptr<IRContext> ctx; Module* mod; Function* func; BasicBlock *entry, *header, *body, *exit; PhiNode *pI, *pSum;
+        makeBaseModule(ctx, mod, func, entry, header, body, exit, pI, pSum);
+        IRBuilder builder(ctx); builder.setModule(mod); builder.setInsertPoint(header);
+        Instruction* call = builder.createExternCall("observable", {}, ctx->getVoidType());
+        finishCanonical(ctx, mod, header, body, exit, pI, pSum);
+        transforms::CFGBuilder::run(*func);
+        transforms::LoopVectorizer vec(vectorizerTarget);
+        assert(!vec.performTransformation(*func) && "Must reject a header side effect");
+        assert(call->getParent() == header && "Rejected header call must be preserved");
+        delete mod;
+    }
+
+    // 8. Unexpected pure header arithmetic is not part of the proven shape.
+    {
+        std::shared_ptr<IRContext> ctx; Module* mod; Function* func; BasicBlock *entry, *header, *body, *exit; PhiNode *pI, *pSum;
+        makeBaseModule(ctx, mod, func, entry, header, body, exit, pI, pSum);
+        IRBuilder builder(ctx); builder.setModule(mod); builder.setInsertPoint(header);
+        builder.createAdd(pI, ctx->getConstantInt(ctx->getIntegerType(32), 9));
+        finishCanonical(ctx, mod, header, body, exit, pI, pSum);
+        transforms::CFGBuilder::run(*func);
+        transforms::LoopVectorizer vec(vectorizerTarget);
+        assert(!vec.performTransformation(*func) && "Must reject extra header arithmetic");
+        delete mod;
+    }
+
+    // 9. An unsupported external PHI use must not be left dangling.
+    {
+        std::shared_ptr<IRContext> ctx; Module* mod; Function* func; BasicBlock *entry, *header, *body, *exit; PhiNode *pI, *pSum;
+        makeBaseModule(ctx, mod, func, entry, header, body, exit, pI, pSum);
+        finishCanonical(ctx, mod, header, body, exit, pI, pSum);
+        IRBuilder builder(ctx); builder.setModule(mod);
+        builder.setInsertPoint(exit, exit->getInstructions().begin());
+        builder.createAdd(pSum, ctx->getConstantInt(ctx->getIntegerType(32), 1));
+        transforms::CFGBuilder::run(*func);
+        transforms::LoopVectorizer vec(vectorizerTarget);
+        assert(!vec.performTransformation(*func) && "Must reject unsupported external PHI use");
+        delete mod;
+    }
+
+    // 10. A second preheader edge makes the candidate non-canonical.
+    {
+        std::shared_ptr<IRContext> ctx; Module* mod; Function* func; BasicBlock *entry, *header, *body, *exit; PhiNode *pI, *pSum;
+        makeBaseModule(ctx, mod, func, entry, header, body, exit, pI, pSum);
+        finishCanonical(ctx, mod, header, body, exit, pI, pSum);
+        IRBuilder builder(ctx); builder.setModule(mod);
+        auto* extraPred = builder.createBasicBlock("extra_preheader", func);
+        builder.setInsertPoint(extraPred); builder.createJmp(header);
+        pI->addIncoming(ctx->getConstantInt(ctx->getIntegerType(32), 0), extraPred);
+        pSum->addIncoming(ctx->getConstantInt(ctx->getIntegerType(32), 0), extraPred);
+        transforms::CFGBuilder::run(*func);
+        transforms::LoopVectorizer vec(vectorizerTarget);
+        assert(!vec.performTransformation(*func) && "Must reject multiple preheaders");
+        delete mod;
+    }
+
+    // 11. A body with an early exit is not the single-latch canonical shape.
+    {
+        std::shared_ptr<IRContext> ctx; Module* mod; Function* func; BasicBlock *entry, *header, *body, *exit; PhiNode *pI, *pSum;
+        makeBaseModule(ctx, mod, func, entry, header, body, exit, pI, pSum);
+        IRBuilder builder(ctx); builder.setModule(mod); builder.setInsertPoint(body);
+        auto* term = builder.createMul(pI, ctx->getConstantInt(ctx->getIntegerType(32), 2));
+        auto* sumNext = builder.createAdd(pSum, term);
+        auto* iNext = builder.createAdd(pI, ctx->getConstantInt(ctx->getIntegerType(32), 1));
+        pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body);
+        builder.createBr(pI, header, exit);
+        builder.setInsertPoint(exit); builder.createRet(pSum);
+        transforms::CFGBuilder::run(*func);
+        transforms::LoopVectorizer vec(vectorizerTarget);
+        assert(!vec.performTransformation(*func) && "Must reject an early exit");
         delete mod;
     }
 
