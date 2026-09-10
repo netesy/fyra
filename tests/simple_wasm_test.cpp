@@ -13,9 +13,9 @@
 int main() {
     // Create a simple test case directly in code
     std::stringstream input(R"(
-export function $main() : w {
+export function $main() : i32 {
 @start
-    ret 42 : w
+    ret 42 : i32
 }
 )");
 

@@ -1,4 +1,5 @@
 #include "codegen/objectgen/PlatformGenerators.h"
+#include "target/artifact/executable/elf.hh"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -30,6 +31,25 @@ ObjectGenResult LinuxObjectGenerator::generate(const std::string& asmPath, const
         }
     }
     
+    return result;
+}
+
+ObjectGenResult LinuxObjectGenerator::generateNativeELF(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                                          const std::vector<ElfGenerator::Symbol>& symbols,
+                                                          const std::vector<ElfGenerator::Relocation>& relocations,
+                                                          const std::string& objPath) {
+    ObjectGenResult result;
+    ElfGenerator elfGen("input.fyra");
+    elfGen.setMachine(62); // EM_X86_64
+
+    if (elfGen.generateRelocatableFromCode(sections, symbols, relocations, objPath)) {
+        result.success = true;
+        result.objectPath = objPath;
+    } else {
+        result.success = false;
+        result.errorOutput = "Native ELF relocatable serialization failed: " + elfGen.getLastError();
+    }
+
     return result;
 }
 

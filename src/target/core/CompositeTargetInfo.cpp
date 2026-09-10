@@ -6,7 +6,7 @@ CompositeTargetInfo::CompositeTargetInfo(std::unique_ptr<ArchitectureInfo> arch,
     : architecture(std::move(arch)), os(std::move(os)) {}
 
 std::string CompositeTargetInfo::getName() const {
-    return architecture->getAssemblyFileExtension() + "-" + os->getName(); // or some other combination
+    return os->getName();
 }
 
 size_t CompositeTargetInfo::getPointerSize() const { return architecture->getPointerSize(); }

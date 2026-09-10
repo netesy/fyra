@@ -65,6 +65,15 @@ public:
                           const std::vector<Relocation>& relocations,
                           const std::string& outputPath);
 
+    /**
+     * @brief Directly serializes a 64-bit ELF relocatable object (.o) from in-memory machine code sections,
+     *        symbols, and relocations without invoking an external assembler.
+     */
+    bool generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections,
+                                    const std::vector<Symbol>& symbols,
+                                    const std::vector<Relocation>& relocations,
+                                    const std::string& outputPath);
+
     // --- Configuration for Executable Generation ---
 
     /**

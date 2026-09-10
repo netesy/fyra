@@ -81,6 +81,15 @@ public:
     
     // Validation interface
     virtual ObjectValidationResult validateObject(const std::string& objPath) = 0;
+
+    // Static library creation interface
+    virtual ObjectGenResult createStaticLibrary(const std::vector<std::string>& objPaths, const std::string& libPath);
+
+    // Executable linking interface
+    virtual ObjectGenResult linkExecutable(const std::vector<std::string>& objPaths,
+                                           const std::string& execPath,
+                                           const std::vector<std::string>& libPaths = {},
+                                           const std::vector<std::string>& libs = {});
     
     // Platform information
     virtual std::string getPlatformName() const = 0;
@@ -123,6 +132,22 @@ public:
     ObjectValidationResult validateGeneratedObject(
         const std::string& objectPath,
         const std::string& targetName
+    );
+
+    // Static library creation interface
+    ObjectGenResult createStaticLibrary(
+        const std::vector<std::string>& objectPaths,
+        const std::string& outputPath,
+        const std::string& targetName
+    );
+
+    // Executable linking interface
+    ObjectGenResult linkExecutable(
+        const std::vector<std::string>& objectPaths,
+        const std::string& outputPath,
+        const std::string& targetName,
+        const std::vector<std::string>& libPaths = {},
+        const std::vector<std::string>& libs = {}
     );
     
     // Configuration

@@ -17,6 +17,82 @@ namespace codegen {
 namespace objectgen {
 
 // PlatformObjectGenerator base implementation
+ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<std::string>& objPaths,
+                                                              const std::string& libPath) {
+    ObjectGenResult result;
+    std::string arTool = getToolPath("ar");
+    if (arTool.empty()) arTool = getToolPath("llvm-ar");
+    if (arTool.empty()) arTool = getToolPath("lib.exe");
+    if (arTool.empty()) {
+        result.success = false;
+        result.errorOutput = "Archiver tool (ar/llvm-ar/lib) not found in PATH";
+        return result;
+    }
+
+    std::string cmd;
+    if (arTool.find("lib.exe") != std::string::npos || arTool.find("LIB.EXE") != std::string::npos) {
+        cmd = arTool + " /OUT:\"" + libPath + "\"";
+        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
+    } else {
+        cmd = arTool + " rcs \"" + libPath + "\"";
+        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
+    }
+
+    std::string output, errorOutput;
+    int exitCode = 0;
+    if (executeCommand(cmd, output, errorOutput, exitCode) && exitCode == 0) {
+        result.success = true;
+        result.objectPath = libPath;
+        result.assemblerOutput = output;
+    } else {
+        result.success = false;
+        result.errorOutput = "Archiver command failed with exit code " + std::to_string(exitCode) + ": " + output + " " + errorOutput;
+    }
+    return result;
+}
+
+ObjectGenResult PlatformObjectGenerator::linkExecutable(const std::vector<std::string>& objPaths,
+                                                        const std::string& execPath,
+                                                        const std::vector<std::string>& libPaths,
+                                                        const std::vector<std::string>& libs) {
+    ObjectGenResult result;
+    std::string ccTool = getToolPath("gcc");
+    if (ccTool.empty()) ccTool = getToolPath("clang");
+    if (ccTool.empty()) ccTool = getToolPath("cc");
+    if (ccTool.empty()) ccTool = getToolPath("cl.exe");
+    if (ccTool.empty()) {
+        result.success = false;
+        result.errorOutput = "Compiler driver (gcc/clang/cc/cl) not found in PATH";
+        return result;
+    }
+
+    std::string cmd;
+    if (ccTool.find("cl.exe") != std::string::npos || ccTool.find("CL.EXE") != std::string::npos) {
+        cmd = ccTool + " /Fe:\"" + execPath + "\"";
+        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
+        for (const auto& lp : libPaths) cmd += " /LIBPATH:\"" + lp + "\"";
+        for (const auto& l : libs) cmd += " \"" + l + ".lib\"";
+    } else {
+        cmd = ccTool + " -no-pie";
+        for (const auto& obj : objPaths) cmd += " \"" + obj + "\"";
+        cmd += " -o \"" + execPath + "\"";
+        for (const auto& lp : libPaths) cmd += " -L\"" + lp + "\"";
+        for (const auto& l : libs) cmd += " -l\"" + l + "\"";
+    }
+
+    std::string output, errorOutput;
+    int exitCode = 0;
+    if (executeCommand(cmd, output, errorOutput, exitCode) && exitCode == 0) {
+        result.success = true;
+        result.objectPath = execPath;
+        result.assemblerOutput = output;
+    } else {
+        result.success = false;
+        result.errorOutput = "Linker command failed with exit code " + std::to_string(exitCode) + ": " + output + " " + errorOutput;
+    }
+    return result;
+}
+
 bool PlatformObjectGenerator::fileExists(const std::string& path) const {
     return std::filesystem::exists(path);
 }
@@ -218,6 +294,44 @@ ObjectValidationResult ObjectFileGenerator::validateGeneratedObject(
     return generator->validateObject(objectPath);
 }
 
+ObjectGenResult ObjectFileGenerator::createStaticLibrary(
+    const std::vector<std::string>& objectPaths,
+    const std::string& outputPath,
+    const std::string& targetName) {
+
+    std::string normalizedTarget = normalizeTargetName(targetName);
+    PlatformObjectGenerator* generator = findGenerator(normalizedTarget);
+
+    if (!generator) {
+        ObjectGenResult result;
+        result.success = false;
+        result.errorOutput = "No generator available for target: " + targetName;
+        return result;
+    }
+
+    return generator->createStaticLibrary(objectPaths, outputPath);
+}
+
+ObjectGenResult ObjectFileGenerator::linkExecutable(
+    const std::vector<std::string>& objectPaths,
+    const std::string& outputPath,
+    const std::string& targetName,
+    const std::vector<std::string>& libPaths,
+    const std::vector<std::string>& libs) {
+
+    std::string normalizedTarget = normalizeTargetName(targetName);
+    PlatformObjectGenerator* generator = findGenerator(normalizedTarget);
+
+    if (!generator) {
+        ObjectGenResult result;
+        result.success = false;
+        result.errorOutput = "No generator available for target: " + targetName;
+        return result;
+    }
+
+    return generator->linkExecutable(objectPaths, outputPath, targetName == "windows" ? libPaths : libPaths, libs);
+}
+
 std::vector<std::string> ObjectFileGenerator::getSupportedTargets() const {
     std::vector<std::string> targets;
     for (const auto& [name, generator] : generators_) {
@@ -279,6 +393,7 @@ ObjectFileGenerator::ToolchainStatus ObjectFileGenerator::checkTargetToolchain(c
 
 void ObjectFileGenerator::initializeDefaultGenerators() {
     registerPlatformGenerator("linux", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("x86_64-linux-bin", ObjectGeneratorFactory::createLinuxGenerator());
     registerPlatformGenerator("x86_64-unknown-linux-gnu", ObjectGeneratorFactory::createLinuxGenerator());
     registerPlatformGenerator("systemv", ObjectGeneratorFactory::createLinuxGenerator());
     
@@ -304,6 +419,21 @@ void ObjectFileGenerator::initializeDefaultGenerators() {
 std::string ObjectFileGenerator::normalizeTargetName(const std::string& targetName) const {
     std::string normalized = targetName;
     std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
+    if (normalized.find("linux") != std::string::npos || normalized == "x86_64-linux-bin" || normalized == "x64-linux-bin") {
+        return "linux";
+    }
+    if (normalized.find("windows") != std::string::npos || normalized.find("win") != std::string::npos) {
+        return "windows";
+    }
+    if (normalized.find("aarch64") != std::string::npos || normalized.find("arm64") != std::string::npos) {
+        return "aarch64";
+    }
+    if (normalized.find("riscv") != std::string::npos) {
+        return "riscv64";
+    }
+    if (normalized.find("wasm") != std::string::npos) {
+        return "wasm32";
+    }
     return normalized;
 }
 

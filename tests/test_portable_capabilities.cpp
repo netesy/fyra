@@ -16,13 +16,13 @@ using namespace target;
 
 void run_test(const std::string& arch_name, ::target::Arch arch, ::target::OS os) {
     std::string source =
-        "export function $main() : w {\n"
+        "export function $main() : i32 {\n"
         "@start\n"
         "    # io.write(stdout, \"Hello\", 5)\n"
-        "    %w = extern \"io.write\"(l 1, l 0, l 5) : l\n"
+        "    %w = extern \"io.write\"(i64 1, i64 0, i64 5) : i64\n"
         "    # process.exit(0)\n"
-        "    extern \"process.exit\"(l 0)\n"
-        "    ret 0 : w\n"
+        "    extern \"process.exit\"(i64 0)\n"
+        "    ret 0 : i32\n"
         "}";
 
     std::stringstream input(source);

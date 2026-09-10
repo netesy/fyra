@@ -142,6 +142,9 @@ public:
     void setValidationLevel(validation::ValidationLevel level);
     void enableVerboseOutput(bool enable);
 
+    // Object file generator getter
+    objectgen::ObjectFileGenerator& getObjectGenerator() { return *objectGenerator_; }
+
     // Timing utilities
     class CompilationTimer {
     public:
