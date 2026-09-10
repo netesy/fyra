@@ -2622,6 +2622,8 @@ VectorCapabilities X64Architecture::getVectorCapabilities() const {
     caps.maxVectorWidth = 128;
     caps.supportedWidths = {128};
     caps.supportsIntegerVectors = true;
+    caps.supportsFloatVectors = true;
+    caps.supportsDoubleVectors = true;
     caps.simdExtension = "SSE2/SSSE3/SSE4.1";
     return caps;
 }

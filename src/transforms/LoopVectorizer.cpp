@@ -20,7 +20,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
     auto ctx = func.getParent()->getContextShared();
     ir::IntegerType* candidateElementType = ctx->getIntegerType(32);
     const unsigned vectorWidth = target.getOptimalVectorWidth(candidateElementType);
-    if (vectorWidth == 0 || vectorWidth % 32 != 0)
+    // This implementation materializes its temporary vectors in Alloc16
+    // storage. Refuse wider targets rather than constructing undersized IR.
+    if (vectorWidth == 0 || vectorWidth > 128 || vectorWidth % 32 != 0)
         return false;
     const unsigned vectorLanes = vectorWidth / 32;
     if (vectorLanes < 2 || (vectorLanes & (vectorLanes - 1)) != 0)
