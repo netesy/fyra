@@ -82,9 +82,11 @@ bool InternalLinker::extractLazyArchiveMembers(
 }
 
 bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
-                           LinkedImage& outImage) {
+                           LinkedImage& outImage,
+                           LinkOutputKind outputKind) {
     lastError_.clear();
     outImage = LinkedImage{};
+    outImage.outputKind = outputKind;
 
     if (artifacts.empty()) {
         lastError_ = "No input object artifacts provided to linker";
@@ -206,8 +208,8 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         }
     }
 
-    // Add Linux x86-64 _start entry stub if main is present and _start is missing (Linux x86-64 only)
-    if (outImage.os == target::OS::Linux && outImage.arch == target::Arch::X64) {
+    // Add Linux x86-64 _start entry stub if main is present and _start is missing (Linux x86-64 only, Executable output kind)
+    if (outImage.outputKind == LinkOutputKind::Executable && outImage.os == target::OS::Linux && outImage.arch == target::Arch::X64) {
         if (!outImage.symbols.count("_start") && (outImage.symbols.count("main") || outImage.symbols.count("$main"))) {
         std::string mainName = outImage.symbols.count("main") ? "main" : "$main";
         uint64_t mainAddr = outImage.symbols[mainName].virtualAddress;

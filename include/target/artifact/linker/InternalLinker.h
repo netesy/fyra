@@ -21,7 +21,8 @@ public:
         std::vector<std::vector<target::artifact::archive::ArchiveObjectMember>>& archives);
 
     bool link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
-              LinkedImage& outImage);
+              LinkedImage& outImage,
+              LinkOutputKind outputKind = LinkOutputKind::Executable);
 
     std::string getLastError() const { return lastError_; }
 

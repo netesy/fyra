@@ -200,7 +200,7 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
     for (const auto& s : locals) finalSymbols.push_back(s);
     for (const auto& s : globals) finalSymbols.push_back(s);
 
-    for (size_t i = 0; i < finalSymbols.size(); ++i) {
+    for (size_t i = 1; i < finalSymbols.size(); ++i) {
         std::string symName = &stringTable[finalSymbols[i].st_name];
         symbolIndexMap[symName] = static_cast<uint32_t>(i);
     }

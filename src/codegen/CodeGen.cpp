@@ -124,11 +124,11 @@ void CodeGen::emitFunction(ir::Function& func) {
                 *os << "\n";
             }
             *os << ".globl " << func.getName() << "\n" << func.getName() << ":\n";
-        } else if (assembler) {
+        } else {
             SymbolInfo func_sym;
             func_sym.name = func.getName();
             func_sym.sectionName = ".text";
-            func_sym.value = assembler->getCodeSize();
+            func_sym.value = assembler ? assembler->getCodeSize() : 0;
             func_sym.type = 2; // STT_FUNC
             func_sym.binding = 1; // STB_GLOBAL
             addSymbol(func_sym);
@@ -401,6 +401,15 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
     result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
     if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {
+        // Emit in binary mode (os = nullptr) to populate assembler, symbols, and relocations
+        assembler = std::make_unique<asm_::Assembler>();
+        rodataAssembler = std::make_unique<asm_::Assembler>();
+        symbols.clear();
+        relocations.clear();
+        os = nullptr;
+        emit(false);
+        os = old_os;
+
         std::string objPath = outputPrefix;
         if (objPath.rfind(".s") != std::string::npos && objPath.rfind(".s") == objPath.size() - 2) {
             std::string objExt = (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win") != std::string::npos) ? ".obj" : ".o";
@@ -444,6 +453,23 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
             s.type = (sym.type == 2) ? ::target::artifact::object::SymbolType::Function : ::target::artifact::object::SymbolType::Object;
             s.isDefined = true;
             artifact.symbols.push_back(s);
+        }
+
+        // Add defined module functions if missing from in-memory symbol table
+        for (auto& func : module.getFunctions()) {
+            if (func->getBasicBlocks().empty()) continue;
+            std::string fnName = func->getName();
+            if (!artifact.findSymbol(fnName)) {
+                ::target::artifact::object::ObjectSymbol s;
+                s.name = fnName;
+                s.value = 0;
+                s.size = 0;
+                s.sectionName = ".text";
+                s.binding = ::target::artifact::object::SymbolBinding::Global;
+                s.type = ::target::artifact::object::SymbolType::Function;
+                s.isDefined = true;
+                artifact.symbols.push_back(s);
+            }
         }
 
         // Relocations

@@ -30,9 +30,15 @@ struct LinkedSymbol {
     std::string sectionName;
 };
 
+enum class LinkOutputKind {
+    Executable,
+    SharedLibrary
+};
+
 struct LinkedImage {
     target::Arch arch = target::Arch::X64;
     target::OS os = target::OS::Linux;
+    LinkOutputKind outputKind = LinkOutputKind::Executable;
 
     std::map<std::string, LinkedSection> sections;
     std::map<std::string, LinkedSymbol> symbols;

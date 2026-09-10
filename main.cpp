@@ -6,6 +6,7 @@
 #include "target/artifact/executable/macho.hh"
 #include "target/artifact/object/ObjectReader.h"
 #include "target/artifact/linker/InternalLinker.h"
+#include "target/artifact/linker/TargetDynamicImageBuilder.h"
 #include "target/artifact/archive/ArchiveReader.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
@@ -68,13 +69,19 @@ std::string get_arg(int argc, char** argv, const std::string& arg) {
 
 int main(int argc, char** argv) {
     bool isLinkMode = false;
+    bool isSharedMode = false;
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--link") {
+        std::string arg = argv[i];
+        if (arg == "--link") {
+            isLinkMode = true;
+        } else if (arg == "--shared") {
+            isSharedMode = true;
             isLinkMode = true;
         }
     }
 
     if (isLinkMode) {
+        target::artifact::linker::LinkOutputKind outputKind = isSharedMode ? target::artifact::linker::LinkOutputKind::SharedLibrary : target::artifact::linker::LinkOutputKind::Executable;
         std::string outputFile = get_arg(argc, argv, "-o");
         std::string targetTriple = get_arg(argc, argv, "--target");
         if (targetTriple.empty()) targetTriple = "x64-linux-bin";
@@ -83,10 +90,11 @@ int main(int argc, char** argv) {
         std::vector<std::string> linkInputs;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
-            if (arg == "--link" || arg == "-o" || arg == "--target") {
+            if (arg == "--link" || arg == "--shared" || arg == "-o" || arg == "--target") {
                 if ((arg == "-o" || arg == "--target") && i + 1 < argc) i++;
                 continue;
             }
+
             if (!arg.empty() && arg[0] != '-') {
                 linkInputs.push_back(arg);
             }
@@ -130,7 +138,7 @@ int main(int argc, char** argv) {
         linker.extractLazyArchiveMembers(artifacts, archives);
 
         target::artifact::linker::LinkedImage image;
-        if (!linker.link(artifacts, image)) {
+        if (!linker.link(artifacts, image, outputKind)) {
             std::cerr << "Linker error: " << linker.getLastError() << std::endl;
             return 1;
         }
@@ -140,6 +148,21 @@ int main(int argc, char** argv) {
             target::TargetDescriptor d;
             d.arch = target::Arch::X64; d.os = target::OS::Linux;
             desc = d;
+        }
+
+        if (outputKind == target::artifact::linker::LinkOutputKind::SharedLibrary) {
+            if (desc->os != target::OS::Linux || desc->arch != target::Arch::X64) {
+                std::cerr << "Error: shared-library output unsupported for target triple: " << targetTriple << std::endl;
+                return 1;
+            }
+
+            auto builder = target::artifact::linker::TargetDynamicImageBuilder::createForTarget(desc->arch, desc->os);
+            if (!builder || !builder->buildSharedLibrary(image, outputFile)) {
+                std::cerr << "Shared library generation failed: " << (builder ? builder->getLastError() : "Unsupported target") << std::endl;
+                return 1;
+            }
+            std::cout << "Shared library linked successfully: " << outputFile << std::endl;
+            return 0;
         }
 
         if (desc->os == target::OS::Windows) {
