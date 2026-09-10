@@ -2626,6 +2626,16 @@ VectorCapabilities X64Architecture::getVectorCapabilities() const {
     return caps;
 }
 
+unsigned X64Architecture::getOptimalVectorWidth(const ir::Type* type) const {
+    if (!type) return 0;
+    if (type->isFloatTy() || type->isDoubleTy()) return 128;
+    if (auto* integer = dynamic_cast<const ir::IntegerType*>(type)) {
+        const unsigned bits = integer->getBitwidth();
+        if (bits == 8 || bits == 16 || bits == 32 || bits == 64) return 128;
+    }
+    return 0;
+}
+
 bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
     if (!type) return false;
     auto* elemTy = type->getElementType();
@@ -3107,6 +3117,61 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         } else if (i.getOpcode() == ir::Instruction::VSelect) {
             *os << "  movdqu " << op0 << ", " << dst << "\n";
             *os << "  pand " << op1 << ", " << dst << "\n";
+            return;
+        } else if (i.getOpcode() == ir::Instruction::VShuffle) {
+            const auto capabilities = getVectorCapabilities();
+            if (!capabilities.supportsSSSE3)
+                throw std::runtime_error("VShuffle requires SSSE3 on x64");
+
+            const ir::ShuffleMask* mask = i.getShuffleMask();
+            if (!mask || !mask->isValid() || mask->resultElements != numElem)
+                throw std::runtime_error("VShuffle requires a valid compile-time mask");
+
+            const unsigned elementBytes = elemTy->getSize();
+            if (elementBytes == 0 || elementBytes * numElem != 16)
+                throw std::runtime_error("x64 VShuffle requires a 128-bit vector");
+
+            codegen::CodeGen::VectorConstant lhsMask{};
+            codegen::CodeGen::VectorConstant rhsMask{};
+            lhsMask.fill(0x80);
+            rhsMask.fill(0x80);
+            for (unsigned outputLane = 0; outputLane < numElem; ++outputLane) {
+                const int selectedLane = mask->indices[outputLane];
+                if (selectedLane < 0 || selectedLane >= static_cast<int>(2 * numElem))
+                    throw std::runtime_error("VShuffle mask index is out of bounds");
+
+                const bool fromRhs = selectedLane >= static_cast<int>(numElem);
+                const unsigned sourceLane = fromRhs
+                    ? static_cast<unsigned>(selectedLane) - numElem
+                    : static_cast<unsigned>(selectedLane);
+                auto& byteMask = fromRhs ? rhsMask : lhsMask;
+                for (unsigned byte = 0; byte < elementBytes; ++byte)
+                    byteMask[outputLane * elementBytes + byte] =
+                        static_cast<uint8_t>(sourceLane * elementBytes + byte);
+            }
+
+            const std::string lhsLabel = cg.getOrCreateVectorConstantLabel(lhsMask);
+            const std::string rhsLabel = cg.getOrCreateVectorConstantLabel(rhsMask);
+            const std::string scratch = getReservedScratchVectorReg();
+            if (abi == X64ABI::Windows) {
+                const std::string lhsAddress = "[rip + " + lhsLabel + "]";
+                const std::string rhsAddress = "[rip + " + rhsLabel + "]";
+                // Save rhs before overwriting dst: the allocator may assign
+                // dst and rhs to the same physical register.
+                *os << "  movdqu " << scratch << ", " << op1 << "\n";
+                *os << "  pshufb " << scratch << ", " << rhsAddress << "\n";
+                *os << "  movdqu " << dst << ", " << op0 << "\n";
+                *os << "  pshufb " << dst << ", " << lhsAddress << "\n";
+                *os << "  por " << dst << ", " << scratch << "\n";
+            } else {
+                const std::string lhsAddress = lhsLabel + "(%rip)";
+                const std::string rhsAddress = rhsLabel + "(%rip)";
+                *os << "  movdqu " << op1 << ", " << scratch << "\n";
+                *os << "  pshufb " << rhsAddress << ", " << scratch << "\n";
+                *os << "  movdqu " << op0 << ", " << dst << "\n";
+                *os << "  pshufb " << lhsAddress << ", " << dst << "\n";
+                *os << "  por " << scratch << ", " << dst << "\n";
+            }
             return;
         } else if (elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
