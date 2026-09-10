@@ -307,3 +307,8 @@ add_executable(test_object test_object.cpp)
 target_link_libraries(test_object PRIVATE fyra)
 add_test(NAME ObjectTest COMMAND test_object)
 set_tests_properties(ObjectTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_linker test_linker.cpp)
+target_link_libraries(test_linker PRIVATE fyra)
+add_test(NAME LinkerTest COMMAND test_linker)
+set_tests_properties(LinkerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

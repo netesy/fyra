@@ -110,7 +110,6 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
 
     const auto* shdrs = reinterpret_cast<const SectionHeader64*>(bytes.data() + ehdr->e_shoff);
 
-    // Read .shstrtab
     if (ehdr->e_shstrndx >= ehdr->e_shnum) {
         lastError_ = "Invalid e_shstrndx";
         return false;
@@ -122,7 +121,6 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
     }
     const char* shstrtab = reinterpret_cast<const char*>(bytes.data() + shstrHdr.sh_offset);
 
-    // Parse sections
     std::vector<std::string> sectionNames(ehdr->e_shnum);
     for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
         const auto& sh = shdrs[i];
@@ -130,7 +128,7 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
             sectionNames[i] = &shstrtab[sh.sh_name];
         }
 
-        if (i == 0) continue; // Skip NULL section
+        if (i == 0) continue;
 
         ObjectSection sec;
         sec.name = sectionNames[i];
@@ -146,7 +144,6 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
         outArtifact.addSection(sec);
     }
 
-    // Parse .symtab if present
     int symtabIdx = -1;
     for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
         if (shdrs[i].sh_type == SHT_SYMTAB) {
@@ -175,6 +172,9 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
                     std::string symName;
                     if (s.st_name < strshdr.sh_size) {
                         symName = &strtab[s.st_name];
+                    }
+                    if (symName.empty() && s.st_shndx < ehdr->e_shnum) {
+                        symName = sectionNames[s.st_shndx];
                     }
                     symbolNames[i] = symName;
 
@@ -210,7 +210,6 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
         }
     }
 
-    // Parse relocations (.rela*)
     for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
         if (shdrs[i].sh_type == SHT_RELA && shdrs[i].sh_offset + shdrs[i].sh_size <= bytes.size()) {
             std::string secName = sectionNames[i];

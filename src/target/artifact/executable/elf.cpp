@@ -134,6 +134,8 @@ public:
                                      const std::vector<ElfGenerator::Symbol>& symbols,
                                      const std::vector<ElfGenerator::Relocation>& relocations,
                                      const std::string& outputPath);
+    bool generateExecutableFromLinkedImage(const target::artifact::linker::LinkedImage& image,
+                                           const std::string& outputPath);
     void setBaseAddress(uint64_t address) { baseAddress_ = address; }
     void setPageSize(uint64_t size) { pageSize_ = size; }
     void setEntryPointName(const std::string& name) { entryPointName_ = name; }
@@ -256,6 +258,32 @@ bool ElfGenerator::Impl::generate(const std::string& assemblyPath, const std::st
     }
     PlatformUtils::deleteFile(tempObjFile);
     return result;
+}
+
+bool ElfGenerator::Impl::generateExecutableFromLinkedImage(const target::artifact::linker::LinkedImage& image,
+                                                            const std::string& outputPath) {
+    std::map<std::string, std::vector<uint8_t>> sections_data;
+    std::vector<ElfGenerator::Symbol> symbols_in;
+    std::vector<ElfGenerator::Relocation> relocs_in;
+
+    for (const auto& [name, sec] : image.sections) {
+        sections_data[name] = sec.data;
+    }
+
+    for (const auto& [name, sym] : image.symbols) {
+        ElfGenerator::Symbol s;
+        s.name = sym.name;
+        uint64_t secVma = (image.sections.count(sym.sectionName)) ? image.sections.at(sym.sectionName).virtualAddress : 0x400000ULL;
+        s.value = (sym.virtualAddress >= secVma) ? (sym.virtualAddress - secVma) : 0;
+        s.size = sym.size;
+        s.type = sym.isFunction ? STT_FUNC : STT_NOTYPE;
+        s.binding = sym.isGlobal ? STB_GLOBAL : STB_LOCAL;
+        s.sectionName = sym.sectionName;
+        symbols_in.push_back(s);
+    }
+
+    setEntryPointName(image.entrySymbolName);
+    return generateFromCode(sections_data, symbols_in, relocs_in, outputPath);
 }
 
 bool ElfGenerator::Impl::generateRelocatableFromCode(const std::map<std::string, std::vector<uint8_t>>& sections_data,
@@ -1307,6 +1335,12 @@ bool ElfGenerator::generateRelocatableFromCode(const std::map<std::string, std::
                                                const std::string& outputPath) {
     return pImpl->generateRelocatableFromCode(sections, symbols, relocations, outputPath);
 }
+
+bool ElfGenerator::generateExecutableFromLinkedImage(const target::artifact::linker::LinkedImage& image,
+                                                       const std::string& outputPath) {
+    return pImpl->generateExecutableFromLinkedImage(image, outputPath);
+}
+
 void ElfGenerator::setBaseAddress(uint64_t address) { pImpl->setBaseAddress(address); }
 void ElfGenerator::setPageSize(uint64_t size) { pImpl->setPageSize(size); }
 void ElfGenerator::setEntryPointName(const std::string& name) { pImpl->setEntryPointName(name); }

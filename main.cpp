@@ -4,6 +4,9 @@
 #include "target/artifact/executable/elf.hh"
 #include "target/artifact/executable/pe.hh"
 #include "target/artifact/executable/macho.hh"
+#include "target/artifact/object/ObjectReader.h"
+#include "target/artifact/linker/InternalLinker.h"
+#include "target/artifact/archive/ArchiveReader.h"
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "transforms/CFGBuilder.h"
@@ -30,11 +33,9 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <cstring>
 #include <algorithm>
 
-// File format detection is handled by the parser
-
-// Helper function to get file extension
 std::string getFileExtension(const std::string& filename) {
     size_t pos = filename.find_last_of('.');
     if (pos == std::string::npos) {
@@ -45,7 +46,6 @@ std::string getFileExtension(const std::string& filename) {
     return ext;
 }
 
-// Detect file format based on extension
 parser::FileFormat detectFileFormat(const std::string& filename) {
     std::string ext = getFileExtension(filename);
     if (ext == ".fyra") {
@@ -57,7 +57,6 @@ parser::FileFormat detectFileFormat(const std::string& filename) {
     }
 }
 
-// A simple CLI parser for now
 std::string get_arg(int argc, char** argv, const std::string& arg) {
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == arg && i + 1 < argc) {
@@ -68,6 +67,109 @@ std::string get_arg(int argc, char** argv, const std::string& arg) {
 }
 
 int main(int argc, char** argv) {
+    bool isLinkMode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--link") {
+            isLinkMode = true;
+        }
+    }
+
+    if (isLinkMode) {
+        std::string outputFile = get_arg(argc, argv, "-o");
+        std::string targetTriple = get_arg(argc, argv, "--target");
+        if (targetTriple.empty()) targetTriple = "x64-linux-bin";
+        if (outputFile.empty()) outputFile = "a.out";
+
+        std::vector<std::string> linkInputs;
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--link" || arg == "-o" || arg == "--target") {
+                if ((arg == "-o" || arg == "--target") && i + 1 < argc) i++;
+                continue;
+            }
+            if (!arg.empty() && arg[0] != '-') {
+                linkInputs.push_back(arg);
+            }
+        }
+
+        std::cout << "--- Linking " << linkInputs.size() << " object/archive inputs ---" << std::endl;
+        std::vector<target::artifact::object::ObjectArtifact> artifacts;
+
+        for (const auto& path : linkInputs) {
+            std::ifstream f(path, std::ios::binary);
+            if (!f.is_open()) {
+                std::cerr << "Error: cannot open input file " << path << std::endl;
+                return 1;
+            }
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            f.close();
+
+            if (bytes.size() >= 8 && std::memcmp(bytes.data(), "!<arch>\n", 8) == 0) {
+                target::artifact::archive::ArchiveReader arReader;
+                std::vector<target::artifact::archive::ArchiveObjectMember> members;
+                if (arReader.parse(bytes, members)) {
+                    for (const auto& m : members) {
+                        artifacts.push_back(m.artifact);
+                    }
+                }
+            } else {
+                auto objReader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+                target::artifact::object::ObjectArtifact art;
+                if (objReader && objReader->parse(bytes, art)) {
+                    artifacts.push_back(art);
+                } else {
+                    std::cerr << "Error: failed to parse object file " << path << std::endl;
+                    return 1;
+                }
+            }
+        }
+
+        target::artifact::linker::InternalLinker linker;
+        target::artifact::linker::LinkedImage image;
+        if (!linker.link(artifacts, image)) {
+            std::cerr << "Linker error: " << linker.getLastError() << std::endl;
+            return 1;
+        }
+
+        auto desc = target::TargetDescriptor::fromString(targetTriple);
+        if (!desc) {
+            target::TargetDescriptor d;
+            d.arch = target::Arch::X64; d.os = target::OS::Linux;
+            desc = d;
+        }
+
+        if (desc->os == target::OS::Windows) {
+            PEGenerator peGen(true);
+            std::map<std::string, std::vector<uint8_t>> sections;
+            std::vector<PEGenerator::Symbol> symbols;
+            std::vector<PEGenerator::Relocation> relocs;
+            for (const auto& [name, sec] : image.sections) sections[name] = sec.data;
+            if (!peGen.generateFromCode(sections, symbols, relocs, outputFile)) {
+                std::cerr << "PE Executable generation failed: " << peGen.getLastError() << std::endl;
+                return 1;
+            }
+        } else if (desc->os == target::OS::MacOS) {
+            MachOGenerator machoGen("input.fyra");
+            std::map<std::string, std::vector<uint8_t>> sections;
+            std::vector<MachOGenerator::Symbol> symbols;
+            std::vector<MachOGenerator::Relocation> relocs;
+            for (const auto& [name, sec] : image.sections) sections[name] = sec.data;
+            if (!machoGen.generateFromCode(sections, symbols, relocs, outputFile)) {
+                std::cerr << "Mach-O Executable generation failed: " << machoGen.getLastError() << std::endl;
+                return 1;
+            }
+        } else {
+            ElfGenerator elfGen("input.fyra");
+            if (!elfGen.generateExecutableFromLinkedImage(image, outputFile)) {
+                std::cerr << "ELF Executable generation failed: " << elfGen.getLastError() << std::endl;
+                return 1;
+            }
+        }
+
+        std::cout << "Executable linked successfully: " << outputFile << std::endl;
+        return 0;
+    }
+
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <input.fyra|input.fy> -o <output.s> [options]" << std::endl;
         std::cerr << "Options:" << std::endl;
@@ -79,6 +181,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
         std::cerr << "  --static-lib                                     Create static library" << std::endl;
+        std::cerr << "  --link                                           Link multiple object files/archives" << std::endl;
         std::cerr << "  --verbose                                        Enable verbose output" << std::endl;
         std::cerr << "  --pipeline                                       Run full compilation pipeline for all targets" << std::endl;
         std::cerr << "  --gen-exec                                       Generate an executable file directly" << std::endl;
@@ -100,11 +203,10 @@ int main(int argc, char** argv) {
     }
     std::string outputFile = get_arg(argc, argv, "-o");
     std::string targetTriple = get_arg(argc, argv, "--target");
-    if (targetTriple.empty()) targetTriple = "x64-linux-bin"; // Default
+    if (targetTriple.empty()) targetTriple = "x64-linux-bin";
 
     int optimizationLevel = 2;
 
-    // Parse command line options
     bool enableValidation = true;
     bool generateObject = false;
     bool createStaticLib = false;
@@ -141,10 +243,8 @@ int main(int argc, char** argv) {
         }
     }
     
-    // Resolve target
     auto desc = target::TargetDescriptor::fromString(targetTriple);
     if (!desc) {
-        // Compatibility with old target names
         if (targetTriple == "linux") targetTriple = "x64-linux-bin";
         else if (targetTriple == "windows" || targetTriple == "windows-amd64") targetTriple = "x64-windows-bin";
         else if (targetTriple == "windows-arm64") targetTriple = "aarch64-windows-bin";
@@ -152,7 +252,6 @@ int main(int argc, char** argv) {
         else if (targetTriple == "wasm32") targetTriple = "wasm32-wasi-wasm";
         else if (targetTriple == "riscv64") targetTriple = "riscv64-linux-bin";
         else {
-            // Last resort for bare names like "x64-linux"
             targetTriple += "-bin";
         }
 
@@ -163,7 +262,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Detect input file format
     parser::FileFormat format = detectFileFormat(inputFile);
     std::string formatName = (format == parser::FileFormat::FYRA) ? "Fyra (.fyra)" : "Fyra (.fy)";
 
@@ -178,7 +276,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 1. Parse the input file
     std::cout << "--- Parsing " << formatName << " input file: " << inputFile << " ---\n" << std::flush;
     parser::Parser p(inFile, static_cast<parser::FileFormat>(format));
     std::unique_ptr<ir::Module> module = p.parseModule();
@@ -188,7 +285,6 @@ int main(int argc, char** argv) {
     }
     std::cout << "--- Parsing complete. ---\n" << std::flush;
 
-    // Validate IR Correctness
     std::cout << "--- Validating IR correctness ---\n" << std::flush;
     std::vector<std::string> irErrors;
     if (!ir::Validator::validateModule(*module, irErrors)) {
@@ -200,7 +296,6 @@ int main(int argc, char** argv) {
     }
     std::cout << "--- IR Validation Successful! ---\n" << std::flush;
 
-    // 2. Run Optimization Pipeline
     std::cout << "--- Running Optimization Pipeline (-O" << optimizationLevel << ") ---\n" << std::flush;
     auto error_reporter = std::make_shared<transforms::ErrorReporter>(std::cerr, false);
     
@@ -280,7 +375,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 3. Generate code
     std::cout << "--- Target: " << desc->toString() << " ---\n" << std::flush;
     auto targetInfo = target::TargetResolver::resolve(*desc);
     
@@ -324,13 +418,16 @@ int main(int argc, char** argv) {
             else { std::cerr << "Error generating executable: " << elfGen.getLastError() << std::endl; return 1; }
         }
     } else {
-        std::string outputPrefix = outputFile.substr(0, outputFile.find_last_of('.'));
+        std::string outputPrefix = outputFile;
+        if (outputPrefix.find_last_of('.') != std::string::npos) {
+            outputPrefix = outputPrefix.substr(0, outputPrefix.find_last_of('.'));
+        }
         codegen::CodeGen codeGen(*module, std::move(targetInfo), nullptr);
         codeGen.enableVerboseOutput(verboseOutput);
         codeGen.enableDebugInfo(true);
         codeGen.module.setSourceFilename(inputFile);
 
-        auto result = codeGen.compileToObject(outputPrefix, enableValidation, generateObject, false);
+        auto result = codeGen.compileToObject(outputFile, enableValidation, generateObject, false);
         if (result.success) {
             std::cout << "Compilation successful in " << result.totalTimeMs << "ms" << std::endl;
             std::cout << "Assembly: " << result.assemblyPath << std::endl;
