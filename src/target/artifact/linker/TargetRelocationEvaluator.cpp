@@ -68,8 +68,8 @@ bool TargetRelocationEvaluator::evaluate(RelocationKind kind,
 }
 
 std::vector<uint8_t> TargetRelocationEvaluator::getImportThunkBytes(target::Arch arch, target::OS os) {
-    if (arch == target::Arch::X64 && (os == target::OS::Windows || os == target::OS::Linux)) {
-        // x64 indirect jump instruction: ff 25 [disp32] (displacement patched by PE/ELF writer)
+    if (arch == target::Arch::X64 && (os == target::OS::Windows || os == target::OS::Linux || os == target::OS::MacOS)) {
+        // x64 indirect jump instruction: ff 25 [disp32] (displacement patched by PE/ELF/Mach-O writer)
         return {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
     }
     return {};

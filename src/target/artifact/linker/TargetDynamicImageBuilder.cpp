@@ -1,6 +1,7 @@
 #include "target/artifact/linker/TargetDynamicImageBuilder.h"
 #include "target/artifact/executable/PeImage.h"
 #include "target/artifact/executable/ElfImage.h"
+#include "target/artifact/executable/MachOImage.h"
 
 namespace target {
 namespace artifact {
@@ -55,13 +56,17 @@ bool PeDynamicImageBuilder::buildSharedLibrary(const DynamicLinkPlan& plan, cons
 }
 
 bool MachODynamicImageBuilder::buildSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) {
-    (void)outputPath;
     if (plan.os != target::OS::MacOS) {
         lastError_ = "shared-library output target OS mismatch for Mach-O builder";
         return false;
     }
-    lastError_ = "shared-library output not implemented for target: macOS/Mach-O";
-    return false;
+    MachOImageWriter writer;
+    if (!writer.writeSharedLibrary(plan, outputPath)) {
+        lastError_ = writer.getLastError();
+        return false;
+    }
+    lastError_.clear();
+    return true;
 }
 
 } // namespace linker

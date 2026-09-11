@@ -10,6 +10,7 @@ namespace target::artifact::linker {
 class MachOImageWriter {
 public:
     bool writeExecutable(const LinkedImage& image, const std::string& outputPath);
+    bool writeSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath);
     const std::string& getLastError() const { return lastError_; }
 
 private:

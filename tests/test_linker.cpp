@@ -434,9 +434,14 @@ void test_common_dynamic_harness() {
     machoPlan.os = target::OS::MacOS;
     auto machoBuilder = TargetDynamicImageBuilder::createForTarget(target::Arch::X64, target::OS::MacOS);
     assert(machoBuilder != nullptr);
-    bool machoOk = machoBuilder->buildSharedLibrary(machoPlan, "test_libanswer.dylib");
-    assert(!machoOk);
-    assert(machoBuilder->getLastError().find("not implemented for target: macOS/Mach-O") != std::string::npos);
+    const std::string dylibPath = "test_libanswer.dylib";
+    bool machoOk = machoBuilder->buildSharedLibrary(machoPlan, dylibPath);
+    assert(machoOk);
+    std::ifstream dylibFile(dylibPath, std::ios::binary);
+    std::vector<uint8_t> dylibBytes((std::istreambuf_iterator<char>(dylibFile)), {});
+    assert(dylibBytes.size() >= 64);
+    assert(dylibBytes[0] == 0xcf && dylibBytes[1] == 0xfa && dylibBytes[2] == 0xed && dylibBytes[3] == 0xfe);
+    std::remove(dylibPath.c_str());
 
     std::cout << "  -> Common Dynamic Image Harness Dispatch PASSED." << std::endl;
 }
