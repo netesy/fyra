@@ -244,6 +244,10 @@ add_test(NAME MachOImageTest COMMAND test_macho_image)
 add_executable(test_pe_import test_pe_import.cpp)
 target_link_libraries(test_pe_import PRIVATE fyra)
 add_test(NAME PeImportTest COMMAND test_pe_import)
+
+add_executable(test_pe_reloc test_pe_reloc.cpp)
+target_link_libraries(test_pe_reloc PRIVATE fyra)
+add_test(NAME PeRelocTest COMMAND test_pe_reloc)
 set_tests_properties(LICMTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_inliner test_inliner.cpp)

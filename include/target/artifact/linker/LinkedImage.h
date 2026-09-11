@@ -42,6 +42,8 @@ struct LinkedImage {
 
     std::map<std::string, LinkedSection> sections;
     std::map<std::string, LinkedSymbol> symbols;
+    std::vector<uint64_t> relocationFixupVmas;
+    std::map<std::string, uint64_t> importThunkVmas;
     uint64_t entryAddress = 0;
     std::string entrySymbolName = "main";
 

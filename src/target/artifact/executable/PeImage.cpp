@@ -171,23 +171,21 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
             currentThunkIdx += static_cast<uint32_t>(imp.symbols.size() + 1);
         }
 
-        // Patch synthesized import thunks in .text (ff 25 [disp32])
+        // Patch synthesized import thunks in .text (ff 25 [disp32]) directly using exact thunk VMA
         auto textIt = std::find_if(image.sections.begin(), image.sections.end(), [](const PeSection& s) { return s.name == ".text"; });
         if (textIt != image.sections.end()) {
             const uint32_t textRva = image.sectionAlignment;
             for (const auto& [symName, iatVma] : symbolIatVma) {
-                std::string thunkName = "__imp_thunk_" + symName;
-                // Search for ff 25 00 00 00 00 thunk at end of .text section
-                for (size_t i = 0; i + 6 <= textIt->data.size(); ++i) {
-                    if (textIt->data[i] == 0xFF && textIt->data[i + 1] == 0x25 &&
-                        textIt->data[i + 2] == 0 && textIt->data[i + 3] == 0 &&
-                        textIt->data[i + 4] == 0 && textIt->data[i + 5] == 0) {
-                        uint32_t thunkRva = textRva + static_cast<uint32_t>(i);
-                        uint64_t thunkVma = image.imageBase + thunkRva;
-                        int64_t disp = static_cast<int64_t>(iatVma) - static_cast<int64_t>(thunkVma + 6);
-                        int32_t disp32 = static_cast<int32_t>(disp);
-                        std::memcpy(textIt->data.data() + i + 2, &disp32, 4);
-                        break;
+                auto thunkIt = image.importThunkVmas.find(symName);
+                if (thunkIt != image.importThunkVmas.end()) {
+                    uint64_t thunkVma = thunkIt->second;
+                    if (thunkVma >= image.imageBase + textRva) {
+                        uint64_t thunkOffsetInText = thunkVma - (image.imageBase + textRva);
+                        if (thunkOffsetInText + 6 <= textIt->data.size()) {
+                            int64_t disp = static_cast<int64_t>(iatVma) - static_cast<int64_t>(thunkVma + 6);
+                            int32_t disp32 = static_cast<int32_t>(disp);
+                            std::memcpy(textIt->data.data() + thunkOffsetInText + 2, &disp32, 4);
+                        }
                     }
                 }
             }
@@ -198,6 +196,71 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
 
         // .idata section flags: Read + Write + Initialized Data
         image.sections.push_back({".idata", std::move(idataBytes), 0, 0xC0000040});
+    }
+
+    // Base relocations (.reloc) construction if fixups exist
+    if (!image.relocationFixupVmas.empty()) {
+        std::vector<uint32_t> fixupRvas;
+        for (uint64_t vma : image.relocationFixupVmas) {
+            if (vma < image.imageBase) {
+                lastError_ = "Invalid base relocation VMA below image base: " + std::to_string(vma);
+                return false;
+            }
+            fixupRvas.push_back(static_cast<uint32_t>(vma - image.imageBase));
+        }
+        std::sort(fixupRvas.begin(), fixupRvas.end());
+        fixupRvas.erase(std::unique(fixupRvas.begin(), fixupRvas.end()), fixupRvas.end());
+
+        if (!fixupRvas.empty()) {
+            const uint32_t relocRva = alignUp(image.sectionAlignment + [&] {
+                uint32_t end = 0;
+                for (const auto& s : image.sections)
+                    end = alignUp(end + std::max<uint32_t>(s.virtualSize, s.data.size()), image.sectionAlignment);
+                return end;
+            }(), image.sectionAlignment);
+
+            std::map<uint32_t, std::vector<uint16_t>> pageGroups;
+            for (uint32_t rvaVal : fixupRvas) {
+                uint32_t pageRva = rvaVal & ~0xFFFU;
+                uint16_t offsetInPage = static_cast<uint16_t>(rvaVal & 0xFFFU);
+                pageGroups[pageRva].push_back(offsetInPage);
+            }
+
+            std::vector<uint8_t> relocBytes;
+            for (const auto& [pageRva, offsets] : pageGroups) {
+                uint32_t entryCount = static_cast<uint32_t>(offsets.size());
+                bool needsPadding = (entryCount % 2 != 0);
+                uint32_t totalEntries = entryCount + (needsPadding ? 1 : 0);
+                uint32_t blockSize = static_cast<uint32_t>(sizeof(uint32_t) * 2 + totalEntries * sizeof(uint16_t));
+
+                auto append32 = [&](uint32_t val) {
+                    uint8_t b[4];
+                    std::memcpy(b, &val, 4);
+                    relocBytes.insert(relocBytes.end(), b, b + 4);
+                };
+                auto append16 = [&](uint16_t val) {
+                    uint8_t b[2];
+                    std::memcpy(b, &val, 2);
+                    relocBytes.insert(relocBytes.end(), b, b + 2);
+                };
+
+                append32(pageRva);
+                append32(blockSize);
+
+                for (uint16_t off : offsets) {
+                    uint16_t entry = (10 << 12) | (off & 0x0FFF); // 10 = IMAGE_REL_BASED_DIR64
+                    append16(entry);
+                }
+                if (needsPadding) {
+                    append16(0); // 0 = IMAGE_REL_BASED_ABSOLUTE
+                }
+            }
+
+            image.dataDirectories[5] = {relocRva, static_cast<uint32_t>(relocBytes.size())}; // IMAGE_DIRECTORY_ENTRY_BASERELOC
+            image.dllCharacteristics |= 0x0040; // IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE
+            // .reloc section flags: Read + Initialized Data + Discardable (0x42000040)
+            image.sections.push_back({".reloc", std::move(relocBytes), 0, 0x42000040});
+        }
     }
 
     // Export records are PE semantics; construct .edata here after ordinary linking.
@@ -339,6 +402,8 @@ bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std
     }
     PeImage pe;
     pe.kind = PeImageKind::Executable;
+    pe.relocationFixupVmas = image.relocationFixupVmas;
+    pe.importThunkVmas = image.importThunkVmas;
     appendLinkedSections(image.sections, pe.sections);
     if (image.entryAddress >= pe.imageBase && image.entryAddress - pe.imageBase <= std::numeric_limits<uint32_t>::max())
         pe.entryRva = static_cast<uint32_t>(image.entryAddress - pe.imageBase);
@@ -376,8 +441,12 @@ PeImage createPeImageFromDynamicPlan(const linker::DynamicLinkPlan& plan, const 
     PeImage pe;
     pe.kind = PeImageKind::Dll;
     pe.imageName = imageName;
-    // No DYNAMIC_BASE flag: generic absolute relocations/base-relocation blocks are not yet modeled.
     pe.dllCharacteristics = 0;
+    pe.relocationFixupVmas = plan.relocations.empty() ? std::vector<uint64_t>{} : [&] {
+        std::vector<uint64_t> vmas;
+        for (const auto& r : plan.relocations) vmas.push_back(r.offset);
+        return vmas;
+    }();
     appendLinkedSections(plan.sections, pe.sections);
     for (const auto& exp : plan.exports) {
         const auto* section = plan.findSection(exp.sectionName);

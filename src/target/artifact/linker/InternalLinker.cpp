@@ -324,6 +324,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                     thunkSym.isGlobal = false;
                     thunkSym.sectionName = ".text";
                     outImage.symbols[thunkSymName] = thunkSym;
+                    outImage.importThunkVmas[reloc.symbolName] = thunkVma;
                 }
                 targetSymAddr = outImage.symbols[thunkSymName].virtualAddress;
             } else {
@@ -343,6 +344,10 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             if (!TargetRelocationEvaluator::evaluate(kind, targetSymAddr, placeAddress, reloc.addend, lsec->data, sectionDataOffset, evalError)) {
                 lastError_ = "Relocation evaluation failed for '" + reloc.symbolName + "': " + evalError;
                 return false;
+            }
+
+            if (kind == RelocationKind::Absolute) {
+                outImage.relocationFixupVmas.push_back(placeAddress);
             }
         }
     }
