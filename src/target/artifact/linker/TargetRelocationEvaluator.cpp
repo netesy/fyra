@@ -67,6 +67,14 @@ bool TargetRelocationEvaluator::evaluate(RelocationKind kind,
     return false;
 }
 
+std::vector<uint8_t> TargetRelocationEvaluator::getImportThunkBytes(target::Arch arch, target::OS os) {
+    if (arch == target::Arch::X64 && os == target::OS::Windows) {
+        // x64 indirect jump instruction: ff 25 [disp32] (displacement patched by PE writer)
+        return {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+    }
+    return {};
+}
+
 } // namespace linker
 } // namespace artifact
 } // namespace target

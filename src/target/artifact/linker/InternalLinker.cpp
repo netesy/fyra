@@ -308,15 +308,18 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                     uint64_t thunkOffset = textSec->data.size();
                     uint64_t thunkVma = textSec->virtualAddress + thunkOffset;
 
-                    // 6-byte x64 indirect jmp: ff 25 00 00 00 00 (disp32 patched by PE writer)
-                    uint8_t jmpBytes[6] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
-                    textSec->data.insert(textSec->data.end(), jmpBytes, jmpBytes + 6);
+                    std::vector<uint8_t> thunkBytes = TargetRelocationEvaluator::getImportThunkBytes(outImage.arch, outImage.os);
+                    if (thunkBytes.empty()) {
+                        lastError_ = "Target import thunk generation not supported for architecture/OS";
+                        return false;
+                    }
+                    textSec->data.insert(textSec->data.end(), thunkBytes.begin(), thunkBytes.end());
                     textSec->virtualSize = textSec->data.size();
 
                     LinkedSymbol thunkSym;
                     thunkSym.name = thunkSymName;
                     thunkSym.virtualAddress = thunkVma;
-                    thunkSym.size = 6;
+                    thunkSym.size = thunkBytes.size();
                     thunkSym.isFunction = true;
                     thunkSym.isGlobal = false;
                     thunkSym.sectionName = ".text";
