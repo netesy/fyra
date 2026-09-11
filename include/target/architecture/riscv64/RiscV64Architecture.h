@@ -9,6 +9,7 @@ class RiscV64Architecture : public ArchitectureInfo {
 public:
     RiscV64Architecture();
 
+    Arch getArch() const override { return Arch::RISCV64; }
     size_t getPointerSize() const override { return 64; }
     TypeInfo getTypeInfo(const ir::Type* type) const override;
     const std::vector<std::string>& getRegisters(RegisterClass regClass) const override;

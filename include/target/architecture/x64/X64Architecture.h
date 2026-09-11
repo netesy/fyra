@@ -26,6 +26,7 @@ class X64Architecture : public ArchitectureInfo {
 public:
     X64Architecture(X64ABI abi);
 
+    Arch getArch() const override { return Arch::X64; }
     size_t getPointerSize() const override { return 8; }
     size_t getStackAlignment() const override { return 16; }
     TypeInfo getTypeInfo(const ir::Type* type) const override;

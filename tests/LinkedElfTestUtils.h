@@ -19,6 +19,14 @@ inline bool writeLinkedX64Elf(codegen::CodeGen& codegen, const std::string& outp
     text.alignment = 16;
     text.flags = 0x6;
     artifact.addSection(text);
+    if (!codegen.getRodataAssembler().getCode().empty()) {
+        target::artifact::object::ObjectSection data;
+        data.name = ".data";
+        data.data = codegen.getRodataAssembler().getCode();
+        data.alignment = 8;
+        data.flags = 0x3;
+        artifact.addSection(data);
+    }
     for (const auto& symbol : codegen.getSymbols()) {
         target::artifact::object::ObjectSymbol out;
         out.name = symbol.name; out.value = symbol.value; out.size = symbol.size;

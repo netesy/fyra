@@ -134,6 +134,12 @@ target_link_libraries(simple_wasm_test PRIVATE fyra)
 add_test(NAME SimpleWasmTest COMMAND simple_wasm_test)
 set_tests_properties(SimpleWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_wasm_execution test_wasm_execution.cpp)
+target_link_libraries(test_wasm_execution PRIVATE fyra)
+
+add_test(NAME WasmExecutionTest COMMAND test_wasm_execution)
+set_tests_properties(WasmExecutionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # add_executable(test_linux_exec test_linux_exec.cpp)
 # target_link_libraries(test_linux_exec PRIVATE fyra)
 

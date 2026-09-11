@@ -40,7 +40,7 @@ std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& t
             d.arch = ::target::Arch::X64; d.os = ::target::OS::MacOS;
         } else if (n == "macos-aarch64" || n == "macos-arm64") {
             d.arch = ::target::Arch::AArch64; d.os = ::target::OS::MacOS;
-        } else if (n == "wasm32") {
+        } else if (n == "wasm32" || n == "wasm32-wasi" || n == "wasm32-unknown-unknown" || n.find("wasm") != std::string::npos) {
             d.arch = ::target::Arch::WASM32; d.os = ::target::OS::WASI;
         } else if (n == "aarch64") {
             d.arch = ::target::Arch::AArch64; d.os = ::target::OS::Linux;
@@ -90,7 +90,11 @@ void CodeGen::emit(bool forExecutable) {
         }
     }
 
-    emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
+    emitTargetSpecificHeader();
+    if (targetInfo->getArch() == ::target::Arch::WASM32) {
+        return;
+    }
+    emitDataSection(); emitTextSection();
     if (forExecutable) targetInfo->emitStartFunction(*this);
     for (auto& func : module.getFunctions()) emitFunction(*func);
     // Targets may intern constants while lowering functions, so finalize the
@@ -106,49 +110,41 @@ void CodeGen::emitFunction(ir::Function& func) {
     stackOffsets.clear();
     lastStoreOp = "";
     liveness.run(func);
-    if (targetInfo->getName() == "wasm32" && !os) {
-        auto funcBodyAsm = std::make_unique<asm_::Assembler>();
-        auto oldAsm = std::move(assembler); assembler = std::move(funcBodyAsm);
-        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
-        wasmFunctionBodies.push_back(assembler->getCode());
-        assembler = std::move(oldAsm);
-    } else {
-        if (debugInfoManager->isDebugEnabled() && os) {
-            debugInfoManager->beforeFunctionEmission(*this, *os, func);
-        }
-        if (os) {
-            if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
-                *os << "\n" << targetInfo->formatFunctionTypeDirective(func.getName()) << "\n";
-            } else {
-                *os << "\n";
-            }
-            *os << ".globl " << func.getName() << "\n" << func.getName() << ":\n";
+    if (debugInfoManager->isDebugEnabled() && os) {
+        debugInfoManager->beforeFunctionEmission(*this, *os, func);
+    }
+    if (os) {
+        if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
+            *os << "\n" << targetInfo->formatFunctionTypeDirective(func.getName()) << "\n";
         } else {
-            SymbolInfo func_sym;
-            func_sym.name = func.getName();
-            func_sym.sectionName = ".text";
-            func_sym.value = assembler ? assembler->getCodeSize() : 0;
-            func_sym.type = 2; // STT_FUNC
-            func_sym.binding = 1; // STB_GLOBAL
-            addSymbol(func_sym);
+            *os << "\n";
         }
-        targetInfo->emitFunctionPrologue(*this, func);
-        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
-        targetInfo->emitFunctionEpilogue(*this, func);
-        if (os) {
-            *os << ".Lfunc_end_" << func.getName() << ":\n";
-            if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
-                *os << targetInfo->formatFunctionSizeDirective(func.getName()) << "\n";
-            }
-        } else if (assembler) {
-            SymbolInfo end_sym;
-            end_sym.name = ".Lfunc_end_" + func.getName();
-            end_sym.sectionName = ".text";
-            end_sym.value = assembler->getCodeSize();
-            end_sym.type = 0;
-            end_sym.binding = 0; // Local
-            addSymbol(end_sym);
+        *os << ".globl " << func.getName() << "\n" << func.getName() << ":\n";
+    } else {
+        SymbolInfo func_sym;
+        func_sym.name = func.getName();
+        func_sym.sectionName = ".text";
+        func_sym.value = assembler ? assembler->getCodeSize() : 0;
+        func_sym.type = 2; // STT_FUNC
+        func_sym.binding = 1; // STB_GLOBAL
+        addSymbol(func_sym);
+    }
+    targetInfo->emitFunctionPrologue(*this, func);
+    for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
+    targetInfo->emitFunctionEpilogue(*this, func);
+    if (os) {
+        *os << ".Lfunc_end_" << func.getName() << ":\n";
+        if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
+            *os << targetInfo->formatFunctionSizeDirective(func.getName()) << "\n";
         }
+    } else if (assembler) {
+        SymbolInfo end_sym;
+        end_sym.name = ".Lfunc_end_" + func.getName();
+        end_sym.sectionName = ".text";
+        end_sym.value = assembler->getCodeSize();
+        end_sym.type = 0;
+        end_sym.binding = 0; // Local
+        addSymbol(end_sym);
     }
 }
 
