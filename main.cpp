@@ -89,9 +89,18 @@ int main(int argc, char** argv) {
         if (targetTriple.empty()) targetTriple = "x64-linux-bin";
         if (outputFile.empty()) outputFile = "a.out";
 
+        std::vector<std::pair<std::string, std::string>> dynamicImports;
         std::vector<std::string> linkInputs;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
+            if (arg == "--import" && i + 1 < argc) {
+                std::string spec = argv[++i];
+                size_t eq = spec.find('=');
+                if (eq != std::string::npos) {
+                    dynamicImports.push_back({spec.substr(0, eq), spec.substr(eq + 1)});
+                }
+                continue;
+            }
             if (arg == "--link" || arg == "--shared" || arg == "-o" || arg == "--target") {
                 if ((arg == "-o" || arg == "--target") && i + 1 < argc) i++;
                 continue;
@@ -140,7 +149,7 @@ int main(int argc, char** argv) {
         linker.extractLazyArchiveMembers(artifacts, archives);
 
         target::artifact::linker::LinkedImage image;
-        if (!linker.link(artifacts, image, outputKind)) {
+        if (!linker.link(artifacts, image, outputKind, dynamicImports)) {
             std::cerr << "Linker error: " << linker.getLastError() << std::endl;
             return 1;
         }
@@ -165,9 +174,17 @@ int main(int argc, char** argv) {
 
         if (desc->os == target::OS::Windows) {
             target::artifact::executable::PeExecutableImageBuilder builder;
-            if (!builder.build(image, outputFile)) {
-                std::cerr << "PE Executable generation failed: " << builder.getLastError() << std::endl;
-                return 1;
+            if (!dynamicImports.empty()) {
+                auto plan = target::artifact::linker::DynamicLinkPlan::createFromLinkedImage(image, dynamicImports);
+                if (!builder.buildWithPlan(plan, outputFile)) {
+                    std::cerr << "PE Executable generation failed: " << builder.getLastError() << std::endl;
+                    return 1;
+                }
+            } else {
+                if (!builder.build(image, outputFile)) {
+                    std::cerr << "PE Executable generation failed: " << builder.getLastError() << std::endl;
+                    return 1;
+                }
             }
         } else if (desc->os == target::OS::MacOS) {
             target::artifact::linker::MachOExecutableImageBuilder builder;

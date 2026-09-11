@@ -25,6 +25,16 @@ struct PeExport {
     uint32_t sectionOffset = 0;
 };
 
+struct PeImportSymbol {
+    std::string name;
+    uint16_t hint = 0;
+};
+
+struct PeImportDirectory {
+    std::string dllName;
+    std::vector<PeImportSymbol> symbols;
+};
+
 struct PeDataDirectory {
     uint32_t virtualAddress = 0;
     uint32_t size = 0;
@@ -43,6 +53,7 @@ struct PeImage {
     std::string imageName;
     std::vector<PeSection> sections;
     std::vector<PeExport> exports;
+    std::vector<PeImportDirectory> imports;
     std::array<PeDataDirectory, 16> dataDirectories{};
 };
 
@@ -58,6 +69,7 @@ private:
 class PeExecutableImageBuilder {
 public:
     bool build(const linker::LinkedImage& image, const std::string& outputPath);
+    bool buildWithPlan(const linker::DynamicLinkPlan& plan, const std::string& outputPath);
     const std::string& getLastError() const { return lastError_; }
 
 private:

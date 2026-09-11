@@ -83,7 +83,8 @@ bool InternalLinker::extractLazyArchiveMembers(
 
 bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
                            LinkedImage& outImage,
-                           LinkOutputKind outputKind) {
+                           LinkOutputKind outputKind,
+                           const std::vector<std::pair<std::string, std::string>>& dynamicImports) {
     lastError_.clear();
     outImage = LinkedImage{};
     outImage.outputKind = outputKind;
@@ -283,10 +284,45 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             }
 
             uint64_t targetSymAddr = 0;
+            std::string matchedLib;
+            for (const auto& [impSym, impLib] : dynamicImports) {
+                if (impSym == reloc.symbolName) {
+                    matchedLib = impLib;
+                    break;
+                }
+            }
+
             if (outImage.symbols.count(reloc.symbolName)) {
                 targetSymAddr = outImage.symbols[reloc.symbolName].virtualAddress;
             } else if (const auto* sec = outImage.findSection(reloc.symbolName)) {
                 targetSymAddr = sec->virtualAddress;
+            } else if (!matchedLib.empty()) {
+                // Synthesize or retrieve import thunk in .text
+                std::string thunkSymName = "__imp_thunk_" + reloc.symbolName;
+                if (!outImage.symbols.count(thunkSymName)) {
+                    auto* textSec = outImage.findSection(".text");
+                    if (!textSec) {
+                        lastError_ = "Cannot synthesize import thunk for '" + reloc.symbolName + "': .text section missing";
+                        return false;
+                    }
+                    uint64_t thunkOffset = textSec->data.size();
+                    uint64_t thunkVma = textSec->virtualAddress + thunkOffset;
+
+                    // 6-byte x64 indirect jmp: ff 25 00 00 00 00 (disp32 patched by PE writer)
+                    uint8_t jmpBytes[6] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+                    textSec->data.insert(textSec->data.end(), jmpBytes, jmpBytes + 6);
+                    textSec->virtualSize = textSec->data.size();
+
+                    LinkedSymbol thunkSym;
+                    thunkSym.name = thunkSymName;
+                    thunkSym.virtualAddress = thunkVma;
+                    thunkSym.size = 6;
+                    thunkSym.isFunction = true;
+                    thunkSym.isGlobal = false;
+                    thunkSym.sectionName = ".text";
+                    outImage.symbols[thunkSymName] = thunkSym;
+                }
+                targetSymAddr = outImage.symbols[thunkSymName].virtualAddress;
             } else {
                 lastError_ = "Unresolved undefined symbol reference: '" + reloc.symbolName + "'";
                 return false;

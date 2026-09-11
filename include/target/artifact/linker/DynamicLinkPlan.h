@@ -47,7 +47,8 @@ public:
     DynamicLinkPlan() = default;
     ~DynamicLinkPlan() = default;
 
-    static DynamicLinkPlan createFromLinkedImage(const LinkedImage& image);
+    static DynamicLinkPlan createFromLinkedImage(const LinkedImage& image,
+                                                        const std::vector<std::pair<std::string, std::string>>& dynamicImports = {});
 
     target::Arch arch = target::Arch::X64;
     target::OS os = target::OS::Linux;

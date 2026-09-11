@@ -22,7 +22,8 @@ public:
 
     bool link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
               LinkedImage& outImage,
-              LinkOutputKind outputKind = LinkOutputKind::Executable);
+              LinkOutputKind outputKind = LinkOutputKind::Executable,
+              const std::vector<std::pair<std::string, std::string>>& dynamicImports = {});
 
     std::string getLastError() const { return lastError_; }
 

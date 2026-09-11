@@ -45,6 +45,13 @@ struct ExportDirectory {
     uint32_t name, ordinalBase, functionCount, nameCount;
     uint32_t functions, names, ordinals;
 };
+struct ImportDescriptor {
+    uint32_t originalFirstThunk;
+    uint32_t timeDateStamp;
+    uint32_t forwarderChain;
+    uint32_t name;
+    uint32_t firstThunk;
+};
 #pragma pack(pop)
 
 struct LaidOutSection {
@@ -91,6 +98,106 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
     if (!image.sectionAlignment || !image.fileAlignment) {
         lastError_ = "PE alignment values must be non-zero";
         return false;
+    }
+
+    // Import table (.idata) construction if imports exist
+    if (!image.imports.empty()) {
+        const uint32_t idataRva = alignUp(image.sectionAlignment + [&] {
+            uint32_t end = 0;
+            for (const auto& s : image.sections)
+                end = alignUp(end + std::max<uint32_t>(s.virtualSize, s.data.size()), image.sectionAlignment);
+            return end;
+        }(), image.sectionAlignment);
+
+        uint32_t numDlls = static_cast<uint32_t>(image.imports.size());
+        uint32_t descTableSize = (numDlls + 1) * sizeof(ImportDescriptor);
+
+        uint32_t totalThunks = 0;
+        for (const auto& imp : image.imports) {
+            totalThunks += static_cast<uint32_t>(imp.symbols.size() + 1); // +1 for null terminator
+        }
+
+        uint32_t iltOffset = descTableSize;
+        uint32_t iatOffset = iltOffset + totalThunks * sizeof(uint64_t);
+        uint32_t namesOffset = iatOffset + totalThunks * sizeof(uint64_t);
+
+        std::vector<uint8_t> idataBytes(namesOffset, 0);
+
+        auto appendString = [&](const std::string& str) -> uint32_t {
+            uint32_t off = static_cast<uint32_t>(idataBytes.size());
+            idataBytes.insert(idataBytes.end(), str.begin(), str.end());
+            idataBytes.push_back(0);
+            return off;
+        };
+
+        auto appendImportByName = [&](uint16_t hint, const std::string& name) -> uint32_t {
+            uint32_t off = static_cast<uint32_t>(idataBytes.size());
+            idataBytes.push_back(static_cast<uint8_t>(hint & 0xFF));
+            idataBytes.push_back(static_cast<uint8_t>((hint >> 8) & 0xFF));
+            idataBytes.insert(idataBytes.end(), name.begin(), name.end());
+            idataBytes.push_back(0);
+            if (idataBytes.size() % 2 != 0) idataBytes.push_back(0); // align to 2 bytes
+            return off;
+        };
+
+        std::map<std::string, uint64_t> symbolIatVma;
+        uint32_t currentThunkIdx = 0;
+        for (size_t d = 0; d < image.imports.size(); ++d) {
+            const auto& imp = image.imports[d];
+            uint32_t dllNameOff = appendString(imp.dllName);
+
+            uint32_t dllIltRva = idataRva + iltOffset + currentThunkIdx * sizeof(uint64_t);
+            uint32_t dllIatRva = idataRva + iatOffset + currentThunkIdx * sizeof(uint64_t);
+
+            ImportDescriptor desc{};
+            desc.originalFirstThunk = dllIltRva;
+            desc.timeDateStamp = 0;
+            desc.forwarderChain = 0;
+            desc.name = idataRva + dllNameOff;
+            desc.firstThunk = dllIatRva;
+
+            std::memcpy(idataBytes.data() + d * sizeof(ImportDescriptor), &desc, sizeof(desc));
+
+            for (size_t s = 0; s < imp.symbols.size(); ++s) {
+                uint32_t ibnOff = appendImportByName(imp.symbols[s].hint, imp.symbols[s].name);
+                uint64_t ibnRva = idataRva + ibnOff;
+
+                std::memcpy(idataBytes.data() + iltOffset + (currentThunkIdx + s) * sizeof(uint64_t), &ibnRva, sizeof(uint64_t));
+                std::memcpy(idataBytes.data() + iatOffset + (currentThunkIdx + s) * sizeof(uint64_t), &ibnRva, sizeof(uint64_t));
+
+                symbolIatVma[imp.symbols[s].name] = image.imageBase + dllIatRva + s * sizeof(uint64_t);
+            }
+
+            currentThunkIdx += static_cast<uint32_t>(imp.symbols.size() + 1);
+        }
+
+        // Patch synthesized import thunks in .text (ff 25 [disp32])
+        auto textIt = std::find_if(image.sections.begin(), image.sections.end(), [](const PeSection& s) { return s.name == ".text"; });
+        if (textIt != image.sections.end()) {
+            const uint32_t textRva = image.sectionAlignment;
+            for (const auto& [symName, iatVma] : symbolIatVma) {
+                std::string thunkName = "__imp_thunk_" + symName;
+                // Search for ff 25 00 00 00 00 thunk at end of .text section
+                for (size_t i = 0; i + 6 <= textIt->data.size(); ++i) {
+                    if (textIt->data[i] == 0xFF && textIt->data[i + 1] == 0x25 &&
+                        textIt->data[i + 2] == 0 && textIt->data[i + 3] == 0 &&
+                        textIt->data[i + 4] == 0 && textIt->data[i + 5] == 0) {
+                        uint32_t thunkRva = textRva + static_cast<uint32_t>(i);
+                        uint64_t thunkVma = image.imageBase + thunkRva;
+                        int64_t disp = static_cast<int64_t>(iatVma) - static_cast<int64_t>(thunkVma + 6);
+                        int32_t disp32 = static_cast<int32_t>(disp);
+                        std::memcpy(textIt->data.data() + i + 2, &disp32, 4);
+                        break;
+                    }
+                }
+            }
+        }
+
+        image.dataDirectories[1] = {idataRva, static_cast<uint32_t>(descTableSize)}; // IMAGE_DIRECTORY_ENTRY_IMPORT
+        image.dataDirectories[12] = {idataRva + iatOffset, static_cast<uint32_t>(totalThunks * sizeof(uint64_t))}; // IMAGE_DIRECTORY_ENTRY_IAT
+
+        // .idata section flags: Read + Write + Initialized Data
+        image.sections.push_back({".idata", std::move(idataBytes), 0, 0xC0000040});
     }
 
     // Export records are PE semantics; construct .edata here after ordinary linking.
@@ -235,6 +342,31 @@ bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std
     appendLinkedSections(image.sections, pe.sections);
     if (image.entryAddress >= pe.imageBase && image.entryAddress - pe.imageBase <= std::numeric_limits<uint32_t>::max())
         pe.entryRva = static_cast<uint32_t>(image.entryAddress - pe.imageBase);
+    PeImageWriter writer;
+    if (!writer.write(std::move(pe), outputPath)) { lastError_ = writer.getLastError(); return false; }
+    return true;
+}
+
+bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan, const std::string& outputPath) {
+    lastError_.clear();
+    if (plan.os != target::OS::Windows || plan.arch != target::Arch::X64) {
+        lastError_ = "PE executable builder requires a Windows x64 plan";
+        return false;
+    }
+    PeImage pe;
+    pe.kind = PeImageKind::Executable;
+    appendLinkedSections(plan.sections, pe.sections);
+    if (plan.entryAddress >= pe.imageBase && plan.entryAddress - pe.imageBase <= std::numeric_limits<uint32_t>::max())
+        pe.entryRva = static_cast<uint32_t>(plan.entryAddress - pe.imageBase);
+
+    std::map<std::string, std::vector<PeImportSymbol>> importMap;
+    for (const auto& imp : plan.imports) {
+        importMap[imp.dependencyLibrary].push_back({imp.symbol, 0});
+    }
+    for (const auto& [dll, syms] : importMap) {
+        pe.imports.push_back({dll, syms});
+    }
+
     PeImageWriter writer;
     if (!writer.write(std::move(pe), outputPath)) { lastError_ = writer.getLastError(); return false; }
     return true;
