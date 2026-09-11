@@ -220,27 +220,29 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             uint64_t startOffset = textSec->data.size();
             uint64_t startVma = textSec->virtualAddress + startOffset;
 
-            // x86-64 _start stub
-            // 31 ed             xor %ebp, %ebp
-            // 5f                pop %rdi
-            // 48 89 e6          mov %rsp, %rsi
-            // e8 [rel32]        call main
-            // 48 89 c7          mov %rax, %rdi
-            // b8 3c 00 00 00    mov $60, %eax
-            // 0f 05             syscall
+            // x86-64 _start stub (System V ABI stack aligned)
+            // 31 ed                xor %ebp, %ebp
+            // 48 8b 3c 24          mov (%rsp), %rdi       (argc)
+            // 48 8d 74 24 08       lea 8(%rsp), %rsi      (argv)
+            // 48 83 e4 f0          and $-16, %rsp         (align stack to 16 bytes)
+            // e8 [rel32]           call main
+            // 48 89 c7             mov %rax, %rdi
+            // b8 3c 00 00 00       mov $60, %eax
+            // 0f 05                syscall
             std::vector<uint8_t> startBytes = {
                 0x31, 0xED,
-                0x5F,
-                0x48, 0x89, 0xE6,
+                0x48, 0x8B, 0x3C, 0x24,
+                0x48, 0x8D, 0x74, 0x24, 0x08,
+                0x48, 0x83, 0xE4, 0xF0,
                 0xE8, 0x00, 0x00, 0x00, 0x00,
                 0x48, 0x89, 0xC7,
                 0xB8, 0x3C, 0x00, 0x00, 0x00,
                 0x0F, 0x05
             };
 
-            int64_t callRel = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 11);
+            int64_t callRel = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 20);
             int32_t callRel32 = static_cast<int32_t>(callRel);
-            std::memcpy(startBytes.data() + 7, &callRel32, 4);
+            std::memcpy(startBytes.data() + 16, &callRel32, 4);
 
             textSec->data.insert(textSec->data.end(), startBytes.begin(), startBytes.end());
             textSec->virtualSize = textSec->data.size();
