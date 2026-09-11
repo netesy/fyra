@@ -299,6 +299,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             } else if (const auto* sec = outImage.findSection(reloc.symbolName)) {
                 targetSymAddr = sec->virtualAddress;
             } else if (matchedImp != nullptr) {
+                outImage.importLibraryNames[reloc.symbolName] = matchedImp->dependencyLibrary;
                 if (matchedImp->kind == DynamicImportKind::Data) {
                     // Record data import fixup to be resolved against the IAT slot VMA in PeImageWriter
                     uint64_t placeAddress = lsec->virtualAddress + outputOffset + reloc.offset;

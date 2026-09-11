@@ -175,5 +175,36 @@ int main() {
     std::remove(libPath.c_str());
     std::remove(consumerPath.c_str());
 
+    // 4. External ELF shared library consumption test
+    const std::string extSrcPath = "ext_fixture.c";
+    const std::string extLibPath = "libextfixture.so";
+    const std::string extConsumerPath = "test_ext_consumer";
+
+    {
+        std::ofstream extSrc(extSrcPath);
+        extSrc << "int get_answer() { return 42; }\n";
+        extSrc << "int global_var = 100;\n";
+    }
+
+    int extCompileRc = std::system(("gcc -fPIC -shared -o " + extLibPath + " " + extSrcPath).c_str());
+    assert(extCompileRc == 0);
+
+    std::vector<DynamicImport> extImports = {
+        {"get_answer", extLibPath, false, DynamicImportKind::Function},
+        {"global_var", extLibPath, false, DynamicImportKind::Data}
+    };
+
+    LinkedImage extConsumerImage;
+    assert(linker.link({makeConsumerArtifact()}, extConsumerImage, LinkOutputKind::Executable, extImports));
+    assert(builder.build(extConsumerImage, extConsumerPath));
+
+    int extRunStatus = std::system(("LD_LIBRARY_PATH=. ./" + extConsumerPath).c_str());
+    assert(WIFEXITED(extRunStatus));
+    assert(WEXITSTATUS(extRunStatus) == 142); // 42 + 100
+
+    std::remove(extSrcPath.c_str());
+    std::remove(extLibPath.c_str());
+    std::remove(extConsumerPath.c_str());
+
     std::cout << "Canonical linked-image ELF executable & shared library tests passed.\n";
 }

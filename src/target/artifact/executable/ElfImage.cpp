@@ -1,4 +1,5 @@
 #include "target/artifact/executable/ElfImage.h"
+#include "target/os/linux/LinuxOS.h"
 
 #include <algorithm>
 #include <cstring>
@@ -593,7 +594,14 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
     }
 
     // Dynamic Executable Path (PT_INTERP, .interp, .dynsym, .dynstr, .hash, .rela.dyn, .rela.plt, .got, .plt, .dynamic)
-    const std::string interpPath = "/lib64/ld-linux-x86-64.so.2";
+    std::string interpPath;
+    if (image.os == target::OS::Linux) {
+        LinuxOS linuxOS;
+        interpPath = linuxOS.getDynamicInterpreterPath(image.arch);
+    }
+    if (interpPath.empty()) {
+        interpPath = "/lib64/ld-linux-x86-64.so.2";
+    }
     std::string interpStr = interpPath + '\0';
 
     // Collect all required imported symbols and library dependencies
@@ -620,8 +628,8 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
         imp.isFunction = true;
         imp.thunkVma = thunkVma;
         imp.gotSlotVma = 0;
-        // Determine library name or default
-        imp.libName = "libfixture.so"; // Default or track via DynamicImport
+        auto libIt = image.importLibraryNames.find(symName);
+        imp.libName = (libIt != image.importLibraryNames.end()) ? libIt->second : "libfixture.so";
         addNeeded(imp.libName);
         imports.push_back(imp);
     }
@@ -633,7 +641,8 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
         imp.isFunction = false;
         imp.thunkVma = 0;
         imp.gotSlotVma = 0;
-        imp.libName = "libfixture.so";
+        auto libIt = image.importLibraryNames.find(fixup.symbolName);
+        imp.libName = (libIt != image.importLibraryNames.end()) ? libIt->second : "libfixture.so";
         addNeeded(imp.libName);
         imports.push_back(imp);
     }

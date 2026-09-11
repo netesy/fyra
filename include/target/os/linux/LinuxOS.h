@@ -30,6 +30,10 @@ public:
     void emitSecurityCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
     void emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
 
+    std::string getDynamicInterpreterPath(target::Arch arch) const override {
+        if (arch == target::Arch::X64) return "/lib64/ld-linux-x86-64.so.2";
+        return "";
+    }
     bool supportsGNUAssemblyMetadata() const override { return true; }
     std::string formatFunctionTypeDirective(const std::string& name, const ArchitectureInfo& arch) const override;
     std::string formatFunctionSizeDirective(const std::string& name) const override;

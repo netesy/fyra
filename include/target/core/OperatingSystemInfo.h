@@ -1,5 +1,6 @@
 #pragma once
 #include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include <string>
 #include <vector>
 #include <string_view>
@@ -40,6 +41,7 @@ public:
     virtual void emitSecurityCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const = 0;
     virtual void emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const = 0;
 
+    virtual std::string getDynamicInterpreterPath(target::Arch arch) const { return ""; }
     virtual bool supportsGNUAssemblyMetadata() const { return false; }
     virtual std::string formatFunctionTypeDirective(const std::string& name, const class ArchitectureInfo& arch) const { return ""; }
     virtual std::string formatFunctionSizeDirective(const std::string& name) const { return ""; }
