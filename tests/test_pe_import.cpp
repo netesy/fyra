@@ -82,7 +82,10 @@ int main() {
     exeArt.addRelocation(callReloc);
 
     LinkedImage exeImage;
-    std::vector<std::pair<std::string, std::string>> imports = {{"get_answer", "answer.dll"}};
+    DynamicImport imp;
+    imp.symbol = "get_answer";
+    imp.dependencyLibrary = "answer.dll";
+    std::vector<DynamicImport> imports = {imp};
     bool exeLinked = linker.link({exeArt}, exeImage, LinkOutputKind::Executable, imports);
     assert(exeLinked);
 

@@ -248,6 +248,10 @@ add_test(NAME PeImportTest COMMAND test_pe_import)
 add_executable(test_pe_reloc test_pe_reloc.cpp)
 target_link_libraries(test_pe_reloc PRIVATE fyra)
 add_test(NAME PeRelocTest COMMAND test_pe_reloc)
+
+add_executable(test_pe_import_complete test_pe_import_complete.cpp)
+target_link_libraries(test_pe_import_complete PRIVATE fyra)
+add_test(NAME PeImportCompleteTest COMMAND test_pe_import_complete)
 set_tests_properties(LICMTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_inliner test_inliner.cpp)

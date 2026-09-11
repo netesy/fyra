@@ -84,7 +84,7 @@ bool InternalLinker::extractLazyArchiveMembers(
 bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArtifact>& artifacts,
                            LinkedImage& outImage,
                            LinkOutputKind outputKind,
-                           const std::vector<std::pair<std::string, std::string>>& dynamicImports) {
+                           const std::vector<DynamicImport>& dynamicImports) {
     lastError_.clear();
     outImage = LinkedImage{};
     outImage.outputKind = outputKind;
@@ -284,10 +284,10 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             }
 
             uint64_t targetSymAddr = 0;
-            std::string matchedLib;
-            for (const auto& [impSym, impLib] : dynamicImports) {
-                if (impSym == reloc.symbolName) {
-                    matchedLib = impLib;
+            const DynamicImport* matchedImp = nullptr;
+            for (const auto& imp : dynamicImports) {
+                if (imp.symbol == reloc.symbolName) {
+                    matchedImp = &imp;
                     break;
                 }
             }
@@ -296,37 +296,42 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                 targetSymAddr = outImage.symbols[reloc.symbolName].virtualAddress;
             } else if (const auto* sec = outImage.findSection(reloc.symbolName)) {
                 targetSymAddr = sec->virtualAddress;
-            } else if (!matchedLib.empty()) {
-                // Synthesize or retrieve import thunk in .text
-                std::string thunkSymName = "__imp_thunk_" + reloc.symbolName;
-                if (!outImage.symbols.count(thunkSymName)) {
-                    auto* textSec = outImage.findSection(".text");
-                    if (!textSec) {
-                        lastError_ = "Cannot synthesize import thunk for '" + reloc.symbolName + "': .text section missing";
-                        return false;
-                    }
-                    uint64_t thunkOffset = textSec->data.size();
-                    uint64_t thunkVma = textSec->virtualAddress + thunkOffset;
+            } else if (matchedImp != nullptr) {
+                if (matchedImp->kind == DynamicImportKind::Data) {
+                    // Imported data symbols are accessed directly through their IAT slot without function thunks
+                    continue;
+                } else {
+                    // Synthesize or retrieve import thunk in .text for function imports
+                    std::string thunkSymName = "__imp_thunk_" + reloc.symbolName;
+                    if (!outImage.symbols.count(thunkSymName)) {
+                        auto* textSec = outImage.findSection(".text");
+                        if (!textSec) {
+                            lastError_ = "Cannot synthesize import thunk for '" + reloc.symbolName + "': .text section missing";
+                            return false;
+                        }
+                        uint64_t thunkOffset = textSec->data.size();
+                        uint64_t thunkVma = textSec->virtualAddress + thunkOffset;
 
-                    std::vector<uint8_t> thunkBytes = TargetRelocationEvaluator::getImportThunkBytes(outImage.arch, outImage.os);
-                    if (thunkBytes.empty()) {
-                        lastError_ = "Target import thunk generation not supported for architecture/OS";
-                        return false;
-                    }
-                    textSec->data.insert(textSec->data.end(), thunkBytes.begin(), thunkBytes.end());
-                    textSec->virtualSize = textSec->data.size();
+                        std::vector<uint8_t> thunkBytes = TargetRelocationEvaluator::getImportThunkBytes(outImage.arch, outImage.os);
+                        if (thunkBytes.empty()) {
+                            lastError_ = "Target import thunk generation not supported for architecture/OS";
+                            return false;
+                        }
+                        textSec->data.insert(textSec->data.end(), thunkBytes.begin(), thunkBytes.end());
+                        textSec->virtualSize = textSec->data.size();
 
-                    LinkedSymbol thunkSym;
-                    thunkSym.name = thunkSymName;
-                    thunkSym.virtualAddress = thunkVma;
-                    thunkSym.size = thunkBytes.size();
-                    thunkSym.isFunction = true;
-                    thunkSym.isGlobal = false;
-                    thunkSym.sectionName = ".text";
-                    outImage.symbols[thunkSymName] = thunkSym;
-                    outImage.importThunkVmas[reloc.symbolName] = thunkVma;
+                        LinkedSymbol thunkSym;
+                        thunkSym.name = thunkSymName;
+                        thunkSym.virtualAddress = thunkVma;
+                        thunkSym.size = thunkBytes.size();
+                        thunkSym.isFunction = true;
+                        thunkSym.isGlobal = false;
+                        thunkSym.sectionName = ".text";
+                        outImage.symbols[thunkSymName] = thunkSym;
+                        outImage.importThunkVmas[reloc.symbolName] = thunkVma;
+                    }
+                    targetSymAddr = outImage.symbols[thunkSymName].virtualAddress;
                 }
-                targetSymAddr = outImage.symbols[thunkSymName].virtualAddress;
             } else {
                 lastError_ = "Unresolved undefined symbol reference: '" + reloc.symbolName + "'";
                 return false;

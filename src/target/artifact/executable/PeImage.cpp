@@ -159,11 +159,20 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
             std::memcpy(idataBytes.data() + d * sizeof(ImportDescriptor), &desc, sizeof(desc));
 
             for (size_t s = 0; s < imp.symbols.size(); ++s) {
-                uint32_t ibnOff = appendImportByName(imp.symbols[s].hint, imp.symbols[s].name);
-                uint64_t ibnRva = idataRva + ibnOff;
+                uint64_t thunkValue = 0;
+                if (imp.symbols[s].isOrdinal) {
+                    if (imp.symbols[s].ordinal == 0 || imp.symbols[s].ordinal > 0xFFFF) {
+                        lastError_ = "PE import ordinal out of range [1..65535]: " + std::to_string(imp.symbols[s].ordinal);
+                        return false;
+                    }
+                    thunkValue = (1ULL << 63) | (imp.symbols[s].ordinal & 0xFFFF);
+                } else {
+                    uint32_t ibnOff = appendImportByName(imp.symbols[s].hint, imp.symbols[s].name);
+                    thunkValue = idataRva + ibnOff;
+                }
 
-                std::memcpy(idataBytes.data() + iltOffset + (currentThunkIdx + s) * sizeof(uint64_t), &ibnRva, sizeof(uint64_t));
-                std::memcpy(idataBytes.data() + iatOffset + (currentThunkIdx + s) * sizeof(uint64_t), &ibnRva, sizeof(uint64_t));
+                std::memcpy(idataBytes.data() + iltOffset + (currentThunkIdx + s) * sizeof(uint64_t), &thunkValue, sizeof(uint64_t));
+                std::memcpy(idataBytes.data() + iatOffset + (currentThunkIdx + s) * sizeof(uint64_t), &thunkValue, sizeof(uint64_t));
 
                 symbolIatVma[imp.symbols[s].name] = image.imageBase + dllIatRva + s * sizeof(uint64_t);
             }
@@ -426,7 +435,13 @@ bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan
 
     std::map<std::string, std::vector<PeImportSymbol>> importMap;
     for (const auto& imp : plan.imports) {
-        importMap[imp.dependencyLibrary].push_back({imp.symbol, 0});
+        PeImportSymbol peSym;
+        peSym.name = imp.symbol;
+        peSym.hint = 0;
+        peSym.isOrdinal = imp.isOrdinal;
+        peSym.ordinal = imp.ordinal;
+        peSym.isData = (imp.kind == linker::DynamicImportKind::Data);
+        importMap[imp.dependencyLibrary].push_back(peSym);
     }
     for (const auto& [dll, syms] : importMap) {
         pe.imports.push_back({dll, syms});

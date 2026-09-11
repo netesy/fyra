@@ -28,6 +28,9 @@ struct PeExport {
 struct PeImportSymbol {
     std::string name;
     uint16_t hint = 0;
+    bool isOrdinal = false;
+    uint32_t ordinal = 0;
+    bool isData = false;
 };
 
 struct PeImportDirectory {

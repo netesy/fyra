@@ -5,7 +5,7 @@ namespace artifact {
 namespace linker {
 
 DynamicLinkPlan DynamicLinkPlan::createFromLinkedImage(const LinkedImage& image,
-                                                        const std::vector<std::pair<std::string, std::string>>& dynamicImports) {
+                                                        const std::vector<DynamicImport>& dynamicImports) {
     DynamicLinkPlan plan;
     plan.arch = image.arch;
     plan.os = image.os;
@@ -26,21 +26,18 @@ DynamicLinkPlan DynamicLinkPlan::createFromLinkedImage(const LinkedImage& image,
         }
     }
 
-    for (const auto& [symName, libName] : dynamicImports) {
-        DynamicImport imp;
-        imp.symbol = symName;
-        imp.dependencyLibrary = libName;
+    for (const auto& imp : dynamicImports) {
         plan.imports.push_back(imp);
 
         bool hasDep = false;
         for (const auto& dep : plan.dependencies) {
-            if (dep.libraryName == libName) {
+            if (dep.libraryName == imp.dependencyLibrary) {
                 hasDep = true;
                 break;
             }
         }
         if (!hasDep) {
-            plan.dependencies.push_back({libName});
+            plan.dependencies.push_back({imp.dependencyLibrary});
         }
     }
 

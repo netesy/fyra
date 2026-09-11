@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
         if (targetTriple.empty()) targetTriple = "x64-linux-bin";
         if (outputFile.empty()) outputFile = "a.out";
 
-        std::vector<std::pair<std::string, std::string>> dynamicImports;
+        std::vector<target::artifact::linker::DynamicImport> dynamicImports;
         std::vector<std::string> linkInputs;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
@@ -97,7 +97,10 @@ int main(int argc, char** argv) {
                 std::string spec = argv[++i];
                 size_t eq = spec.find('=');
                 if (eq != std::string::npos) {
-                    dynamicImports.push_back({spec.substr(0, eq), spec.substr(eq + 1)});
+                    target::artifact::linker::DynamicImport imp;
+                    imp.symbol = spec.substr(0, eq);
+                    imp.dependencyLibrary = spec.substr(eq + 1);
+                    dynamicImports.push_back(imp);
                 }
                 continue;
             }

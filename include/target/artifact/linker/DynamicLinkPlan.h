@@ -18,10 +18,18 @@ struct DynamicExport {
     std::string sectionName;
 };
 
+enum class DynamicImportKind {
+    Function,
+    Data
+};
+
 struct DynamicImport {
     std::string symbol;
     std::string dependencyLibrary;
     bool isWeak = false;
+    DynamicImportKind kind = DynamicImportKind::Function;
+    bool isOrdinal = false;
+    uint32_t ordinal = 0;
 };
 
 struct DynamicDependency {
@@ -48,7 +56,7 @@ public:
     ~DynamicLinkPlan() = default;
 
     static DynamicLinkPlan createFromLinkedImage(const LinkedImage& image,
-                                                        const std::vector<std::pair<std::string, std::string>>& dynamicImports = {});
+                                                        const std::vector<DynamicImport>& dynamicImports = {});
 
     target::Arch arch = target::Arch::X64;
     target::OS os = target::OS::Linux;
