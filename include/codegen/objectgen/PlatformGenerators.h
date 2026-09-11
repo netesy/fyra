@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ObjectFileGenerator.h"
-#include "target/artifact/executable/macho.hh"
 
 namespace codegen {
 namespace objectgen {

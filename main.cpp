@@ -2,7 +2,7 @@
 #include "codegen/CodeGen.h"
 #include "ir/Validator.h"
 #include "target/artifact/executable/ElfImage.h"
-#include "target/artifact/executable/macho.hh"
+#include "target/artifact/executable/MachOImage.h"
 #include "target/artifact/object/ObjectReader.h"
 #include "target/artifact/object/ObjectArtifact.h"
 #include "target/artifact/linker/InternalLinker.h"
@@ -170,13 +170,9 @@ int main(int argc, char** argv) {
                 return 1;
             }
         } else if (desc->os == target::OS::MacOS) {
-            MachOGenerator machoGen("input.fyra");
-            std::map<std::string, std::vector<uint8_t>> sections;
-            std::vector<MachOGenerator::Symbol> symbols;
-            std::vector<MachOGenerator::Relocation> relocs;
-            for (const auto& [name, sec] : image.sections) sections[name] = sec.data;
-            if (!machoGen.generateFromCode(sections, symbols, relocs, outputFile)) {
-                std::cerr << "Mach-O Executable generation failed: " << machoGen.getLastError() << std::endl;
+            target::artifact::linker::MachOExecutableImageBuilder builder;
+            if (!builder.build(image, outputFile)) {
+                std::cerr << "Mach-O Executable generation failed: " << builder.getLastError() << std::endl;
                 return 1;
             }
         } else {
@@ -427,6 +423,16 @@ int main(int argc, char** argv) {
                 rodata.name = ".rodata"; rodata.data = sections[".rodata"]; rodata.alignment = 8; rodata.flags = 0x2;
                 artifact.addSection(rodata);
             }
+            if (sections.count(".data") && !sections[".data"].empty()) {
+                target::artifact::object::ObjectSection data;
+                data.name = ".data"; data.data = sections[".data"]; data.alignment = 8; data.flags = 0x3;
+                artifact.addSection(data);
+            }
+            if (sections.count(".bss") && !sections[".bss"].empty()) {
+                target::artifact::object::ObjectSection bss;
+                bss.name = ".bss"; bss.virtualSize = sections[".bss"].size(); bss.alignment = 8; bss.flags = 0x3;
+                artifact.addSection(bss);
+            }
             for (const auto& sym : codeGenerator.getSymbols()) {
                 target::artifact::object::ObjectSymbol out;
                 out.name = sym.name; out.value = sym.value; out.size = sym.size;
@@ -454,14 +460,44 @@ int main(int argc, char** argv) {
             }
             std::cout << "PE Executable generated successfully: " << outputFile << std::endl;
         } else if (desc->os == target::OS::MacOS) {
-            MachOGenerator machoGen(inputFile);
-            if (desc->arch == target::Arch::AArch64) machoGen.setCpuType(0x0100000c);
-            std::vector<MachOGenerator::Symbol> symbols;
-            for (const auto& sym : codeGenerator.getSymbols()) symbols.push_back({sym.name, sym.value, sym.size, sym.type, sym.binding, sym.sectionName});
-            std::vector<MachOGenerator::Relocation> relocs;
-            for (const auto& reloc : codeGenerator.getRelocations()) relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-            if (machoGen.generateFromCode(sections, symbols, relocs, outputFile)) std::cout << "Mach-O Executable generated successfully: " << outputFile << std::endl;
-            else { std::cerr << "Error generating Mach-O: " << machoGen.getLastError() << std::endl; return 1; }
+            target::artifact::object::ObjectArtifact artifact;
+            artifact.format = target::artifact::object::ObjectFormat::MachO;
+            artifact.arch = desc->arch;
+            artifact.os = desc->os;
+            target::artifact::object::ObjectSection text;
+            text.name = ".text"; text.data = sections[".text"]; text.alignment = 16; text.flags = 0x6;
+            artifact.addSection(text);
+            if (!sections[".rodata"].empty()) {
+                target::artifact::object::ObjectSection rodata;
+                rodata.name = ".rodata"; rodata.data = sections[".rodata"]; rodata.alignment = 8; rodata.flags = 0x2;
+                artifact.addSection(rodata);
+            }
+            for (const auto& sym : codeGenerator.getSymbols()) {
+                target::artifact::object::ObjectSymbol out;
+                out.name = sym.name; out.value = sym.value; out.size = sym.size;
+                out.type = sym.type == 2 ? target::artifact::object::SymbolType::Function
+                                         : target::artifact::object::SymbolType::NoType;
+                out.binding = sym.binding == 1 ? target::artifact::object::SymbolBinding::Global
+                                               : target::artifact::object::SymbolBinding::Local;
+                out.sectionName = sym.sectionName; out.isDefined = true;
+                artifact.addSymbol(out);
+            }
+            for (const auto& reloc : codeGenerator.getRelocations()) {
+                artifact.addRelocation({reloc.offset, reloc.type, reloc.addend,
+                                        reloc.symbolName, reloc.sectionName});
+            }
+            target::artifact::linker::InternalLinker linker;
+            target::artifact::linker::LinkedImage linked;
+            if (!linker.link({artifact}, linked, target::artifact::linker::LinkOutputKind::Executable)) {
+                std::cerr << "Error linking Mach-O: " << linker.getLastError() << std::endl;
+                return 1;
+            }
+            target::artifact::linker::MachOExecutableImageBuilder builder;
+            if (!builder.build(linked, outputFile)) {
+                std::cerr << "Error generating Mach-O: " << builder.getLastError() << std::endl;
+                return 1;
+            }
+            std::cout << "Mach-O Executable generated successfully: " << outputFile << std::endl;
         } else {
             if (desc->arch != target::Arch::X64 || desc->os != target::OS::Linux) {
                 std::cerr << "ELF final-image generation currently supports Linux x64 only" << std::endl;

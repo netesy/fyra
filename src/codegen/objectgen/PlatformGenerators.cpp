@@ -1,5 +1,4 @@
 #include "codegen/objectgen/PlatformGenerators.h"
-#include "target/artifact/executable/macho.hh"
 #include "target/artifact/object/ObjectReader.h"
 #include <iostream>
 #include <fstream>

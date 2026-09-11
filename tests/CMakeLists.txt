@@ -236,6 +236,10 @@ add_test(NAME PortableCapabilitiesTest COMMAND test_portable_capabilities)
 add_executable(test_licm test_licm.cpp)
 target_link_libraries(test_licm PRIVATE fyra)
 add_test(NAME LICMTest COMMAND test_licm)
+
+add_executable(test_macho_image test_macho_image.cpp)
+target_link_libraries(test_macho_image PRIVATE fyra)
+add_test(NAME MachOImageTest COMMAND test_macho_image)
 set_tests_properties(LICMTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_inliner test_inliner.cpp)
