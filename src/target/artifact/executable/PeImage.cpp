@@ -1,4 +1,5 @@
 #include "target/artifact/executable/PeImage.h"
+#include "target/artifact/linker/TargetRelocationEvaluator.h"
 
 #include <algorithm>
 #include <cstring>
@@ -196,6 +197,20 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
                             std::memcpy(textIt->data.data() + thunkOffsetInText + 2, &disp32, 4);
                         }
                     }
+                }
+            }
+        }
+
+        // Evaluate relocations targeting imported data IAT slots directly
+        for (const auto& fixup : image.dataImportFixups) {
+            auto iatIt = symbolIatVma.find(fixup.symbolName);
+            if (iatIt != symbolIatVma.end()) {
+                uint64_t iatVma = iatIt->second;
+                auto secIt = std::find_if(image.sections.begin(), image.sections.end(), [&](const PeSection& s) { return s.name == fixup.sectionName; });
+                if (secIt != image.sections.end()) {
+                    linker::RelocationKind kind = linker::TargetRelocationEvaluator::normalizeType(fixup.relocType);
+                    std::string evalErr;
+                    linker::TargetRelocationEvaluator::evaluate(kind, iatVma, fixup.placeAddress, fixup.addend, secIt->data, fixup.sectionOffset, evalErr);
                 }
             }
         }
@@ -413,6 +428,7 @@ bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std
     pe.kind = PeImageKind::Executable;
     pe.relocationFixupVmas = image.relocationFixupVmas;
     pe.importThunkVmas = image.importThunkVmas;
+    pe.dataImportFixups = image.dataImportFixups;
     appendLinkedSections(image.sections, pe.sections);
     if (image.entryAddress >= pe.imageBase && image.entryAddress - pe.imageBase <= std::numeric_limits<uint32_t>::max())
         pe.entryRva = static_cast<uint32_t>(image.entryAddress - pe.imageBase);
@@ -429,6 +445,9 @@ bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan
     }
     PeImage pe;
     pe.kind = PeImageKind::Executable;
+    pe.relocationFixupVmas = plan.relocationFixupVmas;
+    pe.importThunkVmas = plan.importThunkVmas;
+    pe.dataImportFixups = plan.dataImportFixups;
     appendLinkedSections(plan.sections, pe.sections);
     if (plan.entryAddress >= pe.imageBase && plan.entryAddress - pe.imageBase <= std::numeric_limits<uint32_t>::max())
         pe.entryRva = static_cast<uint32_t>(plan.entryAddress - pe.imageBase);

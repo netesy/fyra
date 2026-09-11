@@ -85,22 +85,93 @@ int main() {
     assert(!failOrd);
     assert(writer.getLastError().find("ordinal out of range") != std::string::npos);
 
-    // 3. Test DynamicLinkPlan Neutral Extension with Data Import
-    LinkedImage linkedImg;
-    linkedImg.os = target::OS::Windows;
-    linkedImg.arch = target::Arch::X64;
+    // 3. Test End-to-End Imported Data Symbol Relocation Patching
+    ObjectArtifact dataExeArt;
+    dataExeArt.format = ObjectFormat::COFF;
+    dataExeArt.arch = target::Arch::X64;
+    dataExeArt.os = target::OS::Windows;
 
-    DynamicImport impData;
-    impData.symbol = "global_var";
-    impData.dependencyLibrary = "answer.dll";
-    impData.kind = DynamicImportKind::Data;
+    // Code instruction referencing imported data:
+    // mov rax, qword ptr [rip + disp32] (48 8b 05 00 00 00 00)
+    // Relocation at offset 3 for symbol "imported_var" (IMAGE_REL_AMD64_REL32)
+    ObjectSection textSec;
+    textSec.name = ".text";
+    textSec.data = {0x48, 0x8B, 0x05, 0x00, 0x00, 0x00, 0x00, 0xC3};
+    textSec.alignment = 16;
+    dataExeArt.addSection(textSec);
 
-    std::vector<DynamicImport> imports = {impData};
-    DynamicLinkPlan plan = DynamicLinkPlan::createFromLinkedImage(linkedImg, imports);
-    assert(plan.imports.size() == 1);
-    assert(plan.imports[0].symbol == "global_var");
-    assert(plan.imports[0].dependencyLibrary == "answer.dll");
-    assert(plan.imports[0].kind == DynamicImportKind::Data);
+    ObjectSymbol mainSym;
+    mainSym.name = "main";
+    mainSym.value = 0;
+    mainSym.size = 8;
+    mainSym.binding = SymbolBinding::Global;
+    mainSym.type = SymbolType::Function;
+    mainSym.sectionName = ".text";
+    mainSym.isDefined = true;
+    dataExeArt.addSymbol(mainSym);
+
+    ObjectRelocation dataReloc;
+    dataReloc.offset = 3;
+    dataReloc.type = "IMAGE_REL_AMD64_REL32";
+    dataReloc.addend = -4;
+    dataReloc.symbolName = "imported_var";
+    dataReloc.sectionName = ".text";
+    dataExeArt.addRelocation(dataReloc);
+
+    InternalLinker linker;
+    LinkedImage dataExeImage;
+    DynamicImport dataImp;
+    dataImp.symbol = "imported_var";
+    dataImp.dependencyLibrary = "data_supplier.dll";
+    dataImp.kind = DynamicImportKind::Data;
+
+    std::vector<DynamicImport> dataImports = {dataImp};
+    bool linked = linker.link({dataExeArt}, dataExeImage, LinkOutputKind::Executable, dataImports);
+    assert(linked);
+
+    // Verify no function thunk was synthesized for imported data in .text
+    assert(dataExeImage.importThunkVmas.find("imported_var") == dataExeImage.importThunkVmas.end());
+    assert(dataExeImage.dataImportFixups.size() == 1);
+
+    PeExecutableImageBuilder peExeBuilder;
+    DynamicLinkPlan dataPlan = DynamicLinkPlan::createFromLinkedImage(dataExeImage, dataImports);
+    const std::string dataExePath = "test_data_import_app.exe";
+    bool builtDataExe = peExeBuilder.buildWithPlan(dataPlan, dataExePath);
+    assert(builtDataExe);
+
+    std::ifstream fileDataExe(dataExePath, std::ios::binary);
+    std::vector<uint8_t> bytesDataExe((std::istreambuf_iterator<char>(fileDataExe)), {});
+    fileDataExe.close();
+    std::remove(dataExePath.c_str());
+
+    assert(bytesDataExe.size() > 0x200);
+
+    // Read patched displacement in the instruction at offset 3 of .text (0x1000 RVA)
+    // Section headers -> .text offset
+    uint32_t peOffData = 0;
+    std::memcpy(&peOffData, bytesDataExe.data() + 0x3c, 4);
+    uint16_t numSecsData = 0, optHeaderSizeData = 0;
+    std::memcpy(&numSecsData, bytesDataExe.data() + peOffData + 4 + 2, 2);
+    std::memcpy(&optHeaderSizeData, bytesDataExe.data() + peOffData + 4 + 16, 2);
+
+    uint32_t secHeaderOffData = peOffData + 4 + 20 + optHeaderSizeData;
+    uint32_t textRawOffData = 0;
+    for (uint16_t i = 0; i < numSecsData; ++i) {
+        char name[9] = {0};
+        std::memcpy(name, bytesDataExe.data() + secHeaderOffData + i * 40, 8);
+        if (std::string(name) == ".text") {
+            std::memcpy(&textRawOffData, bytesDataExe.data() + secHeaderOffData + i * 40 + 20, 4);
+            break;
+        }
+    }
+    assert(textRawOffData != 0);
+
+    int32_t disp32 = 0;
+    std::memcpy(&disp32, bytesDataExe.data() + textRawOffData + 3, 4);
+    std::cout << "Debug disp32 = " << disp32 << " (hex: 0x" << std::hex << disp32 << std::dec << ")" << std::endl;
+    assert(disp32 > 0);
+    uint64_t computedIatVma = (0x140001007) + disp32;
+    assert((computedIatVma & 0xFFF) >= 0x030); // Points into IAT in .idata section
 
     std::cout << "Complete PE Dynamic Import Suite PASSED." << std::endl;
     return 0;

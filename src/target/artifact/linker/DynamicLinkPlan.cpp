@@ -13,6 +13,9 @@ DynamicLinkPlan DynamicLinkPlan::createFromLinkedImage(const LinkedImage& image,
     plan.sections = image.sections;
     plan.entryAddress = image.entryAddress;
     plan.entrySymbolName = image.entrySymbolName;
+    plan.relocationFixupVmas = image.relocationFixupVmas;
+    plan.importThunkVmas = image.importThunkVmas;
+    plan.dataImportFixups = image.dataImportFixups;
 
     for (const auto& [name, sym] : image.symbols) {
         if (sym.isGlobal) {

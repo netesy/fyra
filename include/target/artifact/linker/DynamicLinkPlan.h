@@ -68,6 +68,10 @@ public:
     std::vector<DynamicDependency> dependencies;
     std::vector<DynamicRelocation> relocations;
 
+    std::vector<uint64_t> relocationFixupVmas;
+    std::map<std::string, uint64_t> importThunkVmas;
+    std::vector<LinkedImage::DataImportFixup> dataImportFixups;
+
     uint64_t entryAddress = 0;
     std::string entrySymbolName;
 

@@ -298,7 +298,17 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                 targetSymAddr = sec->virtualAddress;
             } else if (matchedImp != nullptr) {
                 if (matchedImp->kind == DynamicImportKind::Data) {
-                    // Imported data symbols are accessed directly through their IAT slot without function thunks
+                    // Record data import fixup to be resolved against the IAT slot VMA in PeImageWriter
+                    uint64_t placeAddress = lsec->virtualAddress + outputOffset + reloc.offset;
+                    uint64_t sectionDataOffset = outputOffset + reloc.offset;
+                    outImage.dataImportFixups.push_back({
+                        reloc.sectionName,
+                        sectionDataOffset,
+                        placeAddress,
+                        reloc.symbolName,
+                        reloc.addend,
+                        reloc.type
+                    });
                     continue;
                 } else {
                     // Synthesize or retrieve import thunk in .text for function imports

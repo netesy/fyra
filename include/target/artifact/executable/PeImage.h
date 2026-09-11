@@ -59,6 +59,7 @@ struct PeImage {
     std::vector<PeImportDirectory> imports;
     std::vector<uint64_t> relocationFixupVmas;
     std::map<std::string, uint64_t> importThunkVmas;
+    std::vector<linker::LinkedImage::DataImportFixup> dataImportFixups;
     std::array<PeDataDirectory, 16> dataDirectories{};
 };
 
