@@ -10,6 +10,7 @@
 #include <cassert>
 #include <set>
 #include <functional>
+#include <stdexcept>
 
 namespace target::wasm {
 
@@ -136,6 +137,7 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
         };
 
         std::set<const ir::BasicBlock*> processedBBs;
+        std::set<const ir::BasicBlock*> activeDFS;
         const ir::BasicBlock* currentMergeBB = nullptr;
 
         std::function<void(ir::Instruction&, const ir::BasicBlock*)> processInstruction = [&](ir::Instruction& i, const ir::BasicBlock* currentBB) {
@@ -347,8 +349,14 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
         };
 
         std::function<void(const ir::BasicBlock*)> lowerBB = [&](const ir::BasicBlock* bb) {
-            if (!bb || processedBBs.count(bb)) return;
+            if (!bb) return;
+            if (activeDFS.count(bb)) {
+                throw std::runtime_error("wasm32: unsupported CFG backedge/cycle in function " + func->getName());
+            }
+            if (processedBBs.count(bb)) return;
+
             processedBBs.insert(bb);
+            activeDFS.insert(bb);
 
             for (auto& instPtr : bb->getInstructions()) {
                 ir::Instruction& i = *instPtr;
@@ -404,6 +412,8 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
 
                 processInstruction(i, bb);
             }
+
+            activeDFS.erase(bb);
         };
 
         if (!func->getBasicBlocks().empty()) {

@@ -10,6 +10,7 @@
 #include <vector>
 #include <iomanip>
 #include <cstdlib>
+#include <stdexcept>
 
 static std::string toHex(const std::vector<uint8_t>& data) {
     std::stringstream ss;
@@ -104,6 +105,7 @@ export function $main() : i32 {
 
         const auto& code = codeGenBin.getAssembler().getCode();
         std::cout << "Multi-function WASM size: " << code.size() << " bytes" << std::endl;
+        std::cout << "Multi-function WASM hex: " << toHex(code) << std::endl;
 
         runNodeVerification(code, "if (i.exports.main() !== 42) process.exit(1);");
         std::cout << "Node.js WebAssembly.instantiate verification passed: main() == 42" << std::endl;
@@ -260,6 +262,83 @@ export function $fibonacci(%n : i32) : i32 {
         const auto& code = codeGen.getAssembler().getCode();
         runNodeVerification(code, R"(if (i.exports.fibonacci(0) !== 0) process.exit(1); if (i.exports.fibonacci(1) !== 1) process.exit(2); if (i.exports.fibonacci(2) !== 1) process.exit(3); if (i.exports.fibonacci(5) !== 5) process.exit(4); if (i.exports.fibonacci(10) !== 55) process.exit(5);)");
         std::cout << "Fibonacci base-case and recursive execution test (0, 1, 2, 5, 10 -> 0, 1, 1, 5, 55) passed successfully!" << std::endl;
+    }
+
+    // Test 6: Target-Local Backedge / Cycle Rejection Test
+    {
+        std::string src = R"(
+export function $loop_backedge() : i32 {
+@entry
+    %i = copy 0 : i32
+    jmp @loop_header : i32
+
+@loop_header
+    %cond = slt %i, 10 : i32
+    jnz %cond, @loop_body, @done : i32
+
+@loop_body
+    %i2 = add %i, 1 : i32
+    %i = copy %i2 : i32
+    jmp @loop_header : i32
+
+@done
+    ret %i : i32
+}
+)";
+        std::stringstream ss(src);
+        parser::Parser parser(ss, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module != nullptr);
+
+        bool caught = false;
+        try {
+            auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+            codegen::CodeGen codeGen(*module, std::move(targetInfo));
+            codeGen.emit();
+        } catch (const std::runtime_error& ex) {
+            std::string msg = ex.what();
+            if (msg.find("wasm32: unsupported CFG backedge/cycle") != std::string::npos) {
+                caught = true;
+            }
+        }
+        assert(caught);
+        std::cout << "Target-local unsupported CFG backedge rejection test passed successfully!" << std::endl;
+    }
+
+    // Test 7: Real Nested Conditional CFG Execution Test
+    {
+        std::string src = R"(
+export function $nested_if(%x : i32, %y : i32) : i32 {
+@start
+    %c1 = sgt %x, 0 : i32
+    jnz %c1, @pos_x, @neg_x : i32
+
+@pos_x
+    %c2 = sgt %y, 0 : i32
+    jnz %c2, @both_pos, @pos_x_neg_y : i32
+
+@both_pos
+    ret 100 : i32
+
+@pos_x_neg_y
+    ret 200 : i32
+
+@neg_x
+    ret 300 : i32
+}
+)";
+        std::stringstream ss(src);
+        parser::Parser parser(ss, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module != nullptr);
+
+        auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        codegen::CodeGen codeGen(*module, std::move(targetInfo));
+        codeGen.emit();
+
+        const auto& code = codeGen.getAssembler().getCode();
+        runNodeVerification(code, R"(if (i.exports.nested_if(5, 5) !== 100) process.exit(1); if (i.exports.nested_if(5, -5) !== 200) process.exit(2); if (i.exports.nested_if(-5, 5) !== 300) process.exit(3);)");
+        std::cout << "Real Nested Conditional CFG execution test (100, 200, 300) passed successfully!" << std::endl;
     }
 
     std::cout << "All WASM target execution and verification tests passed successfully!" << std::endl;
