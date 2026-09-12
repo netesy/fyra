@@ -3,6 +3,7 @@
 #include "ir/FunctionType.h"
 #include "ir/Constant.h"
 #include "ir/Use.h"
+#include "ir/PhiNode.h"
 #include <algorithm>
 #include <sstream>
 #include <cstring>
@@ -120,9 +121,24 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
             }
         };
 
-        std::set<const ir::BasicBlock*> processedBBs;
+        auto handlePhiAssignments = [&](const ir::BasicBlock* fromBB, const ir::BasicBlock* toBB) {
+            if (!toBB || !fromBB) return;
+            for (auto& instPtr : toBB->getInstructions()) {
+                if (auto* phi = dynamic_cast<ir::PhiNode*>(instPtr.get())) {
+                    if (auto* incVal = phi->getIncomingValueForBlock(const_cast<ir::BasicBlock*>(fromBB))) {
+                        pushOperand(incVal);
+                        if (localIndices.count(phi)) {
+                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(phi)));
+                        }
+                    }
+                }
+            }
+        };
 
-        std::function<void(ir::Instruction&)> processInstruction = [&](ir::Instruction& i) {
+        std::set<const ir::BasicBlock*> processedBBs;
+        const ir::BasicBlock* currentMergeBB = nullptr;
+
+        std::function<void(ir::Instruction&, const ir::BasicBlock*)> processInstruction = [&](ir::Instruction& i, const ir::BasicBlock* currentBB) {
             switch (i.getOpcode()) {
                 case ir::Instruction::Ret:
                     if (!i.getOperands().empty()) {
@@ -312,6 +328,24 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
             }
         };
 
+        auto findTargetMerge = [&](const ir::BasicBlock* b1, const ir::BasicBlock* b2) -> const ir::BasicBlock* {
+            if (!b1 || !b2) return nullptr;
+            const ir::BasicBlock* term1 = nullptr;
+            const ir::BasicBlock* term2 = nullptr;
+            for (auto& instPtr : b1->getInstructions()) {
+                if (instPtr->getOpcode() == ir::Instruction::Jmp && !instPtr->getOperands().empty()) {
+                    term1 = dynamic_cast<const ir::BasicBlock*>(instPtr->getOperands()[0]->get());
+                }
+            }
+            for (auto& instPtr : b2->getInstructions()) {
+                if (instPtr->getOpcode() == ir::Instruction::Jmp && !instPtr->getOperands().empty()) {
+                    term2 = dynamic_cast<const ir::BasicBlock*>(instPtr->getOperands()[0]->get());
+                }
+            }
+            if (term1 && term1 == term2) return term1;
+            return nullptr;
+        };
+
         std::function<void(const ir::BasicBlock*)> lowerBB = [&](const ir::BasicBlock* bb) {
             if (!bb || processedBBs.count(bb)) return;
             processedBBs.insert(bb);
@@ -325,30 +359,50 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                         wasmFunc.body.push_back(WasmInstruction::makeIf());
 
                         auto* trueBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[1]->get());
-                        if (trueBB) lowerBB(trueBB);
-
                         auto* falseBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[2]->get());
+
+                        const ir::BasicBlock* mergeBB = findTargetMerge(trueBB, falseBB);
+                        const ir::BasicBlock* oldMerge = currentMergeBB;
+                        if (mergeBB) currentMergeBB = mergeBB;
+
+                        if (trueBB) {
+                            handlePhiAssignments(bb, trueBB);
+                            lowerBB(trueBB);
+                        }
+
                         if (falseBB && falseBB != trueBB) {
                             wasmFunc.body.push_back(WasmInstruction::makeElse());
+                            handlePhiAssignments(bb, falseBB);
                             lowerBB(falseBB);
                         }
 
                         wasmFunc.body.push_back(WasmInstruction::makeEnd());
+                        currentMergeBB = oldMerge;
+
+                        if (mergeBB && !processedBBs.count(mergeBB)) {
+                            lowerBB(mergeBB);
+                        }
                         continue;
                     } else if (i.getOperands().size() == 1) {
                         auto* targetBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[0]->get());
-                        if (targetBB) lowerBB(targetBB);
+                        if (targetBB) {
+                            handlePhiAssignments(bb, targetBB);
+                            if (targetBB != currentMergeBB) lowerBB(targetBB);
+                        }
                         continue;
                     }
                 } else if (i.getOpcode() == ir::Instruction::Jmp) {
                     if (!i.getOperands().empty()) {
                         auto* targetBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[0]->get());
-                        if (targetBB) lowerBB(targetBB);
+                        if (targetBB) {
+                            handlePhiAssignments(bb, targetBB);
+                            if (targetBB != currentMergeBB) lowerBB(targetBB);
+                        }
                     }
                     continue;
                 }
 
-                processInstruction(i);
+                processInstruction(i, bb);
             }
         };
 

@@ -192,7 +192,7 @@ export function $test_leb128() : i32 {
         std::cout << "Opcode & Signedness & LEB128 execution tests passed successfully!" << std::endl;
     }
 
-    // Test 4: Conditional Diamond Control Flow Execution Test
+    // Test 4: Real Conditional Diamond CFG Execution Test (with merge block & phi node)
     {
         std::string src = R"(
 export function $diamond(%x : i32) : i32 {
@@ -202,11 +202,16 @@ export function $diamond(%x : i32) : i32 {
 
 @pos
     %r1 = add 10, 1 : i32
-    ret %r1 : i32
+    jmp @merge : i32
 
 @neg
     %r2 = add 20, 1 : i32
-    ret %r2 : i32
+    jmp @merge : i32
+
+@merge
+    %res = phi @pos %r1, @neg %r2 : i32
+    %res2 = add %res, 1 : i32
+    ret %res2 : i32
 }
 )";
         std::stringstream ss(src);
@@ -219,8 +224,8 @@ export function $diamond(%x : i32) : i32 {
         codeGen.emit();
 
         const auto& code = codeGen.getAssembler().getCode();
-        runNodeVerification(code, R"(if (i.exports.diamond(5) !== 11) process.exit(1); if (i.exports.diamond(-5) !== 21) process.exit(2);)");
-        std::cout << "Conditional Diamond CFG execution test passed successfully!" << std::endl;
+        runNodeVerification(code, R"(if (i.exports.diamond(5) !== 12) process.exit(1); if (i.exports.diamond(-5) !== 22) process.exit(2);)");
+        std::cout << "Real Conditional Diamond CFG with Merge Block & PHI Node execution test passed successfully!" << std::endl;
     }
 
     // Test 5: Fibonacci Control Flow Execution Test (fib(0), fib(1), fib(2), fib(5), fib(10))
