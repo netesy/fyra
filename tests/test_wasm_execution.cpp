@@ -19,6 +19,20 @@ static std::string toHex(const std::vector<uint8_t>& data) {
     return ss.str();
 }
 
+static void runNodeVerification(const std::vector<uint8_t>& code, const std::string& checkJs) {
+    std::ofstream out("test_temp.wasm", std::ios::binary);
+    out.write(reinterpret_cast<const char*>(code.data()), code.size());
+    out.close();
+
+    std::string cmd = "node -e 'const fs=require(\"fs\"); const bytes=fs.readFileSync(\"test_temp.wasm\"); if (!WebAssembly.validate(bytes)) process.exit(1); const m=new WebAssembly.Module(bytes); const i=new WebAssembly.Instance(m); " + checkJs + "'";
+    int res = std::system(cmd.c_str());
+    if (res != 0) {
+        std::cerr << "Node verification failed for command: " << cmd << " exit code: " << res << std::endl;
+    }
+    std::remove("test_temp.wasm");
+    assert(res == 0);
+}
+
 int main() {
     std::cout << "=== WASM Target Execution & Verification Test Suite ===" << std::endl;
 
@@ -40,6 +54,8 @@ int main() {
 
         assert(code.size() == 38 || code.size() == 37 || code.size() == 39);
         assert(code[0] == 0x00 && code[1] == 0x61 && code[2] == 0x73 && code[3] == 0x6d);
+
+        runNodeVerification(code, "if (i.exports.main() !== 42) process.exit(1);");
 
         // Test determinism
         auto targetInfo2 = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
@@ -75,7 +91,6 @@ export function $main() : i32 {
         codegen::CodeGen codeGenWat(*module, std::move(targetInfoWat), &watStream);
         codeGenWat.emit();
         std::string wat = watStream.str();
-        std::cout << "Generated WAT:\n" << wat << std::endl;
         assert(wat.find("i32.add") != std::string::npos);
         assert(wat.find("call $add") != std::string::npos);
 
@@ -87,13 +102,7 @@ export function $main() : i32 {
         const auto& code = codeGenBin.getAssembler().getCode();
         std::cout << "Multi-function WASM size: " << code.size() << " bytes" << std::endl;
 
-        std::ofstream out("multifunc.wasm", std::ios::binary);
-        out.write(reinterpret_cast<const char*>(code.data()), code.size());
-        out.close();
-
-        // Independent runtime validation & execution check
-        int sysRes = std::system("node -e 'const fs=require(\"fs\"); const m=new WebAssembly.Module(fs.readFileSync(\"multifunc.wasm\")); const i=new WebAssembly.Instance(m); if (i.exports.main() !== 42) process.exit(1);'");
-        assert(sysRes == 0);
+        runNodeVerification(code, "if (i.exports.main() !== 42) process.exit(1);");
         std::cout << "Node.js WebAssembly.instantiate verification passed: main() == 42" << std::endl;
 
         // Determinism check
@@ -108,6 +117,76 @@ export function $main() : i32 {
         codeGenBin2.emit();
         assert(codeGenBin.getAssembler().getCode() == codeGenBin2.getAssembler().getCode());
         std::cout << "Determinism check passed for multi-function module." << std::endl;
+    }
+
+    // Test 3: Opcode Execution Suite (Arithmetic, Bitwise, Shifts, Comparisons, LEB128 boundaries)
+    {
+        std::string src = R"(
+export function $test_ops() : i32 {
+@start
+    %a = add 10, 5 : i32
+    %s = sub %a, 3 : i32
+    %m = mul %s, 4 : i32
+    %d = div %m, 6 : i32
+    %u = udiv %d, 2 : i32
+    %r1 = rem %u, 3 : i32
+    ret %r1 : i32
+}
+
+export function $test_signed_div() : i32 {
+@start
+    %d = div -100, 5 : i32
+    ret %d : i32
+}
+
+export function $test_unsigned_div() : i32 {
+@start
+    %d = udiv -1, 2 : i32
+    ret %d : i32
+}
+
+export function $test_bitwise() : i32 {
+@start
+    %a = and 15, 7 : i32
+    %b = or %a, 16 : i32
+    %c = xor %b, 3 : i32
+    %d = shl %c, 2 : i32
+    ret %d : i32
+}
+
+export function $test_shr_u() : i32 {
+@start
+    %a = shr -16, 2 : i32
+    ret %a : i32
+}
+
+export function $test_sar_s() : i32 {
+@start
+    %a = sar -16, 2 : i32
+    ret %a : i32
+}
+
+export function $test_leb128() : i32 {
+@start
+    %v1 = add -1, -64 : i32
+    %v2 = add %v1, -65 : i32
+    %v3 = add %v2, 127 : i32
+    %v4 = add %v3, 128 : i32
+    ret %v4 : i32
+}
+)";
+        std::stringstream ss(src);
+        parser::Parser parser(ss, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module != nullptr);
+
+        auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        codegen::CodeGen codeGen(*module, std::move(targetInfo));
+        codeGen.emit();
+
+        const auto& code = codeGen.getAssembler().getCode();
+        runNodeVerification(code, R"(if (i.exports.test_ops() !== 1) process.exit(1); if (i.exports.test_signed_div() !== -20) process.exit(2); if (i.exports.test_unsigned_div() !== 2147483647) process.exit(3); if (i.exports.test_bitwise() !== 80) process.exit(4); if (i.exports.test_shr_u() !== 1073741820) process.exit(5); if (i.exports.test_sar_s() !== -4) process.exit(6); if (i.exports.test_leb128() !== 125) process.exit(8);)");
+        std::cout << "Opcode & Signedness & LEB128 execution tests passed successfully!" << std::endl;
     }
 
     std::cout << "All WASM target execution and verification tests passed successfully!" << std::endl;
