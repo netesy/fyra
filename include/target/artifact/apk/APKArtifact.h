@@ -12,7 +12,6 @@ public:
     APKArtifact(std::unique_ptr<TargetInfo> base);
 
     std::string getName() const override;
-    Arch getArch() const override { return baseTarget->getArch(); }
     TypeInfo getTypeInfo(const ir::Type* t) const override;
     const std::vector<std::string>& getRegisters(RegisterClass rc) const override;
     const std::string& getReturnRegister(const ir::Type* t) const override;

@@ -11,7 +11,6 @@ public:
     CompositeTargetInfo(std::unique_ptr<ArchitectureInfo> arch, std::unique_ptr<OperatingSystemInfo> os);
 
     std::string getName() const override;
-    Arch getArch() const override { return architecture->getArch(); }
     size_t getPointerSize() const override;
     size_t getStackAlignment() const override;
     TypeInfo getTypeInfo(const ir::Type* type) const override;

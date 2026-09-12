@@ -14,7 +14,6 @@ using namespace codegen;
 class ArchitectureInfo {
 public:
     virtual ~ArchitectureInfo() = default;
-    virtual Arch getArch() const = 0;
     virtual size_t getPointerSize() const = 0;
     virtual size_t getStackAlignment() const { return 16; }
     virtual TypeInfo getTypeInfo(const ir::Type* type) const = 0;

@@ -8,7 +8,6 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/aarch64/AArch64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/riscv64/RiscV64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/Wasm32Architecture.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/WasmModule.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/linux/LinuxOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/windows/WindowsOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/macos/MacOSOS.cpp

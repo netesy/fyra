@@ -55,7 +55,7 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
     else if (parts[1] == "windows" || parts[1] == "win32") desc.os = OS::Windows;
     else if (parts[1] == "macos" || parts[1] == "darwin") desc.os = OS::MacOS;
     else if (parts[1] == "android") desc.os = OS::Android;
-    else if (parts[1] == "wasi" || parts[1] == "unknown") desc.os = OS::WASI;
+    else if (parts[1] == "wasi") desc.os = OS::WASI;
     else return std::nullopt;
 
     if (parts.size() > 2) {

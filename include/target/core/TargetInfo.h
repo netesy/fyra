@@ -7,7 +7,6 @@
 #include "ir/Syscall.h"
 #include "ir/BasicBlock.h"
 #include "target/capabilities/Capabilities.h"
-#include "target/core/TargetDescriptor.h"
 #include <string>
 #include <vector>
 #include <ostream>
@@ -23,7 +22,6 @@ class TargetInfo {
 public:
     virtual ~TargetInfo() = default;
     virtual std::string getName() const = 0;
-    virtual Arch getArch() const = 0;
     virtual size_t getPointerSize() const { return 8; }
     virtual size_t getStackAlignment() const { return 16; }
     virtual TypeInfo getTypeInfo(const ir::Type* type) const = 0;

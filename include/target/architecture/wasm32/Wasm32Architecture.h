@@ -9,7 +9,6 @@ class Wasm32Architecture : public ArchitectureInfo {
 public:
     Wasm32Architecture();
 
-    Arch getArch() const override { return Arch::WASM32; }
     size_t getPointerSize() const override { return 32; }
     TypeInfo getTypeInfo(const ir::Type* type) const override;
     const std::vector<std::string>& getRegisters(RegisterClass regClass) const override;
