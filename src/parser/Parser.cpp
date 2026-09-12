@@ -275,7 +275,7 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         instr = builder.createRet(v);
     } else if (opcodeStr == "jmp") {
         instr = builder.createJmp(parseValue());
-    } else if (opcodeStr == "jnz") {
+    } else if (opcodeStr == "jnz" || opcodeStr == "br") {
         ir::Value* c = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* t = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* f = parseValue();

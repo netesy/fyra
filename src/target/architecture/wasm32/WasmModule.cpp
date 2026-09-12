@@ -7,6 +7,8 @@
 #include <sstream>
 #include <cstring>
 #include <cassert>
+#include <set>
+#include <functional>
 
 namespace target::wasm {
 
@@ -118,224 +120,250 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
             }
         };
 
-        // Standard CFG basic block structure emitter
-        size_t bbCount = func->getBasicBlocks().size();
-        bool useBlock = bbCount > 1;
+        std::set<const ir::BasicBlock*> processedBBs;
 
-        if (useBlock) {
-            wasmFunc.body.push_back(WasmInstruction::makeBlock());
-        }
+        std::function<void(ir::Instruction&)> processInstruction = [&](ir::Instruction& i) {
+            switch (i.getOpcode()) {
+                case ir::Instruction::Ret:
+                    if (!i.getOperands().empty()) {
+                        pushOperand(i.getOperands()[0]->get());
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeReturn());
+                    break;
 
-        for (auto& bb : func->getBasicBlocks()) {
+                case ir::Instruction::Add:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Add));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Sub:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Sub));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Mul:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Mul));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Div:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32DivS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Udiv:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32DivU));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Rem:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32RemS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Urem:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32RemU));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::And:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32And));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Or:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Or));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Xor:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Xor));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Shl:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Shl));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Shr:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32ShrU));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Sar:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32ShrS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Copy:
+                    pushOperand(i.getOperands()[0]->get());
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Ceq:
+                case ir::Instruction::Cne:
+                case ir::Instruction::Cslt:
+                case ir::Instruction::Csle:
+                case ir::Instruction::Csgt:
+                case ir::Instruction::Csge:
+                case ir::Instruction::Cult:
+                case ir::Instruction::Cule:
+                case ir::Instruction::Cugt:
+                case ir::Instruction::Cuge: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    WasmOpcode op = WasmOpcode::I32Eq;
+                    switch (i.getOpcode()) {
+                        case ir::Instruction::Ceq: op = WasmOpcode::I32Eq; break;
+                        case ir::Instruction::Cne: op = WasmOpcode::I32Ne; break;
+                        case ir::Instruction::Cslt: op = WasmOpcode::I32LtS; break;
+                        case ir::Instruction::Csle: op = WasmOpcode::I32LeS; break;
+                        case ir::Instruction::Csgt: op = WasmOpcode::I32GtS; break;
+                        case ir::Instruction::Csge: op = WasmOpcode::I32GeS; break;
+                        case ir::Instruction::Cult: op = WasmOpcode::I32LtU; break;
+                        case ir::Instruction::Cule: op = WasmOpcode::I32LeU; break;
+                        case ir::Instruction::Cugt: op = WasmOpcode::I32GtU; break;
+                        case ir::Instruction::Cuge: op = WasmOpcode::I32GeU; break;
+                        default: break;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(op));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::Call: {
+                    if (!i.getOperands().empty()) {
+                        const ir::Value* calleeVal = i.getOperands()[0]->get();
+                        const ir::Function* calleeFunc = dynamic_cast<const ir::Function*>(calleeVal);
+                        for (size_t idx = 1; idx < i.getOperands().size(); ++idx) {
+                            pushOperand(i.getOperands()[idx]->get());
+                        }
+                        uint32_t targetIdx = 0;
+                        if (calleeFunc && funcIndices.count(calleeFunc)) {
+                            targetIdx = funcIndices[calleeFunc];
+                        }
+                        wasmFunc.body.push_back(WasmInstruction::makeCall(targetIdx, calleeVal->getName()));
+                        if (i.getType() && !i.getType()->isVoidTy() && localIndices.count(&i)) {
+                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                        }
+                    }
+                    break;
+                }
+
+                default:
+                    break;
+            }
+        };
+
+        std::function<void(const ir::BasicBlock*)> lowerBB = [&](const ir::BasicBlock* bb) {
+            if (!bb || processedBBs.count(bb)) return;
+            processedBBs.insert(bb);
+
             for (auto& instPtr : bb->getInstructions()) {
                 ir::Instruction& i = *instPtr;
 
-                switch (i.getOpcode()) {
-                    case ir::Instruction::Ret:
-                        if (!i.getOperands().empty()) {
-                            pushOperand(i.getOperands()[0]->get());
-                        }
-                        break;
-
-                    case ir::Instruction::Add:
+                if (i.getOpcode() == ir::Instruction::Jnz || i.getOpcode() == ir::Instruction::Br) {
+                    if (i.getOperands().size() >= 3) {
                         pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Add));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
+                        wasmFunc.body.push_back(WasmInstruction::makeIf());
 
-                    case ir::Instruction::Sub:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Sub));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
+                        auto* trueBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[1]->get());
+                        if (trueBB) lowerBB(trueBB);
 
-                    case ir::Instruction::Mul:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Mul));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                        auto* falseBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[2]->get());
+                        if (falseBB && falseBB != trueBB) {
+                            wasmFunc.body.push_back(WasmInstruction::makeElse());
+                            lowerBB(falseBB);
                         }
-                        break;
 
-                    case ir::Instruction::Div:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32DivS));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Udiv:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32DivU));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Rem:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32RemS));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Urem:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32RemU));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::And:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32And));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Or:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Or));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Xor:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Xor));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Shl:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Shl));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Shr:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32ShrU));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Sar:
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32ShrS));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Copy:
-                        pushOperand(i.getOperands()[0]->get());
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
-
-                    case ir::Instruction::Ceq:
-                    case ir::Instruction::Cne:
-                    case ir::Instruction::Cslt:
-                    case ir::Instruction::Csle:
-                    case ir::Instruction::Csgt:
-                    case ir::Instruction::Csge:
-                    case ir::Instruction::Cult:
-                    case ir::Instruction::Cule:
-                    case ir::Instruction::Cugt:
-                    case ir::Instruction::Cuge: {
-                        pushOperand(i.getOperands()[0]->get());
-                        pushOperand(i.getOperands()[1]->get());
-                        WasmOpcode op = WasmOpcode::I32Eq;
-                        switch (i.getOpcode()) {
-                            case ir::Instruction::Ceq: op = WasmOpcode::I32Eq; break;
-                            case ir::Instruction::Cne: op = WasmOpcode::I32Ne; break;
-                            case ir::Instruction::Cslt: op = WasmOpcode::I32LtS; break;
-                            case ir::Instruction::Csle: op = WasmOpcode::I32LeS; break;
-                            case ir::Instruction::Csgt: op = WasmOpcode::I32GtS; break;
-                            case ir::Instruction::Csge: op = WasmOpcode::I32GeS; break;
-                            case ir::Instruction::Cult: op = WasmOpcode::I32LtU; break;
-                            case ir::Instruction::Cule: op = WasmOpcode::I32LeU; break;
-                            case ir::Instruction::Cugt: op = WasmOpcode::I32GtU; break;
-                            case ir::Instruction::Cuge: op = WasmOpcode::I32GeU; break;
-                            default: break;
-                        }
-                        wasmFunc.body.push_back(WasmInstruction::makeSimple(op));
-                        if (localIndices.count(&i)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                        }
-                        break;
+                        wasmFunc.body.push_back(WasmInstruction::makeEnd());
+                        continue;
+                    } else if (i.getOperands().size() == 1) {
+                        auto* targetBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[0]->get());
+                        if (targetBB) lowerBB(targetBB);
+                        continue;
                     }
-
-                    case ir::Instruction::Call: {
-                        if (!i.getOperands().empty()) {
-                            const ir::Value* calleeVal = i.getOperands()[0]->get();
-                            const ir::Function* calleeFunc = dynamic_cast<const ir::Function*>(calleeVal);
-                            for (size_t idx = 1; idx < i.getOperands().size(); ++idx) {
-                                pushOperand(i.getOperands()[idx]->get());
-                            }
-                            uint32_t targetIdx = 0;
-                            if (calleeFunc && funcIndices.count(calleeFunc)) {
-                                targetIdx = funcIndices[calleeFunc];
-                            }
-                            wasmFunc.body.push_back(WasmInstruction::makeCall(targetIdx, calleeVal->getName()));
-                            if (i.getType() && !i.getType()->isVoidTy() && localIndices.count(&i)) {
-                                wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
-                            }
-                        }
-                        break;
+                } else if (i.getOpcode() == ir::Instruction::Jmp) {
+                    if (!i.getOperands().empty()) {
+                        auto* targetBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[0]->get());
+                        if (targetBB) lowerBB(targetBB);
                     }
-
-                    case ir::Instruction::Br:
-                    case ir::Instruction::Jnz: {
-                        if (!i.getOperands().empty()) {
-                            pushOperand(i.getOperands()[0]->get());
-                            wasmFunc.body.push_back(WasmInstruction::makeBrIf(0));
-                        } else {
-                            wasmFunc.body.push_back(WasmInstruction::makeBr(0));
-                        }
-                        break;
-                    }
-
-                    case ir::Instruction::Jmp:
-                        wasmFunc.body.push_back(WasmInstruction::makeBr(0));
-                        break;
-
-                    default:
-                        break;
+                    continue;
                 }
+
+                processInstruction(i);
+            }
+        };
+
+        if (!func->getBasicBlocks().empty()) {
+            lowerBB(func->getBasicBlocks().front().get());
+        }
+
+        for (auto& bb : func->getBasicBlocks()) {
+            if (!processedBBs.count(bb.get())) {
+                lowerBB(bb.get());
             }
         }
 
-        if (useBlock) {
-            wasmFunc.body.push_back(WasmInstruction::makeEnd());
+        if (!wasmFunc.type.results.empty()) {
+            wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::Unreachable));
         }
 
         if (wasmFunc.isExported) {
@@ -355,18 +383,31 @@ std::string WasmWatWriter::write(const WasmModule& module) {
         if (!funcLabel.empty() && funcLabel[0] != '$') funcLabel = "$" + funcLabel;
         ss << "  (func " << funcLabel;
         for (auto p : func.type.params) {
-            ss << " (param " << (p == WasmValType::I32 ? "i32" : "i64") << ")";
+            ss << " (param " << (p == WasmValType::I32 ? "i32" : (p == WasmValType::I64 ? "i64" : (p == WasmValType::F32 ? "f32" : "f64"))) << ")";
         }
         for (auto r : func.type.results) {
-            ss << " (result " << (r == WasmValType::I32 ? "i32" : "i64") << ")";
+            ss << " (result " << (r == WasmValType::I32 ? "i32" : (r == WasmValType::I64 ? "i64" : (r == WasmValType::F32 ? "f32" : "f64"))) << ")";
         }
         ss << "\n";
+
+        for (const auto& loc : func.locals) {
+            std::string typeStr = "i32";
+            if (loc.type == WasmValType::I64) typeStr = "i64";
+            else if (loc.type == WasmValType::F32) typeStr = "f32";
+            else if (loc.type == WasmValType::F64) typeStr = "f64";
+            for (uint32_t c = 0; c < loc.count; ++c) {
+                ss << "    (local " << typeStr << ")\n";
+            }
+        }
 
         for (const auto& inst : func.body) {
             switch (inst.opcode) {
                 case WasmOpcode::I32Const: ss << "    i32.const " << inst.intImm << "\n"; break;
+                case WasmOpcode::I64Const: ss << "    i64.const " << inst.intImm << "\n"; break;
+                case WasmOpcode::F32Const: ss << "    f32.const " << inst.floatImm << "\n"; break;
                 case WasmOpcode::LocalGet: ss << "    local.get " << inst.uintImm << "\n"; break;
                 case WasmOpcode::LocalSet: ss << "    local.set " << inst.uintImm << "\n"; break;
+                case WasmOpcode::LocalTee: ss << "    local.tee " << inst.uintImm << "\n"; break;
                 case WasmOpcode::I32Add: ss << "    i32.add\n"; break;
                 case WasmOpcode::I32Sub: ss << "    i32.sub\n"; break;
                 case WasmOpcode::I32Mul: ss << "    i32.mul\n"; break;
@@ -383,13 +424,30 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                 case WasmOpcode::I32Eq: ss << "    i32.eq\n"; break;
                 case WasmOpcode::I32Ne: ss << "    i32.ne\n"; break;
                 case WasmOpcode::I32LtS: ss << "    i32.lt_s\n"; break;
+                case WasmOpcode::I32LtU: ss << "    i32.lt_u\n"; break;
                 case WasmOpcode::I32LeS: ss << "    i32.le_s\n"; break;
+                case WasmOpcode::I32LeU: ss << "    i32.le_u\n"; break;
                 case WasmOpcode::I32GtS: ss << "    i32.gt_s\n"; break;
+                case WasmOpcode::I32GtU: ss << "    i32.gt_u\n"; break;
                 case WasmOpcode::I32GeS: ss << "    i32.ge_s\n"; break;
-                case WasmOpcode::Call: ss << "    call $" << inst.symbolImm << "\n"; break;
+                case WasmOpcode::I32GeU: ss << "    i32.ge_u\n"; break;
+                case WasmOpcode::Call: {
+                    if (!inst.symbolImm.empty()) {
+                        std::string sym = inst.symbolImm;
+                        if (sym[0] != '$') sym = "$" + sym;
+                        ss << "    call " << sym << "\n";
+                    } else {
+                        ss << "    call " << inst.uintImm << "\n";
+                    }
+                    break;
+                }
                 case WasmOpcode::Br: ss << "    br " << inst.uintImm << "\n"; break;
                 case WasmOpcode::BrIf: ss << "    br_if " << inst.uintImm << "\n"; break;
                 case WasmOpcode::Block: ss << "    block\n"; break;
+                case WasmOpcode::Loop: ss << "    loop\n"; break;
+                case WasmOpcode::If: ss << "    if\n"; break;
+                case WasmOpcode::Else: ss << "    else\n"; break;
+                case WasmOpcode::Return: ss << "    return\n"; break;
                 case WasmOpcode::End: ss << "    end\n"; break;
                 default: break;
             }
@@ -479,6 +537,11 @@ std::vector<uint8_t> WasmBinaryWriter::write(const WasmModule& module) {
             for (const auto& inst : func.body) {
                 body.push_back(static_cast<uint8_t>(inst.opcode));
                 switch (inst.opcode) {
+                    case WasmOpcode::Block:
+                    case WasmOpcode::Loop:
+                    case WasmOpcode::If:
+                        body.push_back(0x40); // void block type in Wasm binary format
+                        break;
                     case WasmOpcode::I32Const:
                         encodeSignedLeb(body, static_cast<int32_t>(inst.intImm));
                         break;

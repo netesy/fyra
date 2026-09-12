@@ -24,12 +24,13 @@ static void runNodeVerification(const std::vector<uint8_t>& code, const std::str
     out.write(reinterpret_cast<const char*>(code.data()), code.size());
     out.close();
 
-    std::string cmd = "node -e 'const fs=require(\"fs\"); const bytes=fs.readFileSync(\"test_temp.wasm\"); if (!WebAssembly.validate(bytes)) process.exit(1); const m=new WebAssembly.Module(bytes); const i=new WebAssembly.Instance(m); " + checkJs + "'";
+    std::string cmd = "node -e 'const fs=require(\"fs\"); const bytes=fs.readFileSync(\"test_temp.wasm\"); if (!WebAssembly.validate(bytes)) { console.error(\"INVALID WASM\"); process.exit(1); } const m=new WebAssembly.Module(bytes); const i=new WebAssembly.Instance(m); " + checkJs + "'";
     int res = std::system(cmd.c_str());
     if (res != 0) {
-        std::cerr << "Node verification failed for command: " << cmd << " exit code: " << res << std::endl;
+        std::cerr << "Node verification failed with code: " << res << std::endl;
+    } else {
+        std::remove("test_temp.wasm");
     }
-    std::remove("test_temp.wasm");
     assert(res == 0);
 }
 
@@ -187,6 +188,71 @@ export function $test_leb128() : i32 {
         const auto& code = codeGen.getAssembler().getCode();
         runNodeVerification(code, R"(if (i.exports.test_ops() !== 1) process.exit(1); if (i.exports.test_signed_div() !== -20) process.exit(2); if (i.exports.test_unsigned_div() !== 2147483647) process.exit(3); if (i.exports.test_bitwise() !== 80) process.exit(4); if (i.exports.test_shr_u() !== 1073741820) process.exit(5); if (i.exports.test_sar_s() !== -4) process.exit(6); if (i.exports.test_leb128() !== 125) process.exit(8);)");
         std::cout << "Opcode & Signedness & LEB128 execution tests passed successfully!" << std::endl;
+    }
+
+    // Test 4: Conditional Diamond Control Flow Execution Test
+    {
+        std::string src = R"(
+export function $diamond(%x : i32) : i32 {
+@start
+    %cond = sgt %x, 0 : i32
+    br %cond, @pos, @neg : i32
+
+@pos
+    %r1 = add 10, 1 : i32
+    ret %r1 : i32
+
+@neg
+    %r2 = add 20, 1 : i32
+    ret %r2 : i32
+}
+)";
+        std::stringstream ss(src);
+        parser::Parser parser(ss, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module != nullptr);
+
+        auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        codegen::CodeGen codeGen(*module, std::move(targetInfo));
+        codeGen.emit();
+
+        const auto& code = codeGen.getAssembler().getCode();
+        runNodeVerification(code, R"(if (i.exports.diamond(5) !== 11) process.exit(1); if (i.exports.diamond(-5) !== 21) process.exit(2);)");
+        std::cout << "Conditional Diamond CFG execution test passed successfully!" << std::endl;
+    }
+
+    // Test 5: Fibonacci Control Flow Execution Test (fib(0), fib(1), fib(2), fib(5), fib(10))
+    {
+        std::string src = R"(
+export function $fibonacci(%n : i32) : i32 {
+@start
+    %t0 = sle %n, 1 : i32
+    br %t0, @base_case, @recursive_case : i32
+
+@base_case
+    ret %n : i32
+
+@recursive_case
+    %t1 = sub %n, 1 : i32
+    %t2 = call $fibonacci(%t1) : i32
+    %t3 = sub %n, 2 : i32
+    %t4 = call $fibonacci(%t3) : i32
+    %t5 = add %t2, %t4 : i32
+    ret %t5 : i32
+}
+)";
+        std::stringstream ss(src);
+        parser::Parser parser(ss, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module != nullptr);
+
+        auto targetInfo = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        codegen::CodeGen codeGen(*module, std::move(targetInfo));
+        codeGen.emit();
+
+        const auto& code = codeGen.getAssembler().getCode();
+        runNodeVerification(code, R"(if (i.exports.fibonacci(0) !== 0) process.exit(1); if (i.exports.fibonacci(1) !== 1) process.exit(2); if (i.exports.fibonacci(2) !== 1) process.exit(3); if (i.exports.fibonacci(5) !== 5) process.exit(4); if (i.exports.fibonacci(10) !== 55) process.exit(5);)");
+        std::cout << "Fibonacci base-case and recursive execution test (0, 1, 2, 5, 10 -> 0, 1, 1, 5, 55) passed successfully!" << std::endl;
     }
 
     std::cout << "All WASM target execution and verification tests passed successfully!" << std::endl;
