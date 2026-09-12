@@ -136,6 +136,15 @@ struct WasmInstruction {
     static WasmInstruction makeLoop() {
         WasmInstruction inst; inst.opcode = WasmOpcode::Loop; return inst;
     }
+    static WasmInstruction makeIf() {
+        WasmInstruction inst; inst.opcode = WasmOpcode::If; return inst;
+    }
+    static WasmInstruction makeElse() {
+        WasmInstruction inst; inst.opcode = WasmOpcode::Else; return inst;
+    }
+    static WasmInstruction makeReturn() {
+        WasmInstruction inst; inst.opcode = WasmOpcode::Return; return inst;
+    }
     static WasmInstruction makeEnd() {
         WasmInstruction inst; inst.opcode = WasmOpcode::End; return inst;
     }

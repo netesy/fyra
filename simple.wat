@@ -5,15 +5,8 @@
   (memory 1)
   (global $__heap_ptr (mut i32) (i32.const 1024))
 (module
-.text
-.globl main
-
-.globl main
-main:
   (func $main (result i32)
-main_start:
-  $42
-  return
+    i32.const 42
   )
-.Lfunc_end_main:
+  (export "main" (func $main))
 )
