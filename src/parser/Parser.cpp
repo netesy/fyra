@@ -280,16 +280,6 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         ir::Value* t = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* f = parseValue();
         instr = builder.createJnz(c, t, f);
-    } else if (opcodeStr == "br") {
-        ir::Value* arg0 = parseValue();
-        if (currentToken.type == TokenType::Comma) {
-            getNextToken();
-            ir::Value* t = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
-            ir::Value* f = parseValue();
-            instr = builder.createJnz(arg0, t, f);
-        } else {
-            instr = builder.createJmp(arg0);
-        }
     } else if (opcodeStr == "store") {
         ir::Value* v = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* p = parseValue();

@@ -24,10 +24,12 @@ static void runNodeVerification(const std::vector<uint8_t>& code, const std::str
     out.write(reinterpret_cast<const char*>(code.data()), code.size());
     out.close();
 
-    std::string cmd = "node -e 'const fs=require(\"fs\"); const bytes=fs.readFileSync(\"test_temp.wasm\"); if (!WebAssembly.validate(bytes)) { console.error(\"INVALID WASM\"); process.exit(1); } const m=new WebAssembly.Module(bytes); const i=new WebAssembly.Instance(m); " + checkJs + "'";
+    std::string cmd = "node -e 'const fs=require(\"fs\"); const bytes=fs.readFileSync(\"test_temp.wasm\"); if (!WebAssembly.validate(bytes)) { console.error(\"INVALID WASM\"); process.exit(1); } const m=new WebAssembly.Module(bytes); const i=new WebAssembly.Instance(m); " + checkJs + "' > /tmp/node.log 2>&1";
     int res = std::system(cmd.c_str());
     if (res != 0) {
-        std::cerr << "Node verification failed with code: " << res << std::endl;
+        std::cerr << "Node verification failed. Output log:" << std::endl;
+        std::ifstream logFile("/tmp/node.log");
+        std::cerr << logFile.rdbuf() << std::endl;
     } else {
         std::remove("test_temp.wasm");
     }
@@ -196,7 +198,7 @@ export function $test_leb128() : i32 {
 export function $diamond(%x : i32) : i32 {
 @start
     %cond = sgt %x, 0 : i32
-    br %cond, @pos, @neg : i32
+    jnz %cond, @pos, @neg : i32
 
 @pos
     %r1 = add 10, 1 : i32
@@ -227,7 +229,7 @@ export function $diamond(%x : i32) : i32 {
 export function $fibonacci(%n : i32) : i32 {
 @start
     %t0 = sle %n, 1 : i32
-    br %t0, @base_case, @recursive_case : i32
+    jnz %t0, @base_case, @recursive_case : i32
 
 @base_case
     ret %n : i32
