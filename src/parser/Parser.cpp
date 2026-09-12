@@ -275,11 +275,21 @@ ir::Instruction* Parser::parseInstruction(ir::BasicBlock* bb) {
         instr = builder.createRet(v);
     } else if (opcodeStr == "jmp") {
         instr = builder.createJmp(parseValue());
-    } else if (opcodeStr == "jnz" || opcodeStr == "br") {
+    } else if (opcodeStr == "jnz") {
         ir::Value* c = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* t = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* f = parseValue();
         instr = builder.createJnz(c, t, f);
+    } else if (opcodeStr == "br") {
+        ir::Value* arg0 = parseValue();
+        if (currentToken.type == TokenType::Comma) {
+            getNextToken();
+            ir::Value* t = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
+            ir::Value* f = parseValue();
+            instr = builder.createJnz(arg0, t, f);
+        } else {
+            instr = builder.createJmp(arg0);
+        }
     } else if (opcodeStr == "store") {
         ir::Value* v = parseValue(); if (currentToken.type == TokenType::Comma) getNextToken();
         ir::Value* p = parseValue();

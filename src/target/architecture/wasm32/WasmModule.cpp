@@ -448,6 +448,7 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                 case WasmOpcode::If: ss << "    if\n"; break;
                 case WasmOpcode::Else: ss << "    else\n"; break;
                 case WasmOpcode::Return: ss << "    return\n"; break;
+                case WasmOpcode::Unreachable: ss << "    unreachable\n"; break;
                 case WasmOpcode::End: ss << "    end\n"; break;
                 default: break;
             }
