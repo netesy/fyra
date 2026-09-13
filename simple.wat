@@ -7,6 +7,8 @@
 (module
   (func $main (result i32)
     i32.const 42
+    return
+    unreachable
   )
   (export "main" (func $main))
 )
