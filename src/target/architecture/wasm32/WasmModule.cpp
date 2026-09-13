@@ -167,7 +167,7 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
         struct LoopInfo {
             const ir::BasicBlock* header = nullptr;
             std::set<const ir::BasicBlock*> bodyBlocks;
-            const ir::BasicBlock* exitBB = nullptr;
+            std::vector<const ir::BasicBlock*> exitBBs;
         };
 
         std::map<const ir::BasicBlock*, LoopInfo> naturalLoops; // key = header
@@ -249,7 +249,9 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                 }
                 for (const ir::BasicBlock* succ : cfgSuccessors[b]) {
                     if (!loop.bodyBlocks.count(succ)) {
-                        if (!loop.exitBB) loop.exitBB = succ;
+                        if (std::find(loop.exitBBs.begin(), loop.exitBBs.end(), succ) == loop.exitBBs.end()) {
+                            loop.exitBBs.push_back(succ);
+                        }
                     }
                 }
             }
@@ -482,6 +484,15 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
             return nullptr;
         };
 
+        auto isExitBlockForAnyLoop = [&](const ir::BasicBlock* targetBB) -> bool {
+            for (int idx = static_cast<int>(scopeStack.size()) - 1; idx >= 0; --idx) {
+                if (scopeStack[idx].kind == Scope::Block && scopeStack[idx].targetBB == targetBB) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         std::function<void(const ir::BasicBlock*)> lowerBB = [&](const ir::BasicBlock* bb) {
             if (!bb) return;
             if (processedBBs.count(bb)) return;
@@ -490,8 +501,8 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
             const LoopInfo* loopPtr = isLoopHeader ? &naturalLoops[bb] : nullptr;
 
             if (isLoopHeader && !activeDFS.count(bb)) {
-                if (loopPtr->exitBB) {
-                    scopeStack.push_back({Scope::Block, loopPtr->exitBB});
+                for (int eIdx = static_cast<int>(loopPtr->exitBBs.size()) - 1; eIdx >= 0; --eIdx) {
+                    scopeStack.push_back({Scope::Block, loopPtr->exitBBs[eIdx]});
                     wasmFunc.body.push_back(WasmInstruction::makeBlock());
                 }
                 scopeStack.push_back({Scope::Loop, bb});
@@ -509,9 +520,9 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                         auto* trueBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[1]->get());
                         auto* falseBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[2]->get());
 
-                        if (loopPtr && loopPtr->exitBB && (trueBB == loopPtr->exitBB || falseBB == loopPtr->exitBB)) {
+                        if (isExitBlockForAnyLoop(trueBB) || isExitBlockForAnyLoop(falseBB)) {
                             pushOperand(i.getOperands()[0]->get());
-                            if (trueBB == loopPtr->exitBB) {
+                            if (isExitBlockForAnyLoop(trueBB)) {
                                 handlePhiAssignments(bb, trueBB);
                                 uint32_t depth = getScopeDepth(trueBB);
                                 wasmFunc.body.push_back(WasmInstruction::makeBrIf(depth));
@@ -563,7 +574,7 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                         auto* targetBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[0]->get());
                         if (targetBB) {
                             handlePhiAssignments(bb, targetBB);
-                            if (activeDFS.count(targetBB)) {
+                            if (activeDFS.count(targetBB) || isExitBlockForAnyLoop(targetBB)) {
                                 uint32_t depth = getScopeDepth(targetBB);
                                 wasmFunc.body.push_back(WasmInstruction::makeBr(depth));
                             } else if (targetBB != currentMergeBB) {
@@ -577,7 +588,7 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                         auto* targetBB = dynamic_cast<const ir::BasicBlock*>(i.getOperands()[0]->get());
                         if (targetBB) {
                             handlePhiAssignments(bb, targetBB);
-                            if (activeDFS.count(targetBB)) {
+                            if (activeDFS.count(targetBB) || isExitBlockForAnyLoop(targetBB)) {
                                 uint32_t depth = getScopeDepth(targetBB);
                                 wasmFunc.body.push_back(WasmInstruction::makeBr(depth));
                             } else if (targetBB != currentMergeBB) {
@@ -596,11 +607,11 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
             if (isLoopHeader) {
                 wasmFunc.body.push_back(WasmInstruction::makeEnd()); // end loop
                 scopeStack.pop_back();
-                if (loopPtr->exitBB) {
+                for (const ir::BasicBlock* exitBB : loopPtr->exitBBs) {
                     wasmFunc.body.push_back(WasmInstruction::makeEnd()); // end block
                     scopeStack.pop_back();
-                    if (!processedBBs.count(loopPtr->exitBB)) {
-                        lowerBB(loopPtr->exitBB);
+                    if (!processedBBs.count(exitBB)) {
+                        lowerBB(exitBB);
                     }
                 }
             }

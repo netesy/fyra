@@ -358,7 +358,163 @@ export function $one_iter_loop() : i32 {
         std::cout << "Gate C Reducible Natural Loop Execution Suite passed (sum_loop==45, zero_iter==0, one_iter==9)!" << std::endl;
     }
 
-    // Test 7: Target-Local Irreducible / Unsupported CFG Rejection Test
+    // Test 7: Gate D Extended Loop Suite (Nested Loops, Multiple Exits, Continue-like Edges, Internal Conditionals)
+    {
+        std::string src = R"(
+export function $nested_loop() : i32 {
+@entry
+    %i_init = copy 0 : i32
+    %count_init = copy 0 : i32
+    jmp @out_header : i32
+
+@out_header
+    %i = phi @entry %i_init, @out_latch %i_next : i32
+    %count = phi @entry %count_init, @out_latch %count_inner : i32
+    %c_out = sge %i, 3 : i32
+    jnz %c_out, @exit, @in_init : i32
+
+@in_init
+    %j_init = copy 0 : i32
+    jmp @in_header : i32
+
+@in_header
+    %j = phi @in_init %j_init, @in_body %j_next : i32
+    %count_in = phi @in_init %count, @in_body %count_in_next : i32
+    %c_in = sge %j, 4 : i32
+    jnz %c_in, @out_latch, @in_body : i32
+
+@in_body
+    %count_in_next = add %count_in, 1 : i32
+    %j_next = add %j, 1 : i32
+    jmp @in_header : i32
+
+@out_latch
+    %count_inner = phi @in_header %count_in : i32
+    %i_next = add %i, 1 : i32
+    jmp @out_header : i32
+
+@exit
+    ret %count : i32
+}
+
+export function $multi_exit_loop() : i32 {
+@entry
+    %i_init = copy 0 : i32
+    jmp @header : i32
+
+@header
+    %i = phi @entry %i_init, @latch %i_next : i32
+    %c1 = sge %i, 20 : i32
+    jnz %c1, @normal_exit, @body : i32
+
+@body
+    %c_early = eq %i, 7 : i32
+    jnz %c_early, @early_exit, @latch : i32
+
+@latch
+    %i_next = add %i, 1 : i32
+    jmp @header : i32
+
+@normal_exit
+    ret 100 : i32
+
+@early_exit
+    ret %i : i32
+}
+
+export function $continue_loop() : i32 {
+@entry
+    %i_init = copy 0 : i32
+    %sum_init = copy 0 : i32
+    jmp @header : i32
+
+@header
+    %i = phi @entry %i_init, @latch %i_next : i32
+    %sum = phi @entry %sum_init, @latch %sum_next : i32
+    %c_exit = sge %i, 10 : i32
+    jnz %c_exit, @exit, @body : i32
+
+@body
+    %rem = rem %i, 2 : i32
+    %is_even = eq %rem, 0 : i32
+    jnz %is_even, @latch_skip, @add_odd : i32
+
+@add_odd
+    %sum_added = add %sum, %i : i32
+    jmp @latch : i32
+
+@latch_skip
+    jmp @latch : i32
+
+@latch
+    %sum_next = phi @add_odd %sum_added, @latch_skip %sum : i32
+    %i_next = add %i, 1 : i32
+    jmp @header : i32
+
+@exit
+    ret %sum : i32
+}
+
+export function $internal_cond_loop() : i32 {
+@entry
+    %i_init = copy 0 : i32
+    %sum_init = copy 0 : i32
+    jmp @header : i32
+
+@header
+    %i = phi @entry %i_init, @latch %i_next : i32
+    %sum = phi @entry %sum_init, @latch %sum_next : i32
+    %c_exit = sge %i, 10 : i32
+    jnz %c_exit, @exit, @body : i32
+
+@body
+    %cond = slt %i, 5 : i32
+    jnz %cond, @then, @else : i32
+
+@then
+    %sum_then = add %sum, 1 : i32
+    jmp @latch : i32
+
+@else
+    %sum_else = add %sum, 2 : i32
+    jmp @latch : i32
+
+@latch
+    %sum_next = phi @then %sum_then, @else %sum_else : i32
+    %i_next = add %i, 1 : i32
+    jmp @header : i32
+
+@exit
+    ret %sum : i32
+}
+)";
+        std::stringstream ss(src);
+        parser::Parser parser(ss, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module != nullptr);
+
+        // WAT text generation test
+        std::stringstream watStream;
+        auto targetInfoWat = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        codegen::CodeGen codeGenWat(*module, std::move(targetInfoWat), &watStream);
+        codeGenWat.emit();
+        std::string wat = watStream.str();
+        assert(wat.find("block") != std::string::npos);
+        assert(wat.find("loop") != std::string::npos);
+
+        // Binary execution test
+        auto targetInfoBin = target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI});
+        codegen::CodeGen codeGenBin(*module, std::move(targetInfoBin));
+        codeGenBin.emit();
+
+        const auto& code = codeGenBin.getAssembler().getCode();
+        std::cout << "Gate D Extended Loop module WASM size: " << code.size() << " bytes" << std::endl;
+
+        runNodeVerification(code, R"(if (i.exports.nested_loop() !== 12) process.exit(1); if (i.exports.multi_exit_loop() !== 7) process.exit(2); if (i.exports.continue_loop() !== 25) process.exit(3); if (i.exports.internal_cond_loop() !== 15) process.exit(4);)");
+        std::cout << "Gate D Extended Loop Execution Suite passed (nested_loop==12, multi_exit==7, continue_loop==25, internal_cond==15)!" << std::endl;
+    }
+
+    // Test 8: Target-Local Irreducible / Unsupported CFG Rejection Test
     {
         std::string src = R"(
 export function $irreducible_cfg() : i32 {
@@ -384,7 +540,6 @@ export function $irreducible_cfg() : i32 {
             codegen::CodeGen codeGen(*module, std::move(targetInfo));
             codeGen.emit();
         } catch (const std::runtime_error& ex) {
-            std::cout << "[Test 7 Caught Exception]: " << ex.what() << std::endl;
             std::string msg = ex.what();
             if (msg.find("wasm32: unsupported irreducible/cyclic CFG") != std::string::npos ||
                 msg.find("wasm32: unsupported CFG backedge/cycle") != std::string::npos) {
@@ -395,7 +550,7 @@ export function $irreducible_cfg() : i32 {
         std::cout << "Target-local irreducible CFG rejection test passed successfully!" << std::endl;
     }
 
-    // Test 8: Real Nested Conditional CFG Execution Test
+    // Test 9: Real Nested Conditional CFG Execution Test
     {
         std::string src = R"(
 export function $nested_if(%x : i32, %y : i32) : i32 {
