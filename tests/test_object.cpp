@@ -5,6 +5,10 @@
 #include "target/artifact/object/CoffObjectReader.h"
 #include "target/artifact/object/MachObjectWriter.h"
 #include "target/artifact/object/MachObjectReader.h"
+#include "target/artifact/object/ObjectWriter.h"
+#include "target/artifact/object/ObjectReader.h"
+#include "target/artifact/object/WasmObjectWriter.h"
+#include "target/artifact/object/WasmObjectReader.h"
 #include <iostream>
 #include <cassert>
 #include <vector>
@@ -170,6 +174,35 @@ void test_macho_writer_reader() {
     std::cout << "  -> Mach-O Writer & Reader Test PASSED." << std::endl;
 }
 
+void test_wasm_writer_reader() {
+    std::cout << "[Test] WASI WebAssembly Object Writer & Reader..." << std::endl;
+
+    ObjectArtifact art;
+    art.arch = target::Arch::WASM32;
+    art.os = target::OS::WASI;
+
+    ObjectSection textSec;
+    textSec.name = ".text";
+    textSec.data = {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+    art.addSection(textSec);
+
+    auto writer = ObjectWriter::createForTargetTriple("wasm32-wasi");
+    assert(writer != nullptr);
+    std::vector<uint8_t> bytes = writer->serialize(art);
+    assert(bytes == textSec.data);
+
+    auto reader = ObjectReader::detectAndCreate(bytes);
+    assert(reader != nullptr);
+    ObjectArtifact readArt;
+    bool parsed = reader->parse(bytes, readArt);
+    assert(parsed);
+    assert(readArt.arch == target::Arch::WASM32);
+    assert(readArt.os == target::OS::WASI);
+    assert(readArt.findSection(".text") != nullptr);
+
+    std::cout << "  -> WASI Wasm Writer & Reader Test PASSED." << std::endl;
+}
+
 void test_explicit_output_path_policy() {
     std::cout << "[Test] Explicit vs Default Output Path Policy..." << std::endl;
 
@@ -194,6 +227,7 @@ int main() {
     test_elf_writer_reader();
     test_coff_writer_reader();
     test_macho_writer_reader();
+    test_wasm_writer_reader();
     test_explicit_output_path_policy();
 
     std::cout << "All Object Subsystem Tests Passed!" << std::endl;
