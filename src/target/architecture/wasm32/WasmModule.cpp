@@ -124,14 +124,29 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
 
         auto handlePhiAssignments = [&](const ir::BasicBlock* fromBB, const ir::BasicBlock* toBB) {
             if (!toBB || !fromBB) return;
+            std::vector<const ir::PhiNode*> phis;
+            std::vector<const ir::Value*> incVals;
+
             for (auto& instPtr : toBB->getInstructions()) {
                 if (auto* phi = dynamic_cast<ir::PhiNode*>(instPtr.get())) {
                     if (auto* incVal = phi->getIncomingValueForBlock(const_cast<ir::BasicBlock*>(fromBB))) {
-                        pushOperand(incVal);
-                        if (localIndices.count(phi)) {
-                            wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(phi)));
-                        }
+                        phis.push_back(phi);
+                        incVals.push_back(incVal);
                     }
+                }
+            }
+
+            if (phis.empty()) return;
+
+            for (size_t k = 0; k < phis.size(); ++k) {
+                pushOperand(incVals[k]);
+            }
+
+            for (int k = static_cast<int>(phis.size()) - 1; k >= 0; --k) {
+                if (localIndices.count(phis[k])) {
+                    wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(phis[k])));
+                } else {
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::Drop));
                 }
             }
         };
@@ -673,6 +688,7 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                 case WasmOpcode::LocalGet: ss << "    local.get " << inst.uintImm << "\n"; break;
                 case WasmOpcode::LocalSet: ss << "    local.set " << inst.uintImm << "\n"; break;
                 case WasmOpcode::LocalTee: ss << "    local.tee " << inst.uintImm << "\n"; break;
+                case WasmOpcode::Drop: ss << "    drop\n"; break;
                 case WasmOpcode::I32Add: ss << "    i32.add\n"; break;
                 case WasmOpcode::I32Sub: ss << "    i32.sub\n"; break;
                 case WasmOpcode::I32Mul: ss << "    i32.mul\n"; break;
