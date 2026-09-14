@@ -2,6 +2,7 @@
 #include "target/artifact/object/ElfObjectReader.h"
 #include "target/artifact/object/CoffObjectReader.h"
 #include "target/artifact/object/MachObjectReader.h"
+#include "target/artifact/object/WasmObjectReader.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -11,7 +12,9 @@ namespace artifact {
 namespace object {
 
 std::unique_ptr<ObjectReader> ObjectReader::createForTarget(const target::TargetDescriptor& desc) {
-    if (desc.os == target::OS::Windows) {
+    if (desc.arch == target::Arch::WASM32 || desc.os == target::OS::WASI) {
+        return std::make_unique<WasmObjectReader>();
+    } else if (desc.os == target::OS::Windows) {
         return std::make_unique<CoffObjectReader>();
     } else if (desc.os == target::OS::MacOS) {
         return std::make_unique<MachObjectReader>();
@@ -27,7 +30,9 @@ std::unique_ptr<ObjectReader> ObjectReader::createForTargetTriple(const std::str
     }
     std::string t = targetTriple;
     for (auto& c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (t.find("win") != std::string::npos || t.find("pe") != std::string::npos) {
+    if (t.find("wasm") != std::string::npos) {
+        return std::make_unique<WasmObjectReader>();
+    } else if (t.find("win") != std::string::npos || t.find("pe") != std::string::npos) {
         return std::make_unique<CoffObjectReader>();
     } else if (t.find("mac") != std::string::npos || t.find("darwin") != std::string::npos) {
         return std::make_unique<MachObjectReader>();
@@ -37,6 +42,9 @@ std::unique_ptr<ObjectReader> ObjectReader::createForTargetTriple(const std::str
 }
 
 std::unique_ptr<ObjectReader> ObjectReader::detectAndCreate(const std::vector<uint8_t>& bytes) {
+    if (bytes.size() >= 4 && std::memcmp(bytes.data(), "\x00""asm", 4) == 0) {
+        return std::make_unique<WasmObjectReader>();
+    }
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "\x7f""ELF", 4) == 0) {
         return std::make_unique<ElfObjectReader>();
     }
