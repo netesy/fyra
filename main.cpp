@@ -365,6 +365,7 @@ int main(int argc, char** argv) {
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
         transforms::LoopUnroll loop_unroll(error_reporter);
+        transforms::LoopVectorizer loop_vectorizer(error_reporter);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
         
         bool optimization_changed = true;
@@ -382,6 +383,7 @@ int main(int argc, char** argv) {
                 if (cfg_simplifier.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && licm.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && scev.run(*func)) optimization_changed = true;
+                if (optimizationLevel >= 2 && loop_vectorizer.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && enableUnroll && loop_unroll.run(*func)) optimization_changed = true;
                 if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;

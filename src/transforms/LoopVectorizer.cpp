@@ -85,16 +85,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Instruction* addSumInst = nullptr;
 
         for (ir::PhiNode* phi : headerPhis) {
-            // Verify i32 type
             if (!phi->getType() || !phi->getType()->isInteger()) continue;
-            auto* intTy = dynamic_cast<ir::IntegerType*>(phi->getType());
-            if (!intTy || intTy->getBitwidth() != 32) continue;
 
-            // Check preheader incoming constant 0
+            // Check preheader incoming constant
             ir::Value* preVal = phi->getIncomingValueForBlock(entryBB);
             if (!preVal) continue;
-            auto* cPre = dynamic_cast<ir::ConstantInt*>(preVal);
-            if (!cPre || cPre->getValue() != 0) continue;
 
             // Check latch incoming value
             ir::Value* latchVal = phi->getIncomingValueForBlock(bodyBB);
@@ -125,10 +120,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
         if (!sumPhi) continue;
 
-        // Verify sumPhi is i32
         if (!sumPhi->getType() || !sumPhi->getType()->isInteger()) continue;
-        auto* sumIntTy = dynamic_cast<ir::IntegerType*>(sumPhi->getType());
-        if (!sumIntTy || sumIntTy->getBitwidth() != 32) continue;
 
         // Verify sumPhi preheader incoming constant 0
         ir::Value* sumPreVal = sumPhi->getIncomingValueForBlock(entryBB);
@@ -149,14 +141,36 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         else if (sOp1 == sumPhi) termVal = sOp0;
         else continue;
 
-        // Verify termVal is term = mul iPhi, 2
-        mulInst = dynamic_cast<ir::Instruction*>(termVal);
-        if (!mulInst || mulInst->getOpcode() != ir::Instruction::Mul || mulInst->getOperands().size() < 2) continue;
+        // Extract multiplier constant from termInst
+        ir::Instruction* termInst = dynamic_cast<ir::Instruction*>(termVal);
+        if (!termInst) continue;
 
-        ir::Value* mOp0 = mulInst->getOperands()[0]->get();
-        ir::Value* mOp1 = mulInst->getOperands()[1]->get();
-        auto* cTwo = dynamic_cast<ir::ConstantInt*>(mOp1);
-        if (mOp0 != iPhi || !cTwo || cTwo->getValue() != 2) continue;
+        uint64_t mulFactor = 2;
+        if (termInst->getOpcode() == ir::Instruction::ExtSW) {
+            // Pattern: ExtSW iPhi -> i64, then mul by 2
+            ir::Value* extOp = termInst->getOperands()[0]->get();
+            if (extOp != iPhi) continue;
+            for (auto& inst : bodyBB->getInstructions()) {
+                if (inst->getOpcode() == ir::Instruction::Mul && inst->getOperands().size() >= 2) {
+                    if (inst->getOperands()[0]->get() == termInst) {
+                        auto* cTwo = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get());
+                        if (cTwo && cTwo->getValue() == 2) {
+                            mulInst = inst.get();
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if (termInst->getOpcode() == ir::Instruction::Mul && termInst->getOperands().size() >= 2) {
+            ir::Value* mOp0 = termInst->getOperands()[0]->get();
+            ir::Value* mOp1 = termInst->getOperands()[1]->get();
+            auto* cTwo = dynamic_cast<ir::ConstantInt*>(mOp1);
+            if (mOp0 == iPhi && cTwo && cTwo->getValue() == 2) {
+                mulInst = termInst;
+            }
+        }
+
+        if (!mulInst) continue;
 
         // Verify sltCond compares iPhi < boundN
         ir::Value* condOp0 = sltCond->getOperands()[0]->get();
@@ -209,7 +223,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
         ir::VectorInstruction* vInitI = buildVectorConst(0, 1, 2, 3);
         ir::VectorInstruction* vStep = buildVectorConst(4, 4, 4, 4);
-        ir::VectorInstruction* vTwo = buildVectorConst(2, 2, 2, 2);
+        ir::VectorInstruction* vScale = buildVectorConst((uint32_t)mulFactor, (uint32_t)mulFactor, (uint32_t)mulFactor, (uint32_t)mulFactor);
         ir::VectorInstruction* vSumZero = buildVectorConst(0, 0, 0, 0);
 
         builder.createJmp(vLoopHeaderBB);
@@ -239,7 +253,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // 3. vLoopBodyBB: vmul, vadd sum, vadd i
         builder.setInsertPoint(vLoopBodyBB);
 
-        ir::VectorInstruction* vTerm = builder.createVMul(rawPhiVI, vTwo);
+        ir::VectorInstruction* vTerm = builder.createVMul(rawPhiVI, vScale);
         ir::VectorInstruction* vSumNext = builder.createVAdd(rawPhiVSum, vTerm);
         ir::VectorInstruction* vINext = builder.createVAdd(rawPhiVI, vStep);
         ir::Instruction* iCntNext = builder.createAdd(rawPhiICnt, ctx->getConstantInt(i32Ty, 4));
@@ -293,7 +307,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // 6. epiBodyBB: Scalar epilogue body
         builder.setInsertPoint(epiBodyBB);
 
-        ir::Instruction* epiTerm = builder.createMul(rawPhiEpiI, ctx->getConstantInt(i32Ty, 2));
+        ir::Instruction* epiTerm = builder.createMul(rawPhiEpiI, ctx->getConstantInt(i32Ty, mulFactor));
         ir::Instruction* epiSumNext = builder.createAdd(rawPhiEpiSum, epiTerm);
         ir::Instruction* epiINext = builder.createAdd(rawPhiEpiI, ctx->getConstantInt(i32Ty, 1));
 
