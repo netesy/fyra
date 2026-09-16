@@ -323,6 +323,11 @@ target_link_libraries(test_auto_vec_properties PRIVATE fyra)
 add_test(NAME AutoVecPropertiesTest COMMAND test_auto_vec_properties)
 set_tests_properties(AutoVecPropertiesTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_auto_vec_predication test_auto_vec_predication.cpp)
+target_link_libraries(test_auto_vec_predication PRIVATE fyra)
+add_test(NAME AutoVecPredicationTest COMMAND test_auto_vec_predication)
+set_tests_properties(AutoVecPredicationTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_archive test_archive.cpp)
 target_link_libraries(test_archive PRIVATE fyra)
 add_test(NAME ArchiveTest COMMAND test_archive)
