@@ -135,12 +135,20 @@ static bool isDirectGprRegister(const std::string& op) {
     return false;
 }
 
-static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const std::string& dst, bool is32) {
+static bool isYmmRegisterName(const std::string& reg) {
+    return reg.find("ymm") != std::string::npos;
+}
+
+static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const std::string& dst, bool is32, unsigned totalBits = 128) {
     if (!os) return;
     if (isXmmRegisterName(src) || isXmmRegisterName(dst)) {
         if (src == dst) return;
         if (isXmmRegisterName(src) && isXmmRegisterName(dst)) {
-            *os << "  movdqu " << src << ", " << dst << "\n";
+            if (totalBits == 256 || isYmmRegisterName(src) || isYmmRegisterName(dst)) {
+                *os << "  vmovdqu " << toYmmReg(src) << ", " << toYmmReg(dst) << "\n";
+            } else {
+                *os << "  movdqu " << src << ", " << dst << "\n";
+            }
         } else if (isXmmRegisterName(src)) {
             if (is32BitRegisterName(dst) || is32) {
                 *os << "  movd " << src << ", " << to32BitReg(dst) << "\n";
@@ -169,6 +177,17 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
 
     if (!cg.lastStoreOp.empty() && s == cg.lastStoreOp && (d == regRax || d == "%rax" || d == "%eax")) {
         std::cerr << "SKIPPED emitMov: s=" << s << " d=" << d << " lastStoreOp=" << cg.lastStoreOp << "\n";
+        return;
+    }
+
+    bool srcIsAddr = (!s.empty() && s[0] == '(' && s.find(',') != std::string::npos);
+    if (srcIsAddr) {
+        std::string reg = is32 ? "%eax" : "%rax";
+        *os << "  leaq " << s << ", " << reg << "\n";
+        if (d != reg) {
+            *os << "  movq " << reg << ", " << d << "\n";
+        }
+        cg.lastStoreOp = d;
         return;
     }
 
@@ -281,15 +300,20 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
             }
         }
 
-        int current_offset = -8 - 8 * (int)layout.usedCalleeRegs.size();
+        int current_offset = -8 * (int)layout.usedCalleeRegs.size();
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
+                    unsigned slotSize = 8;
+                    if (auto* vecTy = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                        unsigned b = vecTy->getElementType()->getSize() * vecTy->getNumElements();
+                        if (b > 8) slotSize = (b + 15) & ~15;
+                    }
                     if (func.hasStackSlot(instr.get())) {
                         cg.getStackOffsets()[instr.get()] = -8 - 8 * (int)layout.usedCalleeRegs.size() - func.getStackSlotForVreg(instr.get());
                     } else if (!instr->hasPhysicalRegister()) {
+                        current_offset -= slotSize;
                         cg.getStackOffsets()[instr.get()] = current_offset;
-                        current_offset -= 8;
                     }
                 }
             }
@@ -545,7 +569,9 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        bool isStackDst = !isDirectGprRegister(dst);
+        std::string rax = (abi == X64ABI::Windows) ? (is32 ? "eax" : "rax") : (is32 ? "%eax" : "%rax");
+        std::string d = isStackDst ? rax : (is32 ? to32BitReg(dst) : to64BitReg(dst));
         std::string s0 = op0;
         if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
         std::string s1 = op1;
@@ -567,21 +593,27 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
                 if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << d << ", rdx\n";
                 else *os << "  add " << d << ", " << op1 << "\n";
             }
+            if (isStackDst) {
+                *os << "  mov " << dst << ", " << rax << "\n";
+            }
         } else {
             if (d == s1 && d != s0) {
                 // Commute: dst = src2 + src1
-                if (isGlobal1) *os << "  leaq " << op1 << ", " << d << "\n";
+                if (isGlobal1) *os << "  leaq " << op1 << ", " << (isStackDst ? rax : d) << "\n";
                 else emitMov(cg, os, op1, d, is32);
 
                 if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
                 else *os << "  " << addOp << " " << s0 << ", " << d << "\n";
             } else {
                 // Direct: dst = src1 + src2
-                if (isGlobal0) *os << "  leaq " << op0 << ", " << d << "\n";
+                if (isGlobal0) *os << "  leaq " << op0 << ", " << (isStackDst ? rax : d) << "\n";
                 else emitMov(cg, os, op0, d, is32);
 
                 if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
                 else *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+            }
+            if (isStackDst) {
+                emitMov(cg, os, rax, dst, is32);
             }
         }
     } else {
@@ -1180,8 +1212,13 @@ void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
 
     bool isVector = i.getType() && (i.getType()->isVectorTy() || i.getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(i.getType()) != nullptr);
     if (isVector) {
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+        unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+        std::string movInst = (totalBits == 256) ? "vmovdqu" : "movdqu";
+        std::string src = (totalBits == 256) ? toYmmReg(srcOp) : srcOp;
+        std::string dest = (totalBits == 256) ? toYmmReg(destOp) : destOp;
         if (auto* os = cg.getTextStream()) {
-            *os << "  movdqu " << srcOp << ", " << destOp << "\n";
+            *os << "  " << movInst << " " << src << ", " << dest << "\n";
         }
         return;
     }
@@ -2054,11 +2091,13 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             if (srcOp == destOp) continue;
 
             bool is32 = is32BitType(phi->getType());
+            auto* vecType = dynamic_cast<const ir::VectorType*>(phi->getType());
+            unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
             if (auto* os = cg.getTextStream()) {
                 if (abi == X64ABI::Windows) {
                     *os << "  mov " << destOp << ", " << srcOp << "\n";
                 } else {
-                    emitMov(cg, os, srcOp, destOp, is32);
+                    emitMov(cg, os, srcOp, destOp, is32, totalBits);
                 }
             } else {
                 auto& as = cg.getAssembler();
@@ -2075,8 +2114,16 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             std::string srcOp = cg.getValueAsOperand(incomingVal);
             bool isVector = incomingVal->getType() && (incomingVal->getType()->isVectorTy() || incomingVal->getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(incomingVal->getType()) != nullptr);
             if (isVector) {
-                *os << "  subq $16, %rsp\n";
-                *os << "  movdqu " << srcOp << ", (%rsp)\n";
+                auto* vecType = dynamic_cast<const ir::VectorType*>(incomingVal->getType());
+                unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+                if (totalBits == 256) {
+                    std::string ymmSrc = toYmmReg(srcOp);
+                    *os << "  subq $32, %rsp\n";
+                    *os << "  vmovdqu " << ymmSrc << ", (%rsp)\n";
+                } else {
+                    *os << "  subq $16, %rsp\n";
+                    *os << "  movdqu " << srcOp << ", (%rsp)\n";
+                }
             } else {
                 bool is32 = is32BitType(incomingVal->getType());
                 std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
@@ -2100,8 +2147,16 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             std::string destOp = cg.getValueAsOperand(phi);
             bool isVector = phi->getType() && (phi->getType()->isVectorTy() || phi->getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(phi->getType()) != nullptr);
             if (isVector) {
-                *os << "  movdqu (%rsp), " << destOp << "\n";
-                *os << "  addq $16, %rsp\n";
+                auto* vecType = dynamic_cast<const ir::VectorType*>(phi->getType());
+                unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+                if (totalBits == 256) {
+                    std::string ymmDst = toYmmReg(destOp);
+                    *os << "  vmovdqu (%rsp), " << ymmDst << "\n";
+                    *os << "  addq $32, %rsp\n";
+                } else {
+                    *os << "  movdqu (%rsp), " << destOp << "\n";
+                    *os << "  addq $16, %rsp\n";
+                }
             } else {
                 bool is32 = is32BitType(phi->getType());
                 std::string movOp = is32 ? "movl" : "movq";
@@ -2358,8 +2413,15 @@ bool X64Architecture::emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::In
                 addrStr = std::to_string(addConst);
             }
         }
-        *os << "  lea " << d << ", [" << addrStr << "]\n";
+        bool isStackDst = !isDirectGprRegister(d);
+        std::string targetReg = isStackDst ? (is32 ? "eax" : "rax") : d;
+        *os << "  lea " << targetReg << ", [" << addrStr << "]\n";
+        if (isStackDst) {
+            *os << "  mov " << d << ", " << targetReg << "\n";
+        }
     } else {
+        bool isStackDst = !isDirectGprRegister(d);
+        std::string targetReg = isStackDst ? (is32 ? "%eax" : "%rax") : d;
         std::string dispStr = (addConst != 0) ? std::to_string(addConst) : "";
         std::string indexStr = "";
         if (!indexReg.empty()) {
@@ -2370,7 +2432,10 @@ bool X64Architecture::emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::In
         if (!indexStr.empty()) {
             *os << "," << indexStr;
         }
-        *os << "), " << d << "\n";
+        *os << "), " << targetReg << "\n";
+        if (isStackDst) {
+            emitMov(cg, os, targetReg, d, is32);
+        }
     }
 
     cg.lastStoreOp = "";
@@ -2633,14 +2698,18 @@ VectorCapabilities X64Architecture::getVectorCapabilities() const {
     VectorCapabilities caps;
     caps.supportsSSE = true;
     caps.supportsSSSE3 = true;
-    caps.supportsAVX = true;
-    caps.supportsAVX2 = true;
-    caps.supportsAVX512 = true;
-    caps.maxVectorWidth = 512;
-    caps.supportedWidths = {128, 256, 512};
+    caps.supportsAVX = false;
+    caps.supportsAVX2 = false;
+    caps.supportsAVX512 = false;
+    caps.maxVectorWidth = 128;
+    caps.supportedWidths = {128, 256};
     caps.supportsIntegerVectors = true;
-    caps.simdExtension = "SSE2/SSSE3/SSE4.1/AVX2/AVX512";
+    caps.simdExtension = "SSE2/SSSE3/SSE4.1";
     return caps;
+}
+
+bool X64Architecture::supportsVectorWidth(unsigned width) const {
+    return width == 128 || width == 256;
 }
 
 bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
@@ -2654,17 +2723,62 @@ bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
         auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
         if (!intTy) return false;
         unsigned bw = intTy->getBitwidth();
-        if (bw == 8 && (numElem == 16 || numElem == 32 || numElem == 64)) return true;
-        if (bw == 16 && (numElem == 8 || numElem == 16 || numElem == 32)) return true;
-        if (bw == 32 && (numElem == 4 || numElem == 8 || numElem == 16)) return true;
-        if (bw == 64 && (numElem == 2 || numElem == 4 || numElem == 8)) return true;
+        if (bw == 8 && numElem == 16) return true;
+        if (bw == 16 && numElem == 8) return true;
+        if (bw == 32 && numElem == 4) return true;
+        if (bw == 64 && numElem == 2) return true;
     } else if (elemTy->isFloatTy()) {
-        if (numElem == 4 || numElem == 8 || numElem == 16) return true;
+        if (numElem == 4) return true;
     } else if (elemTy->isDoubleTy()) {
-        if (numElem == 2 || numElem == 4 || numElem == 8) return true;
+        if (numElem == 2) return true;
     }
 
     return false;
+}
+
+bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const {
+    if (!type || !type->getElementType()) return false;
+    auto* elemTy = type->getElementType();
+    unsigned numElem = type->getNumElements();
+
+    bool validWidth = false;
+    if (elemTy->isIntegerTy()) {
+        auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+        if (!intTy) return false;
+        unsigned bw = intTy->getBitwidth();
+        if (bw == 8 && (numElem == 16 || numElem == 32)) validWidth = true;
+        if (bw == 16 && (numElem == 8 || numElem == 16)) validWidth = true;
+        if (bw == 32 && (numElem == 4 || numElem == 8)) validWidth = true;
+        if (bw == 64 && (numElem == 2 || numElem == 4)) validWidth = true;
+        if (bw == 64 && op == ir::Instruction::VMul) return false;
+    } else if (elemTy->isFloatTy()) {
+        if (numElem == 4 || numElem == 8) validWidth = true;
+    } else if (elemTy->isDoubleTy()) {
+        if (numElem == 2 || numElem == 4) validWidth = true;
+    }
+
+    if (!validWidth) return false;
+
+    switch (op) {
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+        case ir::Instruction::VFAdd:
+        case ir::Instruction::VFSub:
+        case ir::Instruction::VFMul:
+        case ir::Instruction::VFDiv:
+        case ir::Instruction::VLoad:
+        case ir::Instruction::VStore:
+        case ir::Instruction::VAnd:
+        case ir::Instruction::VOr:
+        case ir::Instruction::VXor:
+        case ir::Instruction::VBroadcast:
+        case ir::Instruction::VExtract:
+        case ir::Instruction::VInsert:
+            return true;
+        default:
+            return false;
+    }
 }
 
 void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
@@ -2674,30 +2788,32 @@ void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
         auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
         unsigned totalBitWidth = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
 
-        std::string movInst = "movdqu";
-        if (totalBitWidth == 256) {
-            movInst = "vmovdqu";
-            dstOp = toYmmReg(dstOp);
-        } else if (totalBitWidth == 512) {
-            movInst = "vmovdqu64";
-            dstOp = toZmmReg(dstOp);
-        }
+        bool isReg = isXmmRegisterName(dstOp) || isYmmRegisterName(dstOp);
+        std::string movInst = (totalBitWidth == 256) ? "vmovdqu" : "movdqu";
+        std::string targetReg = isReg ? (totalBitWidth == 256 ? toYmmReg(dstOp) : dstOp) : (totalBitWidth == 256 ? "%ymm0" : "%xmm0");
 
         if (abi == X64ABI::Windows) {
+            targetReg = isReg ? (totalBitWidth == 256 ? toYmmReg(dstOp) : dstOp) : (totalBitWidth == 256 ? "ymm0" : "xmm0");
             if (isDirectGprRegister(ptrOp)) {
-                *os << "  " << movInst << " " << dstOp << ", [" << ptrOp << "]\n";
+                *os << "  " << movInst << " " << targetReg << ", [" << ptrOp << "]\n";
             } else {
                 std::string rax = "rax";
                 *os << "  mov " << rax << ", " << ptrOp << "\n";
-                *os << "  " << movInst << " " << dstOp << ", [" << rax << "]\n";
+                *os << "  " << movInst << " " << targetReg << ", [" << rax << "]\n";
+            }
+            if (!isReg) {
+                *os << "  " << movInst << " [" << dstOp << "], " << targetReg << "\n";
             }
         } else {
             if (isDirectGprRegister(ptrOp)) {
-                *os << "  " << movInst << " (" << ptrOp << "), " << dstOp << "\n";
+                *os << "  " << movInst << " (" << ptrOp << "), " << targetReg << "\n";
             } else {
                 std::string rax = "%rax";
                 *os << "  movq " << ptrOp << ", " << rax << "\n";
-                *os << "  " << movInst << " (%rax), " << dstOp << "\n";
+                *os << "  " << movInst << " (%rax), " << targetReg << "\n";
+            }
+            if (!isReg) {
+                *os << "  " << movInst << " " << targetReg << ", " << dstOp << "\n";
             }
         }
     }
@@ -3202,13 +3318,10 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             op0 = toYmmReg(op0);
             op1 = toYmmReg(op1);
             if (!simdInst.empty() && simdInst[0] != 'v') simdInst = "v" + simdInst;
-            if (dst == op0) {
-                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
-            } else if (dst == op1 && isCommutative) {
-                *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
+            if (abi == X64ABI::Windows) {
+                *os << "  " << simdInst << " " << dst << ", " << op0 << ", " << op1 << "\n";
             } else {
-                *os << "  vmovdqu " << op0 << ", " << dst << "\n";
-                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+                *os << "  " << simdInst << " " << op1 << ", " << op0 << ", " << dst << "\n";
             }
         } else if (totalBitWidth == 512) {
             dst = toZmmReg(dst);

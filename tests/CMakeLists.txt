@@ -308,6 +308,21 @@ target_link_libraries(test_loop_vectorizer PRIVATE fyra)
 add_test(NAME LoopVectorizerTest COMMAND test_loop_vectorizer)
 set_tests_properties(LoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_auto_vec_array test_auto_vec_array.cpp)
+target_link_libraries(test_auto_vec_array PRIVATE fyra)
+add_test(NAME AutoVecArrayTest COMMAND test_auto_vec_array)
+set_tests_properties(AutoVecArrayTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_widening test_auto_vec_widening.cpp)
+target_link_libraries(test_auto_vec_widening PRIVATE fyra)
+add_test(NAME AutoVecWideningTest COMMAND test_auto_vec_widening)
+set_tests_properties(AutoVecWideningTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_properties test_auto_vec_properties.cpp)
+target_link_libraries(test_auto_vec_properties PRIVATE fyra)
+add_test(NAME AutoVecPropertiesTest COMMAND test_auto_vec_properties)
+set_tests_properties(AutoVecPropertiesTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_archive test_archive.cpp)
 target_link_libraries(test_archive PRIVATE fyra)
 add_test(NAME ArchiveTest COMMAND test_archive)

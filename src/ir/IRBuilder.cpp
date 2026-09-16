@@ -7,6 +7,15 @@
 
 namespace ir {
 
+static unsigned getVectorWidthBits(Type* t) {
+    if (auto* vecTy = dynamic_cast<VectorType*>(t)) {
+        if (vecTy->getElementType()) {
+            return vecTy->getElementType()->getSize() * 8 * vecTy->getNumElements();
+        }
+    }
+    return 128;
+}
+
 IRBuilder::IRBuilder() : context(std::make_shared<IRContext>()) {}
 
 IRBuilder::IRBuilder(std::shared_ptr<IRContext> ctx) : context(ctx) {}

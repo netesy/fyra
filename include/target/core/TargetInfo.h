@@ -107,6 +107,7 @@ public:
     virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
     virtual bool supportsVectorWidth(unsigned) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType*) const { return false; }
+    virtual bool supportsVectorOperation(ir::Instruction::Opcode, const ir::VectorType*) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type*) const { return 0; }
     virtual void emitVectorLoad(codegen::CodeGen&, ir::VectorInstruction&) {}
     virtual void emitVectorStore(codegen::CodeGen&, ir::VectorInstruction&) {}

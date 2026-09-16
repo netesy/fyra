@@ -72,6 +72,7 @@ public:
     virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
     virtual bool supportsVectorWidth(unsigned width) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType* type) const { return false; }
+    virtual bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type* type) const { return 0; }
     virtual void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {}
     virtual void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {}
