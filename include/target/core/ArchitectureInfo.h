@@ -39,6 +39,8 @@ public:
 
     virtual void emitRet(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitAdd(CodeGen& cg, ir::Instruction& i) = 0;
+    virtual void emitSMin(CodeGen&, ir::Instruction&) {}
+    virtual void emitSMax(CodeGen&, ir::Instruction&) {}
     virtual void emitSub(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitMul(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitDiv(CodeGen& cg, ir::Instruction& i) = 0;

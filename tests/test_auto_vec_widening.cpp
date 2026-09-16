@@ -131,6 +131,8 @@ int main(int argc, char** argv) {
     int32_t init = atoi(argv[2]);
     int32_t data[64];
     for (int i = 0; i < 64; ++i) data[i] = i + 1;
+    const int32_t upper_half_only[8] = {0, 0, 0, 0, 10, 20, 30, 40};
+    for (int i = 0; i < 8; ++i) data[i] = upper_half_only[i];
     int32_t res = mem_sum(data, n, init);
     printf("RES:%d\n", res);
     return 0;
@@ -144,6 +146,8 @@ int main(int argc, char** argv) {
 
     int32_t testData[64];
     for (int i = 0; i < 64; ++i) testData[i] = i + 1;
+    const int32_t upperHalfOnly[8] = {0, 0, 0, 0, 10, 20, 30, 40};
+    for (int i = 0; i < 8; ++i) testData[i] = upperHalfOnly[i];
 
     for (int nVal : { 0, 1, 7, 8, 9, 15, 16, 17, 31 }) {
         std::string runCmd = binFilePath + " " + std::to_string(nVal) + " " + std::to_string(initVal);
@@ -166,9 +170,60 @@ int main(int argc, char** argv) {
     }
 }
 
+void test_signed_widening_rejected() {
+    auto ctx = std::make_shared<IRContext>();
+    Module module("test_widening_rejection", ctx);
+    IRBuilder builder(ctx);
+    builder.setModule(&module);
+
+    auto* i32Ty = ctx->getIntegerType(32);
+    auto* i64Ty = ctx->getIntegerType(64);
+    Function* func = builder.createFunction("widening_sum", i64Ty, {i64Ty, i32Ty});
+    auto parameter = func->getParameters().begin();
+    Value* base = (parameter++)->get();
+    Value* bound = parameter->get();
+
+    BasicBlock* entry = builder.createBasicBlock("entry", func);
+    BasicBlock* header = builder.createBasicBlock("loop", func);
+    BasicBlock* body = builder.createBasicBlock("body", func);
+    BasicBlock* exit = builder.createBasicBlock("exit", func);
+    builder.setInsertPoint(entry);
+    builder.createJmp(header);
+
+    builder.setInsertPoint(header);
+    auto inductionOwner = std::make_unique<PhiNode>(i32Ty, 0, nullptr, header);
+    auto* induction = inductionOwner.get();
+    header->getInstructions().push_back(std::move(inductionOwner));
+    auto sumOwner = std::make_unique<PhiNode>(i64Ty, 0, nullptr, header);
+    auto* sum = sumOwner.get();
+    header->getInstructions().push_back(std::move(sumOwner));
+    induction->addIncoming(ctx->getConstantInt(i32Ty, 0), entry);
+    sum->addIncoming(ctx->getConstantInt(i64Ty, 0), entry);
+    builder.createBr(builder.createCslt(induction, bound), body, exit);
+
+    builder.setInsertPoint(body);
+    auto* wideIndex = builder.createExtSW(induction, i64Ty);
+    auto* offset = builder.createMul(wideIndex, ctx->getConstantInt(i64Ty, 4));
+    auto* loaded = builder.createLoaduw(builder.createAdd(base, offset));
+    auto* widened = builder.createExtSW(loaded, i64Ty);
+    auto* sumNext = builder.createAdd(sum, widened);
+    auto* inductionNext = builder.createAdd(induction, ctx->getConstantInt(i32Ty, 1));
+    induction->addIncoming(inductionNext, body);
+    sum->addIncoming(sumNext, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit);
+    builder.createRet(sum);
+
+    transforms::CFGBuilder::run(*func);
+    transforms::LoopVectorizer vectorizer;
+    assert(!vectorizer.performTransformation(*func) &&
+           "signed i32-to-i64 reduction must remain safely rejected");
+}
+
 int main() {
     test_memory_sum_reduction(0);
     test_memory_sum_reduction(7);
     test_memory_sum_reduction(-9);
+    test_signed_widening_rejected();
     return 0;
 }

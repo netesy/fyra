@@ -33,6 +33,8 @@ public:
         Shl,
         Shr,
         Sar,
+        SMin,
+        SMax,
         
         // Floating-point Binary Operators
         FAdd,

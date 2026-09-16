@@ -587,6 +587,18 @@ Instruction* IRBuilder::createFDiv(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
+Instruction* IRBuilder::createSMin(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<Instruction>(lhs->getType(), Instruction::SMin,
+                                               std::vector<Value*>{lhs, rhs}, insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
+Instruction* IRBuilder::createSMax(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<Instruction>(lhs->getType(), Instruction::SMax,
+                                               std::vector<Value*>{lhs, rhs}, insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
 Instruction* IRBuilder::createAnd(Value* lhs, Value* rhs) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(lhs->getType(), Instruction::And, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -1040,6 +1052,50 @@ VectorInstruction* IRBuilder::createVMul(Value* lhs, Value* rhs) {
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVFAdd(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFAdd,
+                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVFSub(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFSub,
+                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVFMul(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFMul,
+                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVFDiv(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFDiv,
+                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVMin(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VMin,
+                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
+VectorInstruction* IRBuilder::createVMax(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VMax,
+                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
 }
 
 VectorInstruction* IRBuilder::createVLoad(VectorType* type, Value* ptr) {

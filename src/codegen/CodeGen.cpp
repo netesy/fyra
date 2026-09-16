@@ -239,6 +239,8 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
     switch (instr.getOpcode()) {
         case ir::Instruction::Ret: targetInfo->emitRet(*this, instr); break;
         case ir::Instruction::Add: targetInfo->emitAdd(*this, instr); break;
+        case ir::Instruction::SMin: targetInfo->emitSMin(*this, instr); break;
+        case ir::Instruction::SMax: targetInfo->emitSMax(*this, instr); break;
         case ir::Instruction::Sub: targetInfo->emitSub(*this, instr); break;
         case ir::Instruction::Mul: targetInfo->emitMul(*this, instr); break;
         case ir::Instruction::Div: case ir::Instruction::Udiv: targetInfo->emitDiv(*this, instr); break;

@@ -33,6 +33,8 @@ void CompositeTargetInfo::emitGetArgument(codegen::CodeGen& cg, size_t idx, cons
 
 void CompositeTargetInfo::emitRet(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitRet(cg, i); }
 void CompositeTargetInfo::emitAdd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitAdd(cg, i); }
+void CompositeTargetInfo::emitSMin(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSMin(cg, i); }
+void CompositeTargetInfo::emitSMax(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSMax(cg, i); }
 void CompositeTargetInfo::emitSub(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSub(cg, i); }
 void CompositeTargetInfo::emitMul(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitMul(cg, i); }
 void CompositeTargetInfo::emitDiv(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitDiv(cg, i); }

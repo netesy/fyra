@@ -337,3 +337,13 @@ add_executable(test_linker test_linker.cpp)
 target_link_libraries(test_linker PRIVATE fyra)
 add_test(NAME LinkerTest COMMAND test_linker)
 set_tests_properties(LinkerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_float test_auto_vec_float.cpp)
+target_link_libraries(test_auto_vec_float PRIVATE fyra)
+add_test(NAME AutoVecFloatTest COMMAND test_auto_vec_float)
+set_tests_properties(AutoVecFloatTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_reduction test_auto_vec_reduction.cpp)
+target_link_libraries(test_auto_vec_reduction PRIVATE fyra)
+add_test(NAME AutoVecReductionTest COMMAND test_auto_vec_reduction)
+set_tests_properties(AutoVecReductionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

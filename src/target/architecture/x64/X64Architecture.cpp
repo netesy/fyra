@@ -624,6 +624,29 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
     }
 }
 
+static void emitSignedMinMaxText(X64Architecture&, CodeGen& cg,
+                                 ir::Instruction& i, bool isMin) {
+    auto* os = cg.getTextStream();
+    if (!os) return;
+    bool is32 = i.getType()->getSize() == 4;
+    std::string lhs = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string rhs = cg.getValueAsOperand(i.getOperands()[1]->get());
+    std::string dst = cg.getValueAsOperand(&i);
+    if (dst == rhs && dst != lhs) {
+        // Keep the coalesced RHS in place.  Comparing dst against lhs and
+        // reversing the candidate avoids borrowing an untracked scratch reg.
+        *os << "  " << (is32 ? "cmpl" : "cmpq") << " " << lhs << ", " << dst << "\n";
+        *os << "  " << (isMin ? "cmovg" : "cmovl") << " " << lhs << ", " << dst << "\n";
+        return;
+    }
+    if (dst != lhs) *os << "  " << (is32 ? "movl" : "movq") << " " << lhs << ", " << dst << "\n";
+    *os << "  " << (is32 ? "cmpl" : "cmpq") << " " << rhs << ", " << dst << "\n";
+    *os << "  " << (isMin ? "cmovg" : "cmovl") << " " << rhs << ", " << dst << "\n";
+}
+
+void X64Architecture::emitSMin(CodeGen& cg, ir::Instruction& i) { emitSignedMinMaxText(*this, cg, i, true); }
+void X64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) { emitSignedMinMaxText(*this, cg, i, false); }
+
 void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
     std::string rax = is32 ? "%eax" : "%rax";
@@ -1438,17 +1461,21 @@ bool X64Architecture::emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::I
 
 void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "addss" : "addsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  addsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  addsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1464,17 +1491,21 @@ void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "subss" : "subsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  subsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  subsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1490,17 +1521,21 @@ void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "mulss" : "mulsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  mulsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  mulsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1516,17 +1551,21 @@ void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "divss" : "divsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  divsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  divsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1852,6 +1891,7 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
     }
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
+    std::string fpScratch = getReservedScratchVectorReg();
     if (auto* os = cg.getTextStream()) {
         ir::Value* ptrVal = i.getOperands()[0]->get();
         if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
@@ -1859,7 +1899,7 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             bool is32 = is32BitType(i.getType());
             std::string dest = (abi == X64ABI::Windows) ? (is32 ? "eax" : "rax") : (is32 ? "%eax" : "%rax");
             if (i.getType() && i.getType()->isFloatingPoint()) {
-                dest = (abi == X64ABI::Windows) ? "xmm0" : "%xmm0";
+                dest = fpScratch;
             }
             if (i.hasPhysicalRegister()) {
                 dest = cg.getValueAsOperand(&i);
@@ -1889,10 +1929,11 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
                 *os << "  movq " << op << ", " << rax << "\n";
             }
             if (abi == X64ABI::SystemV) {
-                if (size == 1) *os << (isSigned ? "  movsbq (%rax), %rax\n" : "  movzbq (%rax), %rax\n");
+                if (i.getType() && i.getType()->isFloatTy()) *os << "  movss (" << rax << "), " << fpScratch << "\n";
+                else if (i.getType() && i.getType()->isDoubleTy()) *os << "  movsd (" << rax << "), " << fpScratch << "\n";
+                else if (size == 1) *os << (isSigned ? "  movsbq (%rax), %rax\n" : "  movzbq (%rax), %rax\n");
                 else if (size == 2) *os << (isSigned ? "  movswq (%rax), %rax\n" : "  movzwq (%rax), %rax\n");
                 else if (size == 4) *os << (isSigned ? "  movslq (%rax), %rax\n" : "  movl (%rax), %eax\n");
-                else if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) *os << "  movsd (%rax), %xmm0\n";
                 else *os << "  movq (%rax), %rax\n";
             } else {
                 if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr [rax]\n" : "  movzx rax, byte ptr [rax]\n");
@@ -1903,10 +1944,11 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
         }
         // Store result
         if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
+            const char* moveFP = i.getType()->isFloatTy() ? "movss" : "movsd";
             if (abi == X64ABI::Windows)
-                *os << "  movsd " << cg.getValueAsOperand(&i) << ", xmm0\n";
+                *os << "  " << moveFP << " " << cg.getValueAsOperand(&i) << ", " << fpScratch << "\n";
             else
-                *os << "  movsd %xmm0, " << cg.getValueAsOperand(&i) << "\n";
+                *os << "  " << moveFP << " " << fpScratch << ", " << cg.getValueAsOperand(&i) << "\n";
         } else if (abi == X64ABI::Windows)
             *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
         else {
@@ -1946,10 +1988,33 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
         ir::Value* ptrVal = i.getOperands()[1]->get();
+        ir::Type* storedType = i.getOperands()[0]->get()->getType();
         if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
             std::string stackOp = formatStackOperand(-ciSlot->getValue());
             bool is32Val = (size <= 4);
             emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), stackOp, is32Val);
+            return;
+        }
+
+        if (storedType && storedType->isFloatingPoint()) {
+            std::string valueOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+            std::string ptrOp = cg.getValueAsOperand(ptrVal);
+            std::string move = storedType->isFloatTy() ? "movss" : "movsd";
+            if (abi == X64ABI::SystemV) {
+                if (isDirectGprRegister(ptrOp))
+                    *os << "  " << move << " " << valueOp << ", (" << ptrOp << ")\n";
+                else {
+                    *os << "  movq " << ptrOp << ", %rdx\n";
+                    *os << "  " << move << " " << valueOp << ", (%rdx)\n";
+                }
+            } else {
+                if (isDirectGprRegister(ptrOp))
+                    *os << "  " << move << " [" << ptrOp << "], " << valueOp << "\n";
+                else {
+                    *os << "  mov rdx, " << ptrOp << "\n";
+                    *os << "  " << move << " [rdx], " << valueOp << "\n";
+                }
+            }
             return;
         }
 
@@ -2725,12 +2790,12 @@ bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
         unsigned bw = intTy->getBitwidth();
         if (bw == 8 && numElem == 16) return true;
         if (bw == 16 && numElem == 8) return true;
-        if (bw == 32 && numElem == 4) return true;
-        if (bw == 64 && numElem == 2) return true;
+        if (bw == 32 && (numElem == 4 || numElem == 8)) return true;
+        if (bw == 64 && (numElem == 2 || numElem == 4)) return true;
     } else if (elemTy->isFloatTy()) {
-        if (numElem == 4) return true;
+        if (numElem == 4 || numElem == 8) return true;
     } else if (elemTy->isDoubleTy()) {
-        if (numElem == 2) return true;
+        if (numElem == 2 || numElem == 4) return true;
     }
 
     return false;
@@ -2775,6 +2840,8 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const 
         case ir::Instruction::VBroadcast:
         case ir::Instruction::VExtract:
         case ir::Instruction::VInsert:
+        case ir::Instruction::VMin:
+        case ir::Instruction::VMax:
             return true;
         default:
             return false;
@@ -3172,8 +3239,23 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                 auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
                 unsigned bw = intTy ? intTy->getBitwidth() : 32;
                 if (bw == 32) {
-                    *os << "  movd " << op0 << ", " << dst << "\n";
-                    *os << "  pshufd $0, " << dst << ", " << dst << "\n";
+                    unsigned bits = elemTy->getSize() * 8 * numElem;
+                    if (bits == 256) {
+                        std::string source = op0;
+                        if (!source.empty() && source[0] == '$') {
+                            *os << "  movl " << source << ", %eax\n";
+                            source = "%eax";
+                        }
+                        *os << "  vpbroadcastd " << source << ", " << toYmmReg(dst) << "\n";
+                    } else {
+                        if (!op0.empty() && op0[0] == '$') {
+                            *os << "  movl " << op0 << ", %eax\n";
+                            *os << "  movd %eax, " << dst << "\n";
+                        } else {
+                            *os << "  movd " << op0 << ", " << dst << "\n";
+                        }
+                        *os << "  pshufd $0, " << dst << ", " << dst << "\n";
+                    }
                 } else if (bw == 64) {
                     *os << "  movq " << op0 << ", " << dst << "\n";
                     *os << "  punpcklqdq " << dst << ", " << dst << "\n";

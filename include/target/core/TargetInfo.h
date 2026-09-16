@@ -47,6 +47,8 @@ public:
     virtual void emitGetArgument(codegen::CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
     virtual void emitRet(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitAdd(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitSMin(codegen::CodeGen&, ir::Instruction&) {}
+    virtual void emitSMax(codegen::CodeGen&, ir::Instruction&) {}
     virtual void emitSub(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitMul(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitDiv(codegen::CodeGen&, ir::Instruction&) = 0;

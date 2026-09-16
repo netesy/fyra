@@ -68,6 +68,10 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
         ir::Instruction* instr = current_interval.getVreg();
         bool isVector = false;
         if (instr) {
+            // Scalar floating-point values share the architectural SIMD
+            // register file with vectors on x64.
+            if (instr->getType() && instr->getType()->isFloatingPoint())
+                isVector = true;
             if (instr->getType() && (instr->getType()->isVectorTy() || instr->getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(instr->getType()) != nullptr)) {
                 isVector = true;
             }

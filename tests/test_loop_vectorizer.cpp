@@ -21,15 +21,16 @@
 using namespace ir;
 
 // Scalar reference implementation for sum = sum + 2*i for i in 0..n-1
-int32_t scalar_loop_sum_ref(int32_t n) {
+int32_t scalar_loop_sum_ref(int32_t n, int32_t start = 0) {
     int32_t sum = 0;
-    for (int32_t i = 0; i < n; i++) {
+    for (int32_t i = start; i < n; i++) {
         sum += i * 2;
     }
     return sum;
 }
 
-void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false) {
+void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false,
+                               int32_t start = 0, bool reverseCompare = false) {
     auto ctx = std::make_shared<IRContext>();
     Module module("test_vec_module", ctx);
     IRBuilder builder(ctx);
@@ -62,10 +63,11 @@ void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false) {
         loopHeader->getInstructions().push_back(std::move(phiSum));
     }
 
-    rawPhiI->addIncoming(ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0), entry);
+    rawPhiI->addIncoming(ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), start), entry);
     rawPhiSum->addIncoming(ctx->getConstantInt(dynamic_cast<IntegerType*>(i32Ty), 0), entry);
 
-    Instruction* cond = builder.createCslt(rawPhiI, pN);
+    Instruction* cond = reverseCompare ? builder.createCsgt(pN, rawPhiI)
+                                       : builder.createCslt(rawPhiI, pN);
     builder.createBr(cond, loopBody, exit);
 
     builder.setInsertPoint(loopBody);
@@ -148,14 +150,17 @@ int main(int argc, char** argv) {
 
     assert(execRc == 0 && "Execution of vectorized test binary failed");
 
-    int32_t expectedRes = scalar_loop_sum_ref(n_val);
+    int32_t expectedRes = scalar_loop_sum_ref(n_val, start);
     std::string expectedStr = "RES:" + std::to_string(expectedRes);
     if (resultOutput.find(expectedStr) == std::string::npos) {
         std::cout << "DEBUG n_val=" << n_val << " expected=" << expectedStr << " got=" << resultOutput << std::endl;
     }
     assert(resultOutput.find(expectedStr) != std::string::npos && "Vectorized result mismatch!");
 
-    std::cout << "Test n=" << n_val << (reversePhis ? " (reversed PHIs)" : "") << " PASSED (res=" << expectedRes << ")" << std::endl;
+    std::cout << "Test start=" << start << " n=" << n_val
+              << (reversePhis ? " (reversed PHIs)" : "")
+              << (reverseCompare ? " (reversed compare)" : "")
+              << " PASSED (res=" << expectedRes << ")" << std::endl;
 }
 
 void test_rejection_cases() {
@@ -247,6 +252,9 @@ int main() {
     test_loop_vectorizer_case(9);
     test_loop_vectorizer_case(10000);
     test_loop_vectorizer_case(100000); // i32 wraparound test
+    test_loop_vectorizer_case(20, false, 3);
+    test_loop_vectorizer_case(22, false, 3);
+    test_loop_vectorizer_case(17, false, 0, true);
 
     test_rejection_cases();
 

@@ -530,6 +530,7 @@ void test_simd_rejection() {
     VectorType* vec2i64 = ctx->getVectorType(i64Ty, 2);
     VectorType* vec3i32 = ctx->getVectorType(ctx->getIntegerType(32), 3);
     VectorType* vec3f32 = ctx->getVectorType(f32Ty, 3);
+    VectorType* vec8f32 = ctx->getVectorType(f32Ty, 8);
     VectorType* vec4f64 = ctx->getVectorType(f64Ty, 4);
 
     // supportsVectorType checks
@@ -537,7 +538,8 @@ void test_simd_rejection() {
     assert(x64Arch->supportsVectorType(vec2i64) == true);
     assert(x64Arch->supportsVectorType(vec3i32) == false); // Unsupported lane count
     assert(x64Arch->supportsVectorType(vec3f32) == false); // Unsupported float lane count
-    assert(x64Arch->supportsVectorType(vec4f64) == false); // Unsupported double lane count
+    assert(x64Arch->supportsVectorType(vec8f32) == true);  // AVX f32
+    assert(x64Arch->supportsVectorType(vec4f64) == true);  // AVX f64
 
     // VInsert non-constant index rejection check
     {

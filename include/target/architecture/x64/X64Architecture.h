@@ -47,6 +47,8 @@ public:
 
     void emitRet(CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMin(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMax(CodeGen& cg, ir::Instruction& i) override;
     void emitSub(CodeGen& cg, ir::Instruction& i) override;
     void emitMul(CodeGen& cg, ir::Instruction& i) override;
     void emitDiv(CodeGen& cg, ir::Instruction& i) override;

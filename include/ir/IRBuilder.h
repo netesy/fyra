@@ -59,6 +59,8 @@ public:
     Instruction* createFSub(Value* lhs, Value* rhs);
     Instruction* createFMul(Value* lhs, Value* rhs);
     Instruction* createFDiv(Value* lhs, Value* rhs);
+    Instruction* createSMin(Value* lhs, Value* rhs);
+    Instruction* createSMax(Value* lhs, Value* rhs);
     Instruction* createAnd(Value* lhs, Value* rhs);
     Instruction* createAnd(Value* lhs, Value* rhs, Type* resultType);
     Instruction* createOr(Value* lhs, Value* rhs);
@@ -145,6 +147,12 @@ public:
     VectorInstruction* createVAdd(Value* lhs, Value* rhs);
     VectorInstruction* createVSub(Value* lhs, Value* rhs);
     VectorInstruction* createVMul(Value* lhs, Value* rhs);
+    VectorInstruction* createVFAdd(Value* lhs, Value* rhs);
+    VectorInstruction* createVFSub(Value* lhs, Value* rhs);
+    VectorInstruction* createVFMul(Value* lhs, Value* rhs);
+    VectorInstruction* createVFDiv(Value* lhs, Value* rhs);
+    VectorInstruction* createVMin(Value* lhs, Value* rhs);
+    VectorInstruction* createVMax(Value* lhs, Value* rhs);
     VectorInstruction* createVLoad(VectorType* type, Value* ptr);
     VectorInstruction* createVStore(Value* vec, Value* ptr);
     VectorInstruction* createVBroadcast(VectorType* type, Value* val);
