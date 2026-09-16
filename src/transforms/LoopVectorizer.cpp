@@ -13,6 +13,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <functional>
 #include <cstdlib>
 
 namespace transforms {
@@ -27,11 +28,27 @@ void logDiag(const std::string& msg) {
 
 struct MemoryAccess {
     ir::Instruction* inst = nullptr;
+    bool isLoad = false;
     bool isStore = false;
     ir::Value* base = nullptr;
-    ir::Value* index = nullptr;
-    int64_t stride = 1;
+    ir::Value* induction = nullptr;
+    int64_t constantOffset = 0; // Bytes from base.
+    int64_t stride = 0;         // Bytes per induction step.
     int64_t elementSize = 4;
+    ir::Type* elementType = nullptr;
+};
+
+enum class MemoryLegalityKind { SafeStatically, RequiresRuntimeCheck, Unsafe };
+
+struct RuntimeAliasCheck {
+    ir::Value* firstBase = nullptr;
+    ir::Value* secondBase = nullptr;
+};
+
+struct MemoryLegality {
+    MemoryLegalityKind kind = MemoryLegalityKind::SafeStatically;
+    std::string reason;
+    std::vector<RuntimeAliasCheck> runtimeChecks;
 };
 
 enum class ReductionKind { Add, Mul, SignedMin, SignedMax };
@@ -73,6 +90,7 @@ struct VectorizationPlan {
 
     std::vector<ReductionPlan> reductions;
     std::vector<MemoryAccess> memoryAccesses;
+    MemoryLegality memoryLegality;
 
     // Derived properties
     unsigned loopVF = 8;
@@ -91,6 +109,121 @@ bool isInductionIndex(ir::Value* value, ir::PhiNode* induction) {
     auto* inst = dynamic_cast<ir::Instruction*>(value);
     return inst && inst->getOpcode() == ir::Instruction::ExtSW &&
            !inst->getOperands().empty() && inst->getOperands()[0]->get() == induction;
+}
+
+// Flatten the deliberately small address language accepted by the loop
+// vectorizer.  It recognizes additions in either order, integer constants,
+// and induction*constant in either order.  Anything else remains conservative.
+bool collectAddressTerms(ir::Value* value, ir::PhiNode* induction,
+                         ir::Value*& base, int64_t& stride,
+                         int64_t& constantOffset) {
+    if (isInductionIndex(value, induction)) {
+        stride += 1;
+        return true;
+    }
+    if (auto* constant = dynamic_cast<ir::ConstantInt*>(value)) {
+        constantOffset += static_cast<int64_t>(constant->getValue());
+        return true;
+    }
+    auto* inst = dynamic_cast<ir::Instruction*>(value);
+    if (inst && inst->getOpcode() == ir::Instruction::Add &&
+        inst->getOperands().size() == 2) {
+        return collectAddressTerms(inst->getOperands()[0]->get(), induction,
+                                   base, stride, constantOffset) &&
+               collectAddressTerms(inst->getOperands()[1]->get(), induction,
+                                   base, stride, constantOffset);
+    }
+    if (inst && inst->getOpcode() == ir::Instruction::Mul &&
+        inst->getOperands().size() == 2) {
+        for (unsigned indexOperand = 0; indexOperand != 2; ++indexOperand) {
+            auto* scale = dynamic_cast<ir::ConstantInt*>(
+                inst->getOperands()[1 - indexOperand]->get());
+            if (scale && isInductionIndex(inst->getOperands()[indexOperand]->get(), induction)) {
+                stride += static_cast<int64_t>(scale->getValue());
+                return true;
+            }
+        }
+        return false;
+    }
+    if (!base) {
+        base = value;
+        return true;
+    }
+    return false;
+}
+
+bool normalizeMemoryAccess(MemoryAccess& access, ir::PhiNode* induction) {
+    ir::Value* pointer = access.isStore ? access.inst->getOperands()[1]->get()
+                                        : access.inst->getOperands()[0]->get();
+    access.base = nullptr;
+    access.induction = induction;
+    access.stride = 0;
+    access.constantOffset = 0;
+    if (!collectAddressTerms(pointer, induction, access.base, access.stride,
+                             access.constantOffset) || !access.base)
+        return false;
+    return access.stride == access.elementSize &&
+           access.constantOffset % access.elementSize == 0;
+}
+
+bool isKnownDistinctAllocation(ir::Value* lhs, ir::Value* rhs) {
+    if (lhs == rhs) return false;
+    auto* lhsInst = dynamic_cast<ir::Instruction*>(lhs);
+    auto* rhsInst = dynamic_cast<ir::Instruction*>(rhs);
+    auto isAlloc = [](ir::Instruction* inst) {
+        return inst && (inst->getOpcode() == ir::Instruction::Alloc ||
+                        inst->getOpcode() == ir::Instruction::Alloc4 ||
+                        inst->getOpcode() == ir::Instruction::Alloc16);
+    };
+    return isAlloc(lhsInst) && isAlloc(rhsInst);
+}
+
+MemoryLegality classifyMemory(const std::vector<MemoryAccess>& accesses) {
+    MemoryLegality result;
+    std::set<std::pair<ir::Value*, ir::Value*>> seenChecks;
+    for (size_t i = 0; i < accesses.size(); ++i) {
+        for (size_t j = i + 1; j < accesses.size(); ++j) {
+            const auto& first = accesses[i];
+            const auto& second = accesses[j];
+            if (!first.isStore && !second.isStore)
+                continue; // Read/read overlap has no dependence.
+
+            if (first.base == second.base) {
+                const int64_t byteDelta = second.constantOffset - first.constantOffset;
+                const int64_t distance = byteDelta / first.elementSize;
+                // A same-base pair containing a write is accepted only when its
+                // touched locations are provably disjoint.  Equal offsets and
+                // nonzero distances are conservatively kept scalar: the former
+                // can change same-iteration ordering; the latter is a genuine
+                // loop-carried dependence for some iteration.
+                if (byteDelta % first.elementSize == 0) {
+                    result.kind = MemoryLegalityKind::Unsafe;
+                    result.reason = distance == 0
+                        ? "same-base read/write ordering is not proven safe"
+                        : "inherent same-base loop-carried dependence (distance=" +
+                              std::to_string(distance) + ")";
+                    return result;
+                }
+                result.kind = MemoryLegalityKind::Unsafe;
+                result.reason = "same-base accesses have incompatible byte offsets";
+                return result;
+            }
+
+            if (isKnownDistinctAllocation(first.base, second.base))
+                continue;
+
+            ir::Value* lower = first.base;
+            ir::Value* upper = second.base;
+            if (std::less<ir::Value*>{}(upper, lower)) std::swap(lower, upper);
+            if (seenChecks.insert({lower, upper}).second)
+                result.runtimeChecks.push_back({lower, upper});
+        }
+    }
+    if (!result.runtimeChecks.empty()) {
+        result.kind = MemoryLegalityKind::RequiresRuntimeCheck;
+        result.reason = "possible alias between distinct pointer bases";
+    }
+    return result;
 }
 
 // Recognize typed byte addressing in either commutative order.  A scalar access
@@ -128,6 +261,23 @@ ir::Value* extractBasePointer(ir::Value* ptr) {
     return ptr;
 }
 
+void replaceAddressBase(ir::Value* value, ir::Value* oldBase, ir::Value* newBase) {
+    auto* inst = dynamic_cast<ir::Instruction*>(value);
+    if (!inst) return;
+    const auto opcode = inst->getOpcode();
+    if (opcode != ir::Instruction::Add && opcode != ir::Instruction::Sub &&
+        opcode != ir::Instruction::Mul && opcode != ir::Instruction::ExtSW &&
+        opcode != ir::Instruction::ExtUW)
+        return;
+    for (auto& operand : inst->getOperands()) {
+        if (operand->get() == oldBase) {
+            operand->set(newBase);
+        } else {
+            replaceAddressBase(operand->get(), oldBase, newBase);
+        }
+    }
+}
+
 } // anonymous namespace
 
 bool LoopVectorizer::performTransformation(ir::Function& func) {
@@ -137,6 +287,12 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
     for (auto bbIt = func.getBasicBlocks().begin(); bbIt != func.getBasicBlocks().end(); ++bbIt) {
         ir::BasicBlock* headerBB = bbIt->get();
+
+        // A versioned loop deliberately retains this original loop as the
+        // unsafe scalar fallback.  The marker prevents fixed-point pipelines
+        // from versioning that fallback again.
+        if (headerBB->getName().find("alias.scalar_fallback") == 0)
+            continue;
 
         std::vector<ir::PhiNode*> headerPhis;
         ir::Instruction* sltCond = nullptr;
@@ -198,30 +354,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 MemoryAccess access;
                 access.inst = inst.get();
                 access.isStore = (opc == ir::Instruction::Store || opc == ir::Instruction::Stored || opc == ir::Instruction::Stores);
-                if (access.inst->getOperands().size() > 0) {
-                    ir::Value* ptr = access.isStore ? access.inst->getOperands()[1]->get() : access.inst->getOperands()[0]->get();
-                    access.base = extractBasePointer(ptr);
-                }
+                access.isLoad = !access.isStore;
                 memAccesses.push_back(access);
             }
         }
         if (!isLegal) continue;
-
-        // --- Memory Dependence Analysis ---
-        bool memLegal = true;
-        for (size_t i = 0; i < memAccesses.size(); ++i) {
-            for (size_t j = i + 1; j < memAccesses.size(); ++j) {
-                if (memAccesses[i].isStore || memAccesses[j].isStore) {
-                    if (memAccesses[i].base == memAccesses[j].base) {
-                        logDiag("Rejected loop: loop-carried memory dependence on same base pointer");
-                        memLegal = false;
-                        break;
-                    }
-                }
-            }
-            if (!memLegal) break;
-        }
-        if (!memLegal) continue;
 
         VectorizationPlan plan;
         plan.headerBB = headerBB;
@@ -300,13 +437,13 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
             plan.mainElemType = accessType;
             plan.elementByteSize = accessType->getSize();
+            access.elementType = accessType;
+            access.elementSize = static_cast<int64_t>(plan.elementByteSize);
         }
         if (!isLegal) { logDiag("reject: " + plan.rejectionReason); continue; }
 
         for (auto& access : plan.memoryAccesses) {
-            ir::Value* ptr = access.isStore ? access.inst->getOperands()[1]->get()
-                                            : access.inst->getOperands()[0]->get();
-            if (!isUnitStrideAddress(ptr, iPhi, plan.elementByteSize)) {
+            if (!normalizeMemoryAccess(access, iPhi)) {
                 plan.rejectionReason = "memory address is not base + induction * element size";
                 logDiag("reject: " + plan.rejectionReason);
                 isLegal = false;
@@ -316,6 +453,52 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         if (!isLegal) continue;
         if (!plan.memoryAccesses.empty())
             logDiag("memory: unit stride " + plan.mainElemType->toString());
+
+        plan.memoryLegality = classifyMemory(plan.memoryAccesses);
+        for (size_t accessIndex = 0; accessIndex < plan.memoryAccesses.size(); ++accessIndex) {
+            const auto& access = plan.memoryAccesses[accessIndex];
+            logDiag("access " + std::to_string(accessIndex) + ": " +
+                    (access.isStore ? "store" : "load") +
+                    " base=" + access.base->getName() +
+                    " stride=" + std::to_string(access.stride) +
+                    " offset=" + std::to_string(access.constantOffset));
+        }
+        if (plan.memoryLegality.kind == MemoryLegalityKind::Unsafe) {
+            logDiag("Rejected loop: " + plan.memoryLegality.reason);
+            continue;
+        }
+        if (plan.memoryLegality.kind == MemoryLegalityKind::RequiresRuntimeCheck) {
+            bool rangesRepresentable = true;
+            for (const auto& access : plan.memoryAccesses)
+                rangesRepresentable &= access.constantOffset == 0;
+            if (!rangesRepresentable) {
+                logDiag("Rejected loop: runtime range cannot be constructed overflow-safely");
+                continue;
+            }
+            logDiag("static alias proof: unavailable");
+            logDiag("runtime alias versioning required");
+            for (const auto& check : plan.memoryLegality.runtimeChecks)
+                logDiag("runtime check: " + check.firstBase->getName() + " vs " +
+                        check.secondBase->getName());
+        } else if (!plan.memoryAccesses.empty()) {
+            logDiag("memory legality: safe statically");
+        }
+
+        // Runtime disambiguation/setup measured a crossover near 32 i32
+        // iterations on the reference x64 host.  Keep known shorter versioned
+        // loops scalar; runtime trip counts remain eligible.
+        if (plan.memoryLegality.kind == MemoryLegalityKind::RequiresRuntimeCheck) {
+            auto* constantBound = dynamic_cast<ir::ConstantInt*>(boundN);
+            auto* constantInit = dynamic_cast<ir::ConstantInt*>(plan.initVal);
+            if (constantBound && constantInit) {
+                const int64_t iterations = static_cast<int64_t>(constantBound->getValue()) -
+                                           static_cast<int64_t>(constantInit->getValue());
+                if (iterations >= 0 && iterations < 32) {
+                    logDiag("Rejected loop: runtime versioning below 32-iteration profitability threshold");
+                    continue;
+                }
+            }
+        }
 
         // Cost model: reject constant trip count < 4
         if (auto* cBound = dynamic_cast<ir::ConstantInt*>(boundN)) {
@@ -554,6 +737,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Instruction* boundNCopy = builder.createCopy(plan.boundVal);
         ir::Value* inductionInit = dynamic_cast<ir::ConstantInt*>(plan.initVal)
             ? plan.initVal : static_cast<ir::Value*>(builder.createCopy(plan.initVal));
+        ir::Value* postGuardBound = boundNCopy;
+        ir::Value* postGuardInit = inductionInit;
 
         // Reduction initializers can be ABI parameters.  Preserve them before
         // the vector loop introduces temporaries that reuse argument registers;
@@ -588,8 +773,112 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::BasicBlock* vReductionBB = builder.createBasicBlock("v_reduction", &func);
         ir::BasicBlock* epiHeaderBB = builder.createBasicBlock("epi_header", &func);
         ir::BasicBlock* epiBodyBB = builder.createBasicBlock("epi_body", &func);
+        ir::BasicBlock* aliasCheckBB = nullptr;
+        if (plan.memoryLegality.kind == MemoryLegalityKind::RequiresRuntimeCheck)
+            aliasCheckBB = builder.createBasicBlock("alias.runtime_check", &func);
 
-        builder.createBr(hasVec, vPreheaderBB, epiHeaderBB);
+        builder.createBr(hasVec, aliasCheckBB ? aliasCheckBB : vPreheaderBB,
+                         epiHeaderBB);
+
+        if (aliasCheckBB) {
+            // Runtime ranges are half-open [base + start*size,
+            // base + bound*size).  Versioning is intentionally constrained to
+            // nonnegative offsets; a dynamic negative start makes the runtime
+            // guard false. Unsigned monotonicity checks make every pointer
+            // addition overflow-safe.
+            bool rangesRepresentable = true;
+            for (const auto& access : plan.memoryAccesses)
+                rangesRepresentable &= access.constantOffset >= 0;
+            if (!rangesRepresentable) {
+                logDiag("Rejected loop: runtime range cannot be constructed overflow-safely");
+                // No IR has escaped yet except newly appended blocks.  Keep the
+                // original scalar loop by abandoning this candidate before CFG
+                // reconstruction; remove the appended empty blocks below.
+                auto removeNewBlock = [&](ir::BasicBlock* target) {
+                    for (auto it = func.getBasicBlocks().begin();
+                         it != func.getBasicBlocks().end(); ++it) {
+                        if (it->get() == target) { func.getBasicBlocks().erase(it); break; }
+                    }
+                };
+                removeNewBlock(aliasCheckBB);
+                removeNewBlock(epiBodyBB);
+                removeNewBlock(epiHeaderBB);
+                removeNewBlock(vReductionBB);
+                removeNewBlock(vLoopBodyBB);
+                removeNewBlock(vLoopHeaderBB);
+                removeNewBlock(vPreheaderBB);
+                continue;
+            }
+
+            builder.setInsertPoint(aliasCheckBB);
+            ir::Instruction* trip64 = builder.createExtUW(tripCount, i64Ty);
+            ir::Instruction* byteLength = builder.createMul(
+                trip64, ctx->getConstantInt(i64Ty, plan.elementByteSize));
+            ir::Instruction* guardBound = builder.createCopy(boundNCopy);
+            ir::Instruction* bound64ForRange = builder.createExtUW(guardBound, i64Ty);
+            ir::Instruction* endOffset = builder.createMul(
+                bound64ForRange, ctx->getConstantInt(i64Ty, plan.elementByteSize));
+            ir::Instruction* startNonnegative = builder.createCsge(
+                inductionInit, ctx->getConstantInt(i32Ty, 0));
+
+            ir::Value* allSafe = nullptr;
+            for (const auto& check : plan.memoryLegality.runtimeChecks) {
+                ir::Value* first = builder.createCopy(baseCopyMap.at(check.firstBase));
+                ir::Value* second = builder.createCopy(baseCopyMap.at(check.secondBase));
+                ir::Instruction* firstBeforeSecond = builder.createCule(first, second);
+                ir::Instruction* secondBeforeFirst = builder.createCule(second, first);
+                ir::Instruction* firstGap = builder.createSub(second, first);
+                ir::Instruction* secondGap = builder.createSub(first, second);
+                ir::Instruction* firstDisjoint = builder.createAnd(
+                    firstBeforeSecond, builder.createCuge(firstGap, byteLength));
+                ir::Instruction* secondDisjoint = builder.createAnd(
+                    secondBeforeFirst, builder.createCuge(secondGap, byteLength));
+                ir::Instruction* disjoint = builder.createOr(firstDisjoint, secondDisjoint);
+                // byteLength is at most UINT32_MAX*8.  Requiring the wrapped
+                // distance to address zero to cover it prevents end overflow.
+                ir::Instruction* firstCapacity = builder.createSub(
+                    ctx->getConstantInt(i64Ty, 0), first);
+                ir::Instruction* secondCapacity = builder.createSub(
+                    ctx->getConstantInt(i64Ty, 0), second);
+                ir::Instruction* capacitiesValid = builder.createAnd(
+                    builder.createCuge(firstCapacity, endOffset),
+                    builder.createCuge(secondCapacity, endOffset));
+                ir::Instruction* valid = builder.createAnd(startNonnegative, capacitiesValid);
+                ir::Instruction* safe = builder.createAnd(valid, disjoint);
+                allSafe = allSafe ? static_cast<ir::Value*>(builder.createAnd(allSafe, safe))
+                                  : static_cast<ir::Value*>(safe);
+            }
+            // Materialize fresh values after the guard.  They have no live
+            // range through the guard itself, avoiding destructive reuse by
+            // scalar two-address lowering while dominating both successors.
+            for (const auto& copiedBase : baseCopyMap) {
+                ir::Instruction* preserved = builder.createCeq(
+                    copiedBase.second, copiedBase.second);
+                allSafe = builder.createAnd(allSafe, preserved);
+            }
+            postGuardBound = builder.createCopy(boundNCopy);
+            if (!dynamic_cast<ir::ConstantInt*>(inductionInit))
+                postGuardInit = builder.createCopy(inductionInit);
+            builder.createBr(allSafe, vPreheaderBB, headerBB);
+
+            // The fallback is the untouched original loop.  Redirect every
+            // preheader PHI edge to the alias-check block and mark the header
+            // so subsequent fixed-point iterations cannot version it again.
+            for (ir::PhiNode* phi : headerPhis) {
+                ir::Value* incoming = phi->getIncomingValueForBlock(entryBB);
+                if (phi == iPhi) incoming = postGuardInit;
+                phi->removeIncomingValue(entryBB);
+                phi->addIncoming(incoming, aliasCheckBB);
+            }
+            for (auto& operand : sltCond->getOperands())
+                if (operand->get() == plan.boundVal) operand->set(postGuardBound);
+            headerBB->setName("alias.scalar_fallback." + headerBB->getName());
+            bodyBB->setName("alias.scalar_fallback.body." + bodyBB->getName());
+            logDiag("runtime check emitted: " +
+                    std::to_string(plan.memoryLegality.runtimeChecks.size()) +
+                    " deduplicated conflict(s)");
+            logDiag("scalar fallback preserved");
+        }
 
         // Vector Preheader
         builder.setInsertPoint(vPreheaderBB);
@@ -641,15 +930,15 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
         }
 
-        ir::Value* lateTripCount = boundNCopy;
+        ir::Value* lateTripCount = postGuardBound;
         if (!constantStart || constantStart->getValue() != 0)
-            lateTripCount = builder.createSub(boundNCopy, inductionInit);
+            lateTripCount = builder.createSub(postGuardBound, postGuardInit);
         ir::Instruction* lateVectorCount = builder.createAnd(
             lateTripCount,
             ctx->getConstantInt(i32Ty, (uint64_t)(-(int64_t)plan.vectorFactor)));
         nVec = (constantStart && constantStart->getValue() == 0)
                    ? static_cast<ir::Value*>(lateVectorCount)
-                   : static_cast<ir::Value*>(builder.createAdd(inductionInit, lateVectorCount));
+                   : static_cast<ir::Value*>(builder.createAdd(postGuardInit, lateVectorCount));
 
         builder.createJmp(vLoopHeaderBB);
 
@@ -691,7 +980,18 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::PhiNode* rawPhiICnt = phiICnt.get();
         vLoopHeaderBB->getInstructions().push_back(std::move(phiICnt));
 
-        rawPhiICnt->addIncoming(inductionInit, vPreheaderBB);
+        rawPhiICnt->addIncoming(postGuardInit, vPreheaderBB);
+
+        std::map<ir::Value*, ir::Value*> vectorBaseMap;
+        for (const auto& copiedBase : baseCopyMap) {
+            auto owner = std::make_unique<ir::PhiNode>(copiedBase.second->getType(), 0,
+                                                       nullptr, vLoopHeaderBB);
+            ir::PhiNode* phi = owner.get();
+            vLoopHeaderBB->getInstructions().push_front(std::move(owner));
+            phi->addIncoming(copiedBase.second, vPreheaderBB);
+            phi->addIncoming(phi, vLoopBodyBB);
+            vectorBaseMap[copiedBase.first] = phi;
+        }
 
         ir::Instruction* vCond = builder.createCslt(rawPhiICnt, nVec);
         builder.createBr(vCond, vLoopBodyBB, vReductionBB);
@@ -714,7 +1014,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     break;
                 }
             }
-            ir::Value* safeBase = baseCopyMap.count(basePtr) ? baseCopyMap[basePtr] : basePtr;
+            ir::Value* safeBase = vectorBaseMap.count(basePtr) ? vectorBaseMap[basePtr] : basePtr;
             ir::Instruction* vPtr = builder.createAdd(safeBase, byteOffset);
             ir::VectorInstruction* vLd8 = builder.createVLoad(v8i32Ty, vPtr);
 
@@ -740,7 +1040,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     opc == ir::Instruction::Loads || opc == ir::Instruction::Loadd) {
                     ir::Value* ptr = inst->getOperands()[0]->get();
                     ir::Value* basePtr = extractBasePointer(ptr);
-                    ir::Value* safeBase = baseCopyMap.count(basePtr) ? baseCopyMap[basePtr] : basePtr;
+                    ir::Value* safeBase = vectorBaseMap.count(basePtr) ? vectorBaseMap[basePtr] : basePtr;
                     ir::Instruction* vPtr = builder.createAdd(safeBase, byteOffset);
                     ir::VectorInstruction* vLd = builder.createVLoad(vecTy, vPtr);
                     vValueMap[inst.get()] = vLd;
@@ -822,7 +1122,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     ir::Value* vVal = (instVal && vValueMap.count(instVal)) ? vValueMap[instVal] : valToStore;
 
                     ir::Value* basePtr = extractBasePointer(ptrToStore);
-                    ir::Value* safeBase = baseCopyMap.count(basePtr) ? baseCopyMap[basePtr] : basePtr;
+                    ir::Value* safeBase = vectorBaseMap.count(basePtr) ? vectorBaseMap[basePtr] : basePtr;
                     ir::Instruction* vPtr = builder.createAdd(safeBase, byteOffset);
                     builder.createVStore(vVal, vPtr);
                 }
@@ -896,6 +1196,26 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::PhiNode* rawPhiEpiI = phiEpiI.get();
         epiHeaderBB->getInstructions().push_back(std::move(phiEpiI));
 
+        auto phiEpiBoundOwner = std::make_unique<ir::PhiNode>(i32Ty, 0, nullptr,
+                                                              epiHeaderBB);
+        ir::PhiNode* rawPhiEpiBound = phiEpiBoundOwner.get();
+        epiHeaderBB->getInstructions().push_back(std::move(phiEpiBoundOwner));
+        rawPhiEpiBound->addIncoming(boundNCopy, entryBB);
+        rawPhiEpiBound->addIncoming(postGuardBound, vReductionBB);
+        rawPhiEpiBound->addIncoming(rawPhiEpiBound, epiBodyBB);
+
+        std::map<ir::Value*, ir::Value*> epiBaseMap;
+        for (const auto& copiedBase : baseCopyMap) {
+            auto owner = std::make_unique<ir::PhiNode>(copiedBase.second->getType(), 0,
+                                                       nullptr, epiHeaderBB);
+            ir::PhiNode* phi = owner.get();
+            epiHeaderBB->getInstructions().push_back(std::move(owner));
+            phi->addIncoming(copiedBase.second, entryBB);
+            phi->addIncoming(copiedBase.second, vReductionBB);
+            phi->addIncoming(phi, epiBodyBB);
+            epiBaseMap[copiedBase.first] = phi;
+        }
+
         ir::PhiNode* rawPhiEpiSum = nullptr;
         if (!plan.reductions.empty()) {
             ir::Type* sumTy = plan.reductions[0].scalarType;
@@ -914,7 +1234,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         rawPhiEpiI->addIncoming(inductionInit, entryBB);
         rawPhiEpiI->addIncoming(nVec, vReductionBB);
 
-        ir::Instruction* epiCond = builder.createCslt(rawPhiEpiI, boundNCopy);
+        ir::Instruction* epiCond = builder.createCslt(rawPhiEpiI, rawPhiEpiBound);
         builder.createBr(epiCond, epiBodyBB, exitBB);
 
         // Epilogue Body
@@ -984,7 +1304,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     ir::Instruction* byteOff = builder.createMul(
                         epiI64, ctx->getConstantInt(i64Ty, plan.elementByteSize));
                     ir::Value* basePtr = extractBasePointer(ptr);
-                    ir::Value* safeBase = baseCopyMap.count(basePtr) ? baseCopyMap[basePtr] : basePtr;
+                    ir::Value* safeBase = epiBaseMap.count(basePtr) ? epiBaseMap[basePtr] : basePtr;
                     ePtr = builder.createAdd(safeBase, byteOff);
                 }
                 ir::Instruction* epiLd = opc == ir::Instruction::Loads ? builder.createLoads(ePtr)
@@ -1004,7 +1324,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     ir::Instruction* byteOff = builder.createMul(
                         epiI64, ctx->getConstantInt(i64Ty, plan.elementByteSize));
                     ir::Value* basePtr = extractBasePointer(ptrToStore);
-                    ir::Value* safeBase = baseCopyMap.count(basePtr) ? baseCopyMap[basePtr] : basePtr;
+                    ir::Value* safeBase = epiBaseMap.count(basePtr) ? epiBaseMap[basePtr] : basePtr;
                     ePtr = builder.createAdd(safeBase, byteOff);
                 }
                 if (opc == ir::Instruction::Stores) builder.createStores(eVal, ePtr);
@@ -1050,7 +1370,42 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
         }
 
+        // Explicit latch copies keep loop-invariant values live past every
+        // derived address/store in the scalar tail.  The allocator's PHI-edge
+        // model otherwise permits a store pointer to reuse the bound/base
+        // register before the backedge.
+        rawPhiEpiBound->setIncomingValueForBlock(
+            epiBodyBB, builder.createCopy(rawPhiEpiBound));
+        for (const auto& basePhi : epiBaseMap) {
+            auto* phi = static_cast<ir::PhiNode*>(basePhi.second);
+            phi->setIncomingValueForBlock(epiBodyBB, builder.createCopy(phi));
+        }
+
         builder.createJmp(epiHeaderBB);
+
+        if (aliasCheckBB) {
+            // Keep each fallback base explicitly loop-carried.  This both
+            // documents its invariance and prevents destructive scalar address
+            // lowering from reusing the base register for a derived pointer.
+            auto aliasTerminator = aliasCheckBB->getInstructions().end();
+            --aliasTerminator;
+            builder.setInsertPoint(aliasCheckBB, aliasTerminator);
+            for (const auto& copiedBase : baseCopyMap) {
+                auto owner = std::make_unique<ir::PhiNode>(copiedBase.second->getType(), 0,
+                                                           nullptr, headerBB);
+                ir::PhiNode* phi = owner.get();
+                headerBB->getInstructions().push_front(std::move(owner));
+                phi->addIncoming(copiedBase.second, aliasCheckBB);
+                phi->addIncoming(phi, bodyBB);
+                for (auto& access : plan.memoryAccesses) {
+                    if (access.base != copiedBase.first) continue;
+                    ir::Value* pointer = access.isStore
+                        ? access.inst->getOperands()[1]->get()
+                        : access.inst->getOperands()[0]->get();
+                    replaceAddressBase(pointer, copiedBase.first, phi);
+                }
+            }
+        }
 
         auto removeBB = [&](ir::BasicBlock* target) {
             for (auto it = func.getBasicBlocks().begin(); it != func.getBasicBlocks().end(); ++it) {
@@ -1061,8 +1416,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
         };
 
-        removeBB(headerBB);
-        removeBB(bodyBB);
+        if (!aliasCheckBB) {
+            removeBB(headerBB);
+            removeBB(bodyBB);
+        }
 
         CFGBuilder::run(func);
         changed = true;

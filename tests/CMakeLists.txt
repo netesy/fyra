@@ -347,3 +347,8 @@ add_executable(test_auto_vec_reduction test_auto_vec_reduction.cpp)
 target_link_libraries(test_auto_vec_reduction PRIVATE fyra)
 add_test(NAME AutoVecReductionTest COMMAND test_auto_vec_reduction)
 set_tests_properties(AutoVecReductionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_alias test_auto_vec_alias.cpp)
+target_link_libraries(test_auto_vec_alias PRIVATE fyra)
+add_test(NAME AutoVecAliasTest COMMAND test_auto_vec_alias)
+set_tests_properties(AutoVecAliasTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
