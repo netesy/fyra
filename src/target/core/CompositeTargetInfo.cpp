@@ -96,6 +96,7 @@ VectorCapabilities CompositeTargetInfo::getVectorCapabilities() const { return a
 bool CompositeTargetInfo::supportsVectorWidth(unsigned w) const { return architecture->supportsVectorWidth(w); }
 bool CompositeTargetInfo::supportsVectorType(const ir::VectorType* t) const { return architecture->supportsVectorType(t); }
 bool CompositeTargetInfo::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const { return architecture->supportsVectorOperation(op, type); }
+bool CompositeTargetInfo::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const { return architecture->supportsVectorConversion(op, srcType, dstType); }
 unsigned CompositeTargetInfo::getOptimalVectorWidth(const ir::Type* t) const { return architecture->getOptimalVectorWidth(t); }
 void CompositeTargetInfo::emitVectorLoad(codegen::CodeGen& cg, ir::VectorInstruction& i) { architecture->emitVectorLoad(cg, i); }
 void CompositeTargetInfo::emitVectorStore(codegen::CodeGen& cg, ir::VectorInstruction& i) { architecture->emitVectorStore(cg, i); }

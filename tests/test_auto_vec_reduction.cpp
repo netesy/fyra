@@ -14,6 +14,9 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <atomic>
+#include <unistd.h>
+#include <cstdio>
 using namespace ir;
 
 enum class Kind { Add, Mul, Min, Max, Sub, Div };
@@ -36,8 +39,14 @@ static Function* build(Module& m, IRBuilder& b, Kind kind) {
 int main(){auto c=std::make_shared<IRContext>();Module m("reductions",c);IRBuilder b(c);b.setModule(&m);
  for(Kind k:{Kind::Add,Kind::Mul,Kind::Min,Kind::Max}){auto*f=build(m,b,k);transforms::LoopVectorizer v;assert(v.performTransformation(*f));transforms::LinearScanAllocator ra;ra.run(*f);}
  auto arch=std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);auto os=std::make_unique<target::LinuxOS>();std::unique_ptr<target::TargetInfo> ti=std::make_unique<target::CompositeTargetInfo>(std::move(arch),std::move(os));std::ostringstream ss;codegen::CodeGen cg(m,std::move(ti),&ss);cg.emit(false);std::string as=ss.str();
- for(const char*s:{"vpaddd","vpmulld","vpminsd","vpmaxsd"})assert(as.find(s)!=std::string::npos);std::ofstream("/tmp/reductions.s")<<as;
- std::ofstream h("/tmp/reductions.c");h<<R"C(
+ for(const char*s:{"vpaddd","vpmulld","vpminsd","vpmaxsd"})assert(as.find(s)!=std::string::npos);
+ pid_t pid = getpid(); static std::atomic<uint64_t> counter{0}; uint64_t uid = counter.fetch_add(1);
+ std::string idStr = std::to_string(pid) + "_" + std::to_string(uid);
+ std::string asmPath = "/tmp/reductions_" + idStr + ".s";
+ std::string cPath = "/tmp/reductions_" + idStr + ".c";
+ std::string binPath = "/tmp/reductions_" + idStr;
+ std::ofstream(asmPath)<<as;
+ std::ofstream h(cPath);h<<R"C(
 #include <stdint.h>
 #include <stdio.h>
 extern int32_t reduce_add(int32_t*,int32_t,int32_t,int32_t);extern int32_t reduce_mul(int32_t*,int32_t,int32_t,int32_t);extern int32_t reduce_min(int32_t*,int32_t,int32_t,int32_t);extern int32_t reduce_max(int32_t*,int32_t,int32_t,int32_t);
@@ -45,5 +54,6 @@ static int32_t addref(int32_t*a,int n,int s,int32_t v){for(int i=s;i<n;i++)v=(in
 #define CHECK(F,R,A,N,S,I) do{int32_t g=F(A,N,S,I),e=R(A,N,S,I);if(g!=e){printf("FAIL %s n=%d s=%d init=%d got=%d expected=%d\n",#F,N,S,I,g,e);return 1;}}while(0)
 int main(){int32_t sum[40]={0,0,0,0,10,20,30,40};int32_t prod[40]={1,1,1,1,2,3,4,5};int32_t mn[40]={100,100,100,100,-50,-40,-30,-20};int32_t mx[40]={-100,-100,-100,-100,50,40,30,20};for(int i=8;i<40;i++){sum[i]=i-10;prod[i]=1;mn[i]=i-5;mx[i]=-i;}
  int ns[]={0,1,7,8,9,15,16,17,31};for(unsigned j=0;j<9;j++){int n=ns[j];CHECK(reduce_add,addref,sum,n,0,7);CHECK(reduce_add,addref,sum,n,0,-9);CHECK(reduce_mul,mulref,prod,n,0,2);CHECK(reduce_mul,mulref,prod,n,0,-3);CHECK(reduce_min,minref,mn,n,0,500);CHECK(reduce_min,minref,mn,n,0,-10);CHECK(reduce_max,maxref,mx,n,0,-500);CHECK(reduce_max,maxref,mx,n,0,10);}for(int n=20;n<=22;n+=2){CHECK(reduce_add,addref,sum,n,3,7);CHECK(reduce_min,minref,mn,n,3,500);CHECK(reduce_max,maxref,mx,n,3,-500);}puts("reduction execution passed");return 0;}
-)C";h.close();int rc=std::system("gcc -O0 -no-pie /tmp/reductions.s /tmp/reductions.c -o /tmp/reductions && /tmp/reductions");assert(rc==0);
+)C";h.close();std::string cmd="gcc -O0 -no-pie "+asmPath+" "+cPath+" -o "+binPath+" && "+binPath;int rc=std::system(cmd.c_str());
+std::remove(asmPath.c_str());std::remove(cPath.c_str());std::remove(binPath.c_str());assert(rc==0);
  for(Kind k:{Kind::Sub,Kind::Div}){Function*f=build(m,b,k);transforms::LoopVectorizer v;assert(!v.performTransformation(*f));}return 0;}

@@ -161,6 +161,9 @@ public:
     VectorInstruction* createVShuffle(Value* lhs, Value* rhs, const ShuffleMask& mask);
     VectorInstruction* createVCmp(Value* lhs, Value* rhs, VectorCompareOp op);
     VectorInstruction* createVSelect(Value* mask, Value* trueVal, Value* falseVal);
+    VectorInstruction* createVSExt(Value* val, VectorType* destVecTy);
+    VectorInstruction* createVZExt(Value* val, VectorType* destVecTy);
+    VectorInstruction* createVTrunc(Value* val, VectorType* destVecTy);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);

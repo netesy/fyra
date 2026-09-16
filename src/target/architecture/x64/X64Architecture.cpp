@@ -2848,6 +2848,26 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const 
     }
 }
 
+bool X64Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
+    if (!srcType || !dstType) return false;
+    auto* srcElemTy = dynamic_cast<const ir::IntegerType*>(srcType->getElementType());
+    auto* dstElemTy = dynamic_cast<const ir::IntegerType*>(dstType->getElementType());
+    if (!srcElemTy || !dstElemTy) return false;
+
+    unsigned srcBw = srcElemTy->getBitwidth();
+    unsigned dstBw = dstElemTy->getBitwidth();
+    unsigned srcNum = srcType->getNumElements();
+    unsigned dstNum = dstType->getNumElements();
+
+    if (op == ir::Instruction::VSExt || op == ir::Instruction::VZExt) {
+        // Support <4 x i32> -> <4 x i64> widening conversion
+        if (srcBw == 32 && dstBw == 64 && srcNum == 4 && dstNum == 4) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
     if (auto* os = cg.getTextStream()) {
         std::string ptrOp = cg.getValueAsOperand(i.getOperands()[0]->get());
@@ -3242,11 +3262,20 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                     unsigned bits = elemTy->getSize() * 8 * numElem;
                     if (bits == 256) {
                         std::string source = op0;
-                        if (!source.empty() && source[0] == '$') {
-                            *os << "  movl " << source << ", %eax\n";
-                            source = "%eax";
+                        std::string dstYmm = toYmmReg(dst);
+                        std::string scratchXmm = getReservedScratchVectorReg();
+                        if (isXmmRegisterName(source)) {
+                            *os << "  vpbroadcastd " << source << ", " << dstYmm << "\n";
+                        } else {
+                            if (!source.empty() && source[0] == '$') {
+                                *os << "  movl " << source << ", %eax\n";
+                                *os << "  vmovd %eax, " << scratchXmm << "\n";
+                            } else {
+                                std::string reg32 = to32BitReg(source);
+                                *os << "  vmovd " << reg32 << ", " << scratchXmm << "\n";
+                            }
+                            *os << "  vpbroadcastd " << scratchXmm << ", " << dstYmm << "\n";
                         }
-                        *os << "  vpbroadcastd " << source << ", " << toYmmReg(dst) << "\n";
                     } else {
                         if (!op0.empty() && op0[0] == '$') {
                             *os << "  movl " << op0 << ", %eax\n";
@@ -3257,8 +3286,44 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                         *os << "  pshufd $0, " << dst << ", " << dst << "\n";
                     }
                 } else if (bw == 64) {
-                    *os << "  movq " << op0 << ", " << dst << "\n";
-                    *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                    std::string dstYmm = toYmmReg(dst);
+                    if (!op0.empty() && op0[0] == '$') {
+                        uint64_t val = 0;
+                        if (op0.size() > 1) val = std::stoull(op0.substr(1));
+                        if (val == 0) {
+                            if (numElem == 4 || numElem == 8) {
+                                *os << "  vpxor " << dstYmm << ", " << dstYmm << ", " << dstYmm << "\n";
+                            } else {
+                                *os << "  pxor " << dst << ", " << dst << "\n";
+                            }
+                        } else {
+                            std::string scratchXmm = getReservedScratchVectorReg();
+                            *os << "  movq " << op0 << ", %rax\n";
+                            *os << "  movq %rax, " << scratchXmm << "\n";
+                            if (numElem == 4) {
+                                *os << "  vpbroadcastq " << scratchXmm << ", " << dstYmm << "\n";
+                            } else {
+                                *os << "  punpcklqdq " << scratchXmm << ", " << dst << "\n";
+                            }
+                        }
+                    } else if (isXmmRegisterName(op0)) {
+                        if (numElem == 4) {
+                            *os << "  vpbroadcastq " << op0 << ", " << dstYmm << "\n";
+                        } else {
+                            if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                            *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                        }
+                    } else {
+                        std::string reg64 = to64BitReg(op0);
+                        std::string scratchXmm = getReservedScratchVectorReg();
+                        *os << "  movq " << reg64 << ", " << scratchXmm << "\n";
+                        if (numElem == 4) {
+                            *os << "  vpbroadcastq " << scratchXmm << ", " << dstYmm << "\n";
+                        } else {
+                            if (dst != scratchXmm) *os << "  movdqu " << scratchXmm << ", " << dst << "\n";
+                            *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                        }
+                    }
                 } else if (bw == 16) {
                     *os << "  movd " << op0 << ", " << dst << "\n";
                     *os << "  pshuflw $0, " << dst << ", " << dst << "\n";
@@ -3311,6 +3376,47 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             *os << "  movdqu " << op0 << ", " << dst << "\n";
             *os << "  " << mulInst << " " << op1 << ", " << dst << "\n";
             *os << "  " << addSubInst << " " << op2 << ", " << dst << "\n";
+            return;
+        }
+
+        // Vector Shuffle Handling
+        if (i.getOpcode() == ir::Instruction::VShuffle) {
+            auto* mask = i.getShuffleMask();
+            std::string src0 = toYmmReg(op0);
+            std::string dstYmm = toYmmReg(dst);
+            if (mask && mask->indices.size() == 8 && mask->indices[0] == 4 && mask->indices[1] == 5 && mask->indices[2] == 6 && mask->indices[3] == 7) {
+                *os << "  vperm2i128 $0x01, " << src0 << ", " << src0 << ", " << dstYmm << "\n";
+                return;
+            }
+        }
+
+        // Vector Conversion Handling
+        if (i.getOpcode() == ir::Instruction::VSExt || i.getOpcode() == ir::Instruction::VZExt || i.getOpcode() == ir::Instruction::VTrunc) {
+            auto* srcVecTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            auto* dstVecTy = dynamic_cast<const ir::VectorType*>(i.getType());
+            if (!srcVecTy || !dstVecTy) throw std::runtime_error("Invalid vector conversion types");
+            auto* srcElemTy = dynamic_cast<const ir::IntegerType*>(srcVecTy->getElementType());
+            auto* dstElemTy = dynamic_cast<const ir::IntegerType*>(dstVecTy->getElementType());
+            if (!srcElemTy || !dstElemTy) throw std::runtime_error("Invalid vector conversion integer element types");
+
+            unsigned srcBw = srcElemTy->getBitwidth();
+            unsigned dstBw = dstElemTy->getBitwidth();
+            std::string srcReg = isXmmRegisterName(op0) ? op0 : "%xmm0";
+            std::string dstYmm = toYmmReg(dst);
+
+            if (i.getOpcode() == ir::Instruction::VSExt && srcBw == 32 && dstBw == 64) {
+                if (!isXmmRegisterName(op0)) {
+                    *os << "  vmovdqu " << op0 << ", %xmm0\n";
+                }
+                *os << "  vpmovsxdq " << srcReg << ", " << dstYmm << "\n";
+            } else if (i.getOpcode() == ir::Instruction::VZExt && srcBw == 32 && dstBw == 64) {
+                if (!isXmmRegisterName(op0)) {
+                    *os << "  vmovdqu " << op0 << ", %xmm0\n";
+                }
+                *os << "  vpmovzxdq " << srcReg << ", " << dstYmm << "\n";
+            } else {
+                throw std::runtime_error("Unsupported vector conversion lowering");
+            }
             return;
         }
 

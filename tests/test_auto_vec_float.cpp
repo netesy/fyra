@@ -15,6 +15,9 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <atomic>
+#include <unistd.h>
+#include <cstdio>
 
 using namespace ir;
 
@@ -113,8 +116,13 @@ int main() {
     const std::string text = assembly.str();
     for (const char* mnemonic : {"vaddps", "vsubps", "vmulps", "vdivps", "vaddpd", "vsubpd", "vmulpd", "vdivpd"})
         assert(text.find(mnemonic) != std::string::npos);
-    std::ofstream("/tmp/auto_vec_float.s") << text;
-    std::ofstream harness("/tmp/auto_vec_float.c");
+    pid_t pid = getpid(); static std::atomic<uint64_t> counter{0}; uint64_t uid = counter.fetch_add(1);
+    std::string idStr = std::to_string(pid) + "_" + std::to_string(uid);
+    std::string asmPath = "/tmp/auto_vec_float_" + idStr + ".s";
+    std::string cPath = "/tmp/auto_vec_float_" + idStr + ".c";
+    std::string binPath = "/tmp/auto_vec_float_" + idStr;
+    std::ofstream(asmPath) << text;
+    std::ofstream harness(cPath);
     harness << R"C(
 #include <stdint.h>
 #include <stdio.h>
@@ -130,7 +138,9 @@ int main(){
  puts("floating auto-vectorization execution passed"); return 0;
 })C";
     harness.close();
-    int rc = std::system("gcc -O0 -no-pie /tmp/auto_vec_float.s /tmp/auto_vec_float.c -o /tmp/auto_vec_float && /tmp/auto_vec_float");
+    std::string cmd = "gcc -O0 -no-pie " + asmPath + " " + cPath + " -o " + binPath + " && " + binPath;
+    int rc = std::system(cmd.c_str());
+    std::remove(asmPath.c_str()); std::remove(cPath.c_str()); std::remove(binPath.c_str());
     assert(rc == 0 && "floating vectorized execution mismatch");
     for (bool reduction : {false, true}) {
         Function* rejected = buildRejectedFPLoop(module, builder, reduction);

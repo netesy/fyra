@@ -745,6 +745,39 @@ PhiNode* IRBuilder::createPhi(Type* type, unsigned numOperands, Instruction* all
     return instrPtr;
 }
 
+VectorInstruction* IRBuilder::createVSExt(Value* val, VectorType* destVecTy) {
+    auto srcVecTy = dynamic_cast<VectorType*>(val->getType());
+    if (!srcVecTy || !destVecTy) {
+        throw std::invalid_argument("VSExt operands must be vector types");
+    }
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VSExt, {val}, 128, insertPoint));
+    auto rawPtr = instr.get();
+    if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
+    return rawPtr;
+}
+
+VectorInstruction* IRBuilder::createVZExt(Value* val, VectorType* destVecTy) {
+    auto srcVecTy = dynamic_cast<VectorType*>(val->getType());
+    if (!srcVecTy || !destVecTy) {
+        throw std::invalid_argument("VZExt operands must be vector types");
+    }
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VZExt, {val}, 128, insertPoint));
+    auto rawPtr = instr.get();
+    if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
+    return rawPtr;
+}
+
+VectorInstruction* IRBuilder::createVTrunc(Value* val, VectorType* destVecTy) {
+    auto srcVecTy = dynamic_cast<VectorType*>(val->getType());
+    if (!srcVecTy || !destVecTy) {
+        throw std::invalid_argument("VTrunc operands must be vector types");
+    }
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VTrunc, {val}, 128, insertPoint));
+    auto rawPtr = instr.get();
+    if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
+    return rawPtr;
+}
+
 Instruction* IRBuilder::createCall(Value* callee, const std::vector<Value*>& args, Type* retType) {
     Type* returnType = retType;
     if (!returnType) {

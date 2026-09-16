@@ -99,6 +99,7 @@ public:
     bool supportsVectorWidth(unsigned w) const override;
     bool supportsVectorType(const ir::VectorType* t) const override;
     bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
     unsigned getOptimalVectorWidth(const ir::Type* t) const override;
     void emitVectorLoad(codegen::CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorStore(codegen::CodeGen& cg, ir::VectorInstruction& i) override;

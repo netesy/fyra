@@ -17,6 +17,9 @@
 #include <cstdlib>
 #include <memory>
 #include <sstream>
+#include <atomic>
+#include <unistd.h>
+#include <cstdio>
 
 using namespace ir;
 
@@ -106,14 +109,17 @@ void test_loop_vectorizer_case(int32_t n_val, bool reversePhis = false,
 
     std::string asmCode = asmStream.str();
 
-    std::string asmFilePath = "/tmp/test_vec_gen.s";
-    std::string binFilePath = "/tmp/test_vec_runner";
+    pid_t pid = getpid();
+    static std::atomic<uint64_t> counter{0};
+    uint64_t uid = counter.fetch_add(1);
+    std::string idStr = std::to_string(pid) + "_" + std::to_string(uid);
+    std::string asmFilePath = "/tmp/test_vec_gen_" + idStr + ".s";
+    std::string binFilePath = "/tmp/test_vec_runner_" + idStr;
+    std::string harnessPath = "/tmp/test_vec_harness_" + idStr + ".c";
     {
         std::ofstream asmFile(asmFilePath);
         asmFile << asmCode;
     }
-
-    std::string harnessPath = "/tmp/test_vec_harness.c";
     {
         std::ofstream hFile(harnessPath);
         hFile << R"(
@@ -147,6 +153,10 @@ int main(int argc, char** argv) {
         resultOutput += buffer;
     }
     int execRc = pclose(pipe);
+
+    std::remove(asmFilePath.c_str());
+    std::remove(harnessPath.c_str());
+    std::remove(binFilePath.c_str());
 
     assert(execRc == 0 && "Execution of vectorized test binary failed");
 

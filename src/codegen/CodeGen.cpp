@@ -327,6 +327,9 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::VMax:
         case ir::Instruction::VFMin:
         case ir::Instruction::VFMax:
+        case ir::Instruction::VSExt:
+        case ir::Instruction::VZExt:
+        case ir::Instruction::VTrunc:
         case ir::Instruction::FMA:
         case ir::Instruction::FMS:
         case ir::Instruction::FNMA:

@@ -42,12 +42,18 @@ struct ReductionPlan {
     ir::Value* initialValue = nullptr;
     ir::Value* scalarTerm = nullptr;
     ir::Instruction* update = nullptr;
-    ir::Type* scalarType = nullptr;
-    ir::VectorType* vectorType = nullptr;
+    ir::Type* scalarType = nullptr;       // Accumulator scalar type (e.g. i64 or i32)
+    ir::Type* sourceType = nullptr;       // Source scalar type before extension (e.g. i32)
+    ir::VectorType* vectorType = nullptr; // Accumulator vector type (e.g. <4xi64>)
+    ir::VectorType* sourceVectorType = nullptr; // Source vector type (e.g. <8xi32>)
     ir::Instruction::Opcode vectorOpcode = ir::Instruction::VAdd;
     int64_t identity = 0;
     const char* collapseStrategy = "scalar lane fold";
     bool isWidening = false;
+    ir::Instruction::Opcode conversionOpcode = ir::Instruction::VSExt;
+    unsigned sourceVF = 8;
+    unsigned accumulatorVF = 4;
+    unsigned accumulatorsPerChunk = 2;
 };
 
 struct VectorizationPlan {
@@ -69,13 +75,15 @@ struct VectorizationPlan {
     std::vector<MemoryAccess> memoryAccesses;
 
     // Derived properties
-    unsigned vectorFactor = 4;
-    unsigned vectorWidthBits = 128;
+    unsigned loopVF = 8;
+    unsigned vectorFactor = 8;
+    unsigned vectorWidthBits = 256;
     ir::Type* mainElemType = nullptr;
     ir::VectorType* vectorType = nullptr;
     size_t elementByteSize = 0;
     ir::Instruction::Opcode vectorOpcode = ir::Instruction::VAdd;
     uint64_t mulScaleFactor = 1;
+    bool isWideningReduction = false;
 };
 
 bool isInductionIndex(ir::Value* value, ir::PhiNode* induction) {
@@ -331,10 +339,6 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         bool unsupportedReduction = false;
         uint64_t mulFactor = 1;
         if (reductionPhi && reductionPhi->getType() && reductionPhi->getType()->isInteger()) {
-            if (reductionPhi->getType()->getSize() != 4) {
-                logDiag("Rejected loop: only i32 integer reductions are supported");
-                continue;
-            }
             ir::Value* initial = reductionPhi->getIncomingValueForBlock(entryBB);
             auto* update = dynamic_cast<ir::Instruction*>(
                 reductionPhi->getIncomingValueForBlock(bodyBB));
@@ -350,55 +354,81 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 reduction.update = update;
                 reduction.scalarType = reductionPhi->getType();
 
-                switch (update->getOpcode()) {
-                    case ir::Instruction::Add:
-                        reduction.kind = ReductionKind::Add;
-                        reduction.vectorOpcode = ir::Instruction::VAdd;
-                        reduction.identity = 0;
-                        break;
-                    case ir::Instruction::Mul:
-                        reduction.kind = ReductionKind::Mul;
-                        reduction.vectorOpcode = ir::Instruction::VMul;
-                        reduction.identity = 1;
-                        break;
-                    case ir::Instruction::SMin:
-                        reduction.kind = ReductionKind::SignedMin;
-                        reduction.vectorOpcode = ir::Instruction::VMin;
-                        reduction.identity = INT32_MAX;
-                        break;
-                    case ir::Instruction::SMax:
-                        reduction.kind = ReductionKind::SignedMax;
-                        reduction.vectorOpcode = ir::Instruction::VMax;
-                        reduction.identity = INT32_MIN;
-                        break;
-                    case ir::Instruction::Sub:
-                    case ir::Instruction::Div:
-                        unsupportedReduction = true;
-                        term = nullptr;
-                        break;
-                    default:
-                        unsupportedReduction = true;
-                        term = nullptr;
-                        break;
-                }
-
-                if (term) {
-                    if (auto* termInst = dynamic_cast<ir::Instruction*>(term)) {
-                        if (termInst->getOpcode() == ir::Instruction::ExtSW &&
-                            termInst->getOperands()[0]->get() != iPhi) {
-                            logDiag("Rejected loop: signed i32 -> i64 widening reduction not natively supported");
+                if (reductionPhi->getType()->getSize() == 8) {
+                    // Check for i64 sum from signed i32 widening
+                    auto* termInst = dynamic_cast<ir::Instruction*>(term);
+                    if (termInst && termInst->getOpcode() == ir::Instruction::ExtSW &&
+                        update->getOpcode() == ir::Instruction::Add) {
+                        ir::Value* extSrc = termInst->getOperands()[0]->get();
+                        auto* srcLoad = dynamic_cast<ir::Instruction*>(extSrc);
+                        if (srcLoad && (srcLoad->getOpcode() == ir::Instruction::Loaduw ||
+                                        srcLoad->getOpcode() == ir::Instruction::Load)) {
+                            reduction.kind = ReductionKind::Add;
+                            reduction.vectorOpcode = ir::Instruction::VAdd;
+                            reduction.identity = 0;
+                            reduction.isWidening = true;
+                            reduction.conversionOpcode = ir::Instruction::VSExt;
+                            reduction.sourceType = extSrc->getType(); // i32
+                            plan.isWideningReduction = true;
+                            logDiag("signed widening detected; source type i32; accumulator type i64");
+                        } else {
+                            logDiag("Rejected loop: i64 reduction term is not a signed i32 load extension");
                             unsupportedReduction = true;
                         }
-                        if (termInst->getOpcode() == ir::Instruction::Mul &&
-                            termInst->getOperands()[0]->get() == iPhi) {
-                            if (auto* scale = dynamic_cast<ir::ConstantInt*>(termInst->getOperands()[1]->get()))
-                                mulFactor = scale->getValue();
+                    } else {
+                        logDiag("Rejected loop: i64 reduction is not a supported widening sum pattern");
+                        unsupportedReduction = true;
+                    }
+                } else if (reductionPhi->getType()->getSize() == 4) {
+                    switch (update->getOpcode()) {
+                        case ir::Instruction::Add:
+                            reduction.kind = ReductionKind::Add;
+                            reduction.vectorOpcode = ir::Instruction::VAdd;
+                            reduction.identity = 0;
+                            break;
+                        case ir::Instruction::Mul:
+                            reduction.kind = ReductionKind::Mul;
+                            reduction.vectorOpcode = ir::Instruction::VMul;
+                            reduction.identity = 1;
+                            break;
+                        case ir::Instruction::SMin:
+                            reduction.kind = ReductionKind::SignedMin;
+                            reduction.vectorOpcode = ir::Instruction::VMin;
+                            reduction.identity = INT32_MAX;
+                            break;
+                        case ir::Instruction::SMax:
+                            reduction.kind = ReductionKind::SignedMax;
+                            reduction.vectorOpcode = ir::Instruction::VMax;
+                            reduction.identity = INT32_MIN;
+                            break;
+                        case ir::Instruction::Sub:
+                        case ir::Instruction::Div:
+                            unsupportedReduction = true;
+                            term = nullptr;
+                            break;
+                        default:
+                            unsupportedReduction = true;
+                            term = nullptr;
+                            break;
+                    }
+
+                    if (term) {
+                        if (auto* termInst = dynamic_cast<ir::Instruction*>(term)) {
+                            if (termInst->getOpcode() == ir::Instruction::Mul &&
+                                termInst->getOperands()[0]->get() == iPhi) {
+                                if (auto* scale = dynamic_cast<ir::ConstantInt*>(termInst->getOperands()[1]->get()))
+                                    mulFactor = scale->getValue();
+                            }
                         }
                     }
-                    if (!unsupportedReduction) {
-                        plan.reductions.push_back(reduction);
-                        plan.mulScaleFactor = mulFactor;
-                    }
+                } else {
+                    logDiag("Rejected loop: unsupported integer bitwidth for reduction");
+                    unsupportedReduction = true;
+                }
+
+                if (!unsupportedReduction && term) {
+                    plan.reductions.push_back(reduction);
+                    plan.mulScaleFactor = mulFactor;
                 }
             }
         }
@@ -421,36 +451,76 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         auto ctx = func.getParent()->getContextShared();
         ir::IntegerType* i32Ty = ctx->getIntegerType(32);
         ir::IntegerType* i64Ty = ctx->getIntegerType(64);
-        if (!plan.mainElemType) plan.mainElemType = i32Ty;
-        plan.elementByteSize = plan.mainElemType->getSize();
-        plan.vectorWidthBits = 128;
-        plan.vectorFactor = plan.vectorWidthBits / (plan.elementByteSize * 8);
 
-        ir::Instruction::Opcode mainVOp = ir::Instruction::VAdd;
-        for (auto& inst : bodyBB->getInstructions()) {
-            auto opc = inst->getOpcode();
-            if (opc == ir::Instruction::Sub) { mainVOp = ir::Instruction::VSub; break; }
-            if (opc == ir::Instruction::Mul) { mainVOp = ir::Instruction::VMul; break; }
-            if (opc == ir::Instruction::FAdd) { mainVOp = ir::Instruction::VFAdd; break; }
-            if (opc == ir::Instruction::FSub) { mainVOp = ir::Instruction::VFSub; break; }
-            if (opc == ir::Instruction::FMul) { mainVOp = ir::Instruction::VFMul; break; }
-            if (opc == ir::Instruction::FDiv) { mainVOp = ir::Instruction::VFDiv; break; }
-        }
-        if (!plan.reductions.empty()) mainVOp = plan.reductions[0].vectorOpcode;
-        plan.vectorOpcode = mainVOp;
+        if (plan.isWideningReduction) {
+            auto& reduction = plan.reductions[0];
+            ir::VectorType* srcVecTy = ctx->getVectorType(i32Ty, 4);
+            ir::VectorType* dstVecTy = ctx->getVectorType(i64Ty, 4);
+            ir::VectorType* src8VecTy = ctx->getVectorType(i32Ty, 8);
 
-        if (targetInfo) {
-            unsigned candidateVF = 256 / (plan.elementByteSize * 8);
-            ir::VectorType* vec256 = ctx->getVectorType(plan.mainElemType, candidateVF);
-            logDiag("candidate 256-bit vector type: <" + std::to_string(candidateVF) + " x " +
-                    plan.mainElemType->toString() + ">");
-            logDiag("supportsVectorType: " + std::string(targetInfo->supportsVectorType(vec256) ? "true" : "false"));
-            logDiag("supportsVectorOperation: " + std::string(targetInfo->supportsVectorOperation(mainVOp, vec256) ? "true" : "false"));
+            logDiag("conversion: signed extend");
+            logDiag("i32 -> i64");
+            logDiag("source chunk: 8 lanes");
+            logDiag("destination: 2 x <4xi64>");
+            logDiag("source type i32");
+            logDiag("accumulator type i64");
+            logDiag("source vector type <8xi32>");
+            logDiag("destination vector type <4xi64>");
 
-            if (targetInfo->supportsVectorWidth(256) && targetInfo->supportsVectorType(vec256) &&
-                targetInfo->supportsVectorOperation(mainVOp, vec256)) {
-                plan.vectorFactor = candidateVF;
-                plan.vectorWidthBits = 256;
+            bool convSupp = targetInfo && targetInfo->supportsVectorConversion(ir::Instruction::VSExt, srcVecTy, dstVecTy);
+            bool addSupp = targetInfo && targetInfo->supportsVectorOperation(ir::Instruction::VAdd, dstVecTy);
+
+            if (convSupp) logDiag("conversion supported");
+            if (addSupp) logDiag("vector i64 add supported");
+
+            if (!convSupp || !addSupp) {
+                logDiag("Rejected loop: widening conversion or i64 vector add not supported by target");
+                continue;
+            }
+
+            plan.vectorFactor = 8;
+            plan.vectorWidthBits = 256;
+            plan.mainElemType = i32Ty;
+            plan.elementByteSize = 4;
+            reduction.sourceType = i32Ty;
+            reduction.scalarType = i64Ty;
+            reduction.sourceVectorType = src8VecTy;
+            reduction.vectorType = dstVecTy;
+            reduction.sourceVF = 8;
+            reduction.accumulatorVF = 4;
+            reduction.accumulatorsPerChunk = 2;
+        } else {
+            if (!plan.mainElemType) plan.mainElemType = i32Ty;
+            plan.elementByteSize = plan.mainElemType->getSize();
+            plan.vectorWidthBits = 128;
+            plan.vectorFactor = plan.vectorWidthBits / (plan.elementByteSize * 8);
+
+            ir::Instruction::Opcode mainVOp = ir::Instruction::VAdd;
+            for (auto& inst : bodyBB->getInstructions()) {
+                auto opc = inst->getOpcode();
+                if (opc == ir::Instruction::Sub) { mainVOp = ir::Instruction::VSub; break; }
+                if (opc == ir::Instruction::Mul) { mainVOp = ir::Instruction::VMul; break; }
+                if (opc == ir::Instruction::FAdd) { mainVOp = ir::Instruction::VFAdd; break; }
+                if (opc == ir::Instruction::FSub) { mainVOp = ir::Instruction::VFSub; break; }
+                if (opc == ir::Instruction::FMul) { mainVOp = ir::Instruction::VFMul; break; }
+                if (opc == ir::Instruction::FDiv) { mainVOp = ir::Instruction::VFDiv; break; }
+            }
+            if (!plan.reductions.empty()) mainVOp = plan.reductions[0].vectorOpcode;
+            plan.vectorOpcode = mainVOp;
+
+            if (targetInfo) {
+                unsigned candidateVF = 256 / (plan.elementByteSize * 8);
+                ir::VectorType* vec256 = ctx->getVectorType(plan.mainElemType, candidateVF);
+                logDiag("candidate 256-bit vector type: <" + std::to_string(candidateVF) + " x " +
+                        plan.mainElemType->toString() + ">");
+                logDiag("supportsVectorType: " + std::string(targetInfo->supportsVectorType(vec256) ? "true" : "false"));
+                logDiag("supportsVectorOperation: " + std::string(targetInfo->supportsVectorOperation(mainVOp, vec256) ? "true" : "false"));
+
+                if (targetInfo->supportsVectorWidth(256) && targetInfo->supportsVectorType(vec256) &&
+                    targetInfo->supportsVectorOperation(mainVOp, vec256)) {
+                    plan.vectorFactor = candidateVF;
+                    plan.vectorWidthBits = 256;
+                }
             }
         }
 
@@ -462,7 +532,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         plan.vectorType = vecTy;
         if (!plan.reductions.empty()) {
             auto& reduction = plan.reductions[0];
-            reduction.vectorType = vecTy;
+            if (!plan.isWideningReduction) {
+                reduction.vectorType = vecTy;
+            }
             const char* kind = reduction.kind == ReductionKind::Add ? "add" :
                                reduction.kind == ReductionKind::Mul ? "product" :
                                reduction.kind == ReductionKind::SignedMin ? "signed min" : "signed max";
@@ -547,25 +619,28 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::VectorInstruction* vInitI = nullptr;
         ir::VectorInstruction* vStep = nullptr;
         ir::VectorInstruction* vScale = nullptr;
-        if (plan.memoryAccesses.empty()) {
+        if (plan.memoryAccesses.empty() && !plan.isWideningReduction) {
             vInitI = buildVectorConst(startValConst, 1);
             vStep = buildVectorConst(plan.vectorFactor, 0);
             vScale = buildVectorConst((uint32_t)mulFactor, 0);
         }
-        // Form the reduction identity in a register.  Building zero through
-        // per-lane stores left the temporary's base live across its address
-        // updates, so allocation could reload from the final lane address and
-        // read beyond the table.  XOR is independent of the source lane data.
+
         ir::VectorInstruction* vReductionIdentity = nullptr;
+        ir::VectorInstruction* vZeroAcc0 = nullptr;
+        ir::VectorInstruction* vZeroAcc1 = nullptr;
+
         if (!plan.reductions.empty()) {
-            vReductionIdentity = builder.createVBroadcast(
-                vecTy, ctx->getConstantInt(i32Ty,
-                    static_cast<uint32_t>(plan.reductions[0].identity)));
+            if (plan.isWideningReduction) {
+                ir::VectorType* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+                vZeroAcc0 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
+                vZeroAcc1 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
+            } else {
+                vReductionIdentity = builder.createVBroadcast(
+                    vecTy, ctx->getConstantInt(i32Ty,
+                        static_cast<uint32_t>(plan.reductions[0].identity)));
+            }
         }
 
-        // Materialize the vector end after temporary-vector construction.
-        // Those scalar stores use destructive address updates, so keeping the
-        // entry computation live through the sequence can lose its register.
         ir::Value* lateTripCount = boundNCopy;
         if (!constantStart || constantStart->getValue() != 0)
             lateTripCount = builder.createSub(boundNCopy, inductionInit);
@@ -588,12 +663,28 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             rawPhiVI->addIncoming(vInitI, vPreheaderBB);
         }
 
+        ir::PhiNode* rawPhiVSum0 = nullptr;
+        ir::PhiNode* rawPhiVSum1 = nullptr;
         ir::PhiNode* rawPhiVSum = nullptr;
+
         if (!plan.reductions.empty()) {
-            auto phiVSum = std::make_unique<ir::PhiNode>(vecTy, 0, nullptr, vLoopHeaderBB);
-            rawPhiVSum = phiVSum.get();
-            vLoopHeaderBB->getInstructions().push_back(std::move(phiVSum));
-            rawPhiVSum->addIncoming(vReductionIdentity, vPreheaderBB);
+            if (plan.isWideningReduction) {
+                ir::VectorType* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+                auto phiVSum0 = std::make_unique<ir::PhiNode>(v4i64Ty, 0, nullptr, vLoopHeaderBB);
+                rawPhiVSum0 = phiVSum0.get();
+                vLoopHeaderBB->getInstructions().push_back(std::move(phiVSum0));
+                rawPhiVSum0->addIncoming(vZeroAcc0, vPreheaderBB);
+
+                auto phiVSum1 = std::make_unique<ir::PhiNode>(v4i64Ty, 0, nullptr, vLoopHeaderBB);
+                rawPhiVSum1 = phiVSum1.get();
+                vLoopHeaderBB->getInstructions().push_back(std::move(phiVSum1));
+                rawPhiVSum1->addIncoming(vZeroAcc1, vPreheaderBB);
+            } else {
+                auto phiVSum = std::make_unique<ir::PhiNode>(vecTy, 0, nullptr, vLoopHeaderBB);
+                rawPhiVSum = phiVSum.get();
+                vLoopHeaderBB->getInstructions().push_back(std::move(phiVSum));
+                rawPhiVSum->addIncoming(vReductionIdentity, vPreheaderBB);
+            }
         }
 
         auto phiICnt = std::make_unique<ir::PhiNode>(i32Ty, 0, nullptr, vLoopHeaderBB);
@@ -608,8 +699,36 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // Vector Body
         builder.setInsertPoint(vLoopBodyBB);
 
-        // Lower array accesses if present
-        if (!plan.memoryAccesses.empty()) {
+        if (plan.isWideningReduction) {
+            ir::VectorType* v8i32Ty = ctx->getVectorType(i32Ty, 8);
+            ir::VectorType* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+
+            ir::Instruction* i64ICnt = builder.createExtSW(rawPhiICnt, i64Ty);
+            ir::Instruction* byteOffset = builder.createMul(
+                i64ICnt, ctx->getConstantInt(i64Ty, 4));
+
+            ir::Value* basePtr = nullptr;
+            for (auto& inst : bodyBB->getInstructions()) {
+                if (inst->getOpcode() == ir::Instruction::Loaduw || inst->getOpcode() == ir::Instruction::Load) {
+                    basePtr = extractBasePointer(inst->getOperands()[0]->get());
+                    break;
+                }
+            }
+            ir::Value* safeBase = baseCopyMap.count(basePtr) ? baseCopyMap[basePtr] : basePtr;
+            ir::Instruction* vPtr = builder.createAdd(safeBase, byteOffset);
+            ir::VectorInstruction* vLd8 = builder.createVLoad(v8i32Ty, vPtr);
+
+            ir::VectorInstruction* vLow = builder.createVSExt(vLd8, v4i64Ty);
+            ir::VectorInstruction* vHighShuf = builder.createVShuffle(
+                vLd8, vLd8, ir::ShuffleMask({4, 5, 6, 7, 4, 5, 6, 7}, 8));
+            ir::VectorInstruction* vHigh = builder.createVSExt(vHighShuf, v4i64Ty);
+
+            ir::VectorInstruction* vNextSum0 = builder.createVAdd(rawPhiVSum0, vLow);
+            ir::VectorInstruction* vNextSum1 = builder.createVAdd(rawPhiVSum1, vHigh);
+
+            rawPhiVSum0->addIncoming(vNextSum0, vLoopBodyBB);
+            rawPhiVSum1->addIncoming(vNextSum1, vLoopBodyBB);
+        } else if (!plan.memoryAccesses.empty()) {
             std::map<ir::Instruction*, ir::Value*> vValueMap;
             ir::Instruction* i64ICnt = builder.createExtSW(rawPhiICnt, i64Ty);
             ir::Instruction* byteOffset = builder.createMul(
@@ -738,7 +857,23 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         };
         ir::Instruction* sumReduced = nullptr;
         ir::Value* vectorPathSum = nullptr;
-        if (!plan.reductions.empty() && rawPhiVSum) {
+
+        if (plan.isWideningReduction && rawPhiVSum0 && rawPhiVSum1) {
+            ir::VectorInstruction* vCombined = builder.createVAdd(rawPhiVSum0, rawPhiVSum1);
+            ir::Instruction* redBuf = builder.createAlloc(ctx->getConstantInt(i64Ty, 32), i64Ty);
+            builder.createVStore(vCombined, redBuf);
+
+            ir::Instruction* l0 = builder.createLoadl(redBuf);
+            ir::Instruction* l1 = builder.createLoadl(builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 8)));
+            ir::Instruction* l2 = builder.createLoadl(builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 16)));
+            ir::Instruction* l3 = builder.createLoadl(builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 24)));
+
+            ir::Instruction* s01 = builder.createAdd(l0, l1);
+            ir::Instruction* s23 = builder.createAdd(l2, l3);
+            ir::Instruction* sumRed64 = builder.createAdd(s01, s23);
+
+            vectorPathSum = builder.createAdd(reductionInit, sumRed64);
+        } else if (!plan.reductions.empty() && rawPhiVSum) {
             ir::Instruction* redBuf = builder.createAlloc(ctx->getConstantInt(i64Ty, plan.vectorWidthBits / 8), i64Ty);
             builder.createVStore(rawPhiVSum, redBuf);
 
@@ -763,7 +898,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
         ir::PhiNode* rawPhiEpiSum = nullptr;
         if (!plan.reductions.empty()) {
-            auto phiEpiSum = std::make_unique<ir::PhiNode>(i32Ty, 0, nullptr, epiHeaderBB);
+            ir::Type* sumTy = plan.reductions[0].scalarType;
+            auto phiEpiSum = std::make_unique<ir::PhiNode>(sumTy, 0, nullptr, epiHeaderBB);
             rawPhiEpiSum = phiEpiSum.get();
             epiHeaderBB->getInstructions().push_back(std::move(phiEpiSum));
 
@@ -793,9 +929,17 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             if (!plan.reductions.empty() && plan.memoryAccesses.empty() &&
                 inst.get() == plan.reductions[0].scalarTerm) continue;
 
-            if (opc == ir::Instruction::ExtSW && inst->getOperands()[0]->get() == iPhi) {
-                ir::Instruction* epiI64 = builder.createExtSW(rawPhiEpiI, i64Ty);
-                epiValueMap[inst.get()] = epiI64;
+            if (opc == ir::Instruction::ExtSW) {
+                ir::Value* srcVal = inst->getOperands()[0]->get();
+                if (srcVal == iPhi) {
+                    ir::Instruction* epiI64 = builder.createExtSW(rawPhiEpiI, i64Ty);
+                    epiValueMap[inst.get()] = epiI64;
+                } else {
+                    auto* instSrc = dynamic_cast<ir::Instruction*>(srcVal);
+                    ir::Value* eSrc = (instSrc && epiValueMap.count(instSrc)) ? epiValueMap[instSrc] : srcVal;
+                    ir::Instruction* extVal = builder.createExtSW(eSrc, i64Ty);
+                    epiValueMap[inst.get()] = extVal;
+                }
             } else if (opc == ir::Instruction::Mul || opc == ir::Instruction::FMul ||
                        opc == ir::Instruction::FDiv) {
                 ir::Value* op0 = inst->getOperands()[0]->get();
@@ -874,7 +1018,14 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
         if (rawPhiEpiSum) {
             ir::Instruction* epiSumNext = nullptr;
-            if (!plan.memoryAccesses.empty() && plan.reductions[0].update) {
+            if (!plan.reductions.empty() && plan.reductions[0].scalarTerm) {
+                auto* origTermInst = dynamic_cast<ir::Instruction*>(plan.reductions[0].scalarTerm);
+                if (origTermInst && epiValueMap.count(origTermInst)) {
+                    ir::Value* epiTerm = epiValueMap[origTermInst];
+                    epiSumNext = createScalarReduction(rawPhiEpiSum, epiTerm, plan.reductions[0].kind);
+                }
+            }
+            if (!epiSumNext && !plan.memoryAccesses.empty() && plan.reductions[0].update) {
                 for (auto& inst : bodyBB->getInstructions()) {
                     if (inst->getOpcode() == ir::Instruction::Loaduw || inst->getOpcode() == ir::Instruction::Load) {
                         if (epiValueMap.count(inst.get())) {
