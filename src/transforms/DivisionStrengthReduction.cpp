@@ -217,33 +217,12 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
                     Q = qAbs;
                 }
             } else {
-                SignedMagic m = computeSignedMagic32(d32);
-                int32_t m32 = static_cast<int32_t>(m.magic);
-                int64_t m64 = static_cast<int64_t>(m32); // Properly sign-extend 32-bit magic
-
-                ir::IntegerType* i64Ty = ir::IntegerType::get(64);
-                ir::Value* nExt = builder.createExtSW(N, i64Ty);
-                ir::Value* mExt = ir::ConstantInt::get(i64Ty, static_cast<uint64_t>(m64));
-                ir::Value* mul64 = builder.createMul(nExt, mExt);
-                ir::Value* c32 = ir::ConstantInt::get(i64Ty, 32);
-                ir::Value* high64 = builder.createSar(mul64, c32); // Signed shift for high 32
-                ir::Value* high32 = builder.createTruncD(high64, type);
-
-                if (d32 > 0 && m32 < 0) {
-                    high32 = builder.createAdd(high32, N);
-                } else if (d32 < 0 && m32 > 0) {
-                    high32 = builder.createSub(high32, N);
-                }
-
-                if (m.shift > 0) {
-                    ir::ConstantInt* shiftConst = ir::ConstantInt::get(type, m.shift);
-                    high32 = builder.createSar(high32, shiftConst);
-                }
-
-                // Add 1 if N < 0 (sign bit)
-                ir::ConstantInt* c31 = ir::ConstantInt::get(type, 31);
-                ir::Value* signBit = builder.createShr(N, c31);
-                Q = builder.createAdd(high32, signBit);
+                // The previous signed-magic sequence produced incorrect
+                // quotients for ordinary positive inputs (for example i % 7
+                // in the arithmetic benchmark).  Preserve the scalar signed
+                // operation until a semantics-tested magic implementation is
+                // available.  Power-of-two signed division above remains safe.
+                return false;
             }
         }
     }

@@ -59,7 +59,7 @@ void test_signed_div_rem() {
 
     // Test with edge case values: negative values, INT_MAX, INT_MIN
     std::vector<int32_t> test_values = {-100, 0, 1, -1, INT_MAX, INT_MIN};
-    std::vector<int32_t> divisors = {3, -3, 5, 7, 11};
+    std::vector<int32_t> divisors = {2, -2, 4, 8, 16};
 
     for (int32_t val : test_values) {
         ir::Value* x = ir::ConstantInt::get(i32Ty, val);
@@ -81,6 +81,17 @@ void test_signed_div_rem() {
         assert(inst->getOpcode() != ir::Instruction::Rem && "Rem should be eliminated!");
     }
     std::cout << "Signed Div/Rem Strength Reduction Test Passed!\n";
+
+    ir::Function* guarded = builder.createFunction("signed_non_power_guard", i32Ty, {i32Ty});
+    ir::BasicBlock* guardedBB = builder.createBasicBlock("entry", guarded);
+    builder.setInsertPoint(guardedBB);
+    ir::Value* input = guarded->getParameters().front().get();
+    builder.createRem(input, ir::ConstantInt::get(i32Ty, 7));
+    builder.createRet(ir::ConstantInt::get(i32Ty, 0));
+    assert(!pass.run(*guarded) && "unproven signed magic division must remain scalar");
+    bool keptRemainder = false;
+    for (auto& inst : guardedBB->getInstructions()) keptRemainder |= inst->getOpcode() == ir::Instruction::Rem;
+    assert(keptRemainder);
 }
 
 int main() {

@@ -143,8 +143,39 @@ void test_loop_unroll_call_bail() {
     std::cout << "--- LoopUnroll Call Bail Test Passed ---" << std::endl;
 }
 
+void test_loop_unroll_large_body_bail() {
+    auto ctx = std::make_shared<ir::IRContext>();
+    ir::Module module("unroll_large_module", ctx);
+    ir::IRBuilder builder(ctx); builder.setModule(&module);
+    auto* i32 = ctx->getIntegerType(32);
+    auto* func = builder.createFunction("unroll_large", i32, {});
+    auto* entry = builder.createBasicBlock("entry", func);
+    auto* header = builder.createBasicBlock("header", func);
+    auto* body = builder.createBasicBlock("body", func);
+    auto* exit = builder.createBasicBlock("exit", func);
+    builder.setInsertPoint(entry); builder.createJmp(header);
+    builder.setInsertPoint(header);
+    auto phi = std::make_unique<ir::PhiNode>(i32, 0, nullptr, header);
+    auto* induction = phi.get(); header->getInstructions().push_back(std::move(phi));
+    induction->addIncoming(ctx->getConstantInt(i32, 0), entry);
+    auto* cond = builder.createCslt(induction, ctx->getConstantInt(i32, 100));
+    builder.createBr(cond, body, exit);
+    builder.setInsertPoint(body);
+    ir::Value* value = induction;
+    for (unsigned n = 0; n < 35; ++n)
+        value = builder.createAdd(value, ctx->getConstantInt(i32, n + 2));
+    auto* next = builder.createAdd(induction, ctx->getConstantInt(i32, 1));
+    induction->addIncoming(next, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit); builder.createRet(induction);
+    transforms::CFGBuilder::run(*func);
+    transforms::LoopUnroll unroller;
+    assert(!unroller.run(*func) && "large loop bodies must remain canonical until live-range repair is supported");
+}
+
 int main() {
     test_loop_unroll_basic();
     test_loop_unroll_call_bail();
+    test_loop_unroll_large_body_bail();
     return 0;
 }

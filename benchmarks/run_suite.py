@@ -8,6 +8,7 @@ import statistics
 import json
 import csv
 import re
+import shutil
 
 BENCHMARKS_DIR = os.path.dirname(os.path.abspath(__file__))
 CORPUS_C_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "c")
@@ -78,15 +79,25 @@ def analyze_assembly(asm_file):
         "frame_size": frame_size
     }
 
-def run_cmd(cmd):
-    p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return p.returncode, p.stdout, p.stderr
+COMMAND_TIMEOUT = float(os.environ.get("FYRA_BENCH_TIMEOUT", "30"))
+SAMPLES = int(os.environ.get("FYRA_BENCH_SAMPLES", "15"))
+WARMUP = int(os.environ.get("FYRA_BENCH_WARMUP", "2"))
+
+def run_cmd(cmd, timeout=COMMAND_TIMEOUT):
+    try:
+        p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout after {timeout}s"
 
 def run_exec(exec_path):
-    p = subprocess.run([exec_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return p.returncode, p.stdout, p.stderr
+    try:
+        p = subprocess.run([exec_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=COMMAND_TIMEOUT)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout after {COMMAND_TIMEOUT}s"
 
-def measure_execution(exec_path, samples=15, warmup=2):
+def measure_execution(exec_path, samples=SAMPLES, warmup=WARMUP):
     if not os.path.exists(exec_path):
         return {"median": 0.0, "min": 0.0, "stddev": 0.0, "output": ""}
 
@@ -130,6 +141,9 @@ def main():
 
     bench_names = [f[:-2] for f in os.listdir(CORPUS_C_DIR) if f.endswith(".c")]
     bench_names.sort()
+    requested = {name for name in os.environ.get("FYRA_BENCH_FILTER", "").split(",") if name}
+    if requested:
+        bench_names = [name for name in bench_names if name in requested]
 
     results = []
 
@@ -142,43 +156,65 @@ def main():
             continue
 
         out_dir = os.path.join(BENCHMARKS_DIR, "output", bname)
+        shutil.rmtree(out_dir, ignore_errors=True)
         os.makedirs(out_dir, exist_ok=True)
         print(f"Benchmarking {bname}...", flush=True)
 
         # 1. Compile GCC -O2 -static
         gcc_s = os.path.join(out_dir, "gcc.s")
         gcc_exec = os.path.join(out_dir, "gcc_exec")
-        run_cmd(f"gcc -static -O2 {c_src} -S -o {gcc_s}")
-        run_cmd(f"gcc -static -O2 {c_src} -o {gcc_exec}")
-
         # 2. Compile Clang -O2 -static
         clang_s = os.path.join(out_dir, "clang.s")
         clang_exec = os.path.join(out_dir, "clang_exec")
-        run_cmd(f"clang -static -O2 {c_src} -S -o {clang_s}")
-        run_cmd(f"clang -static -O2 {c_src} -o {clang_exec}")
+        commands = [
+            f"gcc -static -O2 {c_src} -S -o {gcc_s}",
+            f"gcc -static -O2 {c_src} -o {gcc_exec}",
+            f"clang -static -O2 {c_src} -S -o {clang_s}",
+            f"clang -static -O2 {c_src} -o {clang_exec}",
+        ]
 
         # 3. Compile Fyra -O1 & -O2 static
         fyra_o1_s = os.path.join(out_dir, "fyra_o1.s")
         fyra_o2_s = os.path.join(out_dir, "fyra_o2.s")
+        fyra_scalar_s = os.path.join(out_dir, "fyra_scalar.s")
         fyra_exec = os.path.join(out_dir, "fyra_exec")
+        fyra_scalar_exec = os.path.join(out_dir, "fyra_scalar_exec")
 
-        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o1_s} -O1"); fyra_o1_s = fyra_o1_s + ".s" if os.path.exists(fyra_o1_s + ".s") else fyra_o1_s
-        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o2_s} -O2"); fyra_o2_s = fyra_o2_s + ".s" if os.path.exists(fyra_o2_s + ".s") else fyra_o2_s
+        commands += [
+            f"{FYRA_BIN} {fyra_src} -o {fyra_o1_s} -O1",
+            f"{FYRA_BIN} {fyra_src} -o {fyra_o2_s} -O2",
+            f"{FYRA_BIN} {fyra_src} -o {fyra_scalar_s} -O2 --disable-slp",
+        ]
+        for command in commands:
+            rc, stdout, stderr = run_cmd(command)
+            if rc != 0:
+                print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
+                return 1
+        fyra_o1_s = fyra_o1_s + ".s" if os.path.exists(fyra_o1_s + ".s") else fyra_o1_s
+        fyra_o2_s = fyra_o2_s + ".s" if os.path.exists(fyra_o2_s + ".s") else fyra_o2_s
+        fyra_scalar_s = fyra_scalar_s + ".s" if os.path.exists(fyra_scalar_s + ".s") else fyra_scalar_s
         harness_c = os.path.join(BENCHMARKS_DIR, "harness.c")
-        run_cmd(f"gcc -static -no-pie {fyra_o2_s} {harness_c} -o {fyra_exec}")
+        for command in [f"gcc -static -no-pie {fyra_o2_s} {harness_c} -o {fyra_exec}",
+                        f"gcc -static -no-pie {fyra_scalar_s} {harness_c} -o {fyra_scalar_exec}"]:
+            rc, stdout, stderr = run_cmd(command)
+            if rc != 0:
+                print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
+                return 1
 
         # Assembly Analysis
         gcc_asm = analyze_assembly(gcc_s)
         clang_asm = analyze_assembly(clang_s)
         fyra_asm = analyze_assembly(fyra_o2_s)
+        fyra_scalar_asm = analyze_assembly(fyra_scalar_s)
 
         # Measure Execution Runtimes
         gcc_perf = measure_execution(gcc_exec)
         clang_perf = measure_execution(clang_exec)
         fyra_perf = measure_execution(fyra_exec)
+        fyra_scalar_perf = measure_execution(fyra_scalar_exec)
 
         # Correctness Verification
-        correct = (fyra_perf["output"] == clang_perf["output"] and len(fyra_perf["output"]) > 0)
+        correct = (fyra_perf["output"] == clang_perf["output"] == fyra_scalar_perf["output"] and len(fyra_perf["output"]) > 0)
 
         # Verify Static Linkage
         fyra_static = verify_static(fyra_exec)
@@ -190,21 +226,36 @@ def main():
             "gcc_time": gcc_perf["median"],
             "clang_time": clang_perf["median"],
             "fyra_time": fyra_perf["median"],
+            "fyra_scalar_time": fyra_scalar_perf["median"],
+            "fyra_speedup": (fyra_scalar_perf["median"] / fyra_perf["median"] if fyra_perf["median"] > 0 else 0.0),
             "gcc_instrs": gcc_asm["total"],
             "clang_instrs": clang_asm["total"],
             "fyra_instrs": fyra_asm["total"],
+            "fyra_scalar_instrs": fyra_scalar_asm["total"],
             "gcc_mem": gcc_asm["loads"] + gcc_asm["stores"],
             "clang_mem": clang_asm["loads"] + clang_asm["stores"],
             "fyra_mem": fyra_asm["loads"] + fyra_asm["stores"],
+            "fyra_scalar_mem": fyra_scalar_asm["loads"] + fyra_scalar_asm["stores"],
             "fyra_frame_size": fyra_asm["frame_size"],
             "clang_frame_size": clang_asm["frame_size"]
         }
         results.append(entry)
 
         status = "PASSED" if correct else "FAILED"
-        print(f"[{status}] {bname:<24} | Fyra: {fyra_perf['median']:.3f}s | Clang: {clang_perf['median']:.3f}s | GCC: {gcc_perf['median']:.3f}s")
+        print(f"[{status}] {bname:<24} | Scalar: {fyra_scalar_perf['median']:.6f}s | SLP: {fyra_perf['median']:.6f}s | Speedup: {entry['fyra_speedup']:.3f}x | Clang: {clang_perf['median']:.6f}s | GCC: {gcc_perf['median']:.6f}s")
 
-    # Output CSV and JSON
+    failed = [r["name"] for r in results if not r["correct"]]
+    if failed:
+        print(f"Refusing to update result files; failed benchmarks: {', '.join(failed)}")
+        return 1
+
+    # Filtered runs are diagnostic and must never replace the canonical full
+    # suite result set.
+    if requested:
+        print("Filtered run complete; canonical CSV/JSON results were not updated.")
+        return 0
+
+    # Output CSV and JSON only after a complete, checksum-clean run.
     json_path = os.path.join(BENCHMARKS_DIR, "benchmark_results.json")
     csv_path = os.path.join(BENCHMARKS_DIR, "benchmark_results.csv")
 
@@ -232,6 +283,7 @@ def main():
     print(f" Geometric Mean Instruction Ratio    (Fyra / Clang -O2) : {geo_instr:.2f}x")
     print(f" Geometric Mean Memory Operations     (Fyra / Clang -O2) : {geo_mem:.2f}x")
     print("==========================================================================")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

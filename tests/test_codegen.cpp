@@ -1073,6 +1073,13 @@ function $test_tco_negative_stack_args(%a1 : i64, %a2 : i64, %a3 : i64, %a4 : i6
     %unused = add %a7, i64 1 : i64
     ret %res : i64
 }
+
+function $test_stack_argument_call() : i64 {
+@entry
+    %res = call $test_tco_negative_stack_args(i64 1, i64 2, i64 3, i64 4, i64 5, i64 6, i64 6538371840000000000) : i64
+    %adjusted = add %res, i64 1 : i64
+    ret %adjusted : i64
+}
 )";
         std::istringstream tco_stream(tco_ir);
         parser::Parser tco_parser(tco_stream, parser::FileFormat::FYRA);
@@ -1111,6 +1118,12 @@ function $test_tco_negative_stack_args(%a1 : i64, %a2 : i64, %a3 : i64, %a4 : i6
         std::string body_neg_stack = getFunctionBody(tco_asm, "test_tco_negative_stack_args");
         assert(body_neg_stack.find("call test_tco_positive") != std::string::npos);
         assert(body_neg_stack.find("jmp test_tco_positive") == std::string::npos);
+        assert(body_neg_stack.find("pushq %rbp") != std::string::npos);
+
+        std::string body_stack_call = getFunctionBody(tco_asm, "test_stack_argument_call");
+        assert(body_stack_call.find("movabsq $6538371840000000000, %rax") != std::string::npos);
+        assert(body_stack_call.find("call test_tco_negative_stack_args") != std::string::npos);
+        assert(body_stack_call.find("addq $16, %rsp") != std::string::npos);
 
         std::cout << "Tail-Call Optimization (TCO) unit tests passed successfully!" << std::endl;
     }

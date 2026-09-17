@@ -27,6 +27,7 @@
 #include "transforms/ScalarEvolution.h"
 #include "transforms/LoopUnroll.h"
 #include "transforms/LoopVectorizer.h"
+#include "transforms/SLPVectorizer.h"
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/DivisionStrengthReduction.h"
 #include "transforms/ErrorReporter.h"
@@ -214,6 +215,7 @@ int main(int argc, char** argv) {
         std::cerr << "  -O0                                              Disable optimizations" << std::endl;
         std::cerr << "  -O1                                              Enable conservative optimizations" << std::endl;
         std::cerr << "  -O2                                              Enable full optimization pipeline (default)" << std::endl;
+        std::cerr << "  --disable-slp                                     Disable SLP vectorization" << std::endl;
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
@@ -251,11 +253,14 @@ int main(int argc, char** argv) {
     bool runPipeline = false;
     bool generateExecutable = false;
     bool enableUnroll = true;
+    bool enableSLP = true;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--no-unroll") {
             enableUnroll = false;
+        } else if (arg == "--disable-slp") {
+            enableSLP = false;
         } else if (arg == "--no-validate") {
             enableValidation = false;
         } else if (arg == "--validate") {
@@ -366,6 +371,7 @@ int main(int argc, char** argv) {
         transforms::ScalarEvolution scev;
         transforms::LoopUnroll loop_unroll(error_reporter);
         transforms::LoopVectorizer loop_vectorizer(error_reporter);
+        transforms::SLPVectorizer slp_vectorizer(error_reporter);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
         
         bool optimization_changed = true;
@@ -384,6 +390,7 @@ int main(int argc, char** argv) {
                 if (optimizationLevel >= 2 && licm.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && scev.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && loop_vectorizer.run(*func)) optimization_changed = true;
+                if (optimizationLevel >= 2 && enableSLP && slp_vectorizer.run(*func)) optimization_changed = true;
                 if (optimizationLevel >= 2 && enableUnroll && loop_unroll.run(*func)) optimization_changed = true;
                 if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;

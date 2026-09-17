@@ -61,7 +61,7 @@ export function $main() : i32 {
 @loop
     %i = phi @entry 1, @body %i_next : i32
     %sum = phi @entry 0, @body %sum_next : i64
-    %cond = sle %i, 100000000 : i32
+    %cond = sle %i, 5000000 : i32
     jnz %cond, @body, @exit
 
 @body

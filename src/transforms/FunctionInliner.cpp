@@ -10,6 +10,23 @@
 
 namespace transforms {
 
+static bool reachesBlock(ir::BasicBlock* current, ir::BasicBlock* target,
+                         std::set<ir::BasicBlock*>& visited) {
+    if (!current || !visited.insert(current).second) return false;
+    for (auto* successor : current->getSuccessors()) {
+        if (successor == target || reachesBlock(successor, target, visited)) return true;
+    }
+    return false;
+}
+
+static bool blockIsInCycle(ir::BasicBlock* block) {
+    if (!block) return false;
+    std::set<ir::BasicBlock*> visited;
+    for (auto* successor : block->getSuccessors())
+        if (successor == block || reachesBlock(successor, block, visited)) return true;
+    return false;
+}
+
 static bool calleeCanReach(const ir::Function* current, const ir::Function* target, std::set<const ir::Function*>& visited) {
     if (!current || !target) return false;
     if (!visited.insert(current).second) return false;
@@ -67,6 +84,12 @@ bool FunctionInliner::runOnModule(ir::Module& module) {
                     for (auto it = instrs.begin(); it != instrs.end(); ++it) {
                         ir::Instruction* instr = it->get();
                         if (instr->getOpcode() == ir::Instruction::Call && !instr->getOperands().empty()) {
+                            // Inlining into a loop currently exposes cloned
+                            // values to a liveness bug that can coalesce a
+                            // callee temporary with a still-live induction
+                            // value. Keep the call boundary until loop-aware
+                            // live-range repair exists.
+                            if (blockIsInCycle(bb.get())) continue;
                             auto* callee = dynamic_cast<ir::Function*>(instr->getOperands()[0]->get());
                             if (callee && canInline(callee, caller.get())) {
                                 if (inlineCall(instr, callee, caller.get())) {

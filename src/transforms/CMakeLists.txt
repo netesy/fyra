@@ -16,6 +16,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/FunctionInliner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopUnroll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopVectorizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/SLPVectorizer.cpp
 )
 
 target_sources(fyra PRIVATE ${TRANSFORMS_SOURCES})

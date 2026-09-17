@@ -72,6 +72,18 @@ bool LoopUnroll::analyzeLoopLegality(Loop& loop, ir::Function& func, IndVarInfo&
     // Check for nested child loops
     if (!loop.children.empty()) return false;
 
+    // The current cloning implementation is intentionally limited to small
+    // loop bodies.  Large, inlined bodies create enough simultaneously live
+    // cloned values that the rewritten induction update can be assigned the
+    // same physical register as an unrelated temporary, corrupting the back
+    // edge.  Reject those loops until the unroller has explicit live-range
+    // repair rather than emitting a semantically invalid loop.
+    size_t bodyInstructionCount = 0;
+    for (ir::BasicBlock* bb : loop.blocks) {
+        if (bb) bodyInstructionCount += bb->getInstructions().size();
+    }
+    if (bodyInstructionCount > 12) return false;
+
     // Safety checks on all instructions in loop blocks
     for (ir::BasicBlock* bb : loop.blocks) {
         if (!bb) return false;

@@ -11,7 +11,7 @@ int test_constant(int a) { return ((a + 1) * 2) - 3; }
 
 int main() {
     long long sum = 0;
-    for (int i = 1; i <= 100000000; i++) {
+    for (int i = 1; i <= 5000000; i++) {
         sum += test_mixed(i, i % 7, i % 11, i % 13);
         sum += test_chained(i % 5, i % 9, i % 17, i % 23);
         sum += test_constant(i);
