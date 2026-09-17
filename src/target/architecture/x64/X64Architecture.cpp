@@ -1602,6 +1602,9 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             default:                    set = "sete"; break;
         }
         if (isFloatCmp) {
+            const bool single = i.getOperands()[0]->get()->getType()->isFloatTy();
+            const char* move = single ? "movss" : "movsd";
+            const char* compare = single ? "ucomiss" : "ucomisd";
             if (abi == X64ABI::Windows) {
                 *os << "  movsd xmm0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
                 *os << "  ucomisd xmm0, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
@@ -1609,11 +1612,11 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
                 *os << "  movzx " << eax << ", " << al << "\n";
                 *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
             } else {
-                *os << "  movsd " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
-                *os << "  ucomisd " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
+                *os << "  " << move << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
+                *os << "  " << compare << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
                 *os << "  " << set << " " << al << "\n";
                 *os << "  movzbq " << al << ", " << rax << "\n";
-                *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+                *os << "  movl " << eax << ", " << cg.getValueAsOperand(&i) << "\n";
             }
         } else {
             bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
@@ -2842,6 +2845,8 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const 
         case ir::Instruction::VInsert:
         case ir::Instruction::VMin:
         case ir::Instruction::VMax:
+        case ir::Instruction::VCmp:
+        case ir::Instruction::VSelect:
             return true;
         default:
             return false;
@@ -3446,10 +3451,64 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         } else if (i.getOpcode() == ir::Instruction::VHAdd) {
             simdInst = (elemTy->isFloatTy()) ? "haddps" : ((elemTy->isDoubleTy()) ? "haddpd" : "phaddd");
         } else if (i.getOpcode() == ir::Instruction::VCmp) {
-            simdInst = elemTy->isFloatTy() ? "cmpps $0," : (elemTy->isDoubleTy() ? "cmppd $0," : "pcmpeqd");
+            if (i.getOperands().size() != 3)
+                throw std::runtime_error("VCmp requires two vectors and a predicate");
+            auto* predicate = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get());
+            if (!predicate) throw std::runtime_error("VCmp predicate must be constant");
+            const auto pred = static_cast<ir::VectorCompareOp>(predicate->getValue());
+            auto* comparedType = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            if (!comparedType) throw std::runtime_error("VCmp operands must be vectors");
+            const ir::Type* comparedElemTy = comparedType->getElementType();
+            const unsigned totalBits = comparedElemTy->getSize() * 8 * numElem;
+            std::string lhs = totalBits == 256 ? toYmmReg(op0) : op0;
+            std::string rhs = totalBits == 256 ? toYmmReg(op1) : op1;
+            std::string out = totalBits == 256 ? toYmmReg(dst) : dst;
+            if (comparedElemTy->isIntegerTy() && comparedElemTy->getSize() == 4) {
+                if (pred == ir::VectorCompareOp::EQ)
+                    *os << "  vpcmpeqd " << rhs << ", " << lhs << ", " << out << "\n";
+                else if (pred == ir::VectorCompareOp::GT)
+                    *os << "  vpcmpgtd " << rhs << ", " << lhs << ", " << out << "\n";
+                else if (pred == ir::VectorCompareOp::LT)
+                    *os << "  vpcmpgtd " << lhs << ", " << rhs << ", " << out << "\n";
+                else
+                    throw std::runtime_error("Unsupported signed i32 vector comparison predicate");
+            } else if (comparedElemTy->isFloatTy() || comparedElemTy->isDoubleTy()) {
+                unsigned immediate = 0;
+                bool swap = false;
+                switch (pred) {
+                    case ir::VectorCompareOp::EQ: immediate = 0; break;  // ordered, quiet
+                    case ir::VectorCompareOp::LT: immediate = 1; break;
+                    case ir::VectorCompareOp::LE: immediate = 2; break;
+                    case ir::VectorCompareOp::NE: immediate = 12; break; // ordered, quiet
+                    case ir::VectorCompareOp::GT: immediate = 1; swap = true; break;
+                    case ir::VectorCompareOp::GE: immediate = 2; swap = true; break;
+                    default: throw std::runtime_error("Unsupported floating vector comparison predicate");
+                }
+                const char* mnemonic = comparedElemTy->isFloatTy() ? "vcmpps" : "vcmppd";
+                *os << "  " << mnemonic << " $" << immediate << ", "
+                    << (swap ? lhs : rhs) << ", " << (swap ? rhs : lhs)
+                    << ", " << out << "\n";
+            } else {
+                throw std::runtime_error("Unsupported VCmp element type");
+            }
+            return;
         } else if (i.getOpcode() == ir::Instruction::VSelect) {
-            *os << "  movdqu " << op0 << ", " << dst << "\n";
-            *os << "  pand " << op1 << ", " << dst << "\n";
+            if (i.getOperands().size() != 3)
+                throw std::runtime_error("VSelect requires mask, true, and false vectors");
+            std::string trueValue = cg.getValueAsOperand(i.getOperands()[1]->get());
+            std::string falseValue = cg.getValueAsOperand(i.getOperands()[2]->get());
+            const unsigned totalBits = elemTy->getSize() * 8 * numElem;
+            if (totalBits == 256) {
+                op0 = toYmmReg(op0); trueValue = toYmmReg(trueValue);
+                falseValue = toYmmReg(falseValue); dst = toYmmReg(dst);
+            }
+            // IR masks are lane-wise all-zero/all-one bit vectors.  AVX
+            // blendv observes each lane's sign bit, which is therefore an
+            // exact target-specific realization of VSelect's abstract mask.
+            const char* mnemonic = elemTy->isDoubleTy() ? "vblendvpd" :
+                                   (elemTy->isFloatTy() ? "vblendvps" : "vpblendvb");
+            *os << "  " << mnemonic << " " << op0 << ", " << trueValue
+                << ", " << falseValue << ", " << dst << "\n";
             return;
         } else if (elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
