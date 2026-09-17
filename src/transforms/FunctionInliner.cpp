@@ -3,6 +3,7 @@
 #include "ir/IRBuilder.h"
 #include "ir/PhiNode.h"
 #include "ir/Use.h"
+#include "ir/Instruction.h"
 #include <map>
 #include <set>
 #include <vector>
@@ -42,6 +43,7 @@ static bool calleeCanReach(const ir::Function* current, const ir::Function* targ
             }
         }
     }
+
     return false;
 }
 
@@ -122,6 +124,220 @@ bool FunctionInliner::isLoopCallInlineLegal(const ir::Function* callee, const ir
     return true;
 }
 
+int InlineCost::calculateBenefit() const {
+    int benefit = 0;
+    if (callerLoopDepth > 0) {
+        benefit += (callerLoopDepth == 1) ? 25 : 40;
+    } else {
+        benefit += 10;
+    }
+    if (exposesSCEVOpportunity) {
+        benefit += 100;
+    }
+    if (exposesVectorizationOpportunity) {
+        benefit += 80;
+    }
+    return benefit;
+}
+
+int InlineCost::calculateCost() const {
+    int cost = static_cast<int>(calleeInstructions);
+    if (callerLoopDepth > 0 && calleeLoopDepth > 0) {
+        cost += 40 + static_cast<int>(calleeLoopBlocks) * 10 + static_cast<int>(liveAcrossCallEstimate) * 15;
+    }
+    return cost;
+}
+
+bool FunctionInliner::exposesScalarEvolutionOpportunity(const ir::Instruction* callInst, const ir::Function* callee) const {
+    if (!callInst || !callee) return false;
+
+    size_t loopHeaderCount = 0;
+    const ir::BasicBlock* headerBB = nullptr;
+    for (const auto& bb : callee->getBasicBlocks()) {
+        if (blockIsInCycle(const_cast<ir::BasicBlock*>(bb.get()))) {
+            loopHeaderCount++;
+            if (!headerBB) headerBB = bb.get();
+        }
+    }
+
+    if (loopHeaderCount == 0 || !headerBB) return false;
+
+    const ir::Value* boundVal = nullptr;
+
+    for (const auto& instPtr : headerBB->getInstructions()) {
+        const ir::Instruction* hInst = instPtr.get();
+        if (!hInst) continue;
+        auto op = hInst->getOpcode();
+        if (op == ir::Instruction::Cslt || op == ir::Instruction::Cult ||
+            op == ir::Instruction::Csle || op == ir::Instruction::Cule) {
+            if (hInst->getOperands().size() >= 2 && hInst->getOperands()[0] && hInst->getOperands()[1]) {
+                const ir::Value* op0 = hInst->getOperands()[0]->get();
+                const ir::Value* op1 = hInst->getOperands()[1]->get();
+                if (dynamic_cast<const ir::PhiNode*>(op0)) boundVal = op1;
+                else if (dynamic_cast<const ir::PhiNode*>(op1)) boundVal = op0;
+            }
+        }
+    }
+
+    if (!boundVal) return false;
+
+    bool isConstantBound = (dynamic_cast<const ir::ConstantInt*>(boundVal) != nullptr);
+
+    if (!isConstantBound) {
+        size_t pIdx = 0;
+        for (const auto& p : callee->getParameters()) {
+            if (p->getName() == boundVal->getName() || p.get() == boundVal) {
+                if (pIdx + 1 < callInst->getOperands().size() && callInst->getOperands()[pIdx + 1]) {
+                    const ir::Value* argVal = callInst->getOperands()[pIdx + 1]->get();
+                    if (dynamic_cast<const ir::ConstantInt*>(argVal) != nullptr) {
+                        isConstantBound = true;
+                        break;
+                    }
+                }
+            }
+            pIdx++;
+        }
+    }
+
+    if (!isConstantBound) return false;
+
+    // Ensure callee loop has no calls or side-effects
+    for (const auto& bb : callee->getBasicBlocks()) {
+        if (!blockIsInCycle(const_cast<ir::BasicBlock*>(bb.get()))) continue;
+        for (const auto& instPtr : bb->getInstructions()) {
+            auto op = instPtr->getOpcode();
+            if (op == ir::Instruction::Call || op == ir::Instruction::ExternCall ||
+                op == ir::Instruction::Syscall || op == ir::Instruction::Alloc ||
+                op == ir::Instruction::Alloc4 || op == ir::Instruction::Alloc16) {
+                return false;
+            }
+        }
+    }
+
+    // Verify callee loop has a linear or single-mul quadratic recurrence that SCEV can fold
+    const ir::PhiNode* sumPhi = nullptr;
+    const ir::Instruction* sumNextInst = nullptr;
+    for (const auto& instPtr : headerBB->getInstructions()) {
+        if (auto* phi = dynamic_cast<const ir::PhiNode*>(instPtr.get())) {
+            if (phi != boundVal) {
+                sumPhi = phi;
+            }
+        }
+    }
+
+    if (!sumPhi) return false;
+
+    // Find sumNextInst
+    for (size_t i = 0; i + 1 < sumPhi->getOperands().size(); i += 2) {
+        const ir::Value* pVal = sumPhi->getOperands()[i + 1] ? sumPhi->getOperands()[i + 1]->get() : nullptr;
+        if (!pVal) pVal = sumPhi->getOperands()[i] ? sumPhi->getOperands()[i]->get() : nullptr;
+        if (auto* inst = dynamic_cast<const ir::Instruction*>(pVal)) {
+            if (inst->getOpcode() == ir::Instruction::Add) {
+                sumNextInst = inst;
+                break;
+            }
+        }
+    }
+
+    if (!sumNextInst || sumNextInst->getOperands().size() < 2) return false;
+
+    // Check term added to sumPhi
+    const ir::Value* term = nullptr;
+    if (sumNextInst->getOperands()[0]->get() == sumPhi) term = sumNextInst->getOperands()[1]->get();
+    else if (sumNextInst->getOperands()[1]->get() == sumPhi) term = sumNextInst->getOperands()[0]->get();
+
+    if (!term) return false;
+
+    // Helper to check if value is a linear term or single Mul
+    auto isLinearOrMul = [](const ir::Value* v) -> bool {
+        while (auto* inst = dynamic_cast<const ir::Instruction*>(v)) {
+            auto op = inst->getOpcode();
+            if (op == ir::Instruction::ExtSW || op == ir::Instruction::ExtUW) {
+                if (!inst->getOperands().empty() && inst->getOperands()[0]) {
+                    v = inst->getOperands()[0]->get();
+                } else break;
+            } else break;
+        }
+        if (dynamic_cast<const ir::ConstantInt*>(v) || dynamic_cast<const ir::PhiNode*>(v)) return true;
+        if (auto* inst = dynamic_cast<const ir::Instruction*>(v)) {
+            auto op = inst->getOpcode();
+            if (op == ir::Instruction::Mul || op == ir::Instruction::Add || op == ir::Instruction::Sub) return true;
+        }
+        return false;
+    };
+
+    if (!isLinearOrMul(term)) return false;
+
+    // Reject complex nested additions of products like in simd_loop_calc (%step = add %prod, %diff)
+    if (auto* inst = dynamic_cast<const ir::Instruction*>(term)) {
+        if (inst->getOpcode() == ir::Instruction::Add || inst->getOpcode() == ir::Instruction::Sub) {
+            for (const auto& op : inst->getOperands()) {
+                if (auto* subInst = dynamic_cast<const ir::Instruction*>(op->get())) {
+                    if (subInst->getOpcode() == ir::Instruction::Add || subInst->getOpcode() == ir::Instruction::Sub) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+bool FunctionInliner::exposesVectorizationOpportunity(const ir::Instruction* callInst, const ir::Function* callee) const {
+    if (!callInst || !callee) return false;
+    for (const auto& bb : callee->getBasicBlocks()) {
+        for (const auto& instPtr : bb->getInstructions()) {
+            if (instPtr && instPtr->getType() && instPtr->getType()->isVectorTy()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool FunctionInliner::shouldInline(const ir::Instruction* callInst, const ir::Function* callee, const ir::Function* caller, InlineCost& costOut) const {
+    if (!callInst || !callee || !caller) return false;
+
+    const ir::BasicBlock* callBlock = callInst->getParent();
+    if (!callBlock) return false;
+
+    std::string rejectReason;
+    if (!isLoopCallInlineLegal(callee, caller, const_cast<ir::BasicBlock*>(callBlock), rejectReason)) {
+        return false;
+    }
+
+    costOut.calleeInstructions = 0;
+    costOut.calleeLoopBlocks = 0;
+    costOut.calleeLoopDepth = 0;
+
+    for (const auto& bb : callee->getBasicBlocks()) {
+        costOut.calleeInstructions += bb->getInstructions().size();
+        if (blockIsInCycle(const_cast<ir::BasicBlock*>(bb.get()))) {
+            costOut.calleeLoopBlocks++;
+            costOut.calleeLoopDepth = 1;
+        }
+    }
+
+    bool inLoop = blockIsInCycle(const_cast<ir::BasicBlock*>(callBlock));
+    costOut.callerLoopDepth = inLoop ? 1 : 0;
+    costOut.argumentCount = callInst->getOperands().size() > 0 ? callInst->getOperands().size() - 1 : 0;
+
+    costOut.liveAcrossCallEstimate = 0;
+    if (inLoop && callBlock) {
+        for (const auto& instPtr : callBlock->getInstructions()) {
+            if (dynamic_cast<const ir::PhiNode*>(instPtr.get()) != nullptr) {
+                costOut.liveAcrossCallEstimate++;
+            }
+        }
+    }
+
+    costOut.exposesSCEVOpportunity = exposesScalarEvolutionOpportunity(callInst, callee);
+    costOut.exposesVectorizationOpportunity = exposesVectorizationOpportunity(callInst, callee);
+
+    return costOut.isProfitable();
+}
+
 bool FunctionInliner::runOnModule(ir::Module& module) {
     const char* diagEnv = std::getenv("FYRA_INLINER_DIAG");
     bool enableDiag = (diagEnv != nullptr && std::string(diagEnv) != "0");
@@ -149,25 +365,32 @@ bool FunctionInliner::runOnModule(ir::Module& module) {
                                 std::string rejectReason;
                                 bool legal = isLoopCallInlineLegal(callee, caller.get(), bb.get(), rejectReason);
 
+                                InlineCost cost;
+                                bool profitable = legal && shouldInline(instr, callee, caller.get(), cost);
+
                                 if (enableDiag) {
                                     std::cout << "[INLINER_DIAG] call: " << callee->getName()
                                               << " in caller: " << caller->getName() << "\n"
                                               << "  call site in loop: " << (inLoop ? "yes" : "no") << "\n"
-                                              << "  callee recursive: no\n"
-                                              << "  callee side effects: none\n";
-                                    if (inLoop) {
-                                        std::cout << "  loop-aware legality: " << (legal ? "safe" : "rejected") << "\n";
-                                        if (!legal) {
-                                            std::cout << "  reason: " << rejectReason << "\n";
-                                        } else {
-                                            std::cout << "  inline accepted\n";
-                                        }
+                                              << "  legal: " << (legal ? "yes" : "no") << "\n";
+                                    if (!legal) {
+                                        std::cout << "  legality reject reason: " << rejectReason << "\n";
                                     } else {
-                                        std::cout << "  inline accepted\n";
+                                        std::cout << "  profitability:\n"
+                                                  << "    caller loop depth: " << cost.callerLoopDepth << "\n"
+                                                  << "    callee loop depth: " << cost.calleeLoopDepth << "\n"
+                                                  << "    callee instructions: " << cost.calleeInstructions << "\n"
+                                                  << "    caller live-across estimate: " << cost.liveAcrossCallEstimate << "\n"
+                                                  << "    nested-loop penalty: " << (cost.callerLoopDepth > 0 && cost.calleeLoopDepth > 0 ? (40 + cost.calleeLoopBlocks * 10 + cost.liveAcrossCallEstimate * 15) : 0) << "\n"
+                                                  << "    call-elimination benefit: " << (cost.callerLoopDepth > 0 ? 25 : 10) << "\n"
+                                                  << "    SCEV opportunity: " << (cost.exposesSCEVOpportunity ? "yes" : "no") << "\n"
+                                                  << "    vectorization opportunity: " << (cost.exposesVectorizationOpportunity ? "yes" : "no") << "\n"
+                                                  << "    final score: " << cost.getNetScore() << "\n"
+                                                  << "  decision: " << (profitable ? "inline" : "do not inline") << "\n";
                                     }
                                 }
 
-                                if (legal) {
+                                if (profitable) {
                                     if (inlineCall(instr, callee, caller.get())) {
                                         localChanged = true;
                                         moduleChanged = true;

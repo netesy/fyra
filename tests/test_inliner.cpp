@@ -348,11 +348,100 @@ void test_complex_multi_return_rejection_in_loop() {
     std::cout << "--- Complex Multi-Return Rejection Inside Loop Passed ---" << std::endl;
 }
 
+void test_nested_loop_unprofitable_rejection() {
+    std::cout << "--- Testing Nested Loop Unprofitable Rejection ---" << std::endl;
+    auto ctx = std::make_shared<ir::IRContext>();
+    ir::Module module("unprofitable_module", ctx);
+    ir::IRBuilder builder(ctx);
+    builder.setModule(&module);
+
+    ir::IntegerType* i32Ty = static_cast<ir::IntegerType*>(ctx->getIntegerType(32));
+    ir::IntegerType* i64Ty = static_cast<ir::IntegerType*>(ctx->getIntegerType(64));
+
+    // Inner loop callee with sign-extended quadratic product
+    ir::Function* calcFunc = builder.createFunction("calc_func", i64Ty, {i32Ty});
+    ir::Value* pN = calcFunc->getParameters().front().get();
+    ir::BasicBlock* h_entry = builder.createBasicBlock("h_entry", calcFunc);
+    ir::BasicBlock* h_loop = builder.createBasicBlock("h_loop", calcFunc);
+    ir::BasicBlock* h_body = builder.createBasicBlock("h_body", calcFunc);
+    ir::BasicBlock* h_exit = builder.createBasicBlock("h_exit", calcFunc);
+
+    builder.setInsertPoint(h_entry);
+    builder.createJmp(h_loop);
+
+    builder.setInsertPoint(h_loop);
+    ir::PhiNode* phiJ = builder.createPhi(i32Ty, 0, nullptr);
+    ir::PhiNode* phiSum = builder.createPhi(i64Ty, 0, nullptr);
+    ir::Instruction* cond = builder.createCslt(phiJ, pN);
+    builder.createBr(cond, h_body, h_exit);
+
+    builder.setInsertPoint(h_body);
+    ir::Instruction* t1 = builder.createMul(phiJ, ctx->getConstantInt(i32Ty, 5));
+    ir::Instruction* a_w = builder.createAdd(t1, ctx->getConstantInt(i32Ty, 3));
+    ir::Instruction* a = builder.createCast(a_w, i64Ty);
+    ir::Instruction* t2 = builder.createMul(phiJ, ctx->getConstantInt(i32Ty, 2));
+    ir::Instruction* b_w = builder.createAdd(t2, ctx->getConstantInt(i32Ty, 7));
+    ir::Instruction* b = builder.createCast(b_w, i64Ty);
+    ir::Instruction* prod = builder.createMul(a, b);
+    ir::Instruction* sumNext = builder.createAdd(phiSum, prod);
+    ir::Instruction* jNext = builder.createAdd(phiJ, ctx->getConstantInt(i32Ty, 1));
+    builder.createJmp(h_loop);
+
+    phiJ->addIncoming(ctx->getConstantInt(i32Ty, 0), h_entry);
+    phiJ->addIncoming(jNext, h_body);
+    phiSum->addIncoming(ctx->getConstantInt(i64Ty, 0), h_entry);
+    phiSum->addIncoming(sumNext, h_body);
+
+    builder.setInsertPoint(h_exit);
+    builder.createRet(phiSum);
+
+    // Outer caller loop
+    ir::Function* caller = builder.createFunction("outer_caller", i64Ty, {i32Ty});
+    ir::Value* pK = caller->getParameters().front().get();
+    ir::BasicBlock* c_entry = builder.createBasicBlock("c_entry", caller);
+    ir::BasicBlock* c_loop = builder.createBasicBlock("c_loop", caller);
+    ir::BasicBlock* c_body = builder.createBasicBlock("c_body", caller);
+    ir::BasicBlock* c_exit = builder.createBasicBlock("c_exit", caller);
+
+    builder.setInsertPoint(c_entry);
+    builder.createJmp(c_loop);
+
+    builder.setInsertPoint(c_loop);
+    ir::PhiNode* phiK = builder.createPhi(i32Ty, 0, nullptr);
+    ir::PhiNode* phiTotal = builder.createPhi(i64Ty, 0, nullptr);
+    ir::Instruction* cCond = builder.createCslt(phiK, pK);
+    builder.createBr(cCond, c_body, c_exit);
+
+    builder.setInsertPoint(c_body);
+    ir::Instruction* callInst = builder.createCall(calcFunc, {ctx->getConstantInt(i32Ty, 5000000)});
+    ir::Instruction* totalNext = builder.createAdd(phiTotal, callInst);
+    ir::Instruction* kNext = builder.createAdd(phiK, ctx->getConstantInt(i32Ty, 1));
+    builder.createJmp(c_loop);
+
+    phiK->addIncoming(ctx->getConstantInt(i32Ty, 0), c_entry);
+    phiK->addIncoming(kNext, c_body);
+    phiTotal->addIncoming(ctx->getConstantInt(i64Ty, 0), c_entry);
+    phiTotal->addIncoming(totalNext, c_body);
+
+    builder.setInsertPoint(c_exit);
+    builder.createRet(phiTotal);
+
+    transforms::CFGBuilder::run(*calcFunc);
+    transforms::CFGBuilder::run(*caller);
+
+    transforms::FunctionInliner inliner(40);
+    bool changed = inliner.runOnModule(module);
+    assert(!changed && "Unprofitable nested loop callee MUST NOT be inlined!");
+
+    std::cout << "--- Nested Loop Unprofitable Rejection Passed ---" << std::endl;
+}
+
 int main() {
     test_multiblock_inlining();
     test_recursion_rejection();
     test_safe_leaf_helper_in_loop();
     test_canonical_loop_helper_in_loop();
     test_complex_multi_return_rejection_in_loop();
+    test_nested_loop_unprofitable_rejection();
     return 0;
 }
