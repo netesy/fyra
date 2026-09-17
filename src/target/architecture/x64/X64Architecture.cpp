@@ -763,9 +763,6 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
-    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
-    std::string movOp = is32 ? "movl" : "movq";
     std::string idivOp = is32 ? "idivl" : "idivq";
 
     if (auto* os = cg.getTextStream()) {
@@ -777,25 +774,29 @@ void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
         bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
                          (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            *os << "  push rcx\n";
-            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
-            else *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  push rcx\n  push rdx\n  push rax\n";
+            if (isGlobal0) *os << "  lea rax, " << op0 << "\n";
+            else *os << "  mov rax, " << op0 << "\n";
             if (is32) *os << "  cdq\n"; else *os << "  cqo\n";
-            if (isGlobal1) *os << "  lea " << rcx << ", " << op1 << "\n";
-            else *os << "  mov " << rcx << ", " << op1 << "\n";
-            *os << "  idiv " << rcx << "\n";
-            *os << "  pop rcx\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (isGlobal1) *os << "  lea rcx, " << op1 << "\n";
+            else *os << "  mov rcx, " << op1 << "\n";
+            *os << "  idiv rcx\n";
+            *os << "  mov [rsp], rax\n"; // Store quotient into pushed rax slot on stack
+            *os << "  pop rax\n  pop rdx\n  pop rcx\n";
+            *os << "  mov " << dst << ", rax\n";
         } else {
-            *os << "  pushq %rcx\n";
-            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else emitMov(cg, os, op0, rax, is32);
+            std::string raxReg = is32 ? "%eax" : "%rax";
+            std::string rcxReg = is32 ? "%ecx" : "%rcx";
+            *os << "  pushq %rax\n  pushq %rcx\n  pushq %rdx\n";
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << raxReg << "\n";
+            else emitMov(cg, os, op0, raxReg, is32);
             if (is32) *os << "  cltd\n"; else *os << "  cqto\n";
-            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcx << "\n";
-            else emitMov(cg, os, op1, rcx, is32);
-            *os << "  " << idivOp << " " << rcx << "\n";
-            *os << "  popq %rcx\n";
-            emitMov(cg, os, rax, dst, is32);
+            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcxReg << "\n";
+            else emitMov(cg, os, op1, rcxReg, is32);
+            *os << "  " << idivOp << " " << rcxReg << "\n";
+            *os << "  movq %rax, 16(%rsp)\n"; // Store quotient into pushed rax slot on stack
+            *os << "  popq %rdx\n  popq %rcx\n  popq %rax\n";
+            emitMov(cg, os, raxReg, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -808,9 +809,6 @@ void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
-    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
-    std::string rdx = (abi == X64ABI::SystemV) ? (is32 ? "%edx" : "%rdx") : (is32 ? "edx" : "rdx");
     std::string idivOp = is32 ? "idivl" : "idivq";
 
     if (auto* os = cg.getTextStream()) {
@@ -822,25 +820,29 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
         bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
                          (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            *os << "  push rcx\n";
-            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
-            else *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  push rcx\n  push rdx\n  push rax\n";
+            if (isGlobal0) *os << "  lea rax, " << op0 << "\n";
+            else *os << "  mov rax, " << op0 << "\n";
             if (is32) *os << "  cdq\n"; else *os << "  cqo\n";
-            if (isGlobal1) *os << "  lea " << rcx << ", " << op1 << "\n";
-            else *os << "  mov " << rcx << ", " << op1 << "\n";
-            *os << "  idiv " << rcx << "\n";
-            *os << "  pop rcx\n";
-            *os << "  mov " << dst << ", " << rdx << "\n";
+            if (isGlobal1) *os << "  lea rcx, " << op1 << "\n";
+            else *os << "  mov rcx, " << op1 << "\n";
+            *os << "  idiv rcx\n";
+            *os << "  mov [rsp], rdx\n"; // Store remainder into pushed rax slot on stack
+            *os << "  pop rax\n  pop rdx\n  pop rcx\n";
+            *os << "  mov " << dst << ", rax\n";
         } else {
-            *os << "  pushq %rcx\n";
-            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else emitMov(cg, os, op0, rax, is32);
+            std::string raxReg = is32 ? "%eax" : "%rax";
+            std::string rcxReg = is32 ? "%ecx" : "%rcx";
+            *os << "  pushq %rax\n  pushq %rcx\n  pushq %rdx\n";
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << raxReg << "\n";
+            else emitMov(cg, os, op0, raxReg, is32);
             if (is32) *os << "  cltd\n"; else *os << "  cqto\n";
-            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcx << "\n";
-            else emitMov(cg, os, op1, rcx, is32);
-            *os << "  " << idivOp << " " << rcx << "\n";
-            *os << "  popq %rcx\n";
-            emitMov(cg, os, rdx, dst, is32);
+            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcxReg << "\n";
+            else emitMov(cg, os, op1, rcxReg, is32);
+            *os << "  " << idivOp << " " << rcxReg << "\n";
+            *os << "  movq %rdx, 16(%rsp)\n"; // Store remainder into pushed rax slot on stack
+            *os << "  popq %rdx\n  popq %rcx\n  popq %rax\n";
+            emitMov(cg, os, raxReg, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);

@@ -66,7 +66,66 @@ bool FunctionInliner::canInline(const ir::Function* callee, const ir::Function* 
     return true;
 }
 
+bool FunctionInliner::isLoopCallInlineLegal(const ir::Function* callee, const ir::Function* caller, ir::BasicBlock* callBlock, std::string& reason) const {
+    if (!blockIsInCycle(callBlock)) {
+        return true;
+    }
+
+    size_t totalInstrs = 0;
+    size_t retCount = 0;
+    bool hasCalls = false;
+    bool hasSideEffects = false;
+    size_t internalLoopBlocks = 0;
+
+    for (const auto& bb : callee->getBasicBlocks()) {
+        if (blockIsInCycle(bb.get())) {
+            internalLoopBlocks++;
+        }
+        for (const auto& inst : bb->getInstructions()) {
+            totalInstrs++;
+            auto op = inst->getOpcode();
+            if (op == ir::Instruction::Call || op == ir::Instruction::ExternCall) {
+                hasCalls = true;
+            } else if (op == ir::Instruction::Ret) {
+                retCount++;
+            } else if (op == ir::Instruction::Syscall || op == ir::Instruction::Alloc || op == ir::Instruction::Alloc4 || op == ir::Instruction::Alloc16) {
+                hasSideEffects = true;
+            }
+        }
+    }
+
+    if (hasCalls) {
+        reason = "callee contains nested function calls";
+        return false;
+    }
+
+    if (hasSideEffects) {
+        reason = "callee contains side-effecting operations";
+        return false;
+    }
+
+    if (retCount > 1) {
+        reason = "callee has multiple return statements inside loop call site";
+        return false;
+    }
+
+    if (totalInstrs > 60) {
+        reason = "callee instruction count exceeds loop inlining threshold";
+        return false;
+    }
+
+    if (internalLoopBlocks > 3) {
+        reason = "callee contains complex or nested internal loop structures";
+        return false;
+    }
+
+    return true;
+}
+
 bool FunctionInliner::runOnModule(ir::Module& module) {
+    const char* diagEnv = std::getenv("FYRA_INLINER_DIAG");
+    bool enableDiag = (diagEnv != nullptr && std::string(diagEnv) != "0");
+
     bool changed = false;
     bool moduleChanged = true;
     int passLimit = 10;
@@ -84,19 +143,37 @@ bool FunctionInliner::runOnModule(ir::Module& module) {
                     for (auto it = instrs.begin(); it != instrs.end(); ++it) {
                         ir::Instruction* instr = it->get();
                         if (instr->getOpcode() == ir::Instruction::Call && !instr->getOperands().empty()) {
-                            // Inlining into a loop currently exposes cloned
-                            // values to a liveness bug that can coalesce a
-                            // callee temporary with a still-live induction
-                            // value. Keep the call boundary until loop-aware
-                            // live-range repair exists.
-                            if (blockIsInCycle(bb.get())) continue;
                             auto* callee = dynamic_cast<ir::Function*>(instr->getOperands()[0]->get());
                             if (callee && canInline(callee, caller.get())) {
-                                if (inlineCall(instr, callee, caller.get())) {
-                                    localChanged = true;
-                                    moduleChanged = true;
-                                    changed = true;
-                                    break;
+                                bool inLoop = blockIsInCycle(bb.get());
+                                std::string rejectReason;
+                                bool legal = isLoopCallInlineLegal(callee, caller.get(), bb.get(), rejectReason);
+
+                                if (enableDiag) {
+                                    std::cout << "[INLINER_DIAG] call: " << callee->getName()
+                                              << " in caller: " << caller->getName() << "\n"
+                                              << "  call site in loop: " << (inLoop ? "yes" : "no") << "\n"
+                                              << "  callee recursive: no\n"
+                                              << "  callee side effects: none\n";
+                                    if (inLoop) {
+                                        std::cout << "  loop-aware legality: " << (legal ? "safe" : "rejected") << "\n";
+                                        if (!legal) {
+                                            std::cout << "  reason: " << rejectReason << "\n";
+                                        } else {
+                                            std::cout << "  inline accepted\n";
+                                        }
+                                    } else {
+                                        std::cout << "  inline accepted\n";
+                                    }
+                                }
+
+                                if (legal) {
+                                    if (inlineCall(instr, callee, caller.get())) {
+                                        localChanged = true;
+                                        moduleChanged = true;
+                                        changed = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
