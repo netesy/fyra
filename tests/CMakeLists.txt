@@ -294,6 +294,11 @@ target_link_libraries(test_loop_unroll PRIVATE fyra)
 add_test(NAME LoopUnrollTest COMMAND test_loop_unroll)
 set_tests_properties(LoopUnrollTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_simd_stubs test_simd_stubs.cpp)
+target_link_libraries(test_simd_stubs PRIVATE fyra)
+add_test(NAME SIMDStubsTest COMMAND test_simd_stubs)
+set_tests_properties(SIMDStubsTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_simd_exec test_simd_exec.cpp)
 target_link_libraries(test_simd_exec PRIVATE fyra)
 add_test(NAME SIMDTest COMMAND test_simd_exec)

@@ -356,4 +356,56 @@ void AArch64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const st
 std::string AArch64Architecture::getConditionCode(const std::string& op, bool isFloat, bool isUnsigned) const { return "eq"; }
 std::string AArch64Architecture::getWRegister(const std::string& xReg) const { return xReg; }
 
+bool AArch64Architecture::supportsVectorWidth(unsigned width) const {
+    return width == 64 || width == 128;
+}
+
+bool AArch64Architecture::supportsVectorType(const ir::VectorType* type) const {
+    if (!type) return false;
+    unsigned totalBits = static_cast<unsigned>(type->getSize() * 8);
+    if (totalBits != 64 && totalBits != 128) return false;
+    auto* elemTy = type->getElementType();
+    if (!elemTy) return false;
+    size_t elemBits = elemTy->getSize() * 8;
+    return elemBits == 8 || elemBits == 16 || elemBits == 32 || elemBits == 64;
+}
+
+bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const {
+    if (!supportsVectorType(type)) return false;
+    switch (op) {
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+        case ir::Instruction::VFAdd:
+        case ir::Instruction::VFSub:
+        case ir::Instruction::VFMul:
+        case ir::Instruction::VFDiv:
+        case ir::Instruction::VAnd:
+        case ir::Instruction::VOr:
+        case ir::Instruction::VXor:
+        case ir::Instruction::VLoad:
+        case ir::Instruction::VStore:
+        case ir::Instruction::VBroadcast:
+        case ir::Instruction::VExtract:
+        case ir::Instruction::VInsert:
+        case ir::Instruction::VShuffle:
+        case ir::Instruction::VCmp:
+        case ir::Instruction::VSelect:
+        case ir::Instruction::VHAdd:
+        case ir::Instruction::VHSub:
+        case ir::Instruction::VMin:
+        case ir::Instruction::VMax:
+        case ir::Instruction::VFMin:
+        case ir::Instruction::VFMax:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool AArch64Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
+    if (!supportsVectorType(srcType) || !supportsVectorType(dstType)) return false;
+    return op == ir::Instruction::VSExt || op == ir::Instruction::VZExt || op == ir::Instruction::VTrunc;
+}
+
 }

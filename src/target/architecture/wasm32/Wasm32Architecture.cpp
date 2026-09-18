@@ -109,4 +109,50 @@ void Wasm32Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std
 void Wasm32Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {}
 void Wasm32Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {}
 
+bool Wasm32Architecture::supportsVectorWidth(unsigned width) const {
+    return width == 128;
+}
+
+bool Wasm32Architecture::supportsVectorType(const ir::VectorType* type) const {
+    if (!type) return false;
+    unsigned totalBits = static_cast<unsigned>(type->getSize() * 8);
+    if (totalBits != 128) return false;
+    auto* elemTy = type->getElementType();
+    if (!elemTy) return false;
+    size_t elemBits = elemTy->getSize() * 8;
+    return elemBits == 8 || elemBits == 16 || elemBits == 32 || elemBits == 64;
+}
+
+bool Wasm32Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const {
+    if (!supportsVectorType(type)) return false;
+    switch (op) {
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+        case ir::Instruction::VFAdd:
+        case ir::Instruction::VFSub:
+        case ir::Instruction::VFMul:
+        case ir::Instruction::VFDiv:
+        case ir::Instruction::VAnd:
+        case ir::Instruction::VOr:
+        case ir::Instruction::VXor:
+        case ir::Instruction::VLoad:
+        case ir::Instruction::VStore:
+        case ir::Instruction::VBroadcast:
+        case ir::Instruction::VExtract:
+        case ir::Instruction::VInsert:
+        case ir::Instruction::VShuffle:
+        case ir::Instruction::VCmp:
+        case ir::Instruction::VSelect:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Wasm32Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
+    if (!supportsVectorType(srcType) || !supportsVectorType(dstType)) return false;
+    return op == ir::Instruction::VSExt || op == ir::Instruction::VZExt || op == ir::Instruction::VTrunc;
+}
+
 } // namespace target

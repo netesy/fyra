@@ -69,6 +69,11 @@ public:
     bool isCallerSaved(const std::string& reg) const override { return false; }
     bool isCalleeSaved(const std::string& reg) const override { return false; }
     std::string getAssemblyFileExtension() const override { return ".wat"; }
+
+    bool supportsVectorWidth(unsigned width) const override;
+    bool supportsVectorType(const ir::VectorType* type) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
     std::string formatConstant(const ir::ConstantInt* C) const override;
     std::string formatConstant(const ir::ConstantFP* C) const override;
 
