@@ -161,6 +161,79 @@ bool isStraightLine(const ir::BasicBlock& block) {
     return true;
 }
 
+struct SLPCost {
+    int scalarCost = 0;
+    int inputMaterializationCost = 0;
+    int vectorOpCost = 0;
+    int outputMaterializationCost = 0;
+
+    int totalVectorCost() const {
+        return inputMaterializationCost + vectorOpCost + outputMaterializationCost;
+    }
+
+    bool isProfitable(int margin = 1) const {
+        return totalVectorCost() + margin <= scalarCost;
+    }
+};
+
+SLPCost evaluateArithmeticPackCost(const std::vector<ir::Instruction*>& lanes, unsigned vectorWidthBits) {
+    SLPCost cost;
+    if (lanes.empty()) return cost;
+
+    cost.scalarCost = static_cast<int>(lanes.size());
+    cost.vectorOpCost = 1;
+
+    unsigned numLanes = static_cast<unsigned>(lanes.size());
+
+    // Evaluate input materialization costs
+    for (size_t opIdx = 0; opIdx < 2; ++opIdx) {
+        bool allSame = true;
+        bool allVectorProducers = true;
+        ir::Value* firstOp = lanes[0]->getOperands()[opIdx]->get();
+
+        for (size_t i = 0; i < numLanes; ++i) {
+            ir::Value* opVal = lanes[i]->getOperands()[opIdx]->get();
+            if (opVal != firstOp) allSame = false;
+            if (!dynamic_cast<ir::VectorInstruction*>(opVal)) {
+                allVectorProducers = false;
+            }
+        }
+
+        if (allVectorProducers) {
+            // Operands are produced by vector instructions (e.g. VLoad, VAdd) -> zero materialization cost
+            cost.inputMaterializationCost += 0;
+        } else if (allSame) {
+            // Single scalar broadcast -> 1 instruction cost
+            cost.inputMaterializationCost += 1;
+        } else {
+            // Disparate scalar inputs -> VInsert sequence (1 broadcast + (numLanes - 1) inserts)
+            cost.inputMaterializationCost += static_cast<int>(numLanes);
+        }
+    }
+
+    // Evaluate output materialization costs
+    bool allVectorConsumers = true;
+    for (size_t i = 0; i < numLanes; ++i) {
+        for (const auto* use : lanes[i]->getUseList()) {
+            if (use && !dynamic_cast<ir::VectorInstruction*>(use->getUser())) {
+                allVectorConsumers = false;
+                break;
+            }
+        }
+        if (!allVectorConsumers) break;
+    }
+
+    if (allVectorConsumers) {
+        // Output feeds vector consumers (e.g. VStore or subsequent vector ALU) -> zero extraction cost
+        cost.outputMaterializationCost = 0;
+    } else {
+        // Scalar consumers require extraction -> VExtract per lane
+        cost.outputMaterializationCost = static_cast<int>(numLanes);
+    }
+
+    return cost;
+}
+
 } // namespace
 
 bool SLPVectorizer::performTransformation(ir::Function& func) {
@@ -298,6 +371,26 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                 plan.vectorOpcode = vectorOpcode(run[cursor]->getOpcode());
                 if (!independent(plan.lanes)) { ++cursor; continue; }
 
+                // Cost Model Evaluation
+                SLPCost cost = evaluateArithmeticPackCost(plan.lanes, plan.widthBits);
+                if (!cost.isProfitable()) {
+                    diag("SLP candidate:\n"
+                         "  opcode: " + std::to_string(plan.vectorOpcode) + "\n"
+                         "  scalar type: " + scalarType->toString() + "\n"
+                         "  lanes: " + std::to_string(lanes) + "\n"
+                         "  vector width: " + std::to_string(plan.widthBits) + "\n"
+                         "  scalar instructions eliminated: " + std::to_string(cost.scalarCost) + "\n"
+                         "  scalar cost: " + std::to_string(cost.scalarCost) + "\n"
+                         "  input materialization cost: " + std::to_string(cost.inputMaterializationCost) + "\n"
+                         "  vector operation cost: " + std::to_string(cost.vectorOpCost) + "\n"
+                         "  output materialization cost: " + std::to_string(cost.outputMaterializationCost) + "\n"
+                         "  total vector cost: " + std::to_string(cost.totalVectorCost()) + "\n"
+                         "  decision: REJECT\n"
+                         "  reason: insert/extract materialization exceeds scalar cost");
+                    ++cursor;
+                    continue;
+                }
+
                 auto insertAt = std::find_if(block.getInstructions().begin(), block.getInstructions().end(),
                     [&](const std::unique_ptr<ir::Instruction>& item) { return item.get() == plan.lanes.front(); });
                 auto emit = [&](std::unique_ptr<ir::Instruction> instruction) {
@@ -325,8 +418,19 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                     plan.lanes[lane]->replaceAllUsesWith(extract);
                 }
                 block.removeInstructions(plan.lanes);
-                diag("pack accepted: opcode " + std::to_string(plan.vectorOpcode) +
-                     ", lanes " + std::to_string(lanes) + ", width " + std::to_string(plan.widthBits));
+                diag("SLP candidate:\n"
+                     "  opcode: " + std::to_string(plan.vectorOpcode) + "\n"
+                     "  scalar type: " + scalarType->toString() + "\n"
+                     "  lanes: " + std::to_string(lanes) + "\n"
+                     "  vector width: " + std::to_string(plan.widthBits) + "\n"
+                     "  scalar instructions eliminated: " + std::to_string(cost.scalarCost) + "\n"
+                     "  scalar cost: " + std::to_string(cost.scalarCost) + "\n"
+                     "  input materialization cost: " + std::to_string(cost.inputMaterializationCost) + "\n"
+                     "  vector operation cost: " + std::to_string(cost.vectorOpCost) + "\n"
+                     "  output materialization cost: " + std::to_string(cost.outputMaterializationCost) + "\n"
+                     "  total vector cost: " + std::to_string(cost.totalVectorCost()) + "\n"
+                     "  decision: ACCEPT\n"
+                     "  reason: vectorization cost cheaper than scalar cost");
                 changed = true;
                 cursor += lanes;
             }
