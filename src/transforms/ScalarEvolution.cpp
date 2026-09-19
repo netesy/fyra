@@ -14,11 +14,17 @@
 
 namespace transforms {
 
-static ir::Value* stripExtensions(ir::Value* val) {
+static ir::Value* stripExtensions(ir::Value* val, ir::Instruction::Opcode* detectedExt = nullptr, uint32_t* srcBits = nullptr) {
     while (auto* inst = dynamic_cast<ir::Instruction*>(val)) {
         ir::Instruction::Opcode op = inst->getOpcode();
         if (op == ir::Instruction::ExtSW || op == ir::Instruction::ExtUW) {
-            if (!inst->getOperands().empty() && inst->getOperands()[0]) {
+            if (detectedExt) *detectedExt = op;
+            if (inst->getOperands().size() > 0 && inst->getOperands()[0] && inst->getOperands()[0]->get()) {
+                if (srcBits) {
+                    if (auto* ity = dynamic_cast<ir::IntegerType*>(inst->getOperands()[0]->get()->getType())) {
+                        *srcBits = ity->getBitwidth();
+                    }
+                }
                 val = inst->getOperands()[0]->get();
             } else break;
         } else break;
@@ -26,8 +32,9 @@ static ir::Value* stripExtensions(ir::Value* val) {
     return val;
 }
 
-static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff, int64_t& constAdd) {
-    val = stripExtensions(val);
+static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff, int64_t& constAdd,
+                            ir::Instruction::Opcode& detectedExt, uint32_t& srcBits) {
+    val = stripExtensions(val, &detectedExt, &srcBits);
     if (!val) return false;
 
     if (val == indVarPhi) {
@@ -44,8 +51,8 @@ static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff
         ir::Instruction::Opcode op = inst->getOpcode();
         if (op == ir::Instruction::Mul) {
             if (inst->getOperands().size() >= 2 && inst->getOperands()[0] && inst->getOperands()[1]) {
-                ir::Value* op0 = stripExtensions(inst->getOperands()[0]->get());
-                ir::Value* op1 = stripExtensions(inst->getOperands()[1]->get());
+                ir::Value* op0 = stripExtensions(inst->getOperands()[0]->get(), &detectedExt, &srcBits);
+                ir::Value* op1 = stripExtensions(inst->getOperands()[1]->get(), &detectedExt, &srcBits);
 
                 if (op0 == indVarPhi) {
                     if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) {
@@ -61,8 +68,8 @@ static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff
             }
         } else if (op == ir::Instruction::Add) {
             if (inst->getOperands().size() >= 2 && inst->getOperands()[0] && inst->getOperands()[1]) {
-                return parseLinearTerm(inst->getOperands()[0]->get(), indVarPhi, coeff, constAdd) &&
-                       parseLinearTerm(inst->getOperands()[1]->get(), indVarPhi, coeff, constAdd);
+                return parseLinearTerm(inst->getOperands()[0]->get(), indVarPhi, coeff, constAdd, detectedExt, srcBits) &&
+                       parseLinearTerm(inst->getOperands()[1]->get(), indVarPhi, coeff, constAdd, detectedExt, srcBits);
             }
         }
     }
@@ -157,6 +164,8 @@ bool ScalarEvolution::analyzeInductionVariable(Loop& loop, IndVar& indVar) {
                         if (auto* bConst = dynamic_cast<ir::ConstantInt*>(condOp1)) {
                             indVar.constantBound = bConst->getValue();
                             indVar.isConstantBound = true;
+                        } else {
+                            indVar.isConstantBound = false;
                         }
                         indVar.isSlt = (hOp == ir::Instruction::Cslt || hOp == ir::Instruction::Cult);
                         return true;
@@ -209,39 +218,70 @@ bool ScalarEvolution::analyzeRecurrence(Loop& loop, const IndVar& indVar, LoopRe
         else if (op1 == phi) termVal = op0;
         else continue;
 
-        termVal = stripExtensions(termVal);
+        ir::Instruction::Opcode detectedExt = ir::Instruction::ExtSW;
+        uint32_t srcBits = 32;
+        if (auto* termInst = dynamic_cast<ir::Instruction*>(termVal)) {
+            ir::Instruction::Opcode top = termInst->getOpcode();
+            if (top == ir::Instruction::ExtSW || top == ir::Instruction::ExtUW) {
+                detectedExt = top;
+                if (!termInst->getOperands().empty() && termInst->getOperands()[0] && termInst->getOperands()[0]->get()) {
+                    if (auto* ity = dynamic_cast<ir::IntegerType*>(termInst->getOperands()[0]->get()->getType())) {
+                        srcBits = ity->getBitwidth();
+                    }
+                }
+            }
+        }
+
+        ir::Value* strippedTerm = stripExtensions(termVal, &detectedExt, &srcBits);
+
+        uint32_t dstBits = 64;
+        if (auto* pTy = dynamic_cast<ir::IntegerType*>(phi->getType())) {
+            dstBits = pTy->getBitwidth();
+        }
 
         // Pattern 1: Linear f(i) = b*i + c
         int64_t coeffB = 0;
         int64_t coeffC = 0;
-        if (parseLinearTerm(termVal, indVar.phi, coeffB, coeffC)) {
+        if (parseLinearTerm(strippedTerm, indVar.phi, coeffB, coeffC, detectedExt, srcBits)) {
             rec.sumPhi = phi;
             rec.sumNextInst = nextInst;
             rec.initSumVal = initVal;
             rec.coeffA = 0;
             rec.coeffB = coeffB;
             rec.coeffC = coeffC;
+
+            rec.sourceWidth = srcBits;
+            rec.sourceSigned = (detectedExt == ir::Instruction::ExtSW);
+            rec.extensionOp = detectedExt;
+            rec.destWidth = dstBits;
+
             rec.isValid = true;
             return true;
         }
 
         // Pattern 2: Quadratic f(i) = (A*i + B)(C*i + D) = AC*i^2 + (AD+BC)*i + BD
-        if (auto* mulInst = dynamic_cast<ir::Instruction*>(termVal)) {
+        if (auto* mulInst = dynamic_cast<ir::Instruction*>(strippedTerm)) {
             if (mulInst->getOpcode() == ir::Instruction::Mul && mulInst->getOperands().size() >= 2) {
-                ir::Value* m0 = stripExtensions(mulInst->getOperands()[0]->get());
-                ir::Value* m1 = stripExtensions(mulInst->getOperands()[1]->get());
+                ir::Value* m0 = stripExtensions(mulInst->getOperands()[0]->get(), &detectedExt, &srcBits);
+                ir::Value* m1 = stripExtensions(mulInst->getOperands()[1]->get(), &detectedExt, &srcBits);
 
                 int64_t linA1 = 0, constB1 = 0;
                 int64_t linA2 = 0, constB2 = 0;
 
-                if (parseLinearTerm(m0, indVar.phi, linA1, constB1) &&
-                    parseLinearTerm(m1, indVar.phi, linA2, constB2)) {
+                if (parseLinearTerm(m0, indVar.phi, linA1, constB1, detectedExt, srcBits) &&
+                    parseLinearTerm(m1, indVar.phi, linA2, constB2, detectedExt, srcBits)) {
                     rec.sumPhi = phi;
                     rec.sumNextInst = nextInst;
                     rec.initSumVal = initVal;
                     rec.coeffA = linA1 * linA2;
                     rec.coeffB = (linA1 * constB2) + (constB1 * linA2);
                     rec.coeffC = constB1 * constB2;
+
+                    rec.sourceWidth = srcBits;
+                    rec.sourceSigned = (detectedExt == ir::Instruction::ExtSW);
+                    rec.extensionOp = detectedExt;
+                    rec.destWidth = dstBits;
+
                     rec.isValid = true;
                     return true;
                 }
@@ -275,14 +315,19 @@ bool ScalarEvolution::isSafeToEliminate(Loop& loop) {
 }
 
 ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBlock* preheader, const IndVar& indVar, const LoopRecurrence& rec) {
+    // Unconstrained runtime bounds: reject closed-form transformation
+    if (!indVar.isConstantBound) {
+        return nullptr;
+    }
+
     auto ctx = func.getParent() ? func.getParent()->getContextShared() : std::make_shared<ir::IRContext>();
     ir::IRBuilder builder(ctx);
     builder.setModule(func.getParent());
     builder.setInsertPoint(preheader);
 
-    ir::IntegerType* i64Ty = ctx->getIntegerType(64);
+    ir::Type* retTy = rec.sumPhi ? rec.sumPhi->getType() : ctx->getIntegerType(rec.destWidth);
 
-    if (indVar.isConstantBound && indVar.stepVal == 1) {
+    if (indVar.stepVal == 1) {
         int64_t bound = indVar.constantBound;
         int64_t initI = indVar.initVal;
         int64_t numIterations = 0;
@@ -293,7 +338,33 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
             if (bound >= initI) numIterations = bound - initI + 1;
         }
 
-        if (numIterations <= 0) return nullptr;
+        // Zero or negative trip count: loop executes 0 iterations. Return initial accumulator.
+        if (numIterations <= 0) {
+            return rec.initSumVal;
+        }
+
+        // Source arithmetic range verification for positive bounds:
+        // Source term expression is f(i) = rec.coeffA * i^2 + rec.coeffB * i + rec.coeffC
+        // Max value of i is maxI = initI + numIterations - 1.
+        int64_t maxI = initI + numIterations - 1;
+
+        if (rec.sourceWidth == 32) {
+            int64_t maxSrcVal = rec.coeffA * maxI * maxI + rec.coeffB * maxI + rec.coeffC;
+            int64_t minSrcVal = rec.coeffA * initI * initI + rec.coeffB * initI + rec.coeffC;
+            if (minSrcVal > maxSrcVal) {
+                std::swap(minSrcVal, maxSrcVal);
+            }
+
+            if (rec.sourceSigned) {
+                if (maxSrcVal > 2147483647LL || minSrcVal < -2147483648LL) {
+                    return nullptr; // Source operation potentially wraps; reject transformation
+                }
+            } else {
+                if (maxSrcVal > 4294967295LL || minSrcVal < 0LL) {
+                    return nullptr;
+                }
+            }
+        }
 
         uint64_t N = static_cast<uint64_t>(numIterations);
         uint64_t I0 = static_cast<uint64_t>(initI);
@@ -301,9 +372,14 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
         uint64_t initSum = 0;
         if (auto* cInit = dynamic_cast<ir::ConstantInt*>(stripExtensions(rec.initSumVal))) {
             initSum = static_cast<uint64_t>(cInit->getValue());
+        } else {
+            // Non-constant initial sum with positive iterations requires IR builder addition if supported,
+            // or if cInit isn't constant int, we can't fully compute constant at compile-time.
+            // Check if rec.initSumVal is constant int. If not, reject or build IR.
+            return nullptr;
         }
 
-        // sumI_0 = N * (2*I0 + N - 1) / 2
+        // sumI = sum_{k=0}^{N-1} (I0 + k) = N * I0 + N*(N-1)/2
         uint64_t sumI = 0;
         uint64_t term2I0_N1 = (2 * I0) + N - 1;
         if (N % 2 == 0) {
@@ -312,7 +388,7 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
             sumI = N * (term2I0_N1 / 2);
         }
 
-        // sumI2_0 = sum_{k=0}^{N-1} (k + I0)^2 = sum k^2 + 2*I0*sum k + I0^2 * N
+        // sumI2 = sum_{k=0}^{N-1} (k + I0)^2 = sum k^2 + 2*I0*sum k + I0^2 * N
         uint64_t sumK = (N * (N - 1)) / 2;
         uint64_t sumK2 = 0;
         if (N % 2 == 0) {
@@ -335,7 +411,7 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
         sumConst += static_cast<uint64_t>(rec.coeffA) * sumI2;
 
         uint64_t totalFinalSum = initSum + sumConst;
-        return ctx->getConstantInt(i64Ty, totalFinalSum);
+        return ctx->getConstantInt(dynamic_cast<ir::IntegerType*>(retTy) ? static_cast<ir::IntegerType*>(retTy) : ctx->getIntegerType(64), totalFinalSum);
     }
 
     return nullptr;

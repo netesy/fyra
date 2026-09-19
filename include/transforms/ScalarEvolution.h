@@ -41,6 +41,13 @@ private:
         int64_t coeffA = 0;
         int64_t coeffB = 0;
         int64_t coeffC = 0;
+
+        // Recurrence metadata for mixed-width analysis
+        uint32_t sourceWidth = 32;
+        bool sourceSigned = true;
+        ir::Instruction::Opcode extensionOp = ir::Instruction::ExtSW;
+        uint32_t destWidth = 64;
+
         bool isValid = false;
     };
 
