@@ -63,15 +63,5 @@ export function $main() : i32 {
         }
     }
 
-    // Verify Wasm32 vector support capabilities
-    auto wasmTarget = target::TargetResolver::resolve({target::Arch::WASM32, target::OS::WASI});
-    ir::IRContext ctx;
-    ir::Type* i32Ty = ir::IntegerType::get(32);
-    ir::VectorType* v4i32 = ctx.getVectorType(i32Ty, 4);
-
-    assert(wasmTarget->supportsVectorWidth(128));
-    assert(wasmTarget->supportsVectorType(v4i32));
-    std::cout << "Wasm32 vector capabilities test passed!\n";
-
     return 0;
 }

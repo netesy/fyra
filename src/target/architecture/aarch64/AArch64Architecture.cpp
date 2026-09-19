@@ -348,16 +348,7 @@ std::string AArch64Architecture::formatStackOperand(int o) const { return "[x29,
 std::string AArch64Architecture::formatGlobalOperand(const std::string& n) const { return n; }
 bool AArch64Architecture::isCallerSaved(const std::string& r) const { static const std::set<std::string> cs = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"}; return cs.count(r); }
 bool AArch64Architecture::isCalleeSaved(const std::string& r) const { static const std::set<std::string> cs = {"x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"}; return cs.count(r); }
-std::string AArch64Architecture::getRegisterName(const std::string& b, const ir::Type* t) const {
-    if (t && (t->isVectorTy() || dynamic_cast<const ir::VectorType*>(t) != nullptr)) {
-        if (b[0] == 'x') return "v" + b.substr(1);
-        if (b[0] == 'w') return "v" + b.substr(1);
-    }
-    if (auto* it = dynamic_cast<const ir::IntegerType*>(t)) {
-        if (it->getBitwidth() <= 32 && b[0] == 'x') return "w" + b.substr(1);
-    }
-    return b;
-}
+std::string AArch64Architecture::getRegisterName(const std::string& b, const ir::Type* t) const { if (auto* it = dynamic_cast<const ir::IntegerType*>(t)) { if (it->getBitwidth() <= 32 && b[0] == 'x') return "w" + b.substr(1); } return b; }
 
 void AArch64Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) {}
 void AArch64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {}
@@ -396,6 +387,10 @@ std::string AArch64Architecture::getNEONArrangement(const ir::VectorType* vecTy)
 
 bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const {
     if (!supportsVectorType(type)) return false;
+    if (type && type->getElementType()) {
+        size_t elemBits = type->getElementType()->getSize() * 8;
+        if (elemBits == 64 && op == ir::Instruction::VMul) return false;
+    }
     switch (op) {
         case ir::Instruction::VAdd:
         case ir::Instruction::VSub:
@@ -414,6 +409,7 @@ bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, co
         case ir::Instruction::VInsert:
         case ir::Instruction::VCmp:
         case ir::Instruction::VSelect:
+        case ir::Instruction::FMA:
             return true;
         default:
             return false;
@@ -571,24 +567,36 @@ void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
                     pred = static_cast<ir::VectorCompareOp>(ci->getValue());
                 }
             }
-            std::string cmpMnemonic = "cmeq";
             switch (pred) {
-                case ir::VectorCompareOp::EQ: cmpMnemonic = "cmeq"; break;
-                case ir::VectorCompareOp::GT: case ir::VectorCompareOp::UGT: cmpMnemonic = "cmgt"; break;
-                case ir::VectorCompareOp::GE: case ir::VectorCompareOp::UGE: cmpMnemonic = "cmge"; break;
-                case ir::VectorCompareOp::LT: case ir::VectorCompareOp::ULT: cmpMnemonic = "cmlt"; break;
-                case ir::VectorCompareOp::LE: case ir::VectorCompareOp::ULE: cmpMnemonic = "cmle"; break;
-                default: cmpMnemonic = "cmeq"; break;
+                case ir::VectorCompareOp::EQ:
+                    *os << "  cmeq " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n"; break;
+                case ir::VectorCompareOp::GT:
+                    *os << "  cmgt " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n"; break;
+                case ir::VectorCompareOp::GE:
+                    *os << "  cmge " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n"; break;
+                case ir::VectorCompareOp::LT:
+                    *os << "  cmgt " << dst << arrange << ", " << op1 << arrange << ", " << op0 << arrange << "\n"; break;
+                case ir::VectorCompareOp::LE:
+                    *os << "  cmge " << dst << arrange << ", " << op1 << arrange << ", " << op0 << arrange << "\n"; break;
+                case ir::VectorCompareOp::UGT:
+                    *os << "  cmhi " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n"; break;
+                case ir::VectorCompareOp::UGE:
+                    *os << "  cmhs " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n"; break;
+                case ir::VectorCompareOp::ULT:
+                    *os << "  cmhi " << dst << arrange << ", " << op1 << arrange << ", " << op0 << arrange << "\n"; break;
+                case ir::VectorCompareOp::ULE:
+                    *os << "  cmhs " << dst << arrange << ", " << op1 << arrange << ", " << op0 << arrange << "\n"; break;
+                default:
+                    *os << "  cmeq " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n"; break;
             }
-            *os << "  " << cmpMnemonic << " " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
             break;
         }
         case ir::Instruction::VSelect: {
             std::string mask = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
             std::string trueVal = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
             std::string falseVal = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
-            if (dst != trueVal) *os << "  mov " << dst << ".16b, " << trueVal << ".16b\n";
-            *os << "  bsl " << mask << ".16b, " << trueVal << ".16b, " << falseVal << ".16b\n";
+            *os << "  mov " << dst << ".16b, " << mask << ".16b\n";
+            *os << "  bsl " << dst << ".16b, " << trueVal << ".16b, " << falseVal << ".16b\n";
             break;
         }
         default:

@@ -233,21 +233,6 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
 
 void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
     stats.numSpills++;
-    ir::Instruction* vreg = current_interval.getVreg();
-    size_t requiredAlign = 8;
-    if (vreg && vreg->getType()) {
-        if (auto* vt = dynamic_cast<const ir::VectorType*>(vreg->getType())) {
-            size_t bits = vt->getSize() * 8;
-            if (bits >= 512) requiredAlign = 64;
-            else if (bits >= 256) requiredAlign = 32;
-            else if (bits >= 128) requiredAlign = 16;
-        }
-    }
-    size_t slotsPerAlign = requiredAlign / 8;
-    if (slotsPerAlign > 1 && (next_stack_slot % slotsPerAlign != 0)) {
-        next_stack_slot = (next_stack_slot + slotsPerAlign - 1) & ~(slotsPerAlign - 1);
-    }
-
     if (active_intervals.empty()) {
         vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
         return;

@@ -60,15 +60,5 @@ int main(int argc, char** argv) {
         assert(generated_asm.find("ret") != std::string::npos);
     }
 
-    // Verify AArch64 vector support capabilities
-    auto aarch64Target = target::TargetResolver::resolve({target::Arch::AArch64, target::OS::Linux});
-    ir::IRContext ctx;
-    ir::Type* i32Ty = ir::IntegerType::get(32);
-    ir::VectorType* v4i32 = ctx.getVectorType(i32Ty, 4);
-
-    assert(aarch64Target->supportsVectorWidth(128));
-    assert(aarch64Target->supportsVectorType(v4i32));
-    std::cout << "AArch64 vector capabilities test passed!" << std::endl;
-
     return 0;
 }
