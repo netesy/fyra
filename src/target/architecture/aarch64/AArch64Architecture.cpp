@@ -554,6 +554,14 @@ void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
             *os << "  mov " << dst << elementSpec << ", " << val << "\n";
             break;
         }
+        case ir::Instruction::FMA: {
+            std::string a = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string b = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            std::string c = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
+            if (dst != c) *os << "  mov " << dst << ".16b, " << c << ".16b\n";
+            *os << "  fmla " << dst << arrange << ", " << a << arrange << ", " << b << arrange << "\n";
+            break;
+        }
         case ir::Instruction::VCmp: {
             std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
             std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);

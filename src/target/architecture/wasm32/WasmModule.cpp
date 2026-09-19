@@ -727,6 +727,17 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                     break;
                 }
 
+                case ir::Instruction::FMA:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::F32x4Mul));
+                    pushOperand(i.getOperands()[2]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::F32x4Add));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
                 case ir::Instruction::VSelect:
                     pushOperand(i.getOperands()[1]->get());
                     pushOperand(i.getOperands()[2]->get());
