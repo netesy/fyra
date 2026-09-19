@@ -27,7 +27,14 @@ static ir::Value* stripExtensions(ir::Value* val, ir::Instruction::Opcode* detec
                 }
                 val = inst->getOperands()[0]->get();
             } else break;
-        } else break;
+        } else {
+            if (srcBits && inst->getType() && inst->getType()->isIntegerTy()) {
+                if (auto* ity = dynamic_cast<ir::IntegerType*>(inst->getType())) {
+                    *srcBits = ity->getBitwidth();
+                }
+            }
+            break;
+        }
     }
     return val;
 }
@@ -218,8 +225,13 @@ bool ScalarEvolution::analyzeRecurrence(Loop& loop, const IndVar& indVar, LoopRe
         else if (op1 == phi) termVal = op0;
         else continue;
 
+        uint32_t dstBits = 64;
+        if (auto* pTy = dynamic_cast<ir::IntegerType*>(phi->getType())) {
+            dstBits = pTy->getBitwidth();
+        }
+
         ir::Instruction::Opcode detectedExt = ir::Instruction::ExtSW;
-        uint32_t srcBits = 32;
+        uint32_t srcBits = dstBits;
         if (auto* termInst = dynamic_cast<ir::Instruction*>(termVal)) {
             ir::Instruction::Opcode top = termInst->getOpcode();
             if (top == ir::Instruction::ExtSW || top == ir::Instruction::ExtUW) {
@@ -233,11 +245,6 @@ bool ScalarEvolution::analyzeRecurrence(Loop& loop, const IndVar& indVar, LoopRe
         }
 
         ir::Value* strippedTerm = stripExtensions(termVal, &detectedExt, &srcBits);
-
-        uint32_t dstBits = 64;
-        if (auto* pTy = dynamic_cast<ir::IntegerType*>(phi->getType())) {
-            dstBits = pTy->getBitwidth();
-        }
 
         // Pattern 1: Linear f(i) = b*i + c
         int64_t coeffB = 0;

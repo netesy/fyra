@@ -700,9 +700,11 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
                         try {
                             int64_t v = std::stoll(s1.substr(1));
                             if (v > 2147483647LL || v < -2147483648LL) {
-                                std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
-                                *os << "  movabsq " << s1 << ", " << scratch << "\n";
-                                s1 = is32 ? to32BitReg(scratch) : scratch;
+                                *os << "  movabsq " << s1 << ", " << d << "\n";
+                                *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                                if (isStackDst) emitMov(cg, os, rax, dst, is32);
+                                cg.lastStoreOp = "";
+                                return;
                             }
                         } catch (...) {}
                     }

@@ -276,6 +276,86 @@ void test_negative_and_zero_constant_bounds() {
 #include "transforms/FunctionInliner.h"
 #include "transforms/SCCP.h"
 
+void test_constant_term_recurrence() {
+    std::cout << "--- Testing Constant-Term Recurrence Reduction ---" << std::endl;
+    auto ctx = std::make_shared<ir::IRContext>();
+
+    auto run_constant_term_test = [&](int64_t N, int64_t C, int64_t init_acc, uint64_t expected_sum) {
+        ir::Module module("const_term_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        ir::IntegerType* i32Ty = ctx->getIntegerType(32);
+        ir::IntegerType* i64Ty = ctx->getIntegerType(64);
+
+        ir::Function* func = builder.createFunction("sum_const_term", i64Ty, {});
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", func);
+        ir::BasicBlock* header = builder.createBasicBlock("header", func);
+        ir::BasicBlock* body = builder.createBasicBlock("body", func);
+        ir::BasicBlock* exit = builder.createBasicBlock("exit", func);
+
+        builder.setInsertPoint(entry);
+        builder.createJmp(header);
+
+        builder.setInsertPoint(header);
+        auto phiI = std::make_unique<ir::PhiNode>(i32Ty, 0, nullptr, header);
+        ir::PhiNode* rawPhiI = phiI.get();
+        header->getInstructions().push_back(std::move(phiI));
+
+        auto phiSum = std::make_unique<ir::PhiNode>(i64Ty, 0, nullptr, header);
+        ir::PhiNode* rawPhiSum = phiSum.get();
+        header->getInstructions().push_back(std::move(phiSum));
+
+        rawPhiI->addIncoming(ctx->getConstantInt(i32Ty, 0), entry);
+        rawPhiSum->addIncoming(ctx->getConstantInt(i64Ty, init_acc), entry);
+
+        ir::Instruction* cond = builder.createCslt(rawPhiI, ctx->getConstantInt(i32Ty, N));
+        builder.createBr(cond, body, exit);
+
+        builder.setInsertPoint(body);
+        ir::Instruction* sumNext = builder.createAdd(rawPhiSum, ctx->getConstantInt(i64Ty, C));
+        ir::Instruction* iNext = builder.createAdd(rawPhiI, ctx->getConstantInt(i32Ty, 1));
+
+        rawPhiI->addIncoming(iNext, body);
+        rawPhiSum->addIncoming(sumNext, body);
+        builder.createJmp(header);
+
+        builder.setInsertPoint(exit);
+        builder.createRet(rawPhiSum);
+
+        transforms::CFGBuilder::run(*func);
+
+        transforms::ScalarEvolution scev;
+        bool fired = scev.run(*func);
+        assert(fired && "Closed-form transformation MUST fire for constant-term recurrence!");
+
+        ir::Instruction* retInst = exit->getInstructions().back().get();
+        assert(retInst->getOpcode() == ir::Instruction::Ret);
+        auto* retConst = dynamic_cast<ir::ConstantInt*>(retInst->getOperands()[0]->get());
+        assert(retConst != nullptr);
+        assert(static_cast<uint64_t>(retConst->getValue()) == expected_sum);
+    };
+
+    // tail_factorial case: acc += 1307674368000 for N=5000000
+    run_constant_term_test(5000000, 1307674368000LL, 0, 6538371840000000000ULL);
+
+    // Trip counts N = 0, 1, 2, 10
+    run_constant_term_test(0, 100, 37, 37);
+    run_constant_term_test(1, 100, 37, 137);
+    run_constant_term_test(2, 100, 37, 237);
+    run_constant_term_test(10, 100, 37, 1037);
+
+    // Negative bounds N = -1, -10
+    run_constant_term_test(-1, 100, 37, 37);
+    run_constant_term_test(-10, 100, 37, 37);
+
+    // 64-bit modular wrapping test
+    // 0x7FFFFFFFFFFFFFFF + 0x10000 = 0x800000000000FFFF
+    run_constant_term_test(1, 0x10000, 0x7FFFFFFFFFFFFFFFLL, 0x800000000000FFFFULL);
+
+    std::cout << "--- Constant-Term Recurrence Reduction Passed ---" << std::endl;
+}
+
 void test_inliner_scev_integration() {
     std::cout << "--- Testing FunctionInliner + SCEV Integration ---" << std::endl;
     auto ctx = std::make_shared<ir::IRContext>();
@@ -389,6 +469,7 @@ int main() {
     test_constant_bound_transformations();
     test_safe_bound_legality();
     test_negative_and_zero_constant_bounds();
+    test_constant_term_recurrence();
     test_inliner_scev_integration();
     std::cout << "=== All ClosedFormReductionTest suites passed successfully! ===" << std::endl;
     return 0;
