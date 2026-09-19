@@ -602,6 +602,16 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             } else {
                 std::string s1 = op1;
                 if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                if (!s1.empty() && s1[0] == '$') {
+                    try {
+                        int64_t v = std::stoll(s1.substr(1));
+                        if (v > 2147483647LL || v < -2147483648LL) {
+                            std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                            *os << "  movabsq " << s1 << ", " << scratch << "\n";
+                            s1 = is32 ? to32BitReg(scratch) : scratch;
+                        }
+                    } catch (...) {}
+                }
                 *os << "  " << addOp << " " << s1 << ", " << d << "\n";
             }
             cg.lastStoreOp = "";
@@ -616,6 +626,16 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             } else {
                 std::string s0 = op0;
                 if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                if (!s0.empty() && s0[0] == '$') {
+                    try {
+                        int64_t v = std::stoll(s0.substr(1));
+                        if (v > 2147483647LL || v < -2147483648LL) {
+                            std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                            *os << "  movabsq " << s0 << ", " << scratch << "\n";
+                            s0 = is32 ? to32BitReg(scratch) : scratch;
+                        }
+                    } catch (...) {}
+                }
                 *os << "  " << addOp << " " << s0 << ", " << d << "\n";
             }
             cg.lastStoreOp = "";
@@ -656,14 +676,38 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
                 else emitMov(cg, os, op1, d, is32);
 
                 if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
-                else *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                else {
+                    if (!s0.empty() && s0[0] == '$') {
+                        try {
+                            int64_t v = std::stoll(s0.substr(1));
+                            if (v > 2147483647LL || v < -2147483648LL) {
+                                std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                                *os << "  movabsq " << s0 << ", " << scratch << "\n";
+                                s0 = is32 ? to32BitReg(scratch) : scratch;
+                            }
+                        } catch (...) {}
+                    }
+                    *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                }
             } else {
                 // Direct: dst = src1 + src2
                 if (isGlobal0) *os << "  leaq " << op0 << ", " << (isStackDst ? rax : d) << "\n";
                 else emitMov(cg, os, op0, d, is32);
 
                 if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
-                else *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+                else {
+                    if (!s1.empty() && s1[0] == '$') {
+                        try {
+                            int64_t v = std::stoll(s1.substr(1));
+                            if (v > 2147483647LL || v < -2147483648LL) {
+                                std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                                *os << "  movabsq " << s1 << ", " << scratch << "\n";
+                                s1 = is32 ? to32BitReg(scratch) : scratch;
+                            }
+                        } catch (...) {}
+                    }
+                    *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+                }
             }
             if (isStackDst) {
                 emitMov(cg, os, rax, dst, is32);
