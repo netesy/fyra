@@ -280,6 +280,11 @@ target_link_libraries(test_scev PRIVATE fyra)
 add_test(NAME SCEVTest COMMAND test_scev)
 set_tests_properties(SCEVTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_closed_form_reduction test_closed_form_reduction.cpp)
+target_link_libraries(test_closed_form_reduction PRIVATE fyra)
+add_test(NAME ClosedFormReductionTest COMMAND test_closed_form_reduction)
+set_tests_properties(ClosedFormReductionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_sccp_interprocedural test_sccp_interprocedural.cpp)
 target_link_libraries(test_sccp_interprocedural PRIVATE fyra)
 add_test(NAME SCCPInterproceduralTest COMMAND test_sccp_interprocedural)

@@ -151,17 +151,22 @@ int InlineCost::calculateCost() const {
 bool FunctionInliner::exposesScalarEvolutionOpportunity(const ir::Instruction* callInst, const ir::Function* callee) const {
     if (!callInst || !callee) return false;
 
-    size_t loopHeaderCount = 0;
     const ir::BasicBlock* headerBB = nullptr;
     for (const auto& bb : callee->getBasicBlocks()) {
         if (blockIsInCycle(const_cast<ir::BasicBlock*>(bb.get()))) {
-            loopHeaderCount++;
-            if (!headerBB) headerBB = bb.get();
+            for (const auto* pred : bb->getPredecessors()) {
+                if (pred && !blockIsInCycle(const_cast<ir::BasicBlock*>(pred))) {
+                    headerBB = bb.get();
+                    break;
+                }
+            }
+            if (headerBB) break;
         }
     }
 
-    if (loopHeaderCount == 0 || !headerBB) return false;
+    if (!headerBB) return false;
 
+    const ir::PhiNode* indVarPhi = nullptr;
     const ir::Value* boundVal = nullptr;
 
     for (const auto& instPtr : headerBB->getInstructions()) {
@@ -173,25 +178,30 @@ bool FunctionInliner::exposesScalarEvolutionOpportunity(const ir::Instruction* c
             if (hInst->getOperands().size() >= 2 && hInst->getOperands()[0] && hInst->getOperands()[1]) {
                 const ir::Value* op0 = hInst->getOperands()[0]->get();
                 const ir::Value* op1 = hInst->getOperands()[1]->get();
-                if (dynamic_cast<const ir::PhiNode*>(op0)) boundVal = op1;
-                else if (dynamic_cast<const ir::PhiNode*>(op1)) boundVal = op0;
+                if (auto* p0 = dynamic_cast<const ir::PhiNode*>(op0)) {
+                    indVarPhi = p0;
+                    boundVal = op1;
+                } else if (auto* p1 = dynamic_cast<const ir::PhiNode*>(op1)) {
+                    indVarPhi = p1;
+                    boundVal = op0;
+                }
             }
         }
     }
 
-    if (!boundVal) return false;
+    if (!indVarPhi || !boundVal) return false;
 
     bool isExposedBound = false;
     size_t pIdx = 0;
+    const ir::ConstantInt* boundConstArg = nullptr;
     for (const auto& p : callee->getParameters()) {
-        if (p->getName() == boundVal->getName() || p.get() == boundVal) {
+        if (p.get() == boundVal || (!p->getName().empty() && p->getName() == boundVal->getName())) {
             if (pIdx + 1 < callInst->getOperands().size() && callInst->getOperands()[pIdx + 1]) {
                 const ir::Value* argVal = callInst->getOperands()[pIdx + 1]->get();
                 if (auto* cVal = dynamic_cast<const ir::ConstantInt*>(argVal)) {
-                    if (cVal->getValue() <= 10000) {
-                        isExposedBound = true;
-                        break;
-                    }
+                    isExposedBound = true;
+                    boundConstArg = cVal;
+                    break;
                 } else if (dynamic_cast<const ir::PhiNode*>(argVal) != nullptr) {
                     isExposedBound = true;
                     break;
@@ -201,27 +211,29 @@ bool FunctionInliner::exposesScalarEvolutionOpportunity(const ir::Instruction* c
         pIdx++;
     }
 
-    return isExposedBound;
+    if (!isExposedBound) return false;
 
-    // Ensure callee loop has no calls or side-effects
+    // Ensure callee loop has no calls, stores, or side-effects
     for (const auto& bb : callee->getBasicBlocks()) {
         if (!blockIsInCycle(const_cast<ir::BasicBlock*>(bb.get()))) continue;
         for (const auto& instPtr : bb->getInstructions()) {
             auto op = instPtr->getOpcode();
             if (op == ir::Instruction::Call || op == ir::Instruction::ExternCall ||
                 op == ir::Instruction::Syscall || op == ir::Instruction::Alloc ||
-                op == ir::Instruction::Alloc4 || op == ir::Instruction::Alloc16) {
+                op == ir::Instruction::Alloc4 || op == ir::Instruction::Alloc16 ||
+                op == ir::Instruction::Store || op == ir::Instruction::Stored ||
+                op == ir::Instruction::Stores) {
                 return false;
             }
         }
     }
 
-    // Verify callee loop has a linear or single-mul quadratic recurrence that SCEV can fold
+    // Verify callee loop has a sum accumulation PHI node separate from indVarPhi
     const ir::PhiNode* sumPhi = nullptr;
     const ir::Instruction* sumNextInst = nullptr;
     for (const auto& instPtr : headerBB->getInstructions()) {
         if (auto* phi = dynamic_cast<const ir::PhiNode*>(instPtr.get())) {
-            if (phi != boundVal) {
+            if (phi != indVarPhi) {
                 sumPhi = phi;
             }
         }
@@ -250,34 +262,41 @@ bool FunctionInliner::exposesScalarEvolutionOpportunity(const ir::Instruction* c
 
     if (!term) return false;
 
-    // Helper to check if value is a linear term or single Mul
-    auto isLinearOrMul = [](const ir::Value* v) -> bool {
-        while (auto* inst = dynamic_cast<const ir::Instruction*>(v)) {
-            auto op = inst->getOpcode();
-            if (op == ir::Instruction::ExtSW || op == ir::Instruction::ExtUW) {
-                if (!inst->getOperands().empty() && inst->getOperands()[0]) {
-                    v = inst->getOperands()[0]->get();
-                } else break;
+    // Strip extensions
+    const ir::Value* strippedTerm = term;
+    while (auto* inst = dynamic_cast<const ir::Instruction*>(strippedTerm)) {
+        auto op = inst->getOpcode();
+        if (op == ir::Instruction::ExtSW || op == ir::Instruction::ExtUW) {
+            if (!inst->getOperands().empty() && inst->getOperands()[0]) {
+                strippedTerm = inst->getOperands()[0]->get();
             } else break;
-        }
-        if (dynamic_cast<const ir::ConstantInt*>(v) || dynamic_cast<const ir::PhiNode*>(v)) return true;
-        if (auto* inst = dynamic_cast<const ir::Instruction*>(v)) {
-            auto op = inst->getOpcode();
-            if (op == ir::Instruction::Mul || op == ir::Instruction::Add || op == ir::Instruction::Sub) return true;
-        }
+        } else break;
+    }
+
+    // Reject constant terms (e.g. term = 1), as simple scalar increments are not non-trivial closed forms
+    if (dynamic_cast<const ir::ConstantInt*>(strippedTerm) != nullptr) {
         return false;
-    };
+    }
 
-    if (!isLinearOrMul(term)) return false;
-
-    // Reject complex nested additions of products like in simd_loop_calc (%step = add %prod, %diff)
-    if (auto* inst = dynamic_cast<const ir::Instruction*>(term)) {
-        if (inst->getOpcode() == ir::Instruction::Add || inst->getOpcode() == ir::Instruction::Sub) {
+    // Check term structure
+    if (auto* inst = dynamic_cast<const ir::Instruction*>(strippedTerm)) {
+        auto op = inst->getOpcode();
+        if (op == ir::Instruction::Add || op == ir::Instruction::Sub) {
+            // Reject nested additions/subtractions of products (e.g. simd_loop_calc)
             for (const auto& op : inst->getOperands()) {
                 if (auto* subInst = dynamic_cast<const ir::Instruction*>(op->get())) {
                     if (subInst->getOpcode() == ir::Instruction::Add || subInst->getOpcode() == ir::Instruction::Sub) {
                         return false;
                     }
+                }
+            }
+        } else if (op == ir::Instruction::Mul) {
+            // Quadratic term: mul(lin1, lin2).
+            bool op0NonConst = inst->getOperands().size() > 0 && dynamic_cast<const ir::ConstantInt*>(inst->getOperands()[0]->get()) == nullptr;
+            bool op1NonConst = inst->getOperands().size() > 1 && dynamic_cast<const ir::ConstantInt*>(inst->getOperands()[1]->get()) == nullptr;
+            if (op0NonConst && op1NonConst) {
+                if (boundConstArg && boundConstArg->getValue() >= 50000) {
+                    return false; // 32-bit quadratic source overflow for N >= 50000
                 }
             }
         }
