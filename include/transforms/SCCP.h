@@ -52,6 +52,11 @@ private:
         int& stepCount,
         std::unordered_map<ir::Function*, bool>& purityCache
     );
+
+    ir::Constant* foldVectorInstruction(
+        ir::Instruction* instr,
+        const std::vector<ir::Constant*>& opConsts
+    );
     
     std::map<ir::Value*, LatticeEntry> lattice;
     std::vector<ir::Instruction*> instructionWorklist;

@@ -57,6 +57,7 @@ private:
     void linearScan(ir::Function& func, const ::target::TargetInfo* targetInfo = nullptr);
     void expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee, std::vector<PhysicalReg>& free_xmm);
     void spillAtInterval(const class LiveInterval& interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
+    StackSlot allocateStackSlot(ir::Instruction* vreg);
 
     unsigned int next_stack_slot = 0;
     std::vector<StackSlot> free_stack_slots;

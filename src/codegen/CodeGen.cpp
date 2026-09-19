@@ -334,6 +334,8 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::FMS:
         case ir::Instruction::FNMA:
         case ir::Instruction::FNMS:
+        case ir::Instruction::VGather:
+        case ir::Instruction::VScatter:
             targetInfo->emitVectorArithmetic(*this, static_cast<ir::VectorInstruction&>(instr));
             break;
         default: break;

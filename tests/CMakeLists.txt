@@ -313,6 +313,16 @@ add_executable(test_vshuffle_prerequisites test_vshuffle_prerequisites.cpp)
 target_link_libraries(test_vshuffle_prerequisites PRIVATE fyra)
 add_test(NAME VShufflePrerequisitesTest COMMAND test_vshuffle_prerequisites)
 
+add_executable(test_vector_folding_and_spill test_vector_folding_and_spill.cpp)
+target_link_libraries(test_vector_folding_and_spill PRIVATE fyra)
+add_test(NAME VectorFoldingAndSpillTest COMMAND test_vector_folding_and_spill)
+set_tests_properties(VectorFoldingAndSpillTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_fma_gather_egraph test_fma_gather_egraph.cpp)
+target_link_libraries(test_fma_gather_egraph PRIVATE fyra)
+add_test(NAME FMAGatherEGraphTest COMMAND test_fma_gather_egraph)
+set_tests_properties(FMAGatherEGraphTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_loop_vectorizer test_loop_vectorizer.cpp)
 target_link_libraries(test_loop_vectorizer PRIVATE fyra)
 add_test(NAME LoopVectorizerTest COMMAND test_loop_vectorizer)

@@ -1354,11 +1354,36 @@ export function $test_frameless_leaf() : i32 {
 
 export function $test_framed_leaf() : i32 {
 @entry
-    %slot = alloc 8 : i32
-    %val = copy 100 : i32
-    store %val, %slot
-    %v = load %slot : i32
-    ret %v : i32
+    %v0 = copy 1 : i32
+    %v1 = copy 2 : i32
+    %v2 = copy 3 : i32
+    %v3 = copy 4 : i32
+    %v4 = copy 5 : i32
+    %v5 = copy 6 : i32
+    %v6 = copy 7 : i32
+    %v7 = copy 8 : i32
+    %v8 = copy 9 : i32
+    %v9 = copy 10 : i32
+    %v10 = copy 11 : i32
+    %v11 = copy 12 : i32
+    %v12 = copy 13 : i32
+    %v13 = copy 14 : i32
+    %v14 = copy 15 : i32
+    %s1 = add %v0, %v1 : i32
+    %s2 = add %s1, %v2 : i32
+    %s3 = add %s2, %v3 : i32
+    %s4 = add %s3, %v4 : i32
+    %s5 = add %s4, %v5 : i32
+    %s6 = add %s5, %v6 : i32
+    %s7 = add %s6, %v7 : i32
+    %s8 = add %s7, %v8 : i32
+    %s9 = add %s8, %v9 : i32
+    %s10 = add %s9, %v10 : i32
+    %s11 = add %s10, %v11 : i32
+    %s12 = add %s11, %v12 : i32
+    %s13 = add %s12, %v13 : i32
+    %s14 = add %s13, %v14 : i32
+    ret %s14 : i32
 }
 
 export function $test_nested_call() : i32 {
@@ -1369,14 +1394,43 @@ export function $test_nested_call() : i32 {
 
 export function $test_multiple_returns(%cond : i32) : i32 {
 @entry
+    %v0 = copy 1 : i32
+    %v1 = copy 2 : i32
+    %v2 = copy 3 : i32
+    %v3 = copy 4 : i32
+    %v4 = copy 5 : i32
+    %v5 = copy 6 : i32
+    %v6 = copy 7 : i32
+    %v7 = copy 8 : i32
+    %v8 = copy 9 : i32
+    %v9 = copy 10 : i32
+    %v10 = copy 11 : i32
+    %v11 = copy 12 : i32
+    %v12 = copy 13 : i32
+    %v13 = copy 14 : i32
+    %v14 = copy 15 : i32
+    %s1 = add %v0, %v1 : i32
+    %s2 = add %s1, %v2 : i32
+    %s3 = add %s2, %v3 : i32
+    %s4 = add %s3, %v4 : i32
+    %s5 = add %s4, %v5 : i32
+    %s6 = add %s5, %v6 : i32
+    %s7 = add %s6, %v7 : i32
+    %s8 = add %s7, %v8 : i32
+    %s9 = add %s8, %v9 : i32
+    %s10 = add %s9, %v10 : i32
+    %s11 = add %s10, %v11 : i32
+    %s12 = add %s11, %v12 : i32
+    %s13 = add %s12, %v13 : i32
+    %s14 = add %s13, %v14 : i32
     %c = copy %cond : i32
     jnz %c, @b1, @b2
 
 @b1
-    ret 10 : i32
+    ret %s14 : i32
 
 @b2
-    ret 20 : i32
+    ret %s14 : i32
 }
 )";
         std::istringstream stream(frame_ir);

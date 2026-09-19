@@ -164,6 +164,12 @@ public:
     VectorInstruction* createVSExt(Value* val, VectorType* destVecTy);
     VectorInstruction* createVZExt(Value* val, VectorType* destVecTy);
     VectorInstruction* createVTrunc(Value* val, VectorType* destVecTy);
+    VectorInstruction* createVGather(VectorType* resVecTy, Value* basePtr, Value* indexVec, Value* maskVec = nullptr);
+    VectorInstruction* createVScatter(Value* valueVec, Value* basePtr, Value* indexVec, Value* maskVec = nullptr);
+    Instruction* createFMA(Value* a, Value* b, Value* c);
+    Instruction* createFMS(Value* a, Value* b, Value* c);
+    Instruction* createFNMA(Value* a, Value* b, Value* c);
+    Instruction* createFNMS(Value* a, Value* b, Value* c);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);

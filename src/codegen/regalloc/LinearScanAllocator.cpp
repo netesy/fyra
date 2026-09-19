@@ -140,7 +140,7 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                 }
                 assigned = true;
             } else {
-                throw std::runtime_error("XMM allocation pool exhausted and vector spilling is deferred");
+                assigned = false;
             }
         } else if (current_interval.isLiveAcrossCall()) {
             if (!free_callee_regs.empty()) {
@@ -231,25 +231,30 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
     }
 }
 
-void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
-    stats.numSpills++;
-    ir::Instruction* vreg = current_interval.getVreg();
+StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
     size_t requiredAlign = 8;
+    size_t slotCount = 1;
     if (vreg && vreg->getType()) {
         if (auto* vt = dynamic_cast<const ir::VectorType*>(vreg->getType())) {
             size_t bits = vt->getSize() * 8;
-            if (bits >= 512) requiredAlign = 64;
-            else if (bits >= 256) requiredAlign = 32;
-            else if (bits >= 128) requiredAlign = 16;
+            if (bits >= 512) { requiredAlign = 64; slotCount = 8; }
+            else if (bits >= 256) { requiredAlign = 32; slotCount = 4; }
+            else if (bits >= 128) { requiredAlign = 16; slotCount = 2; }
         }
     }
     size_t slotsPerAlign = requiredAlign / 8;
     if (slotsPerAlign > 1 && (next_stack_slot % slotsPerAlign != 0)) {
         next_stack_slot = (next_stack_slot + slotsPerAlign - 1) & ~(slotsPerAlign - 1);
     }
+    StackSlot slot{next_stack_slot};
+    next_stack_slot += slotCount;
+    return slot;
+}
 
+void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
+    stats.numSpills++;
     if (active_intervals.empty()) {
-        vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
+        vreg_to_location_map[current_interval.getVreg()] = allocateStackSlot(current_interval.getVreg());
         return;
     }
 
@@ -264,7 +269,7 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
                 vreg_to_location_map[current_interval.getVreg()] = reg;
 
                 spill_candidate->getVreg()->setPhysicalRegister(-1);
-                vreg_to_location_map[spill_candidate->getVreg()] = StackSlot{next_stack_slot++};
+                vreg_to_location_map[spill_candidate->getVreg()] = allocateStackSlot(spill_candidate->getVreg());
 
                 active_intervals.pop_back();
                 active_intervals.push_back(&current_interval);
@@ -277,13 +282,7 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         }
     }
 
-    if (!free_stack_slots.empty()) {
-        StackSlot slot = free_stack_slots.back();
-        free_stack_slots.pop_back();
-        vreg_to_location_map[current_interval.getVreg()] = slot;
-    } else {
-        vreg_to_location_map[current_interval.getVreg()] = StackSlot{next_stack_slot++};
-    }
+    vreg_to_location_map[current_interval.getVreg()] = allocateStackSlot(current_interval.getVreg());
 }
 
 } // namespace transforms

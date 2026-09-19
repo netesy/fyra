@@ -1147,4 +1147,58 @@ VectorInstruction* IRBuilder::createVStore(Value* vec, Value* ptr) {
     return instrPtr;
 }
 
+VectorInstruction* IRBuilder::createVGather(VectorType* resVecTy, Value* basePtr, Value* indexVec, Value* maskVec) {
+    std::vector<Value*> ops = {basePtr, indexVec};
+    if (maskVec) ops.push_back(maskVec);
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(resVecTy, Instruction::VGather, ops, resVecTy->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVScatter(Value* valueVec, Value* basePtr, Value* indexVec, Value* maskVec) {
+    std::vector<Value*> ops = {valueVec, basePtr, indexVec};
+    if (maskVec) ops.push_back(maskVec);
+    auto* vt = dynamic_cast<VectorType*>(valueVec->getType());
+    unsigned width = vt ? vt->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(context->getVoidType(), Instruction::VScatter, ops, width, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFMA(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FMA, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFMS(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FMS, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFNMA(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FNMA, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFNMS(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FNMS, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
 } // namespace ir

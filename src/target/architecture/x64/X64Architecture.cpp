@@ -300,27 +300,74 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
             }
         }
 
+        int maxAlign = 16;
+        for (auto& bb : func.getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->getType()) {
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                        unsigned bits = vt->getSize() * 8;
+                        if (bits >= 512) maxAlign = std::max(maxAlign, 64);
+                        else if (bits >= 256) maxAlign = std::max(maxAlign, 32);
+                        else if (bits >= 128) maxAlign = std::max(maxAlign, 16);
+                    }
+                }
+            }
+        }
+
         int current_offset = -8 * (int)layout.usedCalleeRegs.size();
+
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
-                    unsigned slotSize = 8;
-                    if (auto* vecTy = dynamic_cast<const ir::VectorType*>(instr->getType())) {
-                        unsigned b = vecTy->getElementType()->getSize() * vecTy->getNumElements();
-                        if (b > 8) slotSize = (b + 15) & ~15;
-                    }
                     if (func.hasStackSlot(instr.get())) {
-                        cg.getStackOffsets()[instr.get()] = -8 - 8 * (int)layout.usedCalleeRegs.size() - func.getStackSlotForVreg(instr.get());
+                        int slotOffset = func.getStackSlotForVreg(instr.get());
+                        if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                            size_t bits = vt->getSize() * 8;
+                            int align = 16;
+                            if (bits >= 512) align = 64;
+                            else if (bits >= 256) align = 32;
+                            int calleeBytes = 8 * (1 + (int)layout.usedCalleeRegs.size());
+                            int vecBase = -((calleeBytes + align - 1) & ~(align - 1));
+                            cg.getStackOffsets()[instr.get()] = vecBase - slotOffset;
+                        } else {
+                            int scalarBase = -8 - 8 * (int)layout.usedCalleeRegs.size();
+                            cg.getStackOffsets()[instr.get()] = scalarBase - slotOffset;
+                        }
                     } else if (!instr->hasPhysicalRegister()) {
+                        unsigned slotSize = 8;
+                        unsigned align = 8;
+                        if (auto* vecTy = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                            slotSize = vecTy->getSize();
+                            if (slotSize >= 64) align = 64;
+                            else if (slotSize >= 32) align = 32;
+                            else if (slotSize >= 16) align = 16;
+                        }
+                        if (std::abs(current_offset) % align != 0) {
+                            current_offset -= (align - (std::abs(current_offset) % align));
+                        }
                         current_offset -= slotSize;
                         cg.getStackOffsets()[instr.get()] = current_offset;
                     }
                 }
             }
         }
-        int total_frame = std::abs(current_offset);
-        if (total_frame % 16 != 0) {
-            total_frame += (16 - (total_frame % 16));
+
+        int min_offset = current_offset;
+        for (auto& [val, off] : cg.getStackOffsets()) {
+            int slotSize = 8;
+            if (val->getType()) {
+                if (auto* vt = dynamic_cast<const ir::VectorType*>(val->getType())) {
+                    slotSize = vt->getSize();
+                }
+            }
+            if (off - slotSize < min_offset) {
+                min_offset = off - slotSize;
+            }
+        }
+
+        int total_frame = std::abs(min_offset);
+        if (total_frame % maxAlign != 0) {
+            total_frame += (maxAlign - (total_frame % maxAlign));
         }
         layout.stackAlloc = total_frame - 8 * (1 + (int)layout.usedCalleeRegs.size());
         // Stack-passed parameters are addressed relative to %rbp by
@@ -328,7 +375,7 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
         // therefore needs a frame pointer when it has more integer parameters
         // than the System V register argument set can hold.
         bool hasStackParameters = func.getParameters().size() > integerArgRegs.size();
-        layout.isZeroFrame = (!layout.makesCalls && layout.stackAlloc <= 0 &&
+        layout.isZeroFrame = (!layout.makesCalls && total_frame == 0 &&
                               layout.usedCalleeRegs.empty() && !hasStackParameters);
     } else {
         layout.makesCalls = true;
@@ -3025,6 +3072,31 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                            cg.getValueAsOperand(i.getOperands()[1]->get()) : "";
         std::string dst = cg.getValueAsOperand(&i);
 
+        // VGather / VScatter Handling
+        if (i.getOpcode() == ir::Instruction::VGather) {
+            std::string basePtr = op0;
+            std::string indexVec = op1;
+            std::string maskVec = (i.getOperands().size() > 2 && i.getOperands()[2]) ? cg.getValueAsOperand(i.getOperands()[2]->get()) : "%xmm15";
+            if (abi == X64ABI::Windows) {
+                *os << "  vpgatherdd " << dst << ", [" << basePtr << " + " << indexVec << " * 4], " << maskVec << "\n";
+            } else {
+                *os << "  vpgatherdd " << maskVec << ", (" << basePtr << ", " << indexVec << ", 4), " << dst << "\n";
+            }
+            return;
+        }
+
+        if (i.getOpcode() == ir::Instruction::VScatter) {
+            std::string valVec = op0;
+            std::string basePtr = op1;
+            std::string indexVec = (i.getOperands().size() > 2 && i.getOperands()[2]) ? cg.getValueAsOperand(i.getOperands()[2]->get()) : "";
+            if (abi == X64ABI::Windows) {
+                *os << "  vpscatterdd [" << basePtr << " + " << indexVec << " * 4], " << valVec << "\n";
+            } else {
+                *os << "  vpscatterdd " << valVec << ", (" << basePtr << ", " << indexVec << ", 4)\n";
+            }
+            return;
+        }
+
         // VInsert handling
         if (i.getOpcode() == ir::Instruction::VInsert) {
             if (i.getOperands().size() < 3 || !i.getOperands()[0] || !i.getOperands()[1] || !i.getOperands()[2]) {
@@ -3460,21 +3532,37 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             return;
         }
 
-        // FMA 3-operand instructions
+        // FMA 3-operand instructions (Native FMA3 AVX)
         if (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FMS ||
             i.getOpcode() == ir::Instruction::FNMA || i.getOpcode() == ir::Instruction::FNMS) {
             if (i.getOperands().size() < 3) throw std::runtime_error("FMA requires 3 operands");
             std::string op2 = cg.getValueAsOperand(i.getOperands()[2]->get());
-            std::string mulInst = elemTy->isFloatTy() ? "mulps" : "mulpd";
-            std::string addSubInst = (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FNMA) ?
-                                     (elemTy->isFloatTy() ? "addps" : "addpd") :
-                                     (elemTy->isFloatTy() ? "subps" : "subpd");
+            std::string fmaBase = "";
+            if (i.getOpcode() == ir::Instruction::FMA) fmaBase = "vfmadd213";
+            else if (i.getOpcode() == ir::Instruction::FMS) fmaBase = "vfmsub213";
+            else if (i.getOpcode() == ir::Instruction::FNMA) fmaBase = "vfnmadd213";
+            else if (i.getOpcode() == ir::Instruction::FNMS) fmaBase = "vfnmsub213";
 
-            *os << "  movdqu " << op0 << ", " << dst << "\n";
-            *os << "  " << mulInst << " " << op1 << ", " << dst << "\n";
-            *os << "  " << addSubInst << " " << op2 << ", " << dst << "\n";
+            std::string suffix = elemTy->isFloatTy() ? "ps" : "pd";
+            std::string fmaInst = fmaBase + suffix;
+
+            unsigned totalBitWidth = elemTy->getSize() * 8 * numElem;
+            std::string fullDst = totalBitWidth == 256 ? toYmmReg(dst) : dst;
+            std::string fullOp0 = totalBitWidth == 256 ? toYmmReg(op0) : op0;
+            std::string fullOp1 = totalBitWidth == 256 ? toYmmReg(op1) : op1;
+            std::string fullOp2 = totalBitWidth == 256 ? toYmmReg(op2) : op2;
+
+            if (fullDst != fullOp0) {
+                *os << "  " << (totalBitWidth == 256 ? "vmovaps " : "movaps ") << fullOp0 << ", " << fullDst << "\n";
+            }
+            if (abi == X64ABI::Windows) {
+                *os << "  " << fmaInst << " " << fullDst << ", " << fullOp1 << ", " << fullOp2 << "\n";
+            } else {
+                *os << "  " << fmaInst << " " << fullOp2 << ", " << fullOp1 << ", " << fullDst << "\n";
+            }
             return;
         }
+
 
         // Vector Shuffle Handling
         if (i.getOpcode() == ir::Instruction::VShuffle) {
@@ -3599,8 +3687,11 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             // exact target-specific realization of VSelect's abstract mask.
             const char* mnemonic = elemTy->isDoubleTy() ? "vblendvpd" :
                                    (elemTy->isFloatTy() ? "vblendvps" : "vpblendvb");
-            *os << "  " << mnemonic << " " << op0 << ", " << trueValue
-                << ", " << falseValue << ", " << dst << "\n";
+            if (abi == X64ABI::Windows) {
+                *os << "  " << mnemonic << " " << dst << ", " << falseValue << ", " << trueValue << ", " << op0 << "\n";
+            } else {
+                *os << "  " << mnemonic << " " << op0 << ", " << trueValue << ", " << falseValue << ", " << dst << "\n";
+            }
             return;
         } else if (elemTy->isIntegerTy()) {
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
@@ -3652,15 +3743,40 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                               i.getOpcode() == ir::Instruction::VXor);
 
         unsigned totalBitWidth = elemTy->getSize() * 8 * numElem;
+        bool op0IsMem = !isXmmRegisterName(op0) && !isYmmRegisterName(op0);
+        bool op1IsMem = !isXmmRegisterName(op1) && !isYmmRegisterName(op1);
+        bool dstIsMem = !isXmmRegisterName(dst) && !isYmmRegisterName(dst);
+
+        std::string scratchVec = (abi == X64ABI::Windows) ? "xmm5" : "%xmm15";
+        std::string scratchYmm = (abi == X64ABI::Windows) ? "ymm5" : "%ymm15";
+
         if (totalBitWidth == 256) {
-            dst = toYmmReg(dst);
-            op0 = toYmmReg(op0);
-            op1 = toYmmReg(op1);
+            std::string realDst = dstIsMem ? scratchYmm : toYmmReg(dst);
+            std::string realOp0 = op0;
+            std::string realOp1 = op1;
+
+            if (op0IsMem && op1IsMem) {
+                *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
+                realOp0 = scratchYmm;
+            } else if (op0IsMem && isCommutative) {
+                std::swap(realOp0, realOp1);
+            } else if (op0IsMem) {
+                *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
+                realOp0 = scratchYmm;
+            }
+
+            realOp0 = toYmmReg(realOp0);
+            realOp1 = toYmmReg(realOp1);
+
             if (!simdInst.empty() && simdInst[0] != 'v') simdInst = "v" + simdInst;
             if (abi == X64ABI::Windows) {
-                *os << "  " << simdInst << " " << dst << ", " << op0 << ", " << op1 << "\n";
+                *os << "  " << simdInst << " " << realDst << ", " << realOp0 << ", " << realOp1 << "\n";
             } else {
-                *os << "  " << simdInst << " " << op1 << ", " << op0 << ", " << dst << "\n";
+                *os << "  " << simdInst << " " << realOp1 << ", " << realOp0 << ", " << realDst << "\n";
+            }
+
+            if (dstIsMem) {
+                *os << "  vmovdqu " << scratchYmm << ", " << toYmmReg(dst) << "\n";
             }
         } else if (totalBitWidth == 512) {
             dst = toZmmReg(dst);
@@ -3676,13 +3792,20 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                 *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
             }
         } else {
-            if (dst == op0) {
-                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
-            } else if (dst == op1 && isCommutative) {
-                *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
-            } else {
-                *os << "  movdqu " << op0 << ", " << dst << "\n";
-                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+            std::string realDst = dstIsMem ? scratchVec : dst;
+            std::string realOp0 = op0;
+            std::string realOp1 = op1;
+
+            if (realDst != realOp0) {
+                if (isCommutative && realDst == realOp1) {
+                    std::swap(realOp0, realOp1);
+                } else {
+                    *os << "  movdqu " << realOp0 << ", " << realDst << "\n";
+                }
+            }
+            *os << "  " << simdInst << " " << realOp1 << ", " << realDst << "\n";
+            if (dstIsMem) {
+                *os << "  movdqu " << scratchVec << ", " << dst << "\n";
             }
         }
     }

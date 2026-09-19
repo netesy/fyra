@@ -31,6 +31,12 @@ ConstantArray* ConstantArray::get(ArrayType* ty, const std::vector<Constant*>& v
     return dynamic_cast<ConstantArray*>(getGlobalCtx().getConstantArray(ty, values));
 }
 
+ConstantVector::ConstantVector(VectorType* ty, const std::vector<Constant*>& elements) : Constant(ty), elements(elements) {}
+
+ConstantVector* ConstantVector::get(VectorType* ty, const std::vector<Constant*>& elements) {
+    return dynamic_cast<ConstantVector*>(getGlobalCtx().getConstantVector(ty, elements));
+}
+
 ConstantString::ConstantString(const std::string& value) : Constant(nullptr), value(value) {}
 
 void ConstantString::setType(Type* ty) {

@@ -181,25 +181,27 @@ bool FunctionInliner::exposesScalarEvolutionOpportunity(const ir::Instruction* c
 
     if (!boundVal) return false;
 
-    bool isConstantBound = (dynamic_cast<const ir::ConstantInt*>(boundVal) != nullptr);
-
-    if (!isConstantBound) {
-        size_t pIdx = 0;
-        for (const auto& p : callee->getParameters()) {
-            if (p->getName() == boundVal->getName() || p.get() == boundVal) {
-                if (pIdx + 1 < callInst->getOperands().size() && callInst->getOperands()[pIdx + 1]) {
-                    const ir::Value* argVal = callInst->getOperands()[pIdx + 1]->get();
-                    if (dynamic_cast<const ir::ConstantInt*>(argVal) != nullptr) {
-                        isConstantBound = true;
+    bool isExposedBound = false;
+    size_t pIdx = 0;
+    for (const auto& p : callee->getParameters()) {
+        if (p->getName() == boundVal->getName() || p.get() == boundVal) {
+            if (pIdx + 1 < callInst->getOperands().size() && callInst->getOperands()[pIdx + 1]) {
+                const ir::Value* argVal = callInst->getOperands()[pIdx + 1]->get();
+                if (auto* cVal = dynamic_cast<const ir::ConstantInt*>(argVal)) {
+                    if (cVal->getValue() <= 10000) {
+                        isExposedBound = true;
                         break;
                     }
+                } else if (dynamic_cast<const ir::PhiNode*>(argVal) != nullptr) {
+                    isExposedBound = true;
+                    break;
                 }
             }
-            pIdx++;
         }
+        pIdx++;
     }
 
-    if (!isConstantBound) return false;
+    return isExposedBound;
 
     // Ensure callee loop has no calls or side-effects
     for (const auto& bb : callee->getBasicBlocks()) {

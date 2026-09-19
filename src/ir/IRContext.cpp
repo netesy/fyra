@@ -160,6 +160,16 @@ Constant* IRContext::getConstantArray(ArrayType* ty, const std::vector<Constant*
     return ptr;
 }
 
+ConstantVector* IRContext::getConstantVector(VectorType* ty, const std::vector<Constant*>& elements) {
+    ConstantVectorKey key{ty, elements};
+    if (constantVectors.count(key)) return constantVectors[key];
+    auto c = std::unique_ptr<ConstantVector>(new ConstantVector(ty, elements));
+    ConstantVector* ptr = c.get();
+    ownedConstants.push_back(std::move(c));
+    constantVectors[key] = ptr;
+    return ptr;
+}
+
 std::unique_ptr<Module> IRContext::createModule(const std::string& name) {
     return std::make_unique<Module>(name, shared_from_this());
 }

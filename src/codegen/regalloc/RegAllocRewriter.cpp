@@ -28,9 +28,17 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     for (const auto& [vreg, location] : location_map) {
         if (std::holds_alternative<StackSlot>(location)) {
             StackSlot slot = std::get<StackSlot>(location);
-            // Assuming each slot is 8 bytes now for x64
-            func.setStackSlotForVreg(vreg, slot.index * 8);
-            stack_frame_size += 8;
+            int slotByteOffset = slot.index * 8;
+            func.setStackSlotForVreg(vreg, slotByteOffset);
+            int slotSize = 8;
+            if (vreg && vreg->getType()) {
+                if (auto* vt = dynamic_cast<const ir::VectorType*>(vreg->getType())) {
+                    slotSize = vt->getSize();
+                }
+            }
+            if (slotByteOffset + slotSize > stack_frame_size) {
+                stack_frame_size = slotByteOffset + slotSize;
+            }
         } else if (std::holds_alternative<PhysicalReg>(location)) {
             PhysicalReg reg = std::get<PhysicalReg>(location);
             vreg->setPhysicalRegister(reg.index);

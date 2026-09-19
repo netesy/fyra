@@ -6,7 +6,9 @@
 #include "ir/Constant.h"
 #include "ir/Module.h"
 #include "ir/PhiNode.h"
+#include "ir/SIMDInstruction.h"
 #include <iostream>
+#include <cmath>
 #include <set>
 #include <unordered_set>
 #include <map>
@@ -37,6 +39,191 @@ static int64_t signExtend(uint64_t val, uint64_t width) {
         return (int64_t)(val | ~mask);
     }
     return (int64_t)val;
+}
+
+ir::Constant* SCCP::foldVectorInstruction(
+    ir::Instruction* instr,
+    const std::vector<ir::Constant*>& opConsts
+) {
+    if (!instr) return nullptr;
+    ir::Instruction::Opcode op = instr->getOpcode();
+
+    // Check if it's a vector instruction
+    auto* resVecTy = dynamic_cast<ir::VectorType*>(instr->getType());
+
+    if (op == ir::Instruction::VBroadcast) {
+        if (opConsts.empty() || !opConsts[0]) return nullptr;
+        if (!resVecTy) return nullptr;
+        ir::Constant* scalarC = opConsts[0];
+        std::vector<ir::Constant*> elements(resVecTy->getNumElements(), scalarC);
+        return ir::ConstantVector::get(resVecTy, elements);
+    }
+
+    if (op == ir::Instruction::VExtract) {
+        if (opConsts.size() < 2 || !opConsts[0] || !opConsts[1]) return nullptr;
+        auto* vecC = dynamic_cast<ir::ConstantVector*>(opConsts[0]);
+        auto* idxC = dynamic_cast<ir::ConstantInt*>(opConsts[1]);
+        if (!vecC || !idxC) return nullptr;
+        size_t idx = static_cast<size_t>(idxC->getValue());
+        if (idx >= vecC->getElements().size()) return nullptr;
+        return vecC->getElement(idx);
+    }
+
+    if (op == ir::Instruction::VInsert) {
+        if (opConsts.size() < 3 || !opConsts[0] || !opConsts[1] || !opConsts[2]) return nullptr;
+        auto* vecC = dynamic_cast<ir::ConstantVector*>(opConsts[0]);
+        ir::Constant* scalarC = opConsts[1];
+        auto* idxC = dynamic_cast<ir::ConstantInt*>(opConsts[2]);
+        if (!vecC || !scalarC || !idxC) return nullptr;
+        size_t idx = static_cast<size_t>(idxC->getValue());
+        if (idx >= vecC->getElements().size()) return nullptr;
+        std::vector<ir::Constant*> newElems = vecC->getElements();
+        newElems[idx] = scalarC;
+        auto* vecTy = dynamic_cast<ir::VectorType*>(vecC->getType());
+        if (!vecTy) return nullptr;
+        return ir::ConstantVector::get(vecTy, newElems);
+    }
+
+    if (op == ir::Instruction::VSelect) {
+        if (opConsts.size() < 3 || !opConsts[0] || !opConsts[1] || !opConsts[2]) return nullptr;
+        auto* maskC = dynamic_cast<ir::ConstantVector*>(opConsts[0]);
+        auto* trueC = dynamic_cast<ir::ConstantVector*>(opConsts[1]);
+        auto* falseC = dynamic_cast<ir::ConstantVector*>(opConsts[2]);
+        if (!maskC || !trueC || !falseC) return nullptr;
+        if (!resVecTy) return nullptr;
+        size_t numElem = resVecTy->getNumElements();
+        if (maskC->getElements().size() != numElem || trueC->getElements().size() != numElem || falseC->getElements().size() != numElem)
+            return nullptr;
+
+        std::vector<ir::Constant*> resElems;
+        for (size_t i = 0; i < numElem; ++i) {
+            auto* mElem = dynamic_cast<ir::ConstantInt*>(maskC->getElement(i));
+            if (!mElem) return nullptr;
+            resElems.push_back(mElem->getValue() != 0 ? trueC->getElement(i) : falseC->getElement(i));
+        }
+        return ir::ConstantVector::get(resVecTy, resElems);
+    }
+
+    if (op == ir::Instruction::VCmp) {
+        if (opConsts.size() < 3 || !opConsts[0] || !opConsts[1] || !opConsts[2]) return nullptr;
+        auto* vec1C = dynamic_cast<ir::ConstantVector*>(opConsts[0]);
+        auto* vec2C = dynamic_cast<ir::ConstantVector*>(opConsts[1]);
+        auto* predC = dynamic_cast<ir::ConstantInt*>(opConsts[2]);
+        if (!vec1C || !vec2C || !predC) return nullptr;
+        if (!resVecTy) return nullptr;
+        size_t numElem = resVecTy->getNumElements();
+        if (vec1C->getElements().size() != numElem || vec2C->getElements().size() != numElem) return nullptr;
+
+        ir::VectorCompareOp pred = static_cast<ir::VectorCompareOp>(predC->getValue());
+        auto* elemIntTy = dynamic_cast<ir::IntegerType*>(resVecTy->getElementType());
+        if (!elemIntTy) return nullptr;
+
+        std::vector<ir::Constant*> resElems;
+        for (size_t i = 0; i < numElem; ++i) {
+            ir::Constant* e1 = vec1C->getElement(i);
+            ir::Constant* e2 = vec2C->getElement(i);
+            bool cond = false;
+            if (auto* i1 = dynamic_cast<ir::ConstantInt*>(e1)) {
+                auto* i2 = dynamic_cast<ir::ConstantInt*>(e2);
+                if (!i2) return nullptr;
+                uint64_t u1 = i1->getValue(), u2 = i2->getValue();
+                uint64_t bw = getBitWidth(i1->getType());
+                int64_t s1 = signExtend(u1, bw), s2 = signExtend(u2, bw);
+                switch (pred) {
+                    case ir::VectorCompareOp::EQ: cond = (u1 == u2); break;
+                    case ir::VectorCompareOp::NE: cond = (u1 != u2); break;
+                    case ir::VectorCompareOp::LT: cond = (s1 < s2); break;
+                    case ir::VectorCompareOp::LE: cond = (s1 <= s2); break;
+                    case ir::VectorCompareOp::GT: cond = (s1 > s2); break;
+                    case ir::VectorCompareOp::GE: cond = (s1 >= s2); break;
+                    case ir::VectorCompareOp::ULT: cond = (u1 < u2); break;
+                    case ir::VectorCompareOp::ULE: cond = (u1 <= u2); break;
+                    case ir::VectorCompareOp::UGT: cond = (u1 > u2); break;
+                    case ir::VectorCompareOp::UGE: cond = (u1 >= u2); break;
+                }
+            } else if (auto* f1 = dynamic_cast<ir::ConstantFP*>(e1)) {
+                auto* f2 = dynamic_cast<ir::ConstantFP*>(e2);
+                if (!f2) return nullptr;
+                double d1 = f1->getValue(), d2 = f2->getValue();
+                switch (pred) {
+                    case ir::VectorCompareOp::EQ: cond = (d1 == d2); break;
+                    case ir::VectorCompareOp::NE: cond = (d1 != d2); break;
+                    case ir::VectorCompareOp::LT: cond = (d1 < d2); break;
+                    case ir::VectorCompareOp::LE: cond = (d1 <= d2); break;
+                    case ir::VectorCompareOp::GT: cond = (d1 > d2); break;
+                    case ir::VectorCompareOp::GE: cond = (d1 >= d2); break;
+                    default: return nullptr;
+                }
+            } else {
+                return nullptr;
+            }
+            uint64_t maskVal = cond ? ((1ULL << elemIntTy->getBitwidth()) - 1ULL) : 0ULL;
+            resElems.push_back(ir::ConstantInt::get(elemIntTy, maskVal));
+        }
+        return ir::ConstantVector::get(resVecTy, resElems);
+    }
+
+    // Binary vector ops
+    if (opConsts.size() < 2 || !opConsts[0] || !opConsts[1]) return nullptr;
+    auto* vec1C = dynamic_cast<ir::ConstantVector*>(opConsts[0]);
+    auto* vec2C = dynamic_cast<ir::ConstantVector*>(opConsts[1]);
+    if (!vec1C || !vec2C) return nullptr;
+    if (!resVecTy) return nullptr;
+
+    size_t numElem = resVecTy->getNumElements();
+    if (vec1C->getElements().size() != numElem || vec2C->getElements().size() != numElem) return nullptr;
+
+    std::vector<ir::Constant*> resElems;
+    for (size_t i = 0; i < numElem; ++i) {
+        ir::Constant* e1 = vec1C->getElement(i);
+        ir::Constant* e2 = vec2C->getElement(i);
+
+        if (auto* i1 = dynamic_cast<ir::ConstantInt*>(e1)) {
+            auto* i2 = dynamic_cast<ir::ConstantInt*>(e2);
+            if (!i2) return nullptr;
+            auto* ity = dynamic_cast<ir::IntegerType*>(resVecTy->getElementType());
+            if (!ity) return nullptr;
+            uint64_t bw = ity->getBitwidth();
+            uint64_t u1 = i1->getValue(), u2 = i2->getValue();
+            int64_t s1 = signExtend(u1, bw), s2 = signExtend(u2, bw);
+            uint64_t resU = 0;
+
+            switch (op) {
+                case ir::Instruction::VAdd: resU = maskValue(u1 + u2, bw); break;
+                case ir::Instruction::VSub: resU = maskValue(u1 - u2, bw); break;
+                case ir::Instruction::VMul: resU = maskValue(u1 * u2, bw); break;
+                case ir::Instruction::VAnd: resU = maskValue(u1 & u2, bw); break;
+                case ir::Instruction::VOr:  resU = maskValue(u1 | u2, bw); break;
+                case ir::Instruction::VXor: resU = maskValue(u1 ^ u2, bw); break;
+                case ir::Instruction::VShl: resU = maskValue(u1 << (u2 & 63), bw); break;
+                case ir::Instruction::VShr: resU = maskValue(u1 >> (u2 & 63), bw); break;
+                case ir::Instruction::VMin: resU = maskValue((s1 < s2 ? s1 : s2), bw); break;
+                case ir::Instruction::VMax: resU = maskValue((s1 > s2 ? s1 : s2), bw); break;
+                default: return nullptr;
+            }
+            resElems.push_back(ir::ConstantInt::get(ity, resU));
+        } else if (auto* f1 = dynamic_cast<ir::ConstantFP*>(e1)) {
+            auto* f2 = dynamic_cast<ir::ConstantFP*>(e2);
+            if (!f2) return nullptr;
+            auto* fty = resVecTy->getElementType();
+            double d1 = f1->getValue(), d2 = f2->getValue();
+            double resD = 0;
+
+            switch (op) {
+                case ir::Instruction::VFAdd: resD = d1 + d2; break;
+                case ir::Instruction::VFSub: resD = d1 - d2; break;
+                case ir::Instruction::VFMul: resD = d1 * d2; break;
+                case ir::Instruction::VFDiv: if (d2 == 0.0) return nullptr; resD = d1 / d2; break;
+                case ir::Instruction::VFMin: resD = std::min(d1, d2); break;
+                case ir::Instruction::VFMax: resD = std::max(d1, d2); break;
+                default: return nullptr;
+            }
+            resElems.push_back(ir::ConstantFP::get(fty, resD));
+        } else {
+            return nullptr;
+        }
+    }
+    return ir::ConstantVector::get(resVecTy, resElems);
 }
 
 bool SCCP::isFunctionPure(ir::Function* func, std::unordered_map<ir::Function*, bool>& purityCache, std::unordered_set<ir::Function*>& activeVisiting) {
@@ -205,13 +392,23 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
                 continue;
             }
 
-            std::vector<ir::ConstantInt*> opCIs;
+            std::vector<ir::Constant*> opConsts;
             for (auto& opUse : instr->getOperands()) {
                 ir::Value* v = opUse ? opUse->get() : nullptr;
-                ir::ConstantInt* ci = nullptr;
-                if (auto* c = dynamic_cast<ir::ConstantInt*>(v)) ci = c;
-                else if (frame.count(v)) ci = dynamic_cast<ir::ConstantInt*>(frame[v]);
-                opCIs.push_back(ci);
+                ir::Constant* c = nullptr;
+                if (auto* constVal = dynamic_cast<ir::Constant*>(v)) c = constVal;
+                else if (frame.count(v)) c = frame[v];
+                opConsts.push_back(c);
+            }
+
+            if (ir::Constant* vecRes = foldVectorInstruction(instr, opConsts)) {
+                frame[instr] = vecRes;
+                continue;
+            }
+
+            std::vector<ir::ConstantInt*> opCIs;
+            for (auto* c : opConsts) {
+                opCIs.push_back(dynamic_cast<ir::ConstantInt*>(c));
             }
 
             uint64_t width = getBitWidth(instr->getType());
@@ -380,8 +577,7 @@ void SCCP::initialize(ir::Function& func) {
 }
 
 SCCP::LatticeEntry SCCP::getLatticeValue(ir::Value* val) {
-    if (auto* ci = dynamic_cast<ir::ConstantInt*>(val)) return {Constant, ci};
-    if (auto* cf = dynamic_cast<ir::ConstantFP*>(val)) return {Constant, cf};
+    if (auto* c = dynamic_cast<ir::Constant*>(val)) return {Constant, c};
     if (lattice.count(val)) return lattice[val];
     return {Bottom, nullptr};
 }
@@ -532,6 +728,14 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
     if (any_bottom) {
         setLatticeValue(instr, {Bottom, nullptr}, inInstructionWorklist);
     } else if (all_const) {
+        std::vector<ir::Constant*> opConsts;
+        for (const auto& v : op_vals) opConsts.push_back(v.constant);
+
+        if (ir::Constant* vecRes = foldVectorInstruction(instr, opConsts)) {
+            setLatticeValue(instr, {Constant, vecRes}, inInstructionWorklist);
+            return;
+        }
+
         // Fold instruction
         if (op == ir::Instruction::Add) {
             int64_t v = static_cast<ir::ConstantInt*>(op_vals[0].constant)->getValue() + static_cast<ir::ConstantInt*>(op_vals[1].constant)->getValue();
