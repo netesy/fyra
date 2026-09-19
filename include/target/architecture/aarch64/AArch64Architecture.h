@@ -74,6 +74,16 @@ public:
     std::string getImmediatePrefix() const override { return "#"; }
     std::string getFunctionTypeSpecifier() const override { return "%function"; }
 
+    bool supportsVectorWidth(unsigned width) const override;
+    bool supportsVectorType(const ir::VectorType* type) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
+
+    void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+
+private:
+    std::string getNEONArrangement(const ir::VectorType* vecTy) const;
+
 private:
     void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);
     std::string getWRegister(const std::string& xReg) const;
