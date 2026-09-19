@@ -299,6 +299,11 @@ target_link_libraries(test_simd_stubs PRIVATE fyra)
 add_test(NAME SIMDStubsTest COMMAND test_simd_stubs)
 set_tests_properties(SIMDStubsTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_wasm_simd_proof test_wasm_simd_proof.cpp)
+target_link_libraries(test_wasm_simd_proof PRIVATE fyra)
+add_test(NAME WasmSIMDProofTest COMMAND test_wasm_simd_proof)
+set_tests_properties(WasmSIMDProofTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_simd_exec test_simd_exec.cpp)
 target_link_libraries(test_simd_exec PRIVATE fyra)
 add_test(NAME SIMDTest COMMAND test_simd_exec)

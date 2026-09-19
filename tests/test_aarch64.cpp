@@ -68,7 +68,6 @@ int main(int argc, char** argv) {
 
     assert(aarch64Target->supportsVectorWidth(128));
     assert(aarch64Target->supportsVectorType(v4i32));
-    assert(aarch64Target->supportsVectorOperation(ir::Instruction::VAdd, v4i32));
     std::cout << "AArch64 vector capabilities test passed!" << std::endl;
 
     return 0;

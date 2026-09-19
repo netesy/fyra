@@ -348,7 +348,16 @@ std::string AArch64Architecture::formatStackOperand(int o) const { return "[x29,
 std::string AArch64Architecture::formatGlobalOperand(const std::string& n) const { return n; }
 bool AArch64Architecture::isCallerSaved(const std::string& r) const { static const std::set<std::string> cs = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"}; return cs.count(r); }
 bool AArch64Architecture::isCalleeSaved(const std::string& r) const { static const std::set<std::string> cs = {"x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"}; return cs.count(r); }
-std::string AArch64Architecture::getRegisterName(const std::string& b, const ir::Type* t) const { if (auto* it = dynamic_cast<const ir::IntegerType*>(t)) { if (it->getBitwidth() <= 32 && b[0] == 'x') return "w" + b.substr(1); } return b; }
+std::string AArch64Architecture::getRegisterName(const std::string& b, const ir::Type* t) const {
+    if (t && (t->isVectorTy() || dynamic_cast<const ir::VectorType*>(t) != nullptr)) {
+        if (b[0] == 'x') return "v" + b.substr(1);
+        if (b[0] == 'w') return "v" + b.substr(1);
+    }
+    if (auto* it = dynamic_cast<const ir::IntegerType*>(t)) {
+        if (it->getBitwidth() <= 32 && b[0] == 'x') return "w" + b.substr(1);
+    }
+    return b;
+}
 
 void AArch64Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) {}
 void AArch64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {}
@@ -370,6 +379,21 @@ bool AArch64Architecture::supportsVectorType(const ir::VectorType* type) const {
     return elemBits == 8 || elemBits == 16 || elemBits == 32 || elemBits == 64;
 }
 
+std::string AArch64Architecture::getNEONArrangement(const ir::VectorType* vecTy) const {
+    if (!vecTy || !vecTy->getElementType()) return ".16b";
+    unsigned elemBits = vecTy->getElementType()->getSize() * 8;
+    unsigned numElems = vecTy->getNumElements();
+    if (elemBits == 8 && numElems == 16) return ".16b";
+    if (elemBits == 8 && numElems == 8) return ".8b";
+    if (elemBits == 16 && numElems == 8) return ".8h";
+    if (elemBits == 16 && numElems == 4) return ".4h";
+    if (elemBits == 32 && numElems == 4) return ".4s";
+    if (elemBits == 32 && numElems == 2) return ".2s";
+    if (elemBits == 64 && numElems == 2) return ".2d";
+    if (elemBits == 64 && numElems == 1) return ".1d";
+    return ".16b";
+}
+
 bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const {
     if (!supportsVectorType(type)) return false;
     switch (op) {
@@ -388,15 +412,8 @@ bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, co
         case ir::Instruction::VBroadcast:
         case ir::Instruction::VExtract:
         case ir::Instruction::VInsert:
-        case ir::Instruction::VShuffle:
         case ir::Instruction::VCmp:
         case ir::Instruction::VSelect:
-        case ir::Instruction::VHAdd:
-        case ir::Instruction::VHSub:
-        case ir::Instruction::VMin:
-        case ir::Instruction::VMax:
-        case ir::Instruction::VFMin:
-        case ir::Instruction::VFMax:
             return true;
         default:
             return false;
@@ -404,8 +421,157 @@ bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, co
 }
 
 bool AArch64Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
-    if (!supportsVectorType(srcType) || !supportsVectorType(dstType)) return false;
-    return op == ir::Instruction::VSExt || op == ir::Instruction::VZExt || op == ir::Instruction::VTrunc;
+    return false;
+}
+
+void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) {
+    auto* os = cg.getTextStream();
+    if (!os) return;
+
+    auto* vecTy = dynamic_cast<const ir::VectorType*>(i.getType());
+    if (!vecTy && !i.getOperands().empty() && i.getOperands()[0]->get()) {
+        vecTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+    }
+
+    std::string arrange = getNEONArrangement(vecTy);
+    std::string rawDst = cg.getValueAsOperand(&i);
+    std::string dst = getRegisterName(rawDst, vecTy);
+
+    switch (i.getOpcode()) {
+        case ir::Instruction::VLoad: {
+            std::string ptr = cg.getValueAsOperand(i.getOperands()[0]->get());
+            std::string qDst = dst;
+            if (!qDst.empty() && qDst[0] == 'v') qDst[0] = 'q';
+            *os << "  ldr " << qDst << ", [" << ptr << "]\n";
+            break;
+        }
+        case ir::Instruction::VStore: {
+            std::string vec = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string ptr = cg.getValueAsOperand(i.getOperands()[1]->get());
+            std::string qVec = vec;
+            if (!qVec.empty() && qVec[0] == 'v') qVec[0] = 'q';
+            *os << "  str " << qVec << ", [" << ptr << "]\n";
+            break;
+        }
+        case ir::Instruction::VAdd: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  add " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VSub: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  sub " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VMul: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  mul " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VFAdd: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  fadd " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VFSub: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  fsub " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VFMul: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  fmul " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VFDiv: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  fdiv " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VAnd: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  and " << dst << ".16b, " << op0 << ".16b, " << op1 << ".16b\n";
+            break;
+        }
+        case ir::Instruction::VOr: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  orr " << dst << ".16b, " << op0 << ".16b, " << op1 << ".16b\n";
+            break;
+        }
+        case ir::Instruction::VXor: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  eor " << dst << ".16b, " << op0 << ".16b, " << op1 << ".16b\n";
+            break;
+        }
+        case ir::Instruction::VBroadcast: {
+            std::string scalar = cg.getValueAsOperand(i.getOperands()[0]->get());
+            *os << "  dup " << dst << arrange << ", " << scalar << "\n";
+            break;
+        }
+        case ir::Instruction::VExtract: {
+            std::string vec = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            uint64_t idx = 0;
+            if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+                idx = ci->getValue();
+            }
+            std::string elementSpec = ".s[" + std::to_string(idx) + "]";
+            if (vecTy && vecTy->getElementType()) {
+                unsigned bits = vecTy->getElementType()->getSize() * 8;
+                if (bits == 8) elementSpec = ".b[" + std::to_string(idx) + "]";
+                else if (bits == 16) elementSpec = ".h[" + std::to_string(idx) + "]";
+                else if (bits == 32) elementSpec = ".s[" + std::to_string(idx) + "]";
+                else if (bits == 64) elementSpec = ".d[" + std::to_string(idx) + "]";
+            }
+            *os << "  mov " << dst << ", " << vec << elementSpec << "\n";
+            break;
+        }
+        case ir::Instruction::VInsert: {
+            std::string vec = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string val = cg.getValueAsOperand(i.getOperands()[1]->get());
+            uint64_t idx = 0;
+            if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get())) {
+                idx = ci->getValue();
+            }
+            std::string elementSpec = ".s[" + std::to_string(idx) + "]";
+            if (vecTy && vecTy->getElementType()) {
+                unsigned bits = vecTy->getElementType()->getSize() * 8;
+                if (bits == 8) elementSpec = ".b[" + std::to_string(idx) + "]";
+                else if (bits == 16) elementSpec = ".h[" + std::to_string(idx) + "]";
+                else if (bits == 32) elementSpec = ".s[" + std::to_string(idx) + "]";
+                else if (bits == 64) elementSpec = ".d[" + std::to_string(idx) + "]";
+            }
+            if (dst != vec) *os << "  mov " << dst << ".16b, " << vec << ".16b\n";
+            *os << "  mov " << dst << elementSpec << ", " << val << "\n";
+            break;
+        }
+        case ir::Instruction::VCmp: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  cmeq " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VSelect: {
+            std::string mask = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string trueVal = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            std::string falseVal = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
+            if (dst != trueVal) *os << "  mov " << dst << ".16b, " << trueVal << ".16b\n";
+            *os << "  bsl " << mask << ".16b, " << trueVal << ".16b, " << falseVal << ".16b\n";
+            break;
+        }
+        default:
+            *os << "  # Unsupported AArch64 vector opcode: " << i.getOpcode() << "\n";
+            break;
+    }
 }
 
 }

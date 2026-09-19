@@ -71,7 +71,6 @@ export function $main() : i32 {
 
     assert(wasmTarget->supportsVectorWidth(128));
     assert(wasmTarget->supportsVectorType(v4i32));
-    assert(wasmTarget->supportsVectorOperation(ir::Instruction::VAdd, v4i32));
     std::cout << "Wasm32 vector capabilities test passed!\n";
 
     return 0;

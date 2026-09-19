@@ -79,7 +79,10 @@ public:
     bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
     bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
 
+    void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+
 private:
+    std::string getNEONArrangement(const ir::VectorType* vecTy) const;
     void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);
     std::string getWRegister(const std::string& xReg) const;
     size_t align_to_16(size_t size) const { return (size + 15) & ~15; }

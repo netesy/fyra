@@ -117,9 +117,6 @@ bool SIMDPatternMatcher::isVectorizableLoop(const std::vector<Instruction*>& ins
 
 unsigned SIMDPatternMatcher::getOptimalVectorWidth(Type* elementType, const std::string& targetArch) {
     if (!elementType) return 128;
-    if (targetArch == "x64" || targetArch == "x86_64") {
-        return 256;
-    }
     return 128;
 }
 

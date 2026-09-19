@@ -96,15 +96,72 @@ enum class WasmOpcode : uint8_t {
     I64Xor = 0x85,
     I64Shl = 0x86,
     I64ShrS = 0x87,
-    I64ShrU = 0x88
+    I64ShrU = 0x88,
+    SIMDPrefix = 0xFD
+};
+
+enum class WasmSIMDOpcode : uint32_t {
+    V128Load = 0x00,
+    V128Store = 0x0B,
+    I32x4Splat = 0x11,
+    F32x4Splat = 0x13,
+    F64x2Splat = 0x14,
+    I32x4ExtractLane = 0x1B,
+    I32x4ReplaceLane = 0x1C,
+    F32x4ExtractLane = 0x1F,
+    F32x4ReplaceLane = 0x20,
+    F64x2ExtractLane = 0x21,
+    F64x2ReplaceLane = 0x22,
+    V128And = 0x4E,
+    V128Or = 0x50,
+    V128Xor = 0x51,
+    V128Bitselect = 0x52,
+    I32x4Eq = 0x8C,
+    I32x4Ne = 0x8D,
+    I32x4LtS = 0x8E,
+    I32x4LtU = 0x8F,
+    I32x4GtS = 0x90,
+    I32x4GtU = 0x91,
+    I32x4LeS = 0x92,
+    I32x4LeU = 0x93,
+    I32x4GeS = 0x94,
+    I32x4GeU = 0x95,
+    I32x4Add = 0xAE,
+    I32x4Sub = 0xAF,
+    I32x4Mul = 0xB5,
+    F32x4Eq = 0x41,
+    F32x4Ne = 0x42,
+    F32x4Lt = 0x43,
+    F32x4Gt = 0x44,
+    F32x4Le = 0x45,
+    F32x4Ge = 0x46,
+    F32x4Add = 0xE4,
+    F32x4Sub = 0xE5,
+    F32x4Mul = 0xE6,
+    F32x4Div = 0xE7,
+    F64x2Add = 0xF0,
+    F64x2Sub = 0xF1,
+    F64x2Mul = 0xF2,
+    F64x2Div = 0xF3
 };
 
 struct WasmInstruction {
     WasmOpcode opcode;
+    WasmSIMDOpcode simdOpcode = WasmSIMDOpcode::I32x4Add;
     int64_t intImm = 0;
     double floatImm = 0.0;
     uint32_t uintImm = 0;
     std::string symbolImm;
+    bool isSIMD = false;
+
+    static WasmInstruction makeSIMD(WasmSIMDOpcode simdOp, uint32_t imm = 0) {
+        WasmInstruction inst;
+        inst.opcode = WasmOpcode::SIMDPrefix;
+        inst.simdOpcode = simdOp;
+        inst.uintImm = imm;
+        inst.isSIMD = true;
+        return inst;
+    }
 
     static WasmInstruction makeConstI32(int32_t val) {
         WasmInstruction inst; inst.opcode = WasmOpcode::I32Const; inst.intImm = val; return inst;

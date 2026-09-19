@@ -141,7 +141,6 @@ bool Wasm32Architecture::supportsVectorOperation(ir::Instruction::Opcode op, con
         case ir::Instruction::VBroadcast:
         case ir::Instruction::VExtract:
         case ir::Instruction::VInsert:
-        case ir::Instruction::VShuffle:
         case ir::Instruction::VCmp:
         case ir::Instruction::VSelect:
             return true;
@@ -151,8 +150,7 @@ bool Wasm32Architecture::supportsVectorOperation(ir::Instruction::Opcode op, con
 }
 
 bool Wasm32Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
-    if (!supportsVectorType(srcType) || !supportsVectorType(dstType)) return false;
-    return op == ir::Instruction::VSExt || op == ir::Instruction::VZExt || op == ir::Instruction::VTrunc;
+    return false;
 }
 
 } // namespace target
