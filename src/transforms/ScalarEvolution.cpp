@@ -295,6 +295,11 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
 
         if (numIterations <= 0) return nullptr;
 
+        if (rec.coeffB != 0 && std::abs(rec.coeffB) > 1) {
+            int64_t maxN = 2147483647LL / std::abs(rec.coeffB) + 1;
+            if (numIterations > maxN) return nullptr;
+        }
+
         uint64_t N = static_cast<uint64_t>(numIterations);
         uint64_t I0 = static_cast<uint64_t>(initI);
 
