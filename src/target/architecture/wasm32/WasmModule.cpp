@@ -1,6 +1,7 @@
 #include "target/architecture/wasm32/WasmModule.h"
 #include "target/architecture/wasm32/WasmBinary.h"
 #include "ir/FunctionType.h"
+#include "ir/SIMDInstruction.h"
 #include "ir/Constant.h"
 #include "ir/Use.h"
 #include "ir/PhiNode.h"
@@ -491,68 +492,110 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                     wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::V128Store));
                     break;
 
-                case ir::Instruction::VAdd:
+                case ir::Instruction::VAdd: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4Add));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::I32x4Add;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->getSize() == 1) op = WasmSIMDOpcode::I8x16Add;
+                        else if (vt->getElementType()->getSize() == 2) op = WasmSIMDOpcode::I16x8Add;
+                        else if (vt->getElementType()->getSize() == 4) op = WasmSIMDOpcode::I32x4Add;
+                        else if (vt->getElementType()->getSize() == 8) op = WasmSIMDOpcode::I64x2Add;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
-                case ir::Instruction::VSub:
+                case ir::Instruction::VSub: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4Sub));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::I32x4Sub;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->getSize() == 1) op = WasmSIMDOpcode::I8x16Sub;
+                        else if (vt->getElementType()->getSize() == 2) op = WasmSIMDOpcode::I16x8Sub;
+                        else if (vt->getElementType()->getSize() == 4) op = WasmSIMDOpcode::I32x4Sub;
+                        else if (vt->getElementType()->getSize() == 8) op = WasmSIMDOpcode::I64x2Sub;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
-                case ir::Instruction::VMul:
+                case ir::Instruction::VMul: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4Mul));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::I32x4Mul;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->getSize() == 2) op = WasmSIMDOpcode::I16x8Mul;
+                        else if (vt->getElementType()->getSize() == 4) op = WasmSIMDOpcode::I32x4Mul;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
-                case ir::Instruction::VFAdd:
+                case ir::Instruction::VFAdd: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::F32x4Add));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::F32x4Add;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->isDoubleTy()) op = WasmSIMDOpcode::F64x2Add;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
-                case ir::Instruction::VFSub:
+                case ir::Instruction::VFSub: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::F32x4Sub));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::F32x4Sub;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->isDoubleTy()) op = WasmSIMDOpcode::F64x2Sub;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
-                case ir::Instruction::VFMul:
+                case ir::Instruction::VFMul: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::F32x4Mul));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::F32x4Mul;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->isDoubleTy()) op = WasmSIMDOpcode::F64x2Mul;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
-                case ir::Instruction::VFDiv:
+                case ir::Instruction::VFDiv: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::F32x4Div));
+                    WasmSIMDOpcode op = WasmSIMDOpcode::F32x4Div;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->isDoubleTy()) op = WasmSIMDOpcode::F64x2Div;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+                }
 
                 case ir::Instruction::VAnd:
                     pushOperand(i.getOperands()[0]->get());
@@ -632,10 +675,51 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                 case ir::Instruction::VCmp: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
-                    WasmSIMDOpcode cmpOp = WasmSIMDOpcode::I32x4Eq;
+                    ir::VectorCompareOp pred = ir::VectorCompareOp::EQ;
+                    if (i.getOperands().size() > 2) {
+                        if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get())) {
+                            pred = static_cast<ir::VectorCompareOp>(ci->getValue());
+                        }
+                    }
                     auto* opTy = i.getOperands()[0]->get()->getType();
                     if (auto* vt = dynamic_cast<const ir::VectorType*>(opTy)) opTy = vt->getElementType();
-                    if (opTy && opTy->isFloatTy()) cmpOp = WasmSIMDOpcode::F32x4Eq;
+
+                    WasmSIMDOpcode cmpOp = WasmSIMDOpcode::I32x4Eq;
+                    if (opTy && opTy->isFloatTy()) {
+                        switch (pred) {
+                            case ir::VectorCompareOp::EQ: cmpOp = WasmSIMDOpcode::F32x4Eq; break;
+                            case ir::VectorCompareOp::NE: cmpOp = WasmSIMDOpcode::F32x4Ne; break;
+                            case ir::VectorCompareOp::LT: cmpOp = WasmSIMDOpcode::F32x4Lt; break;
+                            case ir::VectorCompareOp::LE: cmpOp = WasmSIMDOpcode::F32x4Le; break;
+                            case ir::VectorCompareOp::GT: cmpOp = WasmSIMDOpcode::F32x4Gt; break;
+                            case ir::VectorCompareOp::GE: cmpOp = WasmSIMDOpcode::F32x4Ge; break;
+                            default: cmpOp = WasmSIMDOpcode::F32x4Eq; break;
+                        }
+                    } else if (opTy && opTy->isDoubleTy()) {
+                        switch (pred) {
+                            case ir::VectorCompareOp::EQ: cmpOp = WasmSIMDOpcode::F64x2Eq; break;
+                            case ir::VectorCompareOp::NE: cmpOp = WasmSIMDOpcode::F64x2Ne; break;
+                            case ir::VectorCompareOp::LT: cmpOp = WasmSIMDOpcode::F64x2Lt; break;
+                            case ir::VectorCompareOp::LE: cmpOp = WasmSIMDOpcode::F64x2Le; break;
+                            case ir::VectorCompareOp::GT: cmpOp = WasmSIMDOpcode::F64x2Gt; break;
+                            case ir::VectorCompareOp::GE: cmpOp = WasmSIMDOpcode::F64x2Ge; break;
+                            default: cmpOp = WasmSIMDOpcode::F64x2Eq; break;
+                        }
+                    } else {
+                        switch (pred) {
+                            case ir::VectorCompareOp::EQ: cmpOp = WasmSIMDOpcode::I32x4Eq; break;
+                            case ir::VectorCompareOp::NE: cmpOp = WasmSIMDOpcode::I32x4Ne; break;
+                            case ir::VectorCompareOp::LT: cmpOp = WasmSIMDOpcode::I32x4LtS; break;
+                            case ir::VectorCompareOp::LE: cmpOp = WasmSIMDOpcode::I32x4LeS; break;
+                            case ir::VectorCompareOp::GT: cmpOp = WasmSIMDOpcode::I32x4GtS; break;
+                            case ir::VectorCompareOp::GE: cmpOp = WasmSIMDOpcode::I32x4GeS; break;
+                            case ir::VectorCompareOp::ULT: cmpOp = WasmSIMDOpcode::I32x4LtU; break;
+                            case ir::VectorCompareOp::ULE: cmpOp = WasmSIMDOpcode::I32x4LeU; break;
+                            case ir::VectorCompareOp::UGT: cmpOp = WasmSIMDOpcode::I32x4GtU; break;
+                            case ir::VectorCompareOp::UGE: cmpOp = WasmSIMDOpcode::I32x4GeU; break;
+                            default: cmpOp = WasmSIMDOpcode::I32x4Eq; break;
+                        }
+                    }
                     wasmFunc.body.push_back(WasmInstruction::makeSIMD(cmpOp));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));

@@ -557,7 +557,22 @@ void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
         case ir::Instruction::VCmp: {
             std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
             std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
-            *os << "  cmeq " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            ir::VectorCompareOp pred = ir::VectorCompareOp::EQ;
+            if (i.getOperands().size() > 2) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get())) {
+                    pred = static_cast<ir::VectorCompareOp>(ci->getValue());
+                }
+            }
+            std::string cmpMnemonic = "cmeq";
+            switch (pred) {
+                case ir::VectorCompareOp::EQ: cmpMnemonic = "cmeq"; break;
+                case ir::VectorCompareOp::GT: case ir::VectorCompareOp::UGT: cmpMnemonic = "cmgt"; break;
+                case ir::VectorCompareOp::GE: case ir::VectorCompareOp::UGE: cmpMnemonic = "cmge"; break;
+                case ir::VectorCompareOp::LT: case ir::VectorCompareOp::ULT: cmpMnemonic = "cmlt"; break;
+                case ir::VectorCompareOp::LE: case ir::VectorCompareOp::ULE: cmpMnemonic = "cmle"; break;
+                default: cmpMnemonic = "cmeq"; break;
+            }
+            *os << "  " << cmpMnemonic << " " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
             break;
         }
         case ir::Instruction::VSelect: {
