@@ -1,4 +1,4 @@
-Start testing: Sep 19 08:10 UTC
+Start testing: Sep 19 14:01 UTC
 ----------------------------------------------------------
 Failed to change working directory to C:/Projects/Quick : No such file or directory
 1/43 Testing: ParserTest
@@ -12,7 +12,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ParserTest" end time: Sep 19 08:10 UTC
+"ParserTest" end time: Sep 19 14:01 UTC
 "ParserTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -28,7 +28,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"TypeParserTest" end time: Sep 19 08:10 UTC
+"TypeParserTest" end time: Sep 19 14:01 UTC
 "TypeParserTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -44,7 +44,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"AddTest" end time: Sep 19 08:10 UTC
+"AddTest" end time: Sep 19 14:01 UTC
 "AddTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -60,7 +60,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"CFGTest" end time: Sep 19 08:10 UTC
+"CFGTest" end time: Sep 19 14:01 UTC
 "CFGTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -76,7 +76,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"DomTreeTest" end time: Sep 19 08:10 UTC
+"DomTreeTest" end time: Sep 19 14:01 UTC
 "DomTreeTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -92,7 +92,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"DFTest" end time: Sep 19 08:10 UTC
+"DFTest" end time: Sep 19 14:01 UTC
 "DFTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -108,7 +108,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"PhiTest" end time: Sep 19 08:10 UTC
+"PhiTest" end time: Sep 19 14:01 UTC
 "PhiTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -124,7 +124,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"DIETest" end time: Sep 19 08:10 UTC
+"DIETest" end time: Sep 19 14:01 UTC
 "DIETest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -140,7 +140,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"DIEChainTest" end time: Sep 19 08:10 UTC
+"DIEChainTest" end time: Sep 19 14:01 UTC
 "DIEChainTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -156,7 +156,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"WindowsTest" end time: Sep 19 08:10 UTC
+"WindowsTest" end time: Sep 19 14:01 UTC
 "WindowsTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -172,7 +172,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"RenameTest" end time: Sep 19 08:10 UTC
+"RenameTest" end time: Sep 19 14:01 UTC
 "RenameTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -188,7 +188,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"RenameLoadTest" end time: Sep 19 08:10 UTC
+"RenameLoadTest" end time: Sep 19 14:01 UTC
 "RenameLoadTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -204,7 +204,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"Mem2RegTest" end time: Sep 19 08:10 UTC
+"Mem2RegTest" end time: Sep 19 14:01 UTC
 "Mem2RegTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -220,7 +220,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"CopyElimTest" end time: Sep 19 08:10 UTC
+"CopyElimTest" end time: Sep 19 14:01 UTC
 "CopyElimTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -236,7 +236,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"GVNTest" end time: Sep 19 08:10 UTC
+"GVNTest" end time: Sep 19 14:01 UTC
 "GVNTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -252,7 +252,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"RegAllocTest" end time: Sep 19 08:10 UTC
+"RegAllocTest" end time: Sep 19 14:01 UTC
 "RegAllocTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -268,7 +268,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"RegAllocSpillTest" end time: Sep 19 08:10 UTC
+"RegAllocSpillTest" end time: Sep 19 14:01 UTC
 "RegAllocSpillTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -284,7 +284,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"LivenessTest" end time: Sep 19 08:10 UTC
+"LivenessTest" end time: Sep 19 14:01 UTC
 "LivenessTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -300,7 +300,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"SCCPTest" end time: Sep 19 08:10 UTC
+"SCCPTest" end time: Sep 19 14:01 UTC
 "SCCPTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -316,7 +316,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"WindowsStackTest" end time: Sep 19 08:10 UTC
+"WindowsStackTest" end time: Sep 19 14:01 UTC
 "WindowsStackTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -332,7 +332,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"CopyTest" end time: Sep 19 08:10 UTC
+"CopyTest" end time: Sep 19 14:01 UTC
 "CopyTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -348,7 +348,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"MulDivTest" end time: Sep 19 08:10 UTC
+"MulDivTest" end time: Sep 19 14:01 UTC
 "MulDivTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -364,7 +364,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"BitwiseTest" end time: Sep 19 08:10 UTC
+"BitwiseTest" end time: Sep 19 14:01 UTC
 "BitwiseTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -380,7 +380,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"NegTest" end time: Sep 19 08:10 UTC
+"NegTest" end time: Sep 19 14:01 UTC
 "NegTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -396,7 +396,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ComparisonParserTest" end time: Sep 19 08:10 UTC
+"ComparisonParserTest" end time: Sep 19 14:01 UTC
 "ComparisonParserTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -412,7 +412,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"EnhancedSCCPTest" end time: Sep 19 08:10 UTC
+"EnhancedSCCPTest" end time: Sep 19 14:01 UTC
 "EnhancedSCCPTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -428,7 +428,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"EnhancedDCETest" end time: Sep 19 08:10 UTC
+"EnhancedDCETest" end time: Sep 19 14:01 UTC
 "EnhancedDCETest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -444,7 +444,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"LICMTest" end time: Sep 19 08:10 UTC
+"LICMTest" end time: Sep 19 14:01 UTC
 "LICMTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -460,7 +460,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"IntegrationTest" end time: Sep 19 08:10 UTC
+"IntegrationTest" end time: Sep 19 14:01 UTC
 "IntegrationTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -476,7 +476,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ASMValidationTest" end time: Sep 19 08:10 UTC
+"ASMValidationTest" end time: Sep 19 14:01 UTC
 "ASMValidationTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -492,7 +492,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ObjectGenerationTest" end time: Sep 19 08:10 UTC
+"ObjectGenerationTest" end time: Sep 19 14:01 UTC
 "ObjectGenerationTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -508,7 +508,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"EnhancedCodeGenTest" end time: Sep 19 08:10 UTC
+"EnhancedCodeGenTest" end time: Sep 19 14:01 UTC
 "EnhancedCodeGenTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -524,7 +524,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"EnhancedTargetsTest" end time: Sep 19 08:10 UTC
+"EnhancedTargetsTest" end time: Sep 19 14:01 UTC
 "EnhancedTargetsTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -540,7 +540,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"MemoryOperationsTest" end time: Sep 19 08:10 UTC
+"MemoryOperationsTest" end time: Sep 19 14:01 UTC
 "MemoryOperationsTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -556,7 +556,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ComparisonControlFlowTest" end time: Sep 19 08:10 UTC
+"ComparisonControlFlowTest" end time: Sep 19 14:01 UTC
 "ComparisonControlFlowTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -572,7 +572,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ProfilingTest" end time: Sep 19 08:10 UTC
+"ProfilingTest" end time: Sep 19 14:01 UTC
 "ProfilingTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -588,7 +588,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"SIMDTest" end time: Sep 19 08:10 UTC
+"SIMDTest" end time: Sep 19 14:01 UTC
 "SIMDTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -604,7 +604,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"FusionTest" end time: Sep 19 08:10 UTC
+"FusionTest" end time: Sep 19 14:01 UTC
 "FusionTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -620,7 +620,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"DebugInfoTest" end time: Sep 19 08:10 UTC
+"DebugInfoTest" end time: Sep 19 14:01 UTC
 "DebugInfoTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -636,7 +636,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"EnhancedIntegrationTest" end time: Sep 19 08:10 UTC
+"EnhancedIntegrationTest" end time: Sep 19 14:01 UTC
 "EnhancedIntegrationTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -652,7 +652,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"BenchmarkTest" end time: Sep 19 08:10 UTC
+"BenchmarkTest" end time: Sep 19 14:01 UTC
 "BenchmarkTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -668,7 +668,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"WindowsRiscVEnhancedTest" end time: Sep 19 08:10 UTC
+"WindowsRiscVEnhancedTest" end time: Sep 19 14:01 UTC
 "WindowsRiscVEnhancedTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -684,8 +684,8 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"RiscV64EnhancedTest" end time: Sep 19 08:10 UTC
+"RiscV64EnhancedTest" end time: Sep 19 14:01 UTC
 "RiscV64EnhancedTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Sep 19 08:10 UTC
+End testing: Sep 19 14:01 UTC
