@@ -627,8 +627,14 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
                 }
 
                 if (!constVal) return nullptr;
-                frame[instr] = constVal;
-                frameValArray[instIdx] = constVal;
+                if (ei.cObj && dynamic_cast<ir::ConstantInt*>(constVal)) {
+                    ei.cObj->value = static_cast<ir::ConstantInt*>(constVal)->getValue();
+                    frame[instr] = ei.cObj;
+                    frameValArray[instIdx] = ei.cObj;
+                } else {
+                    frame[instr] = constVal;
+                    frameValArray[instIdx] = constVal;
+                }
                 continue;
             }
 
