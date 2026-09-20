@@ -7,6 +7,7 @@
 #include "ir/Module.h"
 #include "ir/PhiNode.h"
 #include "ir/SIMDInstruction.h"
+#include "transforms/DominatorTree.h"
 #include <iostream>
 #include <cmath>
 #include <set>
@@ -14,6 +15,7 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
+#include <cstring>
 
 namespace transforms {
 
@@ -41,6 +43,111 @@ static int64_t signExtend(uint64_t val, uint64_t width) {
     return (int64_t)val;
 }
 
+static ir::Constant* foldScalarInstruction(
+    ir::Instruction::Opcode op,
+    ir::Type* resTy,
+    const std::vector<ir::Constant*>& opConsts
+) {
+    std::vector<ir::ConstantInt*> opCIs;
+    for (auto* c : opConsts) {
+        auto* ci = dynamic_cast<ir::ConstantInt*>(c);
+        if (!ci) return nullptr;
+        opCIs.push_back(ci);
+    }
+    if (opCIs.empty()) return nullptr;
+
+    uint64_t width = getBitWidth(resTy);
+    uint64_t u1 = opCIs[0]->getValue();
+    uint64_t u2 = (opCIs.size() > 1 && opCIs[1]) ? opCIs[1]->getValue() : 0;
+    int64_t s1 = signExtend(u1, width);
+    int64_t s2 = signExtend(u2, width);
+    uint64_t resU = 0;
+    bool evalSuccess = true;
+
+    switch (op) {
+        case ir::Instruction::Add: resU = maskValue(u1 + u2, width); break;
+        case ir::Instruction::Sub: resU = maskValue(u1 - u2, width); break;
+        case ir::Instruction::Mul: resU = maskValue(u1 * u2, width); break;
+        case ir::Instruction::Div:
+            if (s2 == 0) evalSuccess = false;
+            else resU = maskValue((uint64_t)(s1 / s2), width);
+            break;
+        case ir::Instruction::Udiv:
+            if (u2 == 0) evalSuccess = false;
+            else resU = maskValue(u1 / u2, width);
+            break;
+        case ir::Instruction::Rem:
+            if (s2 == 0) evalSuccess = false;
+            else resU = maskValue((uint64_t)(s1 % s2), width);
+            break;
+        case ir::Instruction::Urem:
+            if (u2 == 0) evalSuccess = false;
+            else resU = maskValue(u1 % u2, width);
+            break;
+        case ir::Instruction::And: resU = maskValue(u1 & u2, width); break;
+        case ir::Instruction::Or:  resU = maskValue(u1 | u2, width); break;
+        case ir::Instruction::Xor: resU = maskValue(u1 ^ u2, width); break;
+        case ir::Instruction::Shl: resU = maskValue(u1 << (u2 & 63), width); break;
+        case ir::Instruction::Shr: resU = maskValue(u1 >> (u2 & 63), width); break;
+        case ir::Instruction::Sar: resU = maskValue((uint64_t)(s1 >> (u2 & 63)), width); break;
+        case ir::Instruction::Neg: resU = maskValue(-u1, width); break;
+        case ir::Instruction::Not: resU = maskValue(~u1, width); break;
+
+        case ir::Instruction::Ceq: resU = (u1 == u2) ? 1 : 0; break;
+        case ir::Instruction::Cne: resU = (u1 != u2) ? 1 : 0; break;
+        case ir::Instruction::Csle: resU = (s1 <= s2) ? 1 : 0; break;
+        case ir::Instruction::Cslt: resU = (s1 < s2) ? 1 : 0; break;
+        case ir::Instruction::Csge: resU = (s1 >= s2) ? 1 : 0; break;
+        case ir::Instruction::Csgt: resU = (s1 > s2) ? 1 : 0; break;
+        case ir::Instruction::Cule: resU = (u1 <= u2) ? 1 : 0; break;
+        case ir::Instruction::Cult: resU = (u1 < u2) ? 1 : 0; break;
+        case ir::Instruction::Cuge: resU = (u1 >= u2) ? 1 : 0; break;
+        case ir::Instruction::Cugt: resU = (u1 > u2) ? 1 : 0; break;
+
+        case ir::Instruction::Copy: resU = maskValue(u1, width); break;
+        case ir::Instruction::ExtUB: case ir::Instruction::ExtUH: case ir::Instruction::ExtUW:
+        case ir::Instruction::Cast:
+            resU = maskValue(u1, width); break;
+        case ir::Instruction::ExtSB: resU = maskValue((uint64_t)signExtend(u1, 8), width); break;
+        case ir::Instruction::ExtSH: resU = maskValue((uint64_t)signExtend(u1, 16), width); break;
+        case ir::Instruction::ExtSW: resU = maskValue((uint64_t)signExtend(u1, 32), width); break;
+        case ir::Instruction::ExtS:  resU = maskValue((uint64_t)s1, width); break;
+        case ir::Instruction::TruncD: resU = maskValue(u1, width); break;
+
+        default: evalSuccess = false; break;
+    }
+
+    if (!evalSuccess) return nullptr;
+
+    ir::IntegerType* ity = dynamic_cast<ir::IntegerType*>(resTy);
+    if (!ity) ity = ir::IntegerType::get(width);
+    return ir::ConstantInt::get(ity, resU);
+}
+
+CallKey SCCP::createCallKey(ir::Function* callee, const std::vector<ir::Constant*>& argConstants) {
+    CallKey key;
+    key.callee = callee;
+    for (auto* c : argConstants) {
+        if (!c) {
+            key.argValues.push_back({nullptr, 0});
+            continue;
+        }
+        ir::Type* ty = c->getType();
+        uint64_t valBits = 0;
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(c)) {
+            valBits = ci->getValue();
+        } else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(c)) {
+            double d = cfp->getValue();
+            static_assert(sizeof(double) == sizeof(uint64_t), "double must be 64-bit");
+            std::memcpy(&valBits, &d, sizeof(double));
+        } else {
+            valBits = reinterpret_cast<uint64_t>(c);
+        }
+        key.argValues.push_back({ty, valBits});
+    }
+    return key;
+}
+
 ir::Constant* SCCP::foldVectorInstruction(
     ir::Instruction* instr,
     const std::vector<ir::Constant*>& opConsts
@@ -48,7 +155,6 @@ ir::Constant* SCCP::foldVectorInstruction(
     if (!instr) return nullptr;
     ir::Instruction::Opcode op = instr->getOpcode();
 
-    // Check if it's a vector instruction
     auto* resVecTy = dynamic_cast<ir::VectorType*>(instr->getType());
 
     if (op == ir::Instruction::VBroadcast) {
@@ -163,7 +269,6 @@ ir::Constant* SCCP::foldVectorInstruction(
         return ir::ConstantVector::get(resVecTy, resElems);
     }
 
-    // Binary vector ops
     if (opConsts.size() < 2 || !opConsts[0] || !opConsts[1]) return nullptr;
     auto* vec1C = dynamic_cast<ir::ConstantVector*>(opConsts[0]);
     auto* vec2C = dynamic_cast<ir::ConstantVector*>(opConsts[1]);
@@ -226,11 +331,11 @@ ir::Constant* SCCP::foldVectorInstruction(
     return ir::ConstantVector::get(resVecTy, resElems);
 }
 
-bool SCCP::isFunctionPure(ir::Function* func, std::unordered_map<ir::Function*, bool>& purityCache, std::unordered_set<ir::Function*>& activeVisiting) {
+bool SCCP::isFunctionPure(ir::Function* func, std::unordered_set<ir::Function*>& activeVisiting) {
     if (!func || func->getBasicBlocks().empty()) return false;
 
-    auto it = purityCache.find(func);
-    if (it != purityCache.end()) return it->second;
+    auto it = evalCtx.purityCache.find(func);
+    if (it != evalCtx.purityCache.end()) return it->second;
 
     if (!activeVisiting.insert(func).second) {
         return true;
@@ -261,7 +366,7 @@ bool SCCP::isFunctionPure(ir::Function* func, std::unordered_map<ir::Function*, 
             if (op == ir::Instruction::Call) {
                 if (inst->getOperands().empty()) { pure = false; break; }
                 ir::Function* callee = dynamic_cast<ir::Function*>(inst->getOperands()[0]->get());
-                if (!callee || !isFunctionPure(callee, purityCache, activeVisiting)) {
+                if (!callee || !isFunctionPure(callee, activeVisiting)) {
                     pure = false;
                     break;
                 }
@@ -270,7 +375,7 @@ bool SCCP::isFunctionPure(ir::Function* func, std::unordered_map<ir::Function*, 
     }
 
     activeVisiting.erase(func);
-    purityCache[func] = pure;
+    evalCtx.purityCache[func] = pure;
     return pure;
 }
 
@@ -278,14 +383,32 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
     ir::Function* callee,
     const std::vector<ir::Constant*>& argConstants,
     int depth,
-    int& stepCount,
-    std::unordered_map<ir::Function*, bool>& purityCache
+    int& callStepCount,
+    int& callBackedgeCount
 ) {
     if (!callee || callee->getBasicBlocks().empty()) return nullptr;
-    if (depth > 64) return nullptr;
+    if (depth > evalCtx.maxRecursionDepth) return nullptr;
 
     std::unordered_set<ir::Function*> activeVisiting;
-    if (!isFunctionPure(callee, purityCache, activeVisiting)) return nullptr;
+    if (!isFunctionPure(callee, activeVisiting)) return nullptr;
+
+    CallKey key = createCallKey(callee, argConstants);
+    if (depth == 0) {
+        auto cacheIt = evalCtx.evalCache.find(key);
+        if (cacheIt != evalCtx.evalCache.end()) {
+            return cacheIt->second;
+        }
+    }
+
+    std::shared_ptr<DominatorTree> domTree;
+    auto domIt = evalCtx.domTreeCache.find(callee);
+    if (domIt != evalCtx.domTreeCache.end()) {
+        domTree = domIt->second;
+    } else {
+        domTree = std::make_shared<DominatorTree>();
+        domTree->run(*callee);
+        evalCtx.domTreeCache[callee] = domTree;
+    }
 
     std::unordered_map<ir::Value*, ir::Constant*> frame;
     const auto& params = callee->getParameters();
@@ -302,7 +425,13 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
         bool blockTerminated = false;
 
         for (auto& instPtr : currentBB->getInstructions()) {
-            if (++stepCount > 100000) return nullptr;
+            callStepCount++;
+            evalCtx.totalModuleInstructionCount++;
+
+            if (callStepCount > evalCtx.maxCallInstructionBudget ||
+                evalCtx.totalModuleInstructionCount > evalCtx.maxModuleInstructionBudget) {
+                return nullptr;
+            }
 
             ir::Instruction* instr = instPtr.get();
             if (!instr) continue;
@@ -366,8 +495,16 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
             if (op == ir::Instruction::Ret) {
                 if (instr->getOperands().empty()) return nullptr;
                 ir::Value* retVal = instr->getOperands()[0]->get();
-                if (auto* c = dynamic_cast<ir::Constant*>(retVal)) return c;
-                if (frame.count(retVal)) return frame[retVal];
+                ir::Constant* finalRes = nullptr;
+                if (auto* c = dynamic_cast<ir::Constant*>(retVal)) finalRes = c;
+                else if (frame.count(retVal)) finalRes = frame[retVal];
+
+                if (finalRes) {
+                    if (depth == 0) {
+                        evalCtx.evalCache[key] = finalRes;
+                    }
+                    return finalRes;
+                }
                 return nullptr;
             }
 
@@ -386,7 +523,7 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
                     subArgs.push_back(c);
                 }
 
-                ir::Constant* res = evaluatePureFunctionCall(subCallee, subArgs, depth + 1, stepCount, purityCache);
+                ir::Constant* res = evaluatePureFunctionCall(subCallee, subArgs, depth + 1, callStepCount, callBackedgeCount);
                 if (!res) return nullptr;
                 frame[instr] = res;
                 continue;
@@ -406,80 +543,23 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
                 continue;
             }
 
-            std::vector<ir::ConstantInt*> opCIs;
-            for (auto* c : opConsts) {
-                opCIs.push_back(dynamic_cast<ir::ConstantInt*>(c));
+            if (ir::Constant* scalRes = foldScalarInstruction(op, instr->getType(), opConsts)) {
+                frame[instr] = scalRes;
+                continue;
             }
 
-            uint64_t width = getBitWidth(instr->getType());
-            uint64_t u1 = (!opCIs.empty() && opCIs[0]) ? opCIs[0]->getValue() : 0;
-            uint64_t u2 = (opCIs.size() > 1 && opCIs[1]) ? opCIs[1]->getValue() : 0;
-            int64_t s1 = signExtend(u1, width);
-            int64_t s2 = signExtend(u2, width);
-            uint64_t resU = 0;
-            bool evalSuccess = true;
-
-            switch (op) {
-                case ir::Instruction::Add: resU = maskValue(u1 + u2, width); break;
-                case ir::Instruction::Sub: resU = maskValue(u1 - u2, width); break;
-                case ir::Instruction::Mul: resU = maskValue(u1 * u2, width); break;
-                case ir::Instruction::Div:
-                    if (s2 == 0) evalSuccess = false;
-                    else resU = maskValue((uint64_t)(s1 / s2), width);
-                    break;
-                case ir::Instruction::Udiv:
-                    if (u2 == 0) evalSuccess = false;
-                    else resU = maskValue(u1 / u2, width);
-                    break;
-                case ir::Instruction::Rem:
-                    if (s2 == 0) evalSuccess = false;
-                    else resU = maskValue((uint64_t)(s1 % s2), width);
-                    break;
-                case ir::Instruction::Urem:
-                    if (u2 == 0) evalSuccess = false;
-                    else resU = maskValue(u1 % u2, width);
-                    break;
-                case ir::Instruction::And: resU = maskValue(u1 & u2, width); break;
-                case ir::Instruction::Or:  resU = maskValue(u1 | u2, width); break;
-                case ir::Instruction::Xor: resU = maskValue(u1 ^ u2, width); break;
-                case ir::Instruction::Shl: resU = maskValue(u1 << (u2 & 63), width); break;
-                case ir::Instruction::Shr: resU = maskValue(u1 >> (u2 & 63), width); break;
-                case ir::Instruction::Sar: resU = maskValue((uint64_t)(s1 >> (u2 & 63)), width); break;
-                case ir::Instruction::Neg: resU = maskValue(-u1, width); break;
-                case ir::Instruction::Not: resU = maskValue(~u1, width); break;
-
-                case ir::Instruction::Ceq: resU = (u1 == u2) ? 1 : 0; break;
-                case ir::Instruction::Cne: resU = (u1 != u2) ? 1 : 0; break;
-                case ir::Instruction::Csle: resU = (s1 <= s2) ? 1 : 0; break;
-                case ir::Instruction::Cslt: resU = (s1 < s2) ? 1 : 0; break;
-                case ir::Instruction::Csge: resU = (s1 >= s2) ? 1 : 0; break;
-                case ir::Instruction::Csgt: resU = (s1 > s2) ? 1 : 0; break;
-                case ir::Instruction::Cule: resU = (u1 <= u2) ? 1 : 0; break;
-                case ir::Instruction::Cult: resU = (u1 < u2) ? 1 : 0; break;
-                case ir::Instruction::Cuge: resU = (u1 >= u2) ? 1 : 0; break;
-                case ir::Instruction::Cugt: resU = (u1 > u2) ? 1 : 0; break;
-
-                case ir::Instruction::Copy: resU = maskValue(u1, width); break;
-                case ir::Instruction::ExtUB: case ir::Instruction::ExtUH: case ir::Instruction::ExtUW:
-                case ir::Instruction::Cast:
-                    resU = maskValue(u1, width); break;
-                case ir::Instruction::ExtSB: resU = maskValue((uint64_t)signExtend(u1, 8), width); break;
-                case ir::Instruction::ExtSH: resU = maskValue((uint64_t)signExtend(u1, 16), width); break;
-                case ir::Instruction::ExtSW: resU = maskValue((uint64_t)signExtend(u1, 32), width); break;
-                case ir::Instruction::ExtS:  resU = maskValue((uint64_t)s1, width); break;
-                case ir::Instruction::TruncD: resU = maskValue(u1, width); break;
-
-                default: evalSuccess = false; break;
-            }
-
-            if (!evalSuccess) return nullptr;
-
-            ir::IntegerType* ity = dynamic_cast<ir::IntegerType*>(instr->getType());
-            if (!ity) ity = ir::IntegerType::get(width);
-            frame[instr] = ir::ConstantInt::get(ity, resU);
+            return nullptr;
         }
 
         if (!blockTerminated) return nullptr;
+
+        if (domTree && nextBB && domTree->dominates(nextBB, currentBB)) {
+            callBackedgeCount++;
+            if (callBackedgeCount > evalCtx.maxCallIterationBudget) {
+                return nullptr;
+            }
+        }
+
         prevBB = currentBB;
         currentBB = nextBB;
     }
@@ -488,43 +568,42 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
 }
 
 bool SCCP::performTransformation(ir::Function& func) {
+    evalCtx.reset();
+
     this->initialize(func);
-    
+
     std::set<ir::BasicBlock*> executableBlocks;
     std::set<std::pair<ir::BasicBlock*, ir::BasicBlock*>> executableEdges;
     std::unordered_set<ir::Instruction*> inInstructionWorklist;
-    
+
     if (func.getBasicBlocks().empty()) return false;
     ir::BasicBlock* entry = func.getBasicBlocks().front().get();
-    
+
     blockWorklist.push_back(entry);
 
     while (!blockWorklist.empty() || !instructionWorklist.empty()) {
         while (!blockWorklist.empty()) {
             ir::BasicBlock* bb = blockWorklist.back();
             blockWorklist.pop_back();
-            
+
             if (executableBlocks.insert(bb).second) {
-                // First time visiting this block, visit all instructions
                 for (auto& instr : bb->getInstructions()) {
                     this->visit(instr.get(), executableEdges, executableBlocks, inInstructionWorklist);
                 }
             } else {
-                // Already visited, but new edges might have been added.
-                // In edge-based SCCP, we only visit PHI nodes when a new edge arrives.
                 for (auto& instr : bb->getInstructions()) {
                     if (instr->getOpcode() == ir::Instruction::Phi) {
                          this->visit(instr.get(), executableEdges, executableBlocks, inInstructionWorklist);
-                    } else break; // PHIs are at the start
+                    } else break;
                 }
             }
         }
-        
+
         if (!instructionWorklist.empty()) {
             ir::Instruction* instr = instructionWorklist.back();
             instructionWorklist.pop_back();
             inInstructionWorklist.erase(instr);
-            
+
             if (instr->getParent() && executableBlocks.count(instr->getParent())) {
                 this->visit(instr, executableEdges, executableBlocks, inInstructionWorklist);
             }
@@ -535,16 +614,15 @@ bool SCCP::performTransformation(ir::Function& func) {
     for (auto& bb_ptr : func.getBasicBlocks()) {
         ir::BasicBlock* bb = bb_ptr.get();
         if (!bb || !executableBlocks.count(bb)) continue;
-        
+
         auto& instrs = bb->getInstructions();
         auto it = instrs.begin();
         while (it != instrs.end()) {
             ir::Instruction* instr = it->get();
-            
-            // Don't replace terminators or PHIs yet
+
             ir::Instruction::Opcode op = instr->getOpcode();
-            if (op == ir::Instruction::Ret || op == ir::Instruction::Br || 
-                op == ir::Instruction::Jmp || op == ir::Instruction::Jnz || 
+            if (op == ir::Instruction::Ret || op == ir::Instruction::Br ||
+                op == ir::Instruction::Jmp || op == ir::Instruction::Jnz ||
                 op == ir::Instruction::Jz || op == ir::Instruction::Phi) {
                 ++it;
                 continue;
@@ -584,10 +662,9 @@ SCCP::LatticeEntry SCCP::getLatticeValue(ir::Value* val) {
 
 void SCCP::setLatticeValue(ir::Instruction* instr, LatticeEntry new_val, std::unordered_set<ir::Instruction*>& inInstructionWorklist) {
     if (!instr || !instr->getType() || instr->getType()->isVoidTy()) return;
-    
+
     LatticeEntry& old_val = lattice[instr];
-    
-    // Monotonicity: Top -> Constant -> Bottom
+
     if (old_val.type == Bottom) return;
     if (new_val.type == Top) return;
     if (old_val.type == Constant && new_val.type == Constant) {
@@ -595,7 +672,7 @@ void SCCP::setLatticeValue(ir::Instruction* instr, LatticeEntry new_val, std::un
         new_val.type = Bottom;
         new_val.constant = nullptr;
     }
-    
+
     if (old_val.type != new_val.type || old_val.constant != new_val.constant) {
         old_val = new_val;
         for (auto& use : instr->getUseList()) {
@@ -610,12 +687,12 @@ void SCCP::setLatticeValue(ir::Instruction* instr, LatticeEntry new_val, std::un
 
 void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir::BasicBlock*>>& executableEdges, std::set<ir::BasicBlock*>& executableBlocks, std::unordered_set<ir::Instruction*>& inInstructionWorklist) {
     ir::Instruction::Opcode op = instr->getOpcode();
-    
+
     if (op == ir::Instruction::Phi) {
         ir::PhiNode* phi = static_cast<ir::PhiNode*>(instr);
         LatticeEntry result = {Top, nullptr};
         bool all_preds_executable = true;
-        
+
         for (size_t i = 0; i + 1 < phi->getOperands().size(); i += 2) {
             ir::Value* op1 = phi->getOperands()[i] ? phi->getOperands()[i]->get() : nullptr;
             ir::Value* op2 = phi->getOperands()[i + 1] ? phi->getOperands()[i + 1]->get() : nullptr;
@@ -660,7 +737,7 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
         LatticeEntry cond = getLatticeValue(instr->getOperands()[0]->get());
         ir::BasicBlock* t_dest = static_cast<ir::BasicBlock*>(instr->getOperands()[1]->get());
         ir::BasicBlock* f_dest = (instr->getOperands().size() > 2) ? static_cast<ir::BasicBlock*>(instr->getOperands()[2]->get()) : nullptr;
-        
+
         if (cond.type == Constant) {
             int64_t val = static_cast<ir::ConstantInt*>(cond.constant)->getValue();
             bool is_true = (op == ir::Instruction::Jz) ? (val == 0) : (val != 0);
@@ -691,9 +768,9 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
                     }
                 }
                 if (all_args_const) {
-                    int stepCount = 0;
-                    std::unordered_map<ir::Function*, bool> purityCache;
-                    ir::Constant* eval_res = evaluatePureFunctionCall(callee, arg_consts, 0, stepCount, purityCache);
+                    int callStepCount = 0;
+                    int callBackedgeCount = 0;
+                    ir::Constant* eval_res = evaluatePureFunctionCall(callee, arg_consts, 0, callStepCount, callBackedgeCount);
                     if (eval_res) {
                         setLatticeValue(instr, {Constant, eval_res}, inInstructionWorklist);
                         return;
@@ -712,9 +789,8 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
         return;
     }
 
-    // Standard binary/unary ops
     if (instr->getOperands().empty()) return;
-    
+
     bool all_const = true;
     bool any_bottom = false;
     std::vector<LatticeEntry> op_vals;
@@ -736,21 +812,12 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
             return;
         }
 
-        // Fold instruction
-        if (op == ir::Instruction::Add) {
-            int64_t v = static_cast<ir::ConstantInt*>(op_vals[0].constant)->getValue() + static_cast<ir::ConstantInt*>(op_vals[1].constant)->getValue();
-            setLatticeValue(instr, {Constant, ir::ConstantInt::get(static_cast<ir::IntegerType*>(instr->getType()), v)}, inInstructionWorklist);
-        } else if (op == ir::Instruction::Sub) {
-            int64_t v = static_cast<ir::ConstantInt*>(op_vals[0].constant)->getValue() - static_cast<ir::ConstantInt*>(op_vals[1].constant)->getValue();
-            setLatticeValue(instr, {Constant, ir::ConstantInt::get(static_cast<ir::IntegerType*>(instr->getType()), v)}, inInstructionWorklist);
-        } else if (op == ir::Instruction::Mul) {
-            int64_t v = static_cast<ir::ConstantInt*>(op_vals[0].constant)->getValue() * static_cast<ir::ConstantInt*>(op_vals[1].constant)->getValue();
-            setLatticeValue(instr, {Constant, ir::ConstantInt::get(static_cast<ir::IntegerType*>(instr->getType()), v)}, inInstructionWorklist);
-        } else if (op == ir::Instruction::Copy) {
-            setLatticeValue(instr, op_vals[0], inInstructionWorklist);
-        } else {
-            setLatticeValue(instr, {Bottom, nullptr}, inInstructionWorklist);
+        if (ir::Constant* scalRes = foldScalarInstruction(op, instr->getType(), opConsts)) {
+            setLatticeValue(instr, {Constant, scalRes}, inInstructionWorklist);
+            return;
         }
+
+        setLatticeValue(instr, {Bottom, nullptr}, inInstructionWorklist);
     }
 }
 
