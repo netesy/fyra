@@ -48,18 +48,20 @@ public:
         int totalModuleInstructionCount = 0;
         int maxModuleInstructionBudget = 250000000; // 250M cumulative
         int maxCallInstructionBudget    = 128000000; // 128M per call
-        int maxCallIterationBudget      = 10000000;  // 10M iterations per call
+        int maxCallIterationBudget      = 6000000;   // 6M iterations per call
         int maxRecursionDepth           = 64;
 
         std::map<CallKey, ir::Constant*> evalCache;
         std::unordered_map<ir::Function*, bool> purityCache;
         std::unordered_map<ir::Function*, std::shared_ptr<DominatorTree>> domTreeCache;
+        std::unordered_map<ir::Function*, std::set<std::pair<ir::BasicBlock*, ir::BasicBlock*>>> backedgeCache;
 
         void reset() {
             totalModuleInstructionCount = 0;
             evalCache.clear();
             purityCache.clear();
             domTreeCache.clear();
+            backedgeCache.clear();
         }
     };
 
