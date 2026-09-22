@@ -394,7 +394,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             if (auto* phi = dynamic_cast<ir::PhiNode*>(inst.get())) {
                 headerPhis.push_back(phi);
             } else if (inst->getOpcode() == ir::Instruction::Cslt || inst->getOpcode() == ir::Instruction::Clt ||
-                       inst->getOpcode() == ir::Instruction::Csgt) {
+                       inst->getOpcode() == ir::Instruction::Csle || inst->getOpcode() == ir::Instruction::Cle ||
+                       inst->getOpcode() == ir::Instruction::Csgt || inst->getOpcode() == ir::Instruction::Csge) {
                 sltCond = inst.get();
             } else if (inst->getOpcode() == ir::Instruction::Br || inst->getOpcode() == ir::Instruction::Jnz) {
                 brInst = inst.get();
@@ -584,8 +585,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Value* condOp0 = sltCond->getOperands()[0]->get();
         ir::Value* condOp1 = sltCond->getOperands()[1]->get();
         const bool normalLess = (sltCond->getOpcode() == ir::Instruction::Cslt ||
-                                 sltCond->getOpcode() == ir::Instruction::Clt) && condOp0 == iPhi;
-        const bool reversedGreater = sltCond->getOpcode() == ir::Instruction::Csgt && condOp1 == iPhi;
+                                 sltCond->getOpcode() == ir::Instruction::Clt ||
+                                 sltCond->getOpcode() == ir::Instruction::Csle ||
+                                 sltCond->getOpcode() == ir::Instruction::Cle) && condOp0 == iPhi;
+        const bool reversedGreater = (sltCond->getOpcode() == ir::Instruction::Csgt ||
+                                      sltCond->getOpcode() == ir::Instruction::Csge) && condOp1 == iPhi;
         ir::Value* boundN = normalLess ? condOp1 : (reversedGreater ? condOp0 : nullptr);
         if (!boundN) { logDiag("reject: induction is not the varying operand of the loop comparison"); continue; }
 
