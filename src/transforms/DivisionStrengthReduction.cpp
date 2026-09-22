@@ -54,17 +54,17 @@ DivisionStrengthReduction::UnsignedMagic DivisionStrengthReduction::computeUnsig
 }
 
 DivisionStrengthReduction::SignedMagic DivisionStrengthReduction::computeSignedMagic32(int32_t d_in) {
-    SignedMagic m;
-    uint32_t d = (d_in < 0) ? (0U - static_cast<uint32_t>(d_in)) : static_cast<uint32_t>(d_in);
-    uint32_t ad = d;
-    uint32_t anc = (1U << 31) - 1 - (1U << 31) % ad;
-    uint32_t p = 31;
-    uint64_t q1 = (1ULL << p) / anc;
-    uint64_t r1 = (1ULL << p) - q1 * anc;
-    uint64_t q2 = (1ULL << p) / ad;
-    uint64_t r2 = (1ULL << p) - q2 * ad;
+    SignedMagic sm;
+    uint32_t ad = (d_in < 0) ? (0U - static_cast<uint32_t>(d_in)) : static_cast<uint32_t>(d_in);
+    uint32_t two31 = 0x80000000U;
+    uint32_t anc = two31 - 1 - two31 % ad;
+    int p = 31;
+    uint64_t q1 = two31 / anc;
+    uint64_t r1 = two31 - q1 * anc;
+    uint64_t q2 = two31 / ad;
+    uint64_t r2 = two31 - q2 * ad;
 
-    do {
+    while (true) {
         p++;
         if (r1 >= anc - r1) {
             q1 = 2 * q1 + 1;
@@ -80,19 +80,21 @@ DivisionStrengthReduction::SignedMagic DivisionStrengthReduction::computeSignedM
             q2 = 2 * q2;
             r2 = 2 * r2;
         }
-        uint64_t delta = ad - r2;
-        if (p < 64 && (1ULL << p) <= delta * (q1 + 1)) {
-            // continue
-        } else {
+        uint64_t m = q2 + 1;
+        if (p >= 64) break;
+        if ((m * ad - (1ULL << p)) <= (1ULL << (p - 31))) {
             break;
         }
-    } while (p < 64);
+    }
 
-    int64_t magic = q2 + 1;
-    if (d_in < 0) magic = -magic;
-    m.magic = magic;
-    m.shift = p - 32;
-    return m;
+    uint64_t m = q2 + 1;
+    int64_t magic = static_cast<int64_t>(m);
+    if (m >= (1ULL << 31)) {
+        magic = static_cast<int64_t>(m) - (1ULL << 32);
+    }
+    sm.magic = static_cast<int32_t>(magic);
+    sm.shift = p - 32;
+    return sm;
 }
 
 bool DivisionStrengthReduction::performTransformation(ir::Function& func) {
@@ -193,36 +195,60 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
         } else if (sD == -1) {
             ir::Value* zero = ir::ConstantInt::get(type, 0);
             Q = builder.createSub(zero, N);
-        } else if (bitWidth == 32) {
-            int32_t d32 = static_cast<int32_t>(sD);
-            uint32_t absD = (d32 < 0) ? (0U - static_cast<uint32_t>(d32)) : static_cast<uint32_t>(d32);
-            if ((absD & (absD - 1)) == 0) {
+        } else {
+            int64_t absD = (sD < 0) ? -sD : sD;
+            if ((static_cast<uint64_t>(absD) & (static_cast<uint64_t>(absD) - 1)) == 0) {
                 // Power of 2 signed division
                 uint32_t shift = 0;
-                while ((1U << shift) < absD) shift++;
+                while ((1ULL << shift) < static_cast<uint64_t>(absD)) shift++;
 
                 // Add sign adjustment: (N < 0 ? absD - 1 : 0)
-                ir::ConstantInt* c31 = ir::ConstantInt::get(type, 31);
-                ir::Value* sign = builder.createSar(N, c31);
-                ir::ConstantInt* cMask = ir::ConstantInt::get(type, (32 - shift));
+                ir::ConstantInt* cSignShift = ir::ConstantInt::get(type, bitWidth - 1);
+                ir::Value* sign = builder.createSar(N, cSignShift);
+                ir::ConstantInt* cMask = ir::ConstantInt::get(type, (bitWidth - shift));
                 ir::Value* adj = builder.createShr(sign, cMask);
                 ir::Value* nAdj = builder.createAdd(N, adj);
                 ir::ConstantInt* cShift = ir::ConstantInt::get(type, shift);
                 ir::Value* qAbs = builder.createSar(nAdj, cShift);
 
-                if (d32 < 0) {
+                if (sD < 0) {
                     ir::Value* zero = ir::ConstantInt::get(type, 0);
                     Q = builder.createSub(zero, qAbs);
                 } else {
                     Q = qAbs;
                 }
-            } else {
-                // The previous signed-magic sequence produced incorrect
-                // quotients for ordinary positive inputs (for example i % 7
-                // in the arithmetic benchmark).  Preserve the scalar signed
-                // operation until a semantics-tested magic implementation is
-                // available.  Power-of-two signed division above remains safe.
-                return false;
+            } else if (bitWidth == 32) {
+                int32_t d32 = static_cast<int32_t>(absD);
+                SignedMagic sm = computeSignedMagic32(d32);
+
+                ir::IntegerType* i64Ty = ir::IntegerType::get(64);
+                ir::Value* nExt = builder.createExtSW(N, i64Ty);
+                ir::Value* mExt = ir::ConstantInt::get(i64Ty, static_cast<uint64_t>(static_cast<int64_t>(sm.magic)));
+                ir::Value* mul64 = builder.createMul(nExt, mExt);
+                ir::Value* c32 = ir::ConstantInt::get(i64Ty, 32);
+                ir::Value* high64 = builder.createSar(mul64, c32);
+                ir::Value* high32 = builder.createTruncD(high64, type);
+
+                if (sm.magic < 0) {
+                    high32 = builder.createAdd(high32, N);
+                }
+
+                ir::Value* qAbs = high32;
+                if (sm.shift > 0) {
+                    ir::ConstantInt* shiftConst = ir::ConstantInt::get(type, sm.shift);
+                    qAbs = builder.createSar(high32, shiftConst);
+                }
+
+                ir::ConstantInt* c31 = ir::ConstantInt::get(type, 31);
+                ir::Value* sign = builder.createShr(N, c31);
+                qAbs = builder.createAdd(qAbs, sign);
+
+                if (sD < 0) {
+                    ir::Value* zero = ir::ConstantInt::get(type, 0);
+                    Q = builder.createSub(zero, qAbs);
+                } else {
+                    Q = qAbs;
+                }
             }
         }
     }

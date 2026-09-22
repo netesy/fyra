@@ -57,9 +57,8 @@ void test_signed_div_rem() {
     ir::BasicBlock* bb = builder.createBasicBlock("entry", func);
     builder.setInsertPoint(bb);
 
-    // Test with edge case values: negative values, INT_MAX, INT_MIN
     std::vector<int32_t> test_values = {-100, 0, 1, -1, INT_MAX, INT_MIN};
-    std::vector<int32_t> divisors = {2, -2, 4, 8, 16};
+    std::vector<int32_t> divisors = {2, -2, 4, 8, 16, 7, 11, 13, 5, 9, 17, 23, -7, -11};
 
     for (int32_t val : test_values) {
         ir::Value* x = ir::ConstantInt::get(i32Ty, val);
@@ -82,16 +81,24 @@ void test_signed_div_rem() {
     }
     std::cout << "Signed Div/Rem Strength Reduction Test Passed!\n";
 
-    ir::Function* guarded = builder.createFunction("signed_non_power_guard", i32Ty, {i32Ty});
-    ir::BasicBlock* guardedBB = builder.createBasicBlock("entry", guarded);
-    builder.setInsertPoint(guardedBB);
-    ir::Value* input = guarded->getParameters().front().get();
+    ir::Function* nonPowerFunc = builder.createFunction("signed_non_power_func", i32Ty, {i32Ty});
+    ir::BasicBlock* npBB = builder.createBasicBlock("entry", nonPowerFunc);
+    builder.setInsertPoint(npBB);
+    ir::Value* input = nonPowerFunc->getParameters().front().get();
     builder.createRem(input, ir::ConstantInt::get(i32Ty, 7));
+    builder.createRem(input, ir::ConstantInt::get(i32Ty, 11));
+    builder.createRem(input, ir::ConstantInt::get(i32Ty, 13));
+    builder.createDiv(input, ir::ConstantInt::get(i32Ty, 17));
     builder.createRet(ir::ConstantInt::get(i32Ty, 0));
-    assert(!pass.run(*guarded) && "unproven signed magic division must remain scalar");
-    bool keptRemainder = false;
-    for (auto& inst : guardedBB->getInstructions()) keptRemainder |= inst->getOpcode() == ir::Instruction::Rem;
-    assert(keptRemainder);
+
+    bool npChanged = pass.run(*nonPowerFunc);
+    assert(npChanged && "Signed non-power-of-two div/rem should be lowered via magic multiplication");
+
+    for (auto& inst : npBB->getInstructions()) {
+        assert(inst->getOpcode() != ir::Instruction::Div && "Div should be eliminated via magic multiplier!");
+        assert(inst->getOpcode() != ir::Instruction::Rem && "Rem should be eliminated via magic multiplier!");
+    }
+    std::cout << "Signed Non-Power-of-Two Magic Division Test Passed!\n";
 }
 
 int main() {
