@@ -97,6 +97,48 @@ DivisionStrengthReduction::SignedMagic DivisionStrengthReduction::computeSignedM
     return sm;
 }
 
+DivisionStrengthReduction::SignedMagic64 DivisionStrengthReduction::computeSignedMagic64(int64_t d_in) {
+    SignedMagic64 result{0, 0};
+    if (d_in == 0 || d_in == 1 || d_in == -1) return result;
+
+    uint64_t ad = (d_in < 0) ? (uint64_t)(-d_in) : (uint64_t)d_in;
+    uint64_t two_63 = 0x8000000000000000ull;
+    uint64_t anc = two_63 - 1 - (two_63 % ad);
+    uint32_t p = 63;
+    uint64_t q1 = two_63 / anc;
+    uint64_t r1 = two_63 - q1 * anc;
+    uint64_t q2 = two_63 / ad;
+    uint64_t r2 = two_63 - q2 * ad;
+    uint64_t delta = 0;
+
+    do {
+        p++;
+        q1 = 2 * q1;
+        r1 = 2 * r1;
+        if (r1 >= anc) {
+            q1++;
+            r1 -= anc;
+        }
+        q2 = 2 * q2;
+        r2 = 2 * r2;
+        if (r2 >= ad) {
+            q2++;
+            r2 -= ad;
+        }
+        delta = ad - r2;
+    } while (q1 < delta || (q1 == delta && r1 == 0));
+
+    uint64_t m = q2 + 1;
+    int64_t magic = (int64_t)m;
+    if (d_in < 0) {
+        magic = -magic;
+    }
+
+    result.magic = magic;
+    result.shift = p - 64;
+    return result;
+}
+
 bool DivisionStrengthReduction::performTransformation(ir::Function& func) {
     bool changed = false;
 

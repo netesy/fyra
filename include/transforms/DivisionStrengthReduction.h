@@ -33,8 +33,14 @@ private:
         uint32_t shift;
     };
 
+    struct SignedMagic64 {
+        int64_t magic;
+        uint32_t shift;
+    };
+
     UnsignedMagic computeUnsignedMagic32(uint32_t d);
     SignedMagic computeSignedMagic32(int32_t d);
+    SignedMagic64 computeSignedMagic64(int64_t d);
 };
 
 } // namespace transforms

@@ -650,6 +650,38 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         std::string s1 = op1;
         if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
 
+        // 3-operand LEA optimization for non-destructive constant additions (dst = val + C where dst != val)
+        if (abi != X64ABI::Windows && !isGlobal0 && !isGlobal1) {
+            auto tryEmitLeaConstAdd = [&](const std::string& regOp, const std::string& immOp) -> bool {
+                if (!immOp.empty() && immOp[0] == '$' && isDirectGprRegister(regOp)) {
+                    try {
+                        int64_t v = std::stoll(immOp.substr(1));
+                        if (v >= -2147483648LL && v <= 2147483647LL) {
+                            std::string baseReg = to64BitReg(regOp);
+                            std::string targetReg = isStackDst ? rax : d;
+                            if (is32) targetReg = to32BitReg(targetReg);
+                            std::string leaInst = is32 ? "leal" : "leaq";
+                            std::string disp = (v != 0) ? std::to_string(v) : "";
+                            *os << "  " << leaInst << " " << disp << "(" << baseReg << "), " << targetReg << "\n";
+                            if (isStackDst) {
+                                emitMov(cg, os, rax, dst, is32);
+                            }
+                            cg.lastStoreOp = "";
+                            return true;
+                        }
+                    } catch (...) {}
+                }
+                return false;
+            };
+
+            std::string d64 = to64BitReg(d);
+            std::string s0_64 = to64BitReg(s0);
+            std::string s1_64 = to64BitReg(s1);
+
+            if (d64 != s0_64 && tryEmitLeaConstAdd(s0, s1)) return;
+            if (d64 != s1_64 && tryEmitLeaConstAdd(s1, s0)) return;
+        }
+
         if (abi == X64ABI::Windows) {
             if (d == s1 && d != s0) {
                 // Commute: dst = src2 + src1
