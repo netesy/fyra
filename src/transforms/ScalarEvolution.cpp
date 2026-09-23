@@ -100,6 +100,25 @@ bool ScalarEvolution::run(ir::Function& func) {
     return false;
 }
 
+bool ScalarEvolution::canEliminateClosedForm(ir::Function& func,
+                                             ir::BasicBlock* header) {
+    if (!header || func.getBasicBlocks().empty()) return false;
+
+    LoopInvariantCodeMotion licm;
+    std::vector<std::unique_ptr<Loop>> loops;
+    licm.findLoops(func, loops);
+    for (auto& loop : loops) {
+        if (loop->header != header || !isSafeToEliminate(*loop)) continue;
+        IndVar indVar;
+        LoopRecurrence recurrence;
+        if (!analyzeInductionVariable(*loop, indVar) ||
+            !analyzeRecurrence(*loop, indVar, recurrence))
+            return false;
+        return analyzeClosedForm(indVar, recurrence).has_value();
+    }
+    return false;
+}
+
 bool ScalarEvolution::analyzeInductionVariable(Loop& loop, IndVar& indVar) {
     if (!loop.header) return false;
 
@@ -321,18 +340,16 @@ bool ScalarEvolution::isSafeToEliminate(Loop& loop) {
     return true;
 }
 
-ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBlock* preheader, const IndVar& indVar, const LoopRecurrence& rec) {
+std::optional<ScalarEvolution::ClosedFormPlan>
+ScalarEvolution::analyzeClosedForm(const IndVar& indVar,
+                                   const LoopRecurrence& rec) {
     // Unconstrained runtime bounds: reject closed-form transformation
     if (!indVar.isConstantBound) {
-        return nullptr;
+        return std::nullopt;
     }
-
-    auto ctx = func.getParent() ? func.getParent()->getContextShared() : std::make_shared<ir::IRContext>();
-    ir::IRBuilder builder(ctx);
-    builder.setModule(func.getParent());
-    builder.setInsertPoint(preheader);
-
-    ir::Type* retTy = rec.sumPhi ? rec.sumPhi->getType() : ctx->getIntegerType(rec.destWidth);
+    auto* resultType = rec.sumPhi
+        ? dynamic_cast<ir::IntegerType*>(rec.sumPhi->getType()) : nullptr;
+    if (!resultType) return std::nullopt;
 
     if (indVar.stepVal == 1) {
         int64_t bound = indVar.constantBound;
@@ -347,7 +364,7 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
 
         // Zero or negative trip count: loop executes 0 iterations. Return initial accumulator.
         if (numIterations <= 0) {
-            return rec.initSumVal;
+            return ClosedFormPlan{resultType, 0, rec.initSumVal};
         }
 
         // Source arithmetic range verification for positive bounds:
@@ -364,11 +381,11 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
 
             if (rec.sourceSigned) {
                 if (maxSrcVal > 2147483647LL || minSrcVal < -2147483648LL) {
-                    return nullptr; // Source operation potentially wraps; reject transformation
+                    return std::nullopt; // Source operation potentially wraps; reject transformation
                 }
             } else {
                 if (maxSrcVal > 4294967295LL || minSrcVal < 0LL) {
-                    return nullptr;
+                    return std::nullopt;
                 }
             }
         }
@@ -383,7 +400,7 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
             // Non-constant initial sum with positive iterations requires IR builder addition if supported,
             // or if cInit isn't constant int, we can't fully compute constant at compile-time.
             // Check if rec.initSumVal is constant int. If not, reject or build IR.
-            return nullptr;
+            return std::nullopt;
         }
 
         // sumI = sum_{k=0}^{N-1} (I0 + k) = N * I0 + N*(N-1)/2
@@ -418,10 +435,18 @@ ir::Value* ScalarEvolution::generateClosedForm(ir::Function& func, ir::BasicBloc
         sumConst += static_cast<uint64_t>(rec.coeffA) * sumI2;
 
         uint64_t totalFinalSum = initSum + sumConst;
-        return ctx->getConstantInt(dynamic_cast<ir::IntegerType*>(retTy) ? static_cast<ir::IntegerType*>(retTy) : ctx->getIntegerType(64), totalFinalSum);
+        return ClosedFormPlan{resultType, totalFinalSum, nullptr};
     }
 
-    return nullptr;
+    return std::nullopt;
+}
+
+ir::Value* ScalarEvolution::materializeClosedForm(ir::Function& func,
+                                                   const ClosedFormPlan& plan) {
+    if (plan.existingValue) return plan.existingValue;
+    auto ctx = func.getParent() ? func.getParent()->getContextShared()
+                                : std::make_shared<ir::IRContext>();
+    return ctx->getConstantInt(plan.resultType, plan.result);
 }
 
 void ScalarEvolution::eliminateLoop(Loop& loop, ir::Value* closedFormVal, ir::Function& func) {
@@ -494,8 +519,9 @@ bool ScalarEvolution::processLoop(Loop& loop, ir::Function& func) {
     LoopRecurrence rec;
     if (!analyzeRecurrence(loop, indVar, rec)) return false;
 
-    ir::Value* closedFormVal = generateClosedForm(func, loop.preheader, indVar, rec);
-    if (!closedFormVal) return false;
+    auto plan = analyzeClosedForm(indVar, rec);
+    if (!plan) return false;
+    ir::Value* closedFormVal = materializeClosedForm(func, *plan);
 
     eliminateLoop(loop, closedFormVal, func);
     return true;

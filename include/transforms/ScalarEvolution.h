@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 #include <set>
+#include <optional>
 
 namespace transforms {
 
@@ -19,6 +20,10 @@ public:
     ScalarEvolution() = default;
 
     bool run(ir::Function& func);
+
+    // Analysis-only query: true only when SCEV can generate a closed-form
+    // replacement for this loop in its current context.
+    bool canEliminateClosedForm(ir::Function& func, ir::BasicBlock* header);
 
 private:
     struct IndVar {
@@ -51,12 +56,21 @@ private:
         bool isValid = false;
     };
 
+    struct ClosedFormPlan {
+        ir::IntegerType* resultType = nullptr;
+        uint64_t result = 0;
+        ir::Value* existingValue = nullptr;
+    };
+
     bool processLoop(Loop& loop, ir::Function& func);
     bool analyzeInductionVariable(Loop& loop, IndVar& indVar);
     bool analyzeRecurrence(Loop& loop, const IndVar& indVar, LoopRecurrence& rec);
     bool isSafeToEliminate(Loop& loop);
 
-    ir::Value* generateClosedForm(ir::Function& func, ir::BasicBlock* preheader, const IndVar& indVar, const LoopRecurrence& rec);
+    std::optional<ClosedFormPlan> analyzeClosedForm(const IndVar& indVar,
+                                                    const LoopRecurrence& rec);
+    ir::Value* materializeClosedForm(ir::Function& func,
+                                     const ClosedFormPlan& plan);
     void eliminateLoop(Loop& loop, ir::Value* closedFormVal, ir::Function& func);
 };
 

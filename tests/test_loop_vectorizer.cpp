@@ -11,6 +11,7 @@
 #include "ir/Use.h"
 #include "transforms/CFGBuilder.h"
 #include "transforms/LoopVectorizer.h"
+#include "transforms/ScalarEvolution.h"
 #include <cassert>
 #include <iostream>
 #include <fstream>
@@ -22,6 +23,43 @@
 #include <cstdio>
 
 using namespace ir;
+
+std::string structuralSnapshot(Function& function) {
+    std::ostringstream snapshot;
+    snapshot << "blocks=" << function.getBasicBlocks().size() << ';';
+    for (const auto& blockOwner : function.getBasicBlocks()) {
+        BasicBlock* block = blockOwner.get();
+        snapshot << "B" << block << " P";
+        for (BasicBlock* predecessor : block->getPredecessors()) snapshot << predecessor << ',';
+        snapshot << " S";
+        for (BasicBlock* successor : block->getSuccessors()) snapshot << successor << ',';
+        snapshot << " I" << block->getInstructions().size() << ':';
+        for (const auto& instructionOwner : block->getInstructions()) {
+            Instruction* instruction = instructionOwner.get();
+            snapshot << instruction << '/' << static_cast<int>(instruction->getOpcode()) << '[';
+            for (const auto& operand : instruction->getOperands())
+                snapshot << operand->get() << ',';
+            snapshot << "]";
+        }
+    }
+    return snapshot.str();
+}
+
+void assertPureClosedFormQuery(transforms::ScalarEvolution& scev,
+                               Function& function, BasicBlock* header,
+                               bool expected) {
+    const std::string before = structuralSnapshot(function);
+    const bool firstResult = scev.canEliminateClosedForm(function, header);
+    if (firstResult != expected)
+        std::cerr << "Unexpected closed-form result for " << function.getName()
+                  << ": " << firstResult << " expected " << expected << std::endl;
+    assert(firstResult == expected);
+    assert(structuralSnapshot(function) == before);
+    for (unsigned iteration = 1; iteration < 10; ++iteration) {
+        assert(scev.canEliminateClosedForm(function, header) == expected);
+        assert(structuralSnapshot(function) == before);
+    }
+}
 
 // Scalar reference implementation for sum = sum + 2*i for i in 0..n-1
 int32_t scalar_loop_sum_ref(int32_t n, int32_t start = 0) {
@@ -222,6 +260,9 @@ void test_rejection_cases() {
         pI->addIncoming(iNext, body); pSum->addIncoming(sumNext, body); builder.createJmp(header);
         builder.setInsertPoint(exit); builder.createRet(pSum);
         transforms::CFGBuilder::run(*func);
+        transforms::ScalarEvolution scev;
+        assertPureClosedFormQuery(scev, *func, header, false);
+        assert(!scev.run(*func));
         transforms::LoopVectorizer vec; assert(!vec.performTransformation(*func) && "Must reject side effect alloc in body");
         delete mod;
     }
@@ -245,6 +286,189 @@ void test_rejection_cases() {
     std::cout << "All Rejection Test Cases Passed Successfully!" << std::endl;
 }
 
+void test_register_expression_widening_execution() {
+    auto ctx = std::make_shared<IRContext>();
+    Module module("register_widening", ctx);
+    IRBuilder builder(ctx); builder.setModule(&module);
+    auto* i32 = ctx->getIntegerType(32);
+    auto* i64 = ctx->getIntegerType(64);
+    Function* function = builder.createFunction("register_widening_sum", i64, {i32});
+    Value* bound = function->getParameters().front().get();
+    BasicBlock* entry = builder.createBasicBlock("entry", function);
+    BasicBlock* header = builder.createBasicBlock("loop", function);
+    BasicBlock* body = builder.createBasicBlock("body", function);
+    BasicBlock* exit = builder.createBasicBlock("exit", function);
+    builder.setInsertPoint(entry); builder.createJmp(header);
+    builder.setInsertPoint(header);
+    auto iOwner = std::make_unique<PhiNode>(i32, 0, nullptr, header);
+    PhiNode* i = iOwner.get(); header->getInstructions().push_back(std::move(iOwner));
+    auto sumOwner = std::make_unique<PhiNode>(i64, 0, nullptr, header);
+    PhiNode* sum = sumOwner.get(); header->getInstructions().push_back(std::move(sumOwner));
+    i->addIncoming(ctx->getConstantInt(i32, 50000), entry);
+    sum->addIncoming(ctx->getConstantInt(i64, 0), entry);
+    builder.createBr(builder.createCslt(i, bound), body, exit);
+    builder.setInsertPoint(body);
+    // Match the non-polynomial register-pressure shape: this is deliberately
+    // outside SCEV's linear/quadratic closed forms, while still overflowing
+    // i32 for some tested starts. ExtSW must observe the wrapped lane result.
+    Value* i1 = builder.createAdd(i, ctx->getConstantInt(i32, 1));
+    Value* i2 = builder.createAdd(i, ctx->getConstantInt(i32, 2));
+    Value* i3 = builder.createAdd(i, ctx->getConstantInt(i32, 3));
+    Value* i4 = builder.createAdd(i, ctx->getConstantInt(i32, 4));
+    Value* i5 = builder.createAdd(i, ctx->getConstantInt(i32, 5));
+    Value* i6 = builder.createAdd(i, ctx->getConstantInt(i32, 6));
+    Value* i7 = builder.createAdd(i, ctx->getConstantInt(i32, 7));
+    Value* v0 = builder.createAdd(i, i1);
+    Value* v1 = builder.createAdd(i2, i3);
+    Value* v2 = builder.createAdd(i4, i5);
+    Value* v3 = builder.createAdd(i6, i7);
+    Value* products = builder.createAdd(builder.createMul(v0, v1),
+                                        builder.createMul(v2, v3));
+    Value* difference = builder.createSub(builder.createAdd(v0, v2),
+                                          builder.createAdd(v1, v3));
+    Value* product = builder.createMul(products, difference);
+    Value* wide = builder.createExtSW(product, i64);
+    Value* sumNext = builder.createAdd(sum, wide);
+    Value* iNext = builder.createAdd(i, ctx->getConstantInt(i32, 1));
+    i->addIncoming(iNext, body); sum->addIncoming(sumNext, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit); builder.createRet(sum);
+    transforms::CFGBuilder::run(*function);
+    transforms::ScalarEvolution scev;
+    assertPureClosedFormQuery(scev, *function, header, false);
+    transforms::LoopVectorizer vectorizer;
+    assert(vectorizer.performTransformation(*function));
+    transforms::LinearScanAllocator allocator; allocator.run(*function);
+    auto architecture = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    auto os = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> target =
+        std::make_unique<target::CompositeTargetInfo>(std::move(architecture), std::move(os));
+    std::ostringstream assembly;
+    codegen::CodeGen codegen(module, std::move(target), &assembly); codegen.emit(false);
+    const std::string text = assembly.str();
+    assert(text.find("paddd") != std::string::npos);
+    assert(text.find("pmulld") != std::string::npos);
+    assert(text.find("%ymm") == std::string::npos);
+    const std::string stem = "/tmp/fyra_register_widening_" + std::to_string(getpid());
+    const std::string asmPath = stem + ".s", harnessPath = stem + ".c", binaryPath = stem;
+    { std::ofstream output(asmPath); output << text; }
+    { std::ofstream output(harnessPath); output << R"(
+#include <stdint.h>
+#include <stdio.h>
+extern int64_t register_widening_sum(int32_t);
+static uint32_t add32(uint32_t a, uint32_t b) { return a + b; }
+static int64_t reference(int32_t start, int32_t bound) {
+  int64_t sum = 0;
+  for (int32_t i = start; i < bound; ++i) {
+    uint32_t u=(uint32_t)i;
+    uint32_t v0=add32(u,u+1), v1=add32(u+2,u+3);
+    uint32_t v2=add32(u+4,u+5), v3=add32(u+6,u+7);
+    uint32_t products=add32(v0*v1,v2*v3);
+    uint32_t difference=add32(v0,v2)-add32(v1,v3);
+    sum += (int32_t)(products*difference);
+  }
+  return sum;
+}
+
+int main(void) {
+  const int lengths[] = { 0,1,2,3,4,5,7,8,9 };
+  for (unsigned n=0;n<9;n++) {
+    int32_t bound = 50000 + lengths[n];
+    if (register_widening_sum(bound) != reference(50000, bound)) return 1;
+  }
+  return 0;
+})"; }
+    const std::string command = "gcc -no-pie " + asmPath + " " + harnessPath + " -o " + binaryPath;
+    assert(std::system(command.c_str()) == 0);
+    assert(std::system(binaryPath.c_str()) == 0);
+    std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
+}
+
+void test_closed_form_has_priority_over_vectorization() {
+    auto ctx = std::make_shared<IRContext>();
+    Module module("closed_form_priority", ctx);
+    IRBuilder builder(ctx); builder.setModule(&module);
+    auto* i32 = ctx->getIntegerType(32);
+    auto* i64 = ctx->getIntegerType(64);
+    Function* function = builder.createFunction("closed_form_priority", i64, {});
+    BasicBlock* entry = builder.createBasicBlock("entry", function);
+    BasicBlock* header = builder.createBasicBlock("loop", function);
+    BasicBlock* body = builder.createBasicBlock("body", function);
+    BasicBlock* exit = builder.createBasicBlock("exit", function);
+    builder.setInsertPoint(entry); builder.createJmp(header);
+    builder.setInsertPoint(header);
+    auto iOwner = std::make_unique<PhiNode>(i32, 0, nullptr, header);
+    PhiNode* i = iOwner.get(); header->getInstructions().push_back(std::move(iOwner));
+    auto sumOwner = std::make_unique<PhiNode>(i64, 0, nullptr, header);
+    PhiNode* sum = sumOwner.get(); header->getInstructions().push_back(std::move(sumOwner));
+    i->addIncoming(ctx->getConstantInt(i32, 0), entry);
+    sum->addIncoming(ctx->getConstantInt(i64, 0), entry);
+    builder.createBr(builder.createCslt(i, ctx->getConstantInt(i32, 2000000)), body, exit);
+    builder.setInsertPoint(body);
+    Value* term = builder.createMul(i, ctx->getConstantInt(i32, 2));
+    Value* nextSum = builder.createAdd(sum, builder.createExtSW(term, i64));
+    Value* nextI = builder.createAdd(i, ctx->getConstantInt(i32, 1));
+    i->addIncoming(nextI, body); sum->addIncoming(nextSum, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit); builder.createRet(sum);
+    transforms::CFGBuilder::run(*function);
+
+    transforms::ScalarEvolution scev;
+    assertPureClosedFormQuery(scev, *function, header, true);
+    transforms::LoopVectorizer vectorizer;
+    assert(!vectorizer.performTransformation(*function));
+    assert(scev.run(*function));
+    assert(function->getBasicBlocks().size() == 2);
+}
+
+void test_runtime_closed_form_shape_remains_vectorizable() {
+    auto ctx = std::make_shared<IRContext>();
+    Module module("runtime_recurrence", ctx);
+    IRBuilder builder(ctx); builder.setModule(&module);
+    auto* i32 = ctx->getIntegerType(32);
+    auto* i64 = ctx->getIntegerType(64);
+    Function* function = builder.createFunction("runtime_sum", i64, {i32});
+    Value* bound = function->getParameters().front().get();
+    BasicBlock* entry = builder.createBasicBlock("entry", function);
+    BasicBlock* header = builder.createBasicBlock("loop", function);
+    BasicBlock* body = builder.createBasicBlock("body", function);
+    BasicBlock* exit = builder.createBasicBlock("exit", function);
+    builder.setInsertPoint(entry); builder.createJmp(header);
+    builder.setInsertPoint(header);
+    auto iOwner = std::make_unique<PhiNode>(i32, 0, nullptr, header);
+    PhiNode* i = iOwner.get(); header->getInstructions().push_back(std::move(iOwner));
+    auto sumOwner = std::make_unique<PhiNode>(i64, 0, nullptr, header);
+    PhiNode* sum = sumOwner.get(); header->getInstructions().push_back(std::move(sumOwner));
+    i->addIncoming(ctx->getConstantInt(i32, 0), entry);
+    sum->addIncoming(ctx->getConstantInt(i64, 0), entry);
+    builder.createBr(builder.createCslt(i, bound), body, exit);
+    builder.setInsertPoint(body);
+    Value* term = builder.createMul(i, ctx->getConstantInt(i32, 2));
+    Value* nextSum = builder.createAdd(sum, builder.createExtSW(term, i64));
+    Value* nextI = builder.createAdd(i, ctx->getConstantInt(i32, 1));
+    i->addIncoming(nextI, body); sum->addIncoming(nextSum, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit); builder.createRet(sum);
+    transforms::CFGBuilder::run(*function);
+
+    transforms::ScalarEvolution scev;
+    assertPureClosedFormQuery(scev, *function, header, false);
+    assert(!scev.run(*function));
+    transforms::LoopVectorizer vectorizer;
+    assert(vectorizer.performTransformation(*function));
+    transforms::LinearScanAllocator allocator; allocator.run(*function);
+    auto architecture = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    auto os = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> target =
+        std::make_unique<target::CompositeTargetInfo>(std::move(architecture), std::move(os));
+    std::ostringstream assembly;
+    codegen::CodeGen codegen(module, std::move(target), &assembly); codegen.emit(false);
+    assert(assembly.str().find("%xmm") != std::string::npos);
+    assert(assembly.str().find("paddd") != std::string::npos);
+    assert(assembly.str().find("pmulld") != std::string::npos);
+    assert(assembly.str().find("%ymm") == std::string::npos);
+}
+
 int main() {
     std::cout << "=== Running Loop Vectorizer Tests ===" << std::endl;
 
@@ -265,6 +489,9 @@ int main() {
     test_loop_vectorizer_case(20, false, 3);
     test_loop_vectorizer_case(22, false, 3);
     test_loop_vectorizer_case(17, false, 0, true);
+    test_closed_form_has_priority_over_vectorization();
+    test_runtime_closed_form_shape_remains_vectorizable();
+    test_register_expression_widening_execution();
 
     test_rejection_cases();
 
