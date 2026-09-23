@@ -176,7 +176,6 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
     if (s == d) return;
 
     if (!cg.lastStoreOp.empty() && s == cg.lastStoreOp && (d == regRax || d == "%rax" || d == "%eax")) {
-        std::cerr << "SKIPPED emitMov: s=" << s << " d=" << d << " lastStoreOp=" << cg.lastStoreOp << "\n";
         return;
     }
 

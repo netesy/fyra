@@ -42,7 +42,6 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
         } else if (std::holds_alternative<PhysicalReg>(location)) {
             PhysicalReg reg = std::get<PhysicalReg>(location);
             vreg->setPhysicalRegister(reg.index);
-            std::cerr << "RegAlloc: " << func.getName() << " :: " << vreg->getName() << " -> physReg " << reg.index << "\n";
         }
     }
     func.setStackFrameSize(stack_frame_size);

@@ -487,6 +487,18 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
             r.sectionName = rel.sectionName;
             r.addend = rel.addend;
             artifact.relocations.push_back(r);
+
+            if (!rel.symbolName.empty() && !artifact.findSymbol(rel.symbolName)) {
+                ::target::artifact::object::ObjectSymbol s;
+                s.name = rel.symbolName;
+                s.value = 0;
+                s.size = 0;
+                s.sectionName = "";
+                s.binding = ::target::artifact::object::SymbolBinding::Global;
+                s.type = ::target::artifact::object::SymbolType::Function;
+                s.isDefined = false;
+                artifact.symbols.push_back(s);
+            }
         }
 
         auto writer = ::target::artifact::object::ObjectWriter::createForTargetTriple(targetInfo->getName());

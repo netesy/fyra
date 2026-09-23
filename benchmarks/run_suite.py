@@ -115,7 +115,7 @@ def analyze_assembly(asm_file):
 
 def run_cmd(cmd, timeout=30.0):
     try:
-        p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         return 124, "", f"timeout after {timeout}s"
@@ -228,7 +228,11 @@ def main():
             f"{FYRA_BIN} {fyra_src} -o {fyra_scalar_s} -O2 --disable-slp",
         ]
         for command in commands:
+            t0 = time.time()
             rc, stdout, stderr = run_cmd(command, timeout=args.timeout)
+            t1 = time.time()
+            if args.verbose:
+                print(f"  Command '{command}' took {t1 - t0:.3f}s", flush=True)
             if rc != 0:
                 print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
                 return 1

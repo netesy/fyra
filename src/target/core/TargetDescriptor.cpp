@@ -36,13 +36,38 @@ std::string TargetDescriptor::toString() const {
     return s;
 }
 
-std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& triple) {
+std::string TargetDescriptor::normalizeTriple(const std::string& triple) {
+    if (triple.empty()) return "x64-linux-bin";
+    if (triple == "linux") return "x64-linux-bin";
+    if (triple == "windows" || triple == "windows-amd64" || triple == "win32" || triple == "win64") return "x64-windows-bin";
+    if (triple == "windows-arm64") return "aarch64-windows-bin";
+    if (triple == "aarch64") return "aarch64-linux-bin";
+    if (triple == "wasm32" || triple == "wasm") return "wasm32-wasi-wasm";
+    if (triple == "riscv64") return "riscv64-linux-bin";
+
+    if (triple.find('-') == std::string::npos) {
+        return triple + "-linux-bin";
+    }
+    if (triple.find_last_of('-') == triple.find('-')) {
+        return triple + "-bin";
+    }
+    return triple;
+}
+
+std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& tripleStr) {
+    std::string triple = tripleStr;
     std::vector<std::string> parts;
     std::stringstream ss(triple);
     std::string item;
     while (std::getline(ss, item, '-')) parts.push_back(item);
 
-    if (parts.size() < 2) return std::nullopt;
+    if (parts.size() < 2) {
+        triple = normalizeTriple(tripleStr);
+        parts.clear();
+        std::stringstream ss2(triple);
+        while (std::getline(ss2, item, '-')) parts.push_back(item);
+        if (parts.size() < 2) return std::nullopt;
+    }
 
     TargetDescriptor desc;
     if (parts[0] == "x64" || parts[0] == "x86_64") desc.arch = Arch::X64;

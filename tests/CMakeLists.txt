@@ -391,3 +391,8 @@ add_executable(test_auto_vec_slp test_auto_vec_slp.cpp)
 target_link_libraries(test_auto_vec_slp PRIVATE fyra)
 add_test(NAME AutoVecSLPTest COMMAND test_auto_vec_slp)
 set_tests_properties(AutoVecSLPTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_backend_builder test_backend_builder.cpp)
+target_link_libraries(test_backend_builder PRIVATE fyra)
+add_test(NAME BackendBuilderTest COMMAND test_backend_builder)
+set_tests_properties(BackendBuilderTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

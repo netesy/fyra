@@ -36,6 +36,7 @@ struct TargetDescriptor {
 
     std::string toString() const;
     static std::optional<TargetDescriptor> fromString(const std::string& triple);
+    static std::string normalizeTriple(const std::string& triple);
 };
 
 }
