@@ -54,17 +54,25 @@ DivisionStrengthReduction::UnsignedMagic DivisionStrengthReduction::computeUnsig
 }
 
 DivisionStrengthReduction::SignedMagic DivisionStrengthReduction::computeSignedMagic32(int32_t d_in) {
-    SignedMagic sm;
+    SignedMagic sm{0, 0, 0, false};
+    if (d_in == 0 || d_in == 1 || d_in == -1) return sm;
+
+    // Hacker's Delight, 2nd edition, Figure 10-1 (signed magic numbers).
+    // Keep the loop's delta/r1 termination test intact: stopping merely when
+    // the current multiplier approximation covers 2^p is insufficient (23 is
+    // one divisor for which that produces an off-by-ten, invalid multiplier).
     uint32_t ad = (d_in < 0) ? (0U - static_cast<uint32_t>(d_in)) : static_cast<uint32_t>(d_in);
     uint32_t two31 = 0x80000000U;
-    uint32_t anc = two31 - 1 - two31 % ad;
+    uint32_t t = two31 + (static_cast<uint32_t>(d_in) >> 31);
+    uint32_t anc = t - 1 - t % ad;
     int p = 31;
     uint64_t q1 = two31 / anc;
     uint64_t r1 = two31 - q1 * anc;
     uint64_t q2 = two31 / ad;
     uint64_t r2 = two31 - q2 * ad;
 
-    while (true) {
+    uint64_t delta;
+    do {
         p++;
         if (r1 >= anc - r1) {
             q1 = 2 * q1 + 1;
@@ -80,20 +88,18 @@ DivisionStrengthReduction::SignedMagic DivisionStrengthReduction::computeSignedM
             q2 = 2 * q2;
             r2 = 2 * r2;
         }
-        uint64_t m = q2 + 1;
-        if (p >= 64) break;
-        if ((m * ad - (1ULL << p)) <= (1ULL << (p - 31))) {
-            break;
-        }
-    }
+        delta = ad - r2;
+        if (p >= 63) return sm;
+    } while (q1 < delta || (q1 == delta && r1 == 0));
 
     uint64_t m = q2 + 1;
     int64_t magic = static_cast<int64_t>(m);
-    if (m >= (1ULL << 31)) {
-        magic = static_cast<int64_t>(m) - (1ULL << 32);
-    }
+    if (d_in < 0) magic = -magic;
     sm.magic = static_cast<int32_t>(magic);
     sm.shift = p - 32;
+    if (d_in > 0 && sm.magic < 0) sm.numeratorCorrection = 1;
+    if (d_in < 0 && sm.magic > 0) sm.numeratorCorrection = -1;
+    sm.valid = sm.shift < 32;
     return sm;
 }
 
@@ -260,8 +266,9 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
                     Q = qAbs;
                 }
             } else if (bitWidth == 32) {
-                int32_t d32 = static_cast<int32_t>(absD);
+                int32_t d32 = static_cast<int32_t>(sD);
                 SignedMagic sm = computeSignedMagic32(d32);
+                if (!sm.valid) return false;
 
                 ir::IntegerType* i64Ty = ir::IntegerType::get(64);
                 ir::Value* nExt = builder.createExtSW(N, i64Ty);
@@ -271,8 +278,10 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
                 ir::Value* high64 = builder.createSar(mul64, c32);
                 ir::Value* high32 = builder.createTruncD(high64, type);
 
-                if (sm.magic < 0) {
+                if (sm.numeratorCorrection > 0) {
                     high32 = builder.createAdd(high32, N);
+                } else if (sm.numeratorCorrection < 0) {
+                    high32 = builder.createSub(high32, N);
                 }
 
                 ir::Value* qAbs = high32;
@@ -282,15 +291,9 @@ bool DivisionStrengthReduction::processInstruction(ir::Instruction* instr, ir::I
                 }
 
                 ir::ConstantInt* c31 = ir::ConstantInt::get(type, 31);
-                ir::Value* sign = builder.createShr(N, c31);
+                ir::Value* sign = builder.createShr(qAbs, c31);
                 qAbs = builder.createAdd(qAbs, sign);
-
-                if (sD < 0) {
-                    ir::Value* zero = ir::ConstantInt::get(type, 0);
-                    Q = builder.createSub(zero, qAbs);
-                } else {
-                    Q = qAbs;
-                }
+                Q = qAbs;
             }
         }
     }

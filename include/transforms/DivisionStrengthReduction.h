@@ -29,8 +29,12 @@ private:
     };
 
     struct SignedMagic {
-        int64_t magic;
+        int32_t magic;
         uint32_t shift;
+        // Applied to the high half of N * magic before the final shift:
+        // +1 adds N, -1 subtracts N, and 0 needs no correction.
+        int8_t numeratorCorrection;
+        bool valid;
     };
 
     struct SignedMagic64 {
