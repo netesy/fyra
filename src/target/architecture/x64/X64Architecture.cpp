@@ -1237,20 +1237,40 @@ void X64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
         std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
         std::string s0 = op0;
         if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get());
 
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rcx << ", " << op1 << "\n";
-            if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
-            *os << "  shl " << d << ", cl\n";
+            if (constantCount) {
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  shl " << d << ", " << count << "\n";
+            } else {
+                *os << "  mov " << rcx << ", " << op1 << "\n";
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                *os << "  shl " << d << ", cl\n";
+            }
         } else {
-            emitMov(cg, os, op1, rcx, is32);
-            if (s0 != d) emitMov(cg, os, s0, d, is32);
-            *os << "  " << shiftOp << " %cl, " << d << "\n";
+            if (constantCount) {
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  " << shiftOp << " $" << count << ", " << d << "\n";
+            } else {
+                emitMov(cg, os, op1, rcx, is32);
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                *os << "  " << shiftOp << " %cl, " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xD3, 0xE0});
+        if (auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+            uint8_t count = static_cast<uint8_t>(constantCount->getValue() & (is32 ? 31ULL : 63ULL));
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xC1, 0xE0, count});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xD3, 0xE0});
+        }
         emitStoreResult(cg, i, 0);
     }
 }
@@ -1268,20 +1288,40 @@ void X64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
         std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
         std::string s0 = op0;
         if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get());
 
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rcx << ", " << op1 << "\n";
-            if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
-            *os << "  shr " << d << ", cl\n";
+            if (constantCount) {
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  shr " << d << ", " << count << "\n";
+            } else {
+                *os << "  mov " << rcx << ", " << op1 << "\n";
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                *os << "  shr " << d << ", cl\n";
+            }
         } else {
-            emitMov(cg, os, op1, rcx, is32);
-            if (s0 != d) emitMov(cg, os, s0, d, is32);
-            *os << "  " << shiftOp << " %cl, " << d << "\n";
+            if (constantCount) {
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  " << shiftOp << " $" << count << ", " << d << "\n";
+            } else {
+                emitMov(cg, os, op1, rcx, is32);
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                *os << "  " << shiftOp << " %cl, " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xD3, 0xE8});
+        if (auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+            uint8_t count = static_cast<uint8_t>(constantCount->getValue() & (is32 ? 31ULL : 63ULL));
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xC1, 0xE8, count});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xD3, 0xE8});
+        }
         emitStoreResult(cg, i, 0);
     }
 }
@@ -1299,20 +1339,40 @@ void X64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
         std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
         std::string s0 = op0;
         if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get());
 
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rcx << ", " << op1 << "\n";
-            if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
-            *os << "  sar " << d << ", cl\n";
+            if (constantCount) {
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  sar " << d << ", " << count << "\n";
+            } else {
+                *os << "  mov " << rcx << ", " << op1 << "\n";
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                *os << "  sar " << d << ", cl\n";
+            }
         } else {
-            emitMov(cg, os, op1, rcx, is32);
-            if (s0 != d) emitMov(cg, os, s0, d, is32);
-            *os << "  " << shiftOp << " %cl, " << d << "\n";
+            if (constantCount) {
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  " << shiftOp << " $" << count << ", " << d << "\n";
+            } else {
+                emitMov(cg, os, op1, rcx, is32);
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                *os << "  " << shiftOp << " %cl, " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xD3, 0xF8});
+        if (auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+            uint8_t count = static_cast<uint8_t>(constantCount->getValue() & (is32 ? 31ULL : 63ULL));
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xC1, 0xF8, count});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xD3, 0xF8});
+        }
         emitStoreResult(cg, i, 0);
     }
 }
