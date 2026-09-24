@@ -809,7 +809,13 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
                 *os << "  sub " << d << ", " << op1 << "\n";
             } else {
                 emitMov(cg, os, op0, d, is32);
-                *os << "  " << subOp << " " << s1 << ", " << d << "\n";
+                std::string realS1 = s1;
+                if (!isDirectGprRegister(d) && !isDirectGprRegister(s1)) {
+                    std::string scratch = is32 ? "%r11d" : "%r11";
+                    emitMov(cg, os, s1, scratch, is32);
+                    realS1 = scratch;
+                }
+                *os << "  " << subOp << " " << realS1 << ", " << d << "\n";
             }
         } else {
             // Fallback for SUB when dst == src2 (non-commutative)
@@ -867,7 +873,18 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
                 *os << "  imul " << d << ", " << op1 << "\n";
             }
         } else {
-            if (d == s1 && d != s0) {
+            if (!isDirectGprRegister(d)) {
+                std::string reg = is32 ? "%eax" : "%rax";
+                emitMov(cg, os, op0, reg, is32);
+                std::string realS1 = s1;
+                if (!isDirectGprRegister(s1)) {
+                    std::string scratch = is32 ? "%r11d" : "%r11";
+                    emitMov(cg, os, s1, scratch, is32);
+                    realS1 = scratch;
+                }
+                *os << "  " << mulOp << " " << realS1 << ", " << (is32 ? "%eax" : "%rax") << "\n";
+                emitMov(cg, os, (is32 ? "%eax" : "%rax"), d, is32);
+            } else if (d == s1 && d != s0) {
                 // Commute: dst = src2 * src1
                 emitMov(cg, os, op1, d, is32);
                 *os << "  " << mulOp << " " << s0 << ", " << d << "\n";
@@ -2252,15 +2269,15 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 if (isDirectGprRegister(ptrOp))
                     *os << "  " << move << " " << valueOp << ", (" << ptrOp << ")\n";
                 else {
-                    *os << "  movq " << ptrOp << ", %rdx\n";
-                    *os << "  " << move << " " << valueOp << ", (%rdx)\n";
+                    *os << "  movq " << ptrOp << ", %r11\n";
+                    *os << "  " << move << " " << valueOp << ", (%r11)\n";
                 }
             } else {
                 if (isDirectGprRegister(ptrOp))
                     *os << "  " << move << " [" << ptrOp << "], " << valueOp << "\n";
                 else {
-                    *os << "  mov rdx, " << ptrOp << "\n";
-                    *os << "  " << move << " [rdx], " << valueOp << "\n";
+                    *os << "  mov r11, " << ptrOp << "\n";
+                    *os << "  " << move << " [r11], " << valueOp << "\n";
                 }
             }
             return;
@@ -2292,21 +2309,21 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov " << op << ", rax\n";
             }
         } else {
-            // op = stack operand holding the pointer address — load it into rdx
+            // op = stack operand holding the pointer address — load it into r11
             if (abi == X64ABI::Windows)
-                *os << "  mov " << rdx << ", " << op << "\n";
+                *os << "  mov r11, " << op << "\n";
             else
-                *os << "  movq " << op << ", " << rdx << "\n";
+                *os << "  movq " << op << ", %r11\n";
             if (abi == X64ABI::SystemV) {
-                if (size == 1) *os << "  movb " << al << ", (" << rdx << ")\n";
-                else if (size == 2) *os << "  movw " << ax << ", (" << rdx << ")\n";
-                else if (size == 4) *os << "  movl " << eax << ", (" << rdx << ")\n";
-                else *os << "  movq " << rax << ", (" << rdx << ")\n";
+                if (size == 1) *os << "  movb " << al << ", (%r11)\n";
+                else if (size == 2) *os << "  movw " << ax << ", (%r11)\n";
+                else if (size == 4) *os << "  movl " << eax << ", (%r11)\n";
+                else *os << "  movq " << rax << ", (%r11)\n";
             } else {
-                if (size == 1) *os << "  mov byte ptr [rdx], al\n";
-                else if (size == 2) *os << "  mov word ptr [rdx], ax\n";
-                else if (size == 4) *os << "  mov dword ptr [rdx], eax\n";
-                else *os << "  mov [rdx], rax\n";
+                if (size == 1) *os << "  mov byte ptr [r11], al\n";
+                else if (size == 2) *os << "  mov word ptr [r11], ax\n";
+                else if (size == 4) *os << "  mov dword ptr [r11], eax\n";
+                else *os << "  mov [r11], rax\n";
             }
         }
     } else {
