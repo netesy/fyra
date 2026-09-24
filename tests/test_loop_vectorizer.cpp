@@ -384,6 +384,39 @@ int main(void) {
     std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
 }
 
+void test_register_widening_rejects_non_i32_leaf() {
+    auto ctx = std::make_shared<IRContext>();
+    Module module("narrow_register_widening", ctx);
+    IRBuilder builder(ctx); builder.setModule(&module);
+    auto* i16 = ctx->getIntegerType(16);
+    auto* i64 = ctx->getIntegerType(64);
+    Function* function = builder.createFunction("narrow_sum", i64, {i16});
+    Value* bound = function->getParameters().front().get();
+    BasicBlock* entry = builder.createBasicBlock("entry", function);
+    BasicBlock* header = builder.createBasicBlock("loop", function);
+    BasicBlock* body = builder.createBasicBlock("body", function);
+    BasicBlock* exit = builder.createBasicBlock("exit", function);
+    builder.setInsertPoint(entry); builder.createJmp(header);
+    builder.setInsertPoint(header);
+    auto iOwner = std::make_unique<PhiNode>(i16, 0, nullptr, header);
+    PhiNode* i = iOwner.get(); header->getInstructions().push_back(std::move(iOwner));
+    auto sumOwner = std::make_unique<PhiNode>(i64, 0, nullptr, header);
+    PhiNode* sum = sumOwner.get(); header->getInstructions().push_back(std::move(sumOwner));
+    i->addIncoming(ctx->getConstantInt(i16, 0), entry);
+    sum->addIncoming(ctx->getConstantInt(i64, 0), entry);
+    builder.createBr(builder.createCslt(i, bound), body, exit);
+    builder.setInsertPoint(body);
+    Value* nextSum = builder.createAdd(sum, builder.createExtSW(i, i64));
+    Value* nextI = builder.createAdd(i, ctx->getConstantInt(i16, 1));
+    i->addIncoming(nextI, body); sum->addIncoming(nextSum, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit); builder.createRet(sum);
+    transforms::CFGBuilder::run(*function);
+
+    transforms::LoopVectorizer vectorizer;
+    assert(!vectorizer.performTransformation(*function));
+}
+
 void test_closed_form_has_priority_over_vectorization() {
     auto ctx = std::make_shared<IRContext>();
     Module module("closed_form_priority", ctx);
@@ -492,6 +525,7 @@ int main() {
     test_closed_form_has_priority_over_vectorization();
     test_runtime_closed_form_shape_remains_vectorizable();
     test_register_expression_widening_execution();
+    test_register_widening_rejects_non_i32_leaf();
 
     test_rejection_cases();
 

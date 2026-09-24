@@ -145,7 +145,10 @@ struct VectorizationPlan {
 
 bool isPureI32Expression(ir::Value* value, ir::PhiNode* induction,
                          std::set<ir::Value*>& visiting) {
-    if (value == induction || dynamic_cast<ir::ConstantInt*>(value)) return true;
+    if (value == induction || dynamic_cast<ir::ConstantInt*>(value)) {
+        ir::Type* type = value ? value->getType() : nullptr;
+        return type && type->isIntegerTy() && type->getSize() == 4;
+    }
     auto* inst = dynamic_cast<ir::Instruction*>(value);
     if (!inst || !inst->getType() || !inst->getType()->isIntegerTy() ||
         inst->getType()->getSize() != 4 || !visiting.insert(value).second)
@@ -1244,7 +1247,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 ir::VectorType* v4i64Ty = ctx->getVectorType(i64Ty, 4);
                 vZeroAcc0 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
                 vZeroAcc1 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
-            } else {
+            } else if (!plan.isRegisterWideningReduction) {
                 vReductionIdentity = builder.createVBroadcast(
                     vecTy, ctx->getConstantInt(i32Ty,
                         static_cast<uint32_t>(plan.reductions[0].identity)));
@@ -1733,8 +1736,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 ir::Value* op1 = inst->getOperands()[1]->get();
                 auto* inst0 = dynamic_cast<ir::Instruction*>(op0);
                 auto* inst1 = dynamic_cast<ir::Instruction*>(op1);
-                ir::Value* eOp0 = (inst0 && epiValueMap.count(inst0)) ? epiValueMap[inst0] : op0;
-                ir::Value* eOp1 = (inst1 && epiValueMap.count(inst1)) ? epiValueMap[inst1] : op1;
+                ir::Value* eOp0 = op0 == iPhi ? static_cast<ir::Value*>(rawPhiEpiI)
+                    : ((inst0 && epiValueMap.count(inst0)) ? epiValueMap[inst0] : op0);
+                ir::Value* eOp1 = op1 == iPhi ? static_cast<ir::Value*>(rawPhiEpiI)
+                    : ((inst1 && epiValueMap.count(inst1)) ? epiValueMap[inst1] : op1);
                 ir::Instruction* epiAdd = opc == ir::Instruction::FAdd
                     ? builder.createFAdd(eOp0, eOp1) : builder.createAdd(eOp0, eOp1);
                 epiValueMap[inst.get()] = epiAdd;
@@ -1743,8 +1748,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 ir::Value* op1 = inst->getOperands()[1]->get();
                 auto* inst0 = dynamic_cast<ir::Instruction*>(op0);
                 auto* inst1 = dynamic_cast<ir::Instruction*>(op1);
-                ir::Value* eOp0 = (inst0 && epiValueMap.count(inst0)) ? epiValueMap[inst0] : op0;
-                ir::Value* eOp1 = (inst1 && epiValueMap.count(inst1)) ? epiValueMap[inst1] : op1;
+                ir::Value* eOp0 = op0 == iPhi ? static_cast<ir::Value*>(rawPhiEpiI)
+                    : ((inst0 && epiValueMap.count(inst0)) ? epiValueMap[inst0] : op0);
+                ir::Value* eOp1 = op1 == iPhi ? static_cast<ir::Value*>(rawPhiEpiI)
+                    : ((inst1 && epiValueMap.count(inst1)) ? epiValueMap[inst1] : op1);
                 ir::Instruction* epiSub = opc == ir::Instruction::FSub
                     ? builder.createFSub(eOp0, eOp1) : builder.createSub(eOp0, eOp1);
                 epiValueMap[inst.get()] = epiSub;
