@@ -241,8 +241,10 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
         transforms::LoopUnroll loop_unroll(error_reporter);
-        transforms::LoopVectorizer loop_vectorizer(error_reporter);
-        transforms::SLPVectorizer slp_vectorizer(error_reporter);
+        const target::TargetDescriptor vectorTarget = desc.value_or(
+            target::TargetDescriptor{target::Arch::X64, target::OS::Linux});
+        transforms::LoopVectorizer loop_vectorizer(error_reporter, vectorTarget);
+        transforms::SLPVectorizer slp_vectorizer(error_reporter, vectorTarget);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
 
         bool optimization_changed = true;

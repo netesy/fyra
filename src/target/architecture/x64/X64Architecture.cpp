@@ -3011,13 +3011,16 @@ VectorCapabilities X64Architecture::getVectorCapabilities() const {
     VectorCapabilities caps;
     caps.supportsSSE = true;
     caps.supportsSSSE3 = true;
-    caps.supportsAVX = false;
-    caps.supportsAVX2 = false;
+    caps.supportsAVX = true;
+    caps.supportsAVX2 = true;
     caps.supportsAVX512 = false;
-    caps.maxVectorWidth = 128;
+    caps.maxVectorWidth = 256;
     caps.supportedWidths = {128, 256};
+    caps.supportsFloatVectors = true;
     caps.supportsIntegerVectors = true;
-    caps.simdExtension = "SSE2/SSSE3/SSE4.1";
+    caps.supportsDoubleVectors = true;
+    caps.supportsMaskedOps = true;
+    caps.simdExtension = "SSE2/SSSE3/SSE4.1/AVX2";
     return caps;
 }
 
@@ -3036,8 +3039,8 @@ bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
         auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
         if (!intTy) return false;
         unsigned bw = intTy->getBitwidth();
-        if (bw == 8 && numElem == 16) return true;
-        if (bw == 16 && numElem == 8) return true;
+        if (bw == 8 && (numElem == 16 || numElem == 32)) return true;
+        if (bw == 16 && (numElem == 8 || numElem == 16)) return true;
         if (bw == 32 && (numElem == 4 || numElem == 8)) return true;
         if (bw == 64 && (numElem == 2 || numElem == 4)) return true;
     } else if (elemTy->isFloatTy()) {

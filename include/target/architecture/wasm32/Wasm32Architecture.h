@@ -70,6 +70,7 @@ public:
     bool isCalleeSaved(const std::string& reg) const override { return false; }
     std::string getAssemblyFileExtension() const override { return ".wat"; }
 
+    VectorCapabilities getVectorCapabilities() const override;
     bool supportsVectorWidth(unsigned width) const override;
     bool supportsVectorType(const ir::VectorType* type) const override;
     bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
