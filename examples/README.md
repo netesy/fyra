@@ -6,7 +6,7 @@ A tiny PHP-like toy language frontend that:
 
 1. Parses a minimal class-based snippet (`class`, method, `new`, method call).
 2. Lowers it to Fyra IR via `ir::IRBuilder`.
-3. Links an in-memory `ObjectArtifact` with `InternalLinker` and writes the resulting `LinkedImage` with `ElfExecutableImageBuilder`.
+3. Uses `fyra::BackendBuilder` to run the compiler pipeline and emit a native executable.
 4. Executes the generated executable and validates the result.
 
 This example does **not** invoke gcc/clang.
@@ -28,4 +28,4 @@ cmake --build build --target test_phpish_frontend
 ./build/tests/test_phpish_frontend
 ```
 
-The `test_phpish_frontend` toy frontend now exercises complex arithmetic, variables, functions, `if/elif/else`, `while`, and `for` loops end-to-end through Fyra IR + in-memory execution.
+The `test_phpish_frontend` toy frontend exercises complex arithmetic, variables, functions, `if/elif/else`, `while`, and `for` loops through Fyra IR and `fyra::BackendBuilder`.

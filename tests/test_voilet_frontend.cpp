@@ -1,5 +1,7 @@
 #include <cassert>
 #include <cctype>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -7,10 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "codegen/CodeGen.h"
-#include "target/core/TargetResolver.h"
-#include "target/core/TargetInfo.h"
-#include "target/core/TargetDescriptor.h"
+#include "fyra/BackendBuilder.h"
 #include "ir/Constant.h"
 #include "ir/IRBuilder.h"
 #include "ir/Module.h"
@@ -392,9 +391,16 @@ Ctx lower(const std::string& source, const std::string& name) {
 
 void checkWat(const std::string& source, const std::string& tag) {
     Ctx c = lower(source, "voilet_wat_" + tag);
+    const std::string path = "./voilet_" + tag + ".wat";
+    fyra::BackendBuilder backend(c.module);
+    fyra::BuildResult result = backend.target("wasm32-wasi-wasm").emitWAT(path);
+    if (!result.success) {
+        throw std::runtime_error(result.errors.empty() ? "WAT emission failed" : result.errors.front());
+    }
+    std::ifstream input(path);
     std::stringstream ss;
-    codegen::CodeGen cg(c.module, target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI}), &ss);
-    cg.emit();
+    ss << input.rdbuf();
+    std::remove(path.c_str());
 
     const std::string wat = ss.str();
     assert(!wat.empty());
@@ -405,10 +411,16 @@ void checkWat(const std::string& source, const std::string& tag) {
 
 void checkWasm(const std::string& source, const std::string& tag) {
     Ctx c = lower(source, "voilet_wasm_" + tag);
-    codegen::CodeGen cg(c.module, target::TargetResolver::resolve({::target::Arch::WASM32, ::target::OS::WASI}));
-    cg.emit();
-
-    const auto& code = cg.getAssembler().getCode();
+    const std::string path = "./voilet_" + tag + ".wasm";
+    fyra::BackendBuilder backend(c.module);
+    fyra::BuildResult result = backend.target("wasm32-wasi-wasm").emitWasm(path);
+    if (!result.success) {
+        throw std::runtime_error(result.errors.empty() ? "WASM emission failed" : result.errors.front());
+    }
+    std::ifstream input(path, std::ios::binary);
+    std::vector<uint8_t> code((std::istreambuf_iterator<char>(input)),
+                              std::istreambuf_iterator<char>());
+    std::remove(path.c_str());
     assert(code.size() >= 8);
     assert(code[0] == 0x00 && code[1] == 0x61 && code[2] == 0x73 && code[3] == 0x6d);
     assert(code[4] == 0x01 && code[5] == 0x00 && code[6] == 0x00 && code[7] == 0x00);
