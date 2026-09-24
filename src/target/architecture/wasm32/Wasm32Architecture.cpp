@@ -109,6 +109,16 @@ void Wasm32Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std
 void Wasm32Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) {}
 void Wasm32Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {}
 
+VectorCapabilities Wasm32Architecture::getVectorCapabilities() const {
+    VectorCapabilities caps;
+    caps.maxVectorWidth = 128;
+    caps.supportedWidths = {128};
+    caps.supportsFloatVectors = true;
+    caps.supportsIntegerVectors = true;
+    caps.simdExtension = "WebAssembly SIMD128";
+    return caps;
+}
+
 bool Wasm32Architecture::supportsVectorWidth(unsigned width) const {
     return width == 128;
 }

@@ -24,7 +24,9 @@ void diag(const std::string& message) {
 
 bool scalarOpcode(O op) {
     return op == O::Add || op == O::Sub || op == O::Mul ||
-           op == O::FAdd || op == O::FSub || op == O::FMul;
+           op == O::FAdd || op == O::FSub || op == O::FMul ||
+           op == O::And || op == O::Or || op == O::Xor ||
+           op == O::SMin || op == O::SMax;
 }
 
 bool isLoad(O op) { return op == O::Load || op == O::Loads || op == O::Loadd; }
@@ -113,13 +115,20 @@ O vectorOpcode(O op) {
         case O::FAdd: return O::VFAdd;
         case O::FSub: return O::VFSub;
         case O::FMul: return O::VFMul;
+        case O::And: return O::VAnd;
+        case O::Or: return O::VOr;
+        case O::Xor: return O::VXor;
+        case O::SMin: return O::VMin;
+        case O::SMax: return O::VMax;
         default: return O::VAdd;
     }
 }
 
 unsigned elementBits(ir::Type* type) {
-    if (auto* integer = dynamic_cast<ir::IntegerType*>(type))
-        return integer->getBitwidth() == 32 ? 32 : 0;
+    if (auto* integer = dynamic_cast<ir::IntegerType*>(type)) {
+        const unsigned width = integer->getBitwidth();
+        return width == 8 || width == 16 || width == 32 || width == 64 ? width : 0;
+    }
     if (type && type->isFloatTy()) return 32;
     if (type && type->isDoubleTy()) return 64;
     return 0;
@@ -240,7 +249,8 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
     auto* module = func.getParent();
     if (!module) return false;
     auto* context = module->getContext();
-    auto target = target::TargetResolver::resolve({target::Arch::X64, target::OS::Linux});
+    auto target = target::TargetResolver::resolve(target_);
+    if (!target) return false;
     bool changed = false;
 
     for (auto& blockOwner : func.getBasicBlocks()) {
@@ -261,7 +271,8 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
             ir::Type* scalarType = firstValue->getType();
             unsigned bits = elementBits(scalarType);
             unsigned laneCount = 0;
-            for (unsigned width : {256u, 128u}) {
+            for (unsigned width : {512u, 256u, 128u, 64u}) {
+                if (!target->supportsVectorWidth(width)) continue;
                 unsigned count = bits ? width / bits : 0;
                 auto* vt = count ? context->getVectorType(scalarType, count) : nullptr;
                 if (count && storeCursor + count <= storeRoots.size() && target->supportsVectorWidth(width) &&
@@ -350,7 +361,7 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                 ir::Type* scalarType = run[cursor]->getType();
                 const unsigned bits = elementBits(scalarType);
                 unsigned lanes = 0;
-                for (unsigned candidate : {256u, 128u}) {
+                for (unsigned candidate : {512u, 256u, 128u, 64u}) {
                     unsigned count = bits ? candidate / bits : 0;
                     if (count && cursor + count <= run.size()) {
                         auto* type = context->getVectorType(scalarType, count);

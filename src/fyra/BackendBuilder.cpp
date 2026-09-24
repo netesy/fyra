@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <algorithm>
 
 namespace fyra {
 
@@ -120,6 +121,9 @@ BackendBuilder& BackendBuilder::importSymbol(const std::string& symbol, const st
 
 void BackendBuilder::invalidatePrepared() {
     preparedModule_.reset();
+    // CompilerPipeline caches completion of each lowering stage.  A new clone
+    // must go through every stage again after any configuration change.
+    pipeline_ = CompilerPipeline{};
     isPrepared_ = false;
 }
 
@@ -166,33 +170,70 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
     codegen::CodeGen codeGenerator(*preparedModule_, std::move(targetInfo), nullptr);
     codeGenerator.emit(false);
 
-    std::map<std::string, std::vector<uint8_t>> sections;
-    sections[".text"] = codeGenerator.getAssembler().getCode();
-    sections[".rodata"] = codeGenerator.getRodataAssembler().getCode();
+    const auto& textBytes = codeGenerator.getAssembler().getCode();
+    const auto& auxiliaryBytes = codeGenerator.getRodataAssembler().getCode();
+
+    // CodeGen uses one auxiliary assembler for both writable data and constant
+    // data.  Its symbols retain the actual destination section, so use those
+    // offsets to recover the section boundary before constructing the artifact.
+    uint64_t dataSize = 0;
+    uint64_t bssSize = 0;
+    bool hasData = false;
+    bool hasRodata = false;
+    for (const auto& sym : codeGenerator.getSymbols()) {
+        if (sym.sectionName == ".data") {
+            hasData = true;
+            dataSize = std::max(dataSize, sym.value + sym.size);
+        } else if (sym.sectionName == ".rodata") {
+            hasRodata = true;
+        } else if (sym.sectionName == ".bss") {
+            bssSize = std::max(bssSize, sym.value + sym.size);
+        }
+    }
+    dataSize = std::min<uint64_t>(dataSize, auxiliaryBytes.size());
 
     target::artifact::object::ObjectSection textSec;
     textSec.name = ".text";
-    textSec.data = sections[".text"];
+    textSec.data = textBytes;
     textSec.alignment = 16;
     textSec.flags = 0x6; // SHF_ALLOC | SHF_EXECINSTR
     artifact.addSection(textSec);
 
-    if (!sections[".rodata"].empty()) {
+    if (hasData && dataSize != 0) {
+        target::artifact::object::ObjectSection dataSec;
+        dataSec.name = ".data";
+        dataSec.data.assign(auxiliaryBytes.begin(), auxiliaryBytes.begin() + dataSize);
+        dataSec.alignment = 8;
+        dataSec.flags = 0x3; // SHF_ALLOC | SHF_WRITE
+        artifact.addSection(dataSec);
+    }
+
+    const uint64_t rodataOffset = hasData ? dataSize : 0;
+    if ((hasRodata || !hasData) && rodataOffset < auxiliaryBytes.size()) {
         target::artifact::object::ObjectSection rodataSec;
         rodataSec.name = (desc->os == target::OS::Windows) ? ".rdata" : ".rodata";
-        rodataSec.data = sections[".rodata"];
+        rodataSec.data.assign(auxiliaryBytes.begin() + rodataOffset, auxiliaryBytes.end());
         rodataSec.alignment = 8;
         rodataSec.flags = 0x2; // SHF_ALLOC
         artifact.addSection(rodataSec);
     }
 
+    if (bssSize != 0) {
+        target::artifact::object::ObjectSection bssSec;
+        bssSec.name = ".bss";
+        bssSec.virtualSize = bssSize;
+        bssSec.alignment = 16;
+        bssSec.flags = 0x3; // SHF_ALLOC | SHF_WRITE
+        artifact.addSection(bssSec);
+    }
+
     for (const auto& sym : codeGenerator.getSymbols()) {
         target::artifact::object::ObjectSymbol out;
         out.name = sym.name;
-        out.value = sym.value;
+        out.value = (sym.sectionName == ".rodata") ? sym.value - rodataOffset : sym.value;
         out.size = sym.size;
         out.type = (sym.type == 2) ? target::artifact::object::SymbolType::Function
-                                  : target::artifact::object::SymbolType::NoType;
+                                  : target::artifact::object::SymbolType::Object;
         out.binding = (sym.binding == 1) ? target::artifact::object::SymbolBinding::Global
                                         : target::artifact::object::SymbolBinding::Local;
         out.sectionName = sym.sectionName;
@@ -228,7 +269,10 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
             s.isDefined = false;
             artifact.addSymbol(s);
         }
-        artifact.addRelocation({reloc.offset, reloc.type, reloc.addend,
+        const uint64_t offset = (reloc.sectionName == ".rodata")
+                                    ? reloc.offset - rodataOffset
+                                    : reloc.offset;
+        artifact.addRelocation({offset, reloc.type, reloc.addend,
                                 reloc.symbolName, reloc.sectionName});
     }
 

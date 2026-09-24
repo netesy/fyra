@@ -2,6 +2,7 @@
 
 #include "transforms/TransformPass.h"
 #include "ir/Instruction.h"
+#include "target/core/TargetDescriptor.h"
 #include <memory>
 #include <vector>
 
@@ -31,10 +32,14 @@ public:
         std::vector<ir::Instruction*> scalarAccesses;
     };
 
-    explicit SLPVectorizer(std::shared_ptr<ErrorReporter> reporter = nullptr)
-        : TransformPass("SLPVectorizer", reporter) {}
+    explicit SLPVectorizer(std::shared_ptr<ErrorReporter> reporter = nullptr,
+                           target::TargetDescriptor target = {target::Arch::X64, target::OS::Linux})
+        : TransformPass("SLPVectorizer", reporter), target_(std::move(target)) {}
 
     bool performTransformation(ir::Function& func) override;
+
+private:
+    target::TargetDescriptor target_;
 };
 
 } // namespace transforms

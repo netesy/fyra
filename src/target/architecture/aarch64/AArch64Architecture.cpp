@@ -365,6 +365,18 @@ void AArch64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const st
 std::string AArch64Architecture::getConditionCode(const std::string& op, bool isFloat, bool isUnsigned) const { return "eq"; }
 std::string AArch64Architecture::getWRegister(const std::string& xReg) const { return xReg; }
 
+VectorCapabilities AArch64Architecture::getVectorCapabilities() const {
+    VectorCapabilities caps;
+    caps.supportsNEON = true;
+    caps.maxVectorWidth = 128;
+    caps.supportedWidths = {64, 128};
+    caps.supportsFloatVectors = true;
+    caps.supportsIntegerVectors = true;
+    caps.supportsDoubleVectors = true;
+    caps.simdExtension = "NEON";
+    return caps;
+}
+
 bool AArch64Architecture::supportsVectorWidth(unsigned width) const {
     return width == 64 || width == 128;
 }

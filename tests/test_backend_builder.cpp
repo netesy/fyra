@@ -2,6 +2,7 @@
 #include "ir/IRContext.h"
 #include "ir/IRBuilder.h"
 #include "ir/Module.h"
+#include "target/artifact/object/ObjectReader.h"
 #include <cassert>
 #include <iostream>
 #include <fstream>
@@ -236,6 +237,47 @@ int main() {
         assert(resSo.success);
         assert(resSo.kind == fyra::OutputKind::SharedLibrary);
         std::cout << "Shared library generated successfully: /tmp/libshared_a.so" << std::endl;
+    }
+
+    // Test 6: Writable data and heap storage survive the artifact pipeline.
+    {
+        ir::Module module("test_data_sections", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        module.addGlobalVariable(std::make_unique<ir::GlobalVariable>(
+            i32, "answer", ctx->getConstantInt(i32, 42), false, ".data"));
+
+        auto* pointerType = ir::PointerType::get(*ctx, i32);
+        ir::Function* allocate = builder.createFunction("allocate", pointerType);
+        ir::BasicBlock* allocateEntry = builder.createBasicBlock("entry", allocate);
+        builder.setInsertPoint(allocateEntry);
+        auto* allocation = builder.createAlloc(
+            ctx->getConstantInt(ctx->getIntegerType(64), 8), i32);
+        builder.createRet(allocation);
+
+        ir::Function* fn = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        builder.createRet(ctx->getConstantInt(i32, 42));
+
+        fyra::BackendBuilder backend(module);
+        backend.target("x64-linux-bin").optimize(fyra::OptimizationLevel::O0);
+        fyra::BuildResult objectResult = backend.emitObject("/tmp/test_data_sections.o");
+        assert(objectResult.success);
+
+        auto reader = target::artifact::object::ObjectReader::createForTargetTriple("x64-linux-bin");
+        target::artifact::object::ObjectArtifact artifact;
+        assert(reader && reader->read("/tmp/test_data_sections.o", artifact));
+        assert(artifact.findSection(".data") != nullptr);
+
+        // Reconfiguration after emission must run a fresh compiler pipeline.
+        backend.optimize(fyra::OptimizationLevel::O2);
+        fyra::BuildResult executableResult = backend.emitExecutable("/tmp/test_data_sections_exec");
+        assert(executableResult.success);
+        int rc = std::system("/tmp/test_data_sections_exec");
+        assert(WEXITSTATUS(rc) == 42);
     }
 
     std::cout << "=== All BackendBuilder API direct C++ tests passed successfully! ===" << std::endl;
