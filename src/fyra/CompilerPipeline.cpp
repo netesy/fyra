@@ -12,6 +12,7 @@
 #include "transforms/Mem2Reg.h"
 #include "transforms/FunctionInliner.h"
 #include "transforms/DivisionStrengthReduction.h"
+#include "transforms/InstCombine.h"
 #include "transforms/SCCP.h"
 #include "transforms/CopyElimination.h"
 #include "transforms/GVN.h"
@@ -246,6 +247,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         transforms::LoopVectorizer loop_vectorizer(error_reporter, vectorTarget);
         transforms::SLPVectorizer slp_vectorizer(error_reporter, vectorTarget);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
+        transforms::InstCombinePass inst_combine;
 
         bool optimization_changed = true;
         int iteration = 1;
@@ -254,6 +256,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         if (!isWasm) {
             while (optimization_changed && iteration <= maxIterations) {
                 optimization_changed = false;
+                if (inst_combine.run(*func)) optimization_changed = true;
                 if (div_sr.run(*func)) optimization_changed = true;
                 if (enhanced_sccp.run(*func)) optimization_changed = true;
                 if (copy_elim.run(*func)) optimization_changed = true;

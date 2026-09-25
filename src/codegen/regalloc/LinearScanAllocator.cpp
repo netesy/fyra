@@ -35,8 +35,9 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
     std::vector<PhysicalReg> free_callee_regs;
     std::vector<PhysicalReg> free_xmm_regs;
 
-    // Caller-saved registers: pure scratch (0:r10, 1:r11, 2:rcx, 3:rdx, 6:r8, 7:r9, 5:rdi, 4:rsi)
-    static const std::vector<unsigned int> caller_indices = {0, 1, 2, 3, 6, 7, 5, 4};
+    // Caller-saved registers: pure scratch (0:r10, 2:rcx, 3:rdx, 6:r8, 7:r9, 5:rdi, 4:rsi)
+    // Index 1 (%r11) is reserved for backend codegen scratch usage (e.g. pointer dereferences, two-memory-operand instructions).
+    static const std::vector<unsigned int> caller_indices = {0, 2, 3, 6, 7, 5, 4};
     for (auto it = caller_indices.rbegin(); it != caller_indices.rend(); ++it) {
         free_caller_regs.push_back({*it});
     }

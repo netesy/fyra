@@ -53,7 +53,7 @@ struct MemoryLegality {
     std::vector<RuntimeAliasCheck> runtimeChecks;
 };
 
-enum class ReductionKind { Add, Mul, SignedMin, SignedMax };
+enum class ReductionKind { Add, Mul, SignedMin, SignedMax, FAdd, FMul };
 
 struct ReductionPlan {
     ReductionKind kind = ReductionKind::Add;
@@ -67,6 +67,8 @@ struct ReductionPlan {
     ir::VectorType* sourceVectorType = nullptr; // Source vector type (e.g. <8xi32>)
     ir::Instruction::Opcode vectorOpcode = ir::Instruction::VAdd;
     int64_t identity = 0;
+    double fpIdentity = 0.0;
+    bool isFloatingPoint = false;
     const char* collapseStrategy = "scalar lane fold";
     bool isWidening = false;
     // A signed i32 expression which is widened lane-by-lane and accumulated
@@ -420,8 +422,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         for (auto& inst : headerBB->getInstructions()) {
             if (auto* phi = dynamic_cast<ir::PhiNode*>(inst.get())) {
                 headerPhis.push_back(phi);
-            } else if (inst->getOpcode() == ir::Instruction::Cslt || inst->getOpcode() == ir::Instruction::Csle || inst->getOpcode() == ir::Instruction::Clt ||
-                       inst->getOpcode() == ir::Instruction::Csgt) {
+            } else if (inst->getOpcode() == ir::Instruction::Cslt || inst->getOpcode() == ir::Instruction::Csle ||
+                       inst->getOpcode() == ir::Instruction::Clt || inst->getOpcode() == ir::Instruction::Csgt ||
+                       inst->getOpcode() == ir::Instruction::Csge || inst->getOpcode() == ir::Instruction::Cgt ||
+                       inst->getOpcode() == ir::Instruction::Cge) {
                 sltCond = inst.get();
             } else if (inst->getOpcode() == ir::Instruction::Br || inst->getOpcode() == ir::Instruction::Jnz) {
                 brInst = inst.get();
@@ -586,19 +590,36 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             auto* latchInst = dynamic_cast<ir::Instruction*>(latchVal);
             if (!latchInst) continue;
 
-            if (latchInst->getOpcode() == ir::Instruction::Add && latchInst->getOperands().size() >= 2) {
+            if ((latchInst->getOpcode() == ir::Instruction::Add || latchInst->getOpcode() == ir::Instruction::Sub) &&
+                latchInst->getOperands().size() >= 2) {
                 ir::Value* op0 = latchInst->getOperands()[0]->get();
                 ir::Value* op1 = latchInst->getOperands()[1]->get();
                 auto* c1 = dynamic_cast<ir::ConstantInt*>(op1);
                 auto* c0 = dynamic_cast<ir::ConstantInt*>(op0);
-                const ir::ConstantInt* step = op0 == phi ? c1 : (op1 == phi ? c0 : nullptr);
-                if (step && step->getValue() > 0 && step->getValue() <= INT32_MAX) {
-                    iPhi = phi;
-                    addINextInst = latchInst;
-                    plan.initVal = preVal;
-                    plan.stepConst = static_cast<int64_t>(step->getValue());
-                    plan.stepInst = latchInst;
-                    break;
+
+                if (latchInst->getOpcode() == ir::Instruction::Add) {
+                    const ir::ConstantInt* step = op0 == phi ? c1 : (op1 == phi ? c0 : nullptr);
+                    if (step) {
+                        int64_t stepVal = static_cast<int32_t>(step->getValue());
+                        if (stepVal != 0 && std::abs(stepVal) <= INT32_MAX) {
+                            iPhi = phi;
+                            addINextInst = latchInst;
+                            plan.initVal = preVal;
+                            plan.stepConst = stepVal;
+                            plan.stepInst = latchInst;
+                            break;
+                        }
+                    }
+                } else if (latchInst->getOpcode() == ir::Instruction::Sub && op0 == phi && c1) {
+                    int64_t stepVal = -static_cast<int32_t>(c1->getValue());
+                    if (stepVal != 0 && std::abs(stepVal) <= INT32_MAX) {
+                        iPhi = phi;
+                        addINextInst = latchInst;
+                        plan.initVal = preVal;
+                        plan.stepConst = stepVal;
+                        plan.stepInst = latchInst;
+                        break;
+                    }
                 }
             }
         }
@@ -613,15 +634,27 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         const bool normalLess = (sltCond->getOpcode() == ir::Instruction::Cslt ||
                                  sltCond->getOpcode() == ir::Instruction::Csle ||
                                  sltCond->getOpcode() == ir::Instruction::Clt) && condOp0 == iPhi;
+        const bool normalGreater = (sltCond->getOpcode() == ir::Instruction::Csgt ||
+                                    sltCond->getOpcode() == ir::Instruction::Csge ||
+                                    sltCond->getOpcode() == ir::Instruction::Cgt ||
+                                    sltCond->getOpcode() == ir::Instruction::Cge) && condOp0 == iPhi;
         const bool reversedGreater = sltCond->getOpcode() == ir::Instruction::Csgt && condOp1 == iPhi;
-        ir::Value* boundN = normalLess ? condOp1 : (reversedGreater ? condOp0 : nullptr);
+
+        ir::Value* boundN = nullptr;
+        if (plan.stepConst > 0) {
+            boundN = normalLess ? condOp1 : (reversedGreater ? condOp0 : nullptr);
+        } else {
+            boundN = normalGreater ? condOp1 : nullptr;
+        }
         if (!boundN) { logDiag("reject: induction is not the varying operand of the loop comparison"); continue; }
 
-        plan.inclusiveBound = sltCond->getOpcode() == ir::Instruction::Csle;
+        plan.inclusiveBound = sltCond->getOpcode() == ir::Instruction::Csle ||
+                              sltCond->getOpcode() == ir::Instruction::Csge;
         if (plan.inclusiveBound) {
             auto* constantBound = dynamic_cast<ir::ConstantInt*>(boundN);
-            if (!constantBound || static_cast<uint32_t>(constantBound->getValue()) == INT32_MAX) {
-                logDiag("reject: inclusive bound cannot be incremented without signed overflow");
+            if (!constantBound || static_cast<uint32_t>(constantBound->getValue()) == INT32_MAX ||
+                (plan.stepConst < 0 && static_cast<int32_t>(constantBound->getValue()) == INT32_MIN)) {
+                logDiag("reject: inclusive bound cannot be adjusted without signed overflow");
                 continue;
             }
         }
@@ -730,14 +763,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             if (phi != iPhi) { reductionPhi = phi; break; }
         }
 
-        if (reductionPhi && reductionPhi->getType() && reductionPhi->getType()->isFloatingPoint()) {
-            logDiag("Rejected loop: floating-point reductions require reassociation semantics");
-            continue;
-        }
-
         bool unsupportedReduction = false;
         uint64_t mulFactor = 1;
-        if (reductionPhi && reductionPhi->getType() && reductionPhi->getType()->isInteger()) {
+        if (reductionPhi && reductionPhi->getType()) {
             ir::Value* initial = reductionPhi->getIncomingValueForBlock(entryBB);
             auto* update = dynamic_cast<ir::Instruction*>(
                 reductionPhi->getIncomingValueForBlock(bodyBB));
@@ -753,7 +781,22 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 reduction.update = update;
                 reduction.scalarType = reductionPhi->getType();
 
-                if (reductionPhi->getType()->getSize() == 8) {
+                if (reductionPhi->getType()->isFloatingPoint()) {
+                    if (update->getOpcode() == ir::Instruction::FAdd) {
+                        reduction.kind = ReductionKind::FAdd;
+                        reduction.vectorOpcode = ir::Instruction::VFAdd;
+                        reduction.fpIdentity = 0.0;
+                        reduction.isFloatingPoint = true;
+                    } else if (update->getOpcode() == ir::Instruction::FMul) {
+                        reduction.kind = ReductionKind::FMul;
+                        reduction.vectorOpcode = ir::Instruction::VFMul;
+                        reduction.fpIdentity = 1.0;
+                        reduction.isFloatingPoint = true;
+                    } else {
+                        unsupportedReduction = true;
+                        term = nullptr;
+                    }
+                } else if (reductionPhi->getType()->getSize() == 8) {
                     // Check for i64 sum from signed i32 widening
                     auto* termInst = dynamic_cast<ir::Instruction*>(term);
                     if (termInst && termInst->getOpcode() == ir::Instruction::ExtSW &&
@@ -986,7 +1029,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
             const char* kind = reduction.kind == ReductionKind::Add ? "add" :
                                reduction.kind == ReductionKind::Mul ? "product" :
-                               reduction.kind == ReductionKind::SignedMin ? "signed min" : "signed max";
+                               reduction.kind == ReductionKind::SignedMin ? "signed min" :
+                               reduction.kind == ReductionKind::SignedMax ? "signed max" :
+                               reduction.kind == ReductionKind::FAdd ? "fadd" : "fmul";
             logDiag(std::string("reduction: ") + kind +
                     "; type: " + reduction.scalarType->toString() +
                     "; identity: " + std::to_string(reduction.identity) +
@@ -1001,8 +1046,12 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         builder.setInsertPoint(entryBB);
 
         ir::Instruction* boundNCopy = builder.createCopy(plan.boundVal);
-        if (plan.inclusiveBound)
-            boundNCopy = builder.createAdd(boundNCopy, ctx->getConstantInt(i32Ty, 1));
+        if (plan.inclusiveBound) {
+            if (plan.stepConst > 0)
+                boundNCopy = builder.createAdd(boundNCopy, ctx->getConstantInt(i32Ty, 1));
+            else
+                boundNCopy = builder.createSub(boundNCopy, ctx->getConstantInt(i32Ty, 1));
+        }
         ir::Value* inductionInit = dynamic_cast<ir::ConstantInt*>(plan.initVal)
             ? plan.initVal : static_cast<ir::Value*>(builder.createCopy(plan.initVal));
         ir::Value* postGuardBound = boundNCopy;
@@ -1026,19 +1075,32 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
         ir::Value* tripCount = boundNCopy;
         ir::Value* nVec = nullptr;
-        auto* constantStart = dynamic_cast<ir::ConstantInt*>(plan.initVal);
-        if (!constantStart || constantStart->getValue() != 0)
-            tripCount = builder.createSub(boundNCopy, inductionInit);
-        if (plan.stepConst != 1) {
-            tripCount = builder.createUdiv(
-                builder.createAdd(tripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
-                ctx->getConstantInt(i32Ty, plan.stepConst));
+        if (plan.stepConst > 0) {
+            auto* constantStart = dynamic_cast<ir::ConstantInt*>(plan.initVal);
+            if (!constantStart || constantStart->getValue() != 0)
+                tripCount = builder.createSub(boundNCopy, inductionInit);
+            if (plan.stepConst != 1) {
+                tripCount = builder.createUdiv(
+                    builder.createAdd(tripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
+                    ctx->getConstantInt(i32Ty, plan.stepConst));
+            }
+        } else {
+            const int64_t posStep = -plan.stepConst;
+            tripCount = builder.createSub(inductionInit, boundNCopy);
+            if (posStep != 1) {
+                tripCount = builder.createUdiv(
+                    builder.createAdd(tripCount, ctx->getConstantInt(i32Ty, posStep - 1)),
+                    ctx->getConstantInt(i32Ty, posStep));
+            }
         }
         ir::Instruction* hasVec = builder.createCsgt(tripCount, ctx->getConstantInt(i32Ty, plan.vectorFactor - 1));
         ir::Instruction* vectorCount = builder.createAnd(tripCount, ctx->getConstantInt(i32Ty, (uint64_t)(-(int64_t)plan.vectorFactor)));
         ir::Value* vectorSpan = vectorCount;
-        if (plan.stepConst != 1)
+        if (plan.stepConst < 0) {
+            vectorSpan = builder.createMul(vectorCount, ctx->getConstantInt(i32Ty, (uint64_t)plan.stepConst));
+        } else if (plan.stepConst != 1) {
             vectorSpan = builder.createMul(vectorCount, ctx->getConstantInt(i32Ty, plan.stepConst));
+        }
         nVec = builder.createAdd(inductionInit, vectorSpan);
 
         ir::BasicBlock* vPreheaderBB = builder.createBasicBlock("v_preheader", &func);
@@ -1259,26 +1321,46 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 vZeroAcc0 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
                 vZeroAcc1 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
             } else if (!plan.isRegisterWideningReduction) {
-                vReductionIdentity = builder.createVBroadcast(
-                    vecTy, ctx->getConstantInt(i32Ty,
-                        static_cast<uint32_t>(plan.reductions[0].identity)));
+                if (plan.reductions[0].isFloatingPoint) {
+                    ir::Value* fpConst = ctx->getConstantFP(
+                        plan.reductions[0].scalarType, plan.reductions[0].fpIdentity);
+                    vReductionIdentity = builder.createVBroadcast(vecTy, fpConst);
+                } else {
+                    vReductionIdentity = builder.createVBroadcast(
+                        vecTy, ctx->getConstantInt(i32Ty,
+                            static_cast<uint32_t>(plan.reductions[0].identity)));
+                }
             }
         }
 
         ir::Value* lateTripCount = postGuardBound;
-        if (!constantStart || constantStart->getValue() != 0)
-            lateTripCount = builder.createSub(postGuardBound, postGuardInit);
-        if (plan.stepConst != 1) {
-            lateTripCount = builder.createUdiv(
-                builder.createAdd(lateTripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
-                ctx->getConstantInt(i32Ty, plan.stepConst));
+        if (plan.stepConst > 0) {
+            auto* constantStart = dynamic_cast<ir::ConstantInt*>(plan.initVal);
+            if (!constantStart || constantStart->getValue() != 0)
+                lateTripCount = builder.createSub(postGuardBound, postGuardInit);
+            if (plan.stepConst != 1) {
+                lateTripCount = builder.createUdiv(
+                    builder.createAdd(lateTripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
+                    ctx->getConstantInt(i32Ty, plan.stepConst));
+            }
+        } else {
+            const int64_t posStep = -plan.stepConst;
+            lateTripCount = builder.createSub(postGuardInit, postGuardBound);
+            if (posStep != 1) {
+                lateTripCount = builder.createUdiv(
+                    builder.createAdd(lateTripCount, ctx->getConstantInt(i32Ty, posStep - 1)),
+                    ctx->getConstantInt(i32Ty, posStep));
+            }
         }
         ir::Instruction* lateVectorCount = builder.createAnd(
             lateTripCount,
             ctx->getConstantInt(i32Ty, (uint64_t)(-(int64_t)plan.vectorFactor)));
         ir::Value* lateVectorSpan = lateVectorCount;
-        if (plan.stepConst != 1)
+        if (plan.stepConst < 0) {
+            lateVectorSpan = builder.createMul(lateVectorCount, ctx->getConstantInt(i32Ty, (uint64_t)plan.stepConst));
+        } else if (plan.stepConst != 1) {
             lateVectorSpan = builder.createMul(lateVectorCount, ctx->getConstantInt(i32Ty, plan.stepConst));
+        }
         nVec = builder.createAdd(postGuardInit, lateVectorSpan);
 
         builder.createJmp(vLoopHeaderBB);
@@ -1340,7 +1422,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             vectorBaseMap[copiedBase.first] = phi;
         }
 
-        ir::Instruction* vCond = builder.createCslt(rawPhiICnt, nVec);
+        ir::Instruction* vCond = plan.stepConst > 0
+            ? builder.createCslt(rawPhiICnt, nVec)
+            : builder.createCsgt(rawPhiICnt, nVec);
         builder.createBr(vCond, vLoopBodyBB, vReductionBB);
 
         // Vector Body
@@ -1557,6 +1641,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                         case ReductionKind::Mul: next = builder.createVMul(rawPhiVSum, vectorTerm); break;
                         case ReductionKind::SignedMin: next = builder.createVMin(rawPhiVSum, vectorTerm); break;
                         case ReductionKind::SignedMax: next = builder.createVMax(rawPhiVSum, vectorTerm); break;
+                        case ReductionKind::FAdd: next = builder.createVFAdd(rawPhiVSum, vectorTerm); break;
+                        case ReductionKind::FMul: next = builder.createVFMul(rawPhiVSum, vectorTerm); break;
                     }
                     vValueMap[inst.get()] = next;
                     rawPhiVSum->addIncoming(next, vLoopBodyBB);
@@ -1662,6 +1748,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 case ReductionKind::Mul: return builder.createMul(lhs, rhs);
                 case ReductionKind::SignedMin: return builder.createSMin(lhs, rhs);
                 case ReductionKind::SignedMax: return builder.createSMax(lhs, rhs);
+                case ReductionKind::FAdd: return builder.createFAdd(lhs, rhs);
+                case ReductionKind::FMul: return builder.createFMul(lhs, rhs);
             }
             return nullptr;
         };
@@ -1689,10 +1777,21 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             ir::Instruction* redBuf = builder.createAlloc(ctx->getConstantInt(i64Ty, plan.vectorWidthBits / 8), i64Ty);
             builder.createVStore(rawPhiVSum, redBuf);
 
-            sumReduced = builder.createLoaduw(redBuf);
+            const bool isFP = plan.reductions[0].isFloatingPoint;
+            const bool isFloat = plan.reductions[0].scalarType && plan.reductions[0].scalarType->isFloatTy();
+
+            auto loadLane = [&](ir::Value* ptr) -> ir::Instruction* {
+                if (isFP) {
+                    return isFloat ? builder.createLoads(ptr) : builder.createLoadd(ptr);
+                }
+                return builder.createLoaduw(ptr);
+            };
+
+            const size_t elemByteSize = isFP ? (isFloat ? 4 : 8) : 4;
+            sumReduced = loadLane(redBuf);
             for (unsigned lane = 1; lane < plan.vectorFactor; ++lane) {
-                ir::Instruction* pOff = builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, lane * 4));
-                ir::Instruction* laneVal = builder.createLoaduw(pOff);
+                ir::Instruction* pOff = builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, lane * elemByteSize));
+                ir::Instruction* laneVal = loadLane(pOff);
                 sumReduced = createScalarReduction(sumReduced, laneVal,
                                                    plan.reductions[0].kind);
             }
@@ -1746,7 +1845,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         rawPhiEpiI->addIncoming(inductionInit, entryBB);
         rawPhiEpiI->addIncoming(nVec, vReductionBB);
 
-        ir::Instruction* epiCond = builder.createCslt(rawPhiEpiI, rawPhiEpiBound);
+        ir::Instruction* epiCond = plan.stepConst > 0
+            ? builder.createCslt(rawPhiEpiI, rawPhiEpiBound)
+            : builder.createCsgt(rawPhiEpiI, rawPhiEpiBound);
         builder.createBr(epiCond, epiBodyBB, exitBB);
 
         // Epilogue Body
@@ -1922,7 +2023,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             else builder.createStore(selected, pointer);
         }
 
-        ir::Instruction* epiINext = builder.createAdd(rawPhiEpiI, ctx->getConstantInt(i32Ty, 1));
+        ir::Instruction* epiINext = builder.createAdd(rawPhiEpiI, ctx->getConstantInt(i32Ty, (uint64_t)plan.stepConst));
         rawPhiEpiI->addIncoming(epiINext, epiLatchBB);
 
         if (rawPhiEpiSum) {

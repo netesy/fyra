@@ -809,7 +809,13 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
                 *os << "  sub " << d << ", " << op1 << "\n";
             } else {
                 emitMov(cg, os, op0, d, is32);
-                *os << "  " << subOp << " " << s1 << ", " << d << "\n";
+                std::string realS1 = s1;
+                if (!isDirectGprRegister(d) && !isDirectGprRegister(s1)) {
+                    std::string scratch = is32 ? "%r11d" : "%r11";
+                    emitMov(cg, os, s1, scratch, is32);
+                    realS1 = scratch;
+                }
+                *os << "  " << subOp << " " << realS1 << ", " << d << "\n";
             }
         } else {
             // Fallback for SUB when dst == src2 (non-commutative)
@@ -867,7 +873,18 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
                 *os << "  imul " << d << ", " << op1 << "\n";
             }
         } else {
-            if (d == s1 && d != s0) {
+            if (!isDirectGprRegister(d)) {
+                std::string reg = is32 ? "%eax" : "%rax";
+                emitMov(cg, os, op0, reg, is32);
+                std::string realS1 = s1;
+                if (!isDirectGprRegister(s1)) {
+                    std::string scratch = is32 ? "%r11d" : "%r11";
+                    emitMov(cg, os, s1, scratch, is32);
+                    realS1 = scratch;
+                }
+                *os << "  " << mulOp << " " << realS1 << ", " << (is32 ? "%eax" : "%rax") << "\n";
+                emitMov(cg, os, (is32 ? "%eax" : "%rax"), d, is32);
+            } else if (d == s1 && d != s0) {
                 // Commute: dst = src2 * src1
                 emitMov(cg, os, op1, d, is32);
                 *os << "  " << mulOp << " " << s0 << ", " << d << "\n";
@@ -2155,6 +2172,113 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             emitMov(cg, os, stackOp, dest, is32);
             return;
         }
+        struct SIBAddress {
+            std::string base;
+            std::string index;
+            int scale = 1;
+            int64_t disp = 0;
+            bool isValid = false;
+
+            std::string format(X64ABI abi) const {
+                if (!isValid) return "";
+                std::string res;
+                if (disp != 0) res += std::to_string(disp);
+                if (abi == X64ABI::SystemV) {
+                    res += "(" + base;
+                    if (!index.empty()) res += ", " + index + ", " + std::to_string(scale);
+                    res += ")";
+                } else {
+                    res = "[" + base;
+                    if (!index.empty()) res += " + " + index + " * " + std::to_string(scale);
+                    if (disp > 0) res += " + " + std::to_string(disp);
+                    else if (disp < 0) res += " - " + std::to_string(-disp);
+                    res += "]";
+                }
+                return res;
+            }
+        };
+
+        auto tryMatchSIB = [&](ir::Value* val) -> std::optional<SIBAddress> {
+            if (!val) return std::nullopt;
+            auto* inst = dynamic_cast<ir::Instruction*>(val);
+            if (!inst) return std::nullopt;
+
+            int64_t disp = 0;
+            ir::Instruction* addrInst = inst;
+
+            if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
+                if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get())) {
+                    disp = c->getValue();
+                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[0]->get())) addrInst = inner;
+                } else if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[0]->get())) {
+                    disp = c->getValue();
+                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[1]->get())) addrInst = inner;
+                }
+            }
+
+            if (addrInst->getOpcode() == ir::Instruction::Add && addrInst->getOperands().size() == 2) {
+                ir::Value* baseVal = addrInst->getOperands()[0]->get();
+                ir::Value* scaledIndexVal = addrInst->getOperands()[1]->get();
+
+                auto* mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
+                if (!mulInst) {
+                    std::swap(baseVal, scaledIndexVal);
+                    mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
+                }
+
+                if (mulInst && mulInst->getOpcode() == ir::Instruction::Mul && mulInst->getOperands().size() == 2) {
+                    ir::Value* idxVal = mulInst->getOperands()[0]->get();
+                    auto* scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[1]->get());
+                    if (!scaleC) {
+                        idxVal = mulInst->getOperands()[1]->get();
+                        scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[0]->get());
+                    }
+
+                    if (scaleC && (scaleC->getValue() == 1 || scaleC->getValue() == 2 || scaleC->getValue() == 4 || scaleC->getValue() == 8)) {
+                        SIBAddress sib;
+                        sib.base = cg.getValueAsOperand(baseVal);
+                        sib.index = cg.getValueAsOperand(idxVal);
+                        sib.scale = static_cast<int>(scaleC->getValue());
+                        sib.disp = disp;
+                        sib.isValid = true;
+                        if (!sib.base.empty() && !sib.index.empty() &&
+                            (abi == X64ABI::Windows || (sib.base[0] == '%' && sib.index[0] == '%'))) {
+                            if (sib.index[0] == '%') sib.index = to64BitReg(sib.index);
+                            return sib;
+                        }
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+
+        if (auto sib = tryMatchSIB(ptrVal)) {
+            std::string sibStr = sib->format(abi);
+            std::string destOp = cg.getValueAsOperand(&i);
+            if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
+                const char* moveFP = i.getType()->isFloatTy() ? "movss" : "movsd";
+                if (abi == X64ABI::Windows)
+                    *os << "  " << moveFP << " " << destOp << ", " << sibStr << "\n";
+                else
+                    *os << "  " << moveFP << " " << sibStr << ", " << destOp << "\n";
+                return;
+            }
+            if (abi == X64ABI::SystemV) {
+                if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << sibStr << ", " << rax << "\n";
+                else if (size == 2) *os << (isSigned ? "  movswq " : "  movzwq ") << sibStr << ", " << rax << "\n";
+                else if (size == 4) *os << (isSigned ? "  movslq " : "  movl ") << sibStr << ", " << eax << "\n";
+                else *os << "  movq " << sibStr << ", " << rax << "\n";
+            } else {
+                if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr " : "  movzx rax, byte ptr ") << sibStr << "\n";
+                else if (size == 2) *os << (isSigned ? "  movsx rax, word ptr " : "  movzx rax, word ptr ") << sibStr << "\n";
+                else if (size == 4) *os << (isSigned ? "  movsxd rax, dword ptr " : "  mov eax, dword ptr ") << sibStr << "\n";
+                else *os << "  mov rax, " << sibStr << "\n";
+            }
+            bool is32 = is32BitType(i.getType());
+            emitMov(cg, os, is32 ? eax : rax, destOp, is32);
+            return;
+        }
+
         std::string op = cg.getValueAsOperand(ptrVal);
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(ptrVal) != nullptr;
         if (isGlobal) {
@@ -2244,6 +2368,131 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
+        struct SIBAddress {
+            std::string base;
+            std::string index;
+            int scale = 1;
+            int64_t disp = 0;
+            bool isValid = false;
+
+            std::string format(X64ABI abi) const {
+                if (!isValid) return "";
+                std::string res;
+                if (disp != 0) res += std::to_string(disp);
+                if (abi == X64ABI::SystemV) {
+                    res += "(" + base;
+                    if (!index.empty()) res += ", " + index + ", " + std::to_string(scale);
+                    res += ")";
+                } else {
+                    res = "[" + base;
+                    if (!index.empty()) res += " + " + index + " * " + std::to_string(scale);
+                    if (disp > 0) res += " + " + std::to_string(disp);
+                    else if (disp < 0) res += " - " + std::to_string(-disp);
+                    res += "]";
+                }
+                return res;
+            }
+        };
+
+        auto tryMatchSIB = [&](ir::Value* val) -> std::optional<SIBAddress> {
+            if (!val) return std::nullopt;
+            auto* inst = dynamic_cast<ir::Instruction*>(val);
+            if (!inst) return std::nullopt;
+
+            int64_t disp = 0;
+            ir::Instruction* addrInst = inst;
+
+            if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
+                if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get())) {
+                    disp = c->getValue();
+                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[0]->get())) addrInst = inner;
+                } else if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[0]->get())) {
+                    disp = c->getValue();
+                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[1]->get())) addrInst = inner;
+                }
+            }
+
+            if (addrInst->getOpcode() == ir::Instruction::Add && addrInst->getOperands().size() == 2) {
+                ir::Value* baseVal = addrInst->getOperands()[0]->get();
+                ir::Value* scaledIndexVal = addrInst->getOperands()[1]->get();
+
+                auto* mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
+                if (!mulInst) {
+                    std::swap(baseVal, scaledIndexVal);
+                    mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
+                }
+
+                if (mulInst && mulInst->getOpcode() == ir::Instruction::Mul && mulInst->getOperands().size() == 2) {
+                    ir::Value* idxVal = mulInst->getOperands()[0]->get();
+                    auto* scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[1]->get());
+                    if (!scaleC) {
+                        idxVal = mulInst->getOperands()[1]->get();
+                        scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[0]->get());
+                    }
+
+                    if (scaleC && (scaleC->getValue() == 1 || scaleC->getValue() == 2 || scaleC->getValue() == 4 || scaleC->getValue() == 8)) {
+                        if (auto* extInst = dynamic_cast<ir::Instruction*>(idxVal)) {
+                            if (extInst->getOpcode() == ir::Instruction::ExtSW || extInst->getOpcode() == ir::Instruction::ExtUW) {
+                                if (!extInst->getOperands().empty()) idxVal = extInst->getOperands()[0]->get();
+                            }
+                        }
+                        SIBAddress sib;
+                        sib.base = cg.getValueAsOperand(baseVal);
+                        sib.index = cg.getValueAsOperand(idxVal);
+                        sib.scale = static_cast<int>(scaleC->getValue());
+                        sib.disp = disp;
+                        sib.isValid = true;
+                        if (!sib.base.empty() && !sib.index.empty() &&
+                            (abi == X64ABI::Windows || (sib.base[0] == '%' && sib.index[0] == '%'))) {
+                            if (sib.index[0] == '%') sib.index = to64BitReg(sib.index);
+                            return sib;
+                        }
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+
+        const std::string fpScratch = getReservedScratchVectorReg();
+        if (auto sib = tryMatchSIB(ptrVal)) {
+            std::string sibStr = sib->format(abi);
+            std::string valOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+            if (storedType && storedType->isFloatingPoint()) {
+                std::string move = storedType->isFloatTy() ? "movss" : "movsd";
+                if (valOp.empty() || valOp[0] != '%') {
+                    *os << "  " << move << " " << valOp << ", " << fpScratch << "\n";
+                    valOp = fpScratch;
+                }
+                if (abi == X64ABI::SystemV) *os << "  " << move << " " << valOp << ", " << sibStr << "\n";
+                else *os << "  " << move << " " << sibStr << ", " << valOp << "\n";
+            } else {
+                bool is32Val = (size <= 4);
+                std::string scratch = "%r11";
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov " << rax << ", " << valOp << "\n";
+                    if (size == 1) *os << "  mov byte ptr " << sibStr << ", al\n";
+                    else if (size == 2) *os << "  mov word ptr " << sibStr << ", ax\n";
+                    else if (size == 4) *os << "  mov dword ptr " << sibStr << ", eax\n";
+                    else *os << "  mov " << sibStr << ", rax\n";
+                } else {
+                    if (sib->base == "%rax" || sib->index == "%rax") {
+                        emitMov(cg, os, valOp, scratch, is32Val);
+                        if (size == 1) *os << "  movb " << to8BitReg(scratch) << ", " << sibStr << "\n";
+                        else if (size == 2) *os << "  movw " << to16BitReg(scratch) << ", " << sibStr << "\n";
+                        else if (size == 4) *os << "  movl " << to32BitReg(scratch) << ", " << sibStr << "\n";
+                        else *os << "  movq " << scratch << ", " << sibStr << "\n";
+                    } else {
+                        emitMov(cg, os, valOp, rax, is32Val);
+                        if (size == 1) *os << "  movb " << al << ", " << sibStr << "\n";
+                        else if (size == 2) *os << "  movw " << ax << ", " << sibStr << "\n";
+                        else if (size == 4) *os << "  movl " << eax << ", " << sibStr << "\n";
+                        else *os << "  movq " << rax << ", " << sibStr << "\n";
+                    }
+                }
+            }
+            return;
+        }
+
         if (storedType && storedType->isFloatingPoint()) {
             std::string valueOp = cg.getValueAsOperand(i.getOperands()[0]->get());
             std::string ptrOp = cg.getValueAsOperand(ptrVal);
@@ -2252,15 +2501,15 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 if (isDirectGprRegister(ptrOp))
                     *os << "  " << move << " " << valueOp << ", (" << ptrOp << ")\n";
                 else {
-                    *os << "  movq " << ptrOp << ", %rdx\n";
-                    *os << "  " << move << " " << valueOp << ", (%rdx)\n";
+                    *os << "  movq " << ptrOp << ", %r11\n";
+                    *os << "  " << move << " " << valueOp << ", (%r11)\n";
                 }
             } else {
                 if (isDirectGprRegister(ptrOp))
                     *os << "  " << move << " [" << ptrOp << "], " << valueOp << "\n";
                 else {
-                    *os << "  mov rdx, " << ptrOp << "\n";
-                    *os << "  " << move << " [rdx], " << valueOp << "\n";
+                    *os << "  mov r11, " << ptrOp << "\n";
+                    *os << "  " << move << " [r11], " << valueOp << "\n";
                 }
             }
             return;
@@ -2292,21 +2541,21 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov " << op << ", rax\n";
             }
         } else {
-            // op = stack operand holding the pointer address — load it into rdx
+            // op = stack operand holding the pointer address — load it into r11
             if (abi == X64ABI::Windows)
-                *os << "  mov " << rdx << ", " << op << "\n";
+                *os << "  mov r11, " << op << "\n";
             else
-                *os << "  movq " << op << ", " << rdx << "\n";
+                *os << "  movq " << op << ", %r11\n";
             if (abi == X64ABI::SystemV) {
-                if (size == 1) *os << "  movb " << al << ", (" << rdx << ")\n";
-                else if (size == 2) *os << "  movw " << ax << ", (" << rdx << ")\n";
-                else if (size == 4) *os << "  movl " << eax << ", (" << rdx << ")\n";
-                else *os << "  movq " << rax << ", (" << rdx << ")\n";
+                if (size == 1) *os << "  movb " << al << ", (%r11)\n";
+                else if (size == 2) *os << "  movw " << ax << ", (%r11)\n";
+                else if (size == 4) *os << "  movl " << eax << ", (%r11)\n";
+                else *os << "  movq " << rax << ", (%r11)\n";
             } else {
-                if (size == 1) *os << "  mov byte ptr [rdx], al\n";
-                else if (size == 2) *os << "  mov word ptr [rdx], ax\n";
-                else if (size == 4) *os << "  mov dword ptr [rdx], eax\n";
-                else *os << "  mov [rdx], rax\n";
+                if (size == 1) *os << "  mov byte ptr [r11], al\n";
+                else if (size == 2) *os << "  mov word ptr [r11], ax\n";
+                else if (size == 4) *os << "  mov dword ptr [r11], eax\n";
+                else *os << "  mov [r11], rax\n";
             }
         }
     } else {
