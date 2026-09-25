@@ -648,11 +648,13 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
         if (!boundN) { logDiag("reject: induction is not the varying operand of the loop comparison"); continue; }
 
-        plan.inclusiveBound = sltCond->getOpcode() == ir::Instruction::Csle;
+        plan.inclusiveBound = sltCond->getOpcode() == ir::Instruction::Csle ||
+                              sltCond->getOpcode() == ir::Instruction::Csge;
         if (plan.inclusiveBound) {
             auto* constantBound = dynamic_cast<ir::ConstantInt*>(boundN);
-            if (!constantBound || static_cast<uint32_t>(constantBound->getValue()) == INT32_MAX) {
-                logDiag("reject: inclusive bound cannot be incremented without signed overflow");
+            if (!constantBound || static_cast<uint32_t>(constantBound->getValue()) == INT32_MAX ||
+                (plan.stepConst < 0 && static_cast<int32_t>(constantBound->getValue()) == INT32_MIN)) {
+                logDiag("reject: inclusive bound cannot be adjusted without signed overflow");
                 continue;
             }
         }
@@ -1044,8 +1046,12 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         builder.setInsertPoint(entryBB);
 
         ir::Instruction* boundNCopy = builder.createCopy(plan.boundVal);
-        if (plan.inclusiveBound)
-            boundNCopy = builder.createAdd(boundNCopy, ctx->getConstantInt(i32Ty, 1));
+        if (plan.inclusiveBound) {
+            if (plan.stepConst > 0)
+                boundNCopy = builder.createAdd(boundNCopy, ctx->getConstantInt(i32Ty, 1));
+            else
+                boundNCopy = builder.createSub(boundNCopy, ctx->getConstantInt(i32Ty, 1));
+        }
         ir::Value* inductionInit = dynamic_cast<ir::ConstantInt*>(plan.initVal)
             ? plan.initVal : static_cast<ir::Value*>(builder.createCopy(plan.initVal));
         ir::Value* postGuardBound = boundNCopy;
