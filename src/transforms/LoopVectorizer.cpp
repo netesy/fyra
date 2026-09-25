@@ -1069,19 +1069,32 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
         ir::Value* tripCount = boundNCopy;
         ir::Value* nVec = nullptr;
-        auto* constantStart = dynamic_cast<ir::ConstantInt*>(plan.initVal);
-        if (!constantStart || constantStart->getValue() != 0)
-            tripCount = builder.createSub(boundNCopy, inductionInit);
-        if (plan.stepConst != 1) {
-            tripCount = builder.createUdiv(
-                builder.createAdd(tripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
-                ctx->getConstantInt(i32Ty, plan.stepConst));
+        if (plan.stepConst > 0) {
+            auto* constantStart = dynamic_cast<ir::ConstantInt*>(plan.initVal);
+            if (!constantStart || constantStart->getValue() != 0)
+                tripCount = builder.createSub(boundNCopy, inductionInit);
+            if (plan.stepConst != 1) {
+                tripCount = builder.createUdiv(
+                    builder.createAdd(tripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
+                    ctx->getConstantInt(i32Ty, plan.stepConst));
+            }
+        } else {
+            const int64_t posStep = -plan.stepConst;
+            tripCount = builder.createSub(inductionInit, boundNCopy);
+            if (posStep != 1) {
+                tripCount = builder.createUdiv(
+                    builder.createAdd(tripCount, ctx->getConstantInt(i32Ty, posStep - 1)),
+                    ctx->getConstantInt(i32Ty, posStep));
+            }
         }
         ir::Instruction* hasVec = builder.createCsgt(tripCount, ctx->getConstantInt(i32Ty, plan.vectorFactor - 1));
         ir::Instruction* vectorCount = builder.createAnd(tripCount, ctx->getConstantInt(i32Ty, (uint64_t)(-(int64_t)plan.vectorFactor)));
         ir::Value* vectorSpan = vectorCount;
-        if (plan.stepConst != 1)
+        if (plan.stepConst < 0) {
+            vectorSpan = builder.createMul(vectorCount, ctx->getConstantInt(i32Ty, (uint64_t)plan.stepConst));
+        } else if (plan.stepConst != 1) {
             vectorSpan = builder.createMul(vectorCount, ctx->getConstantInt(i32Ty, plan.stepConst));
+        }
         nVec = builder.createAdd(inductionInit, vectorSpan);
 
         ir::BasicBlock* vPreheaderBB = builder.createBasicBlock("v_preheader", &func);
@@ -1315,19 +1328,33 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
 
         ir::Value* lateTripCount = postGuardBound;
-        if (!constantStart || constantStart->getValue() != 0)
-            lateTripCount = builder.createSub(postGuardBound, postGuardInit);
-        if (plan.stepConst != 1) {
-            lateTripCount = builder.createUdiv(
-                builder.createAdd(lateTripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
-                ctx->getConstantInt(i32Ty, plan.stepConst));
+        if (plan.stepConst > 0) {
+            auto* constantStart = dynamic_cast<ir::ConstantInt*>(plan.initVal);
+            if (!constantStart || constantStart->getValue() != 0)
+                lateTripCount = builder.createSub(postGuardBound, postGuardInit);
+            if (plan.stepConst != 1) {
+                lateTripCount = builder.createUdiv(
+                    builder.createAdd(lateTripCount, ctx->getConstantInt(i32Ty, plan.stepConst - 1)),
+                    ctx->getConstantInt(i32Ty, plan.stepConst));
+            }
+        } else {
+            const int64_t posStep = -plan.stepConst;
+            lateTripCount = builder.createSub(postGuardInit, postGuardBound);
+            if (posStep != 1) {
+                lateTripCount = builder.createUdiv(
+                    builder.createAdd(lateTripCount, ctx->getConstantInt(i32Ty, posStep - 1)),
+                    ctx->getConstantInt(i32Ty, posStep));
+            }
         }
         ir::Instruction* lateVectorCount = builder.createAnd(
             lateTripCount,
             ctx->getConstantInt(i32Ty, (uint64_t)(-(int64_t)plan.vectorFactor)));
         ir::Value* lateVectorSpan = lateVectorCount;
-        if (plan.stepConst != 1)
+        if (plan.stepConst < 0) {
+            lateVectorSpan = builder.createMul(lateVectorCount, ctx->getConstantInt(i32Ty, (uint64_t)plan.stepConst));
+        } else if (plan.stepConst != 1) {
             lateVectorSpan = builder.createMul(lateVectorCount, ctx->getConstantInt(i32Ty, plan.stepConst));
+        }
         nVec = builder.createAdd(postGuardInit, lateVectorSpan);
 
         builder.createJmp(vLoopHeaderBB);
@@ -1389,7 +1416,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             vectorBaseMap[copiedBase.first] = phi;
         }
 
-        ir::Instruction* vCond = builder.createCslt(rawPhiICnt, nVec);
+        ir::Instruction* vCond = plan.stepConst > 0
+            ? builder.createCslt(rawPhiICnt, nVec)
+            : builder.createCsgt(rawPhiICnt, nVec);
         builder.createBr(vCond, vLoopBodyBB, vReductionBB);
 
         // Vector Body
@@ -1810,7 +1839,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         rawPhiEpiI->addIncoming(inductionInit, entryBB);
         rawPhiEpiI->addIncoming(nVec, vReductionBB);
 
-        ir::Instruction* epiCond = builder.createCslt(rawPhiEpiI, rawPhiEpiBound);
+        ir::Instruction* epiCond = plan.stepConst > 0
+            ? builder.createCslt(rawPhiEpiI, rawPhiEpiBound)
+            : builder.createCsgt(rawPhiEpiI, rawPhiEpiBound);
         builder.createBr(epiCond, epiBodyBB, exitBB);
 
         // Epilogue Body
@@ -1986,7 +2017,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             else builder.createStore(selected, pointer);
         }
 
-        ir::Instruction* epiINext = builder.createAdd(rawPhiEpiI, ctx->getConstantInt(i32Ty, 1));
+        ir::Instruction* epiINext = builder.createAdd(rawPhiEpiI, ctx->getConstantInt(i32Ty, (uint64_t)plan.stepConst));
         rawPhiEpiI->addIncoming(epiINext, epiLatchBB);
 
         if (rawPhiEpiSum) {

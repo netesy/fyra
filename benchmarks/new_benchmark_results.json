@@ -1,0 +1,44 @@
+[
+  {
+    "name": "arithmetic",
+    "fyra_scalar_time": 0.056468,
+    "fyra_time": 0.0565,
+    "fyra_speedup": 0.999,
+    "fyra_vector_instrs": 11
+  },
+  {
+    "name": "int_widths",
+    "fyra_scalar_time": 0.100118,
+    "fyra_time": 0.100317,
+    "fyra_speedup": 0.998,
+    "fyra_vector_instrs": 6
+  },
+  {
+    "name": "loops",
+    "fyra_scalar_time": 0.001699,
+    "fyra_time": 0.001685,
+    "fyra_speedup": 1.008,
+    "fyra_vector_instrs": 62
+  },
+  {
+    "name": "realistic_dot_product",
+    "fyra_scalar_time": 0.001745,
+    "fyra_time": 0.001873,
+    "fyra_speedup": 0.931,
+    "fyra_vector_instrs": 4
+  },
+  {
+    "name": "reg_pressure",
+    "fyra_scalar_time": 0.080637,
+    "fyra_time": 0.080682,
+    "fyra_speedup": 0.999,
+    "fyra_vector_instrs": 109
+  },
+  {
+    "name": "tail_recursion",
+    "fyra_scalar_time": 0.001683,
+    "fyra_time": 0.001654,
+    "fyra_speedup": 1.018,
+    "fyra_vector_instrs": 7
+  }
+]
