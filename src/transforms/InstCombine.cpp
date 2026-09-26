@@ -63,6 +63,61 @@ bool InstCombinePass::performTransformation(ir::Function& func) {
                         }
                     }
                 }
+                // (A + C1) + (B + C2) -> (A + B) + (C1 + C2)
+                else if (opc == ir::Instruction::Add) {
+                    if (auto* iLhs = dynamic_cast<ir::Instruction*>(lhs)) {
+                        if (auto* iRhs = dynamic_cast<ir::Instruction*>(rhs)) {
+                            if (iLhs->getOpcode() == ir::Instruction::Add && iRhs->getOpcode() == ir::Instruction::Add) {
+                                ir::Value* aL = iLhs->getOperands()[0]->get();
+                                ir::Value* bL = iLhs->getOperands()[1]->get();
+                                ir::Value* aR = iRhs->getOperands()[0]->get();
+                                ir::Value* bR = iRhs->getOperands()[1]->get();
+
+                                auto* cL = dynamic_cast<ir::ConstantInt*>(bL);
+                                auto* cR = dynamic_cast<ir::ConstantInt*>(bR);
+                                if (!cL) { cL = dynamic_cast<ir::ConstantInt*>(aL); if (cL) aL = bL; }
+                                if (!cR) { cR = dynamic_cast<ir::ConstantInt*>(aR); if (cR) aR = bR; }
+
+                                if (cL && cR && ctx && iTy) {
+                                    ir::IRBuilder builder(ctx);
+                                    builder.setInsertPoint(bb.get(), it);
+                                    ir::Instruction* baseAdd = builder.createAdd(aL, aR);
+                                    int64_t combined = cL->getValue() + cR->getValue();
+                                    if (combined == 0) {
+                                        replacement = baseAdd;
+                                    } else {
+                                        inst->getOperands()[0]->set(baseAdd);
+                                        inst->getOperands()[1]->set(ctx->getConstantInt(iTy, combined));
+                                        changed = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // sub (add A, C1), (add A, C2) -> C1 - C2
+                else if (opc == ir::Instruction::Sub) {
+                    if (auto* iLhs = dynamic_cast<ir::Instruction*>(lhs)) {
+                        if (auto* iRhs = dynamic_cast<ir::Instruction*>(rhs)) {
+                            if (iLhs->getOpcode() == ir::Instruction::Add && iRhs->getOpcode() == ir::Instruction::Add) {
+                                ir::Value* aL = iLhs->getOperands()[0]->get();
+                                ir::Value* bL = iLhs->getOperands()[1]->get();
+                                ir::Value* aR = iRhs->getOperands()[0]->get();
+                                ir::Value* bR = iRhs->getOperands()[1]->get();
+
+                                auto* cL = dynamic_cast<ir::ConstantInt*>(bL);
+                                auto* cR = dynamic_cast<ir::ConstantInt*>(bR);
+                                if (!cL) { cL = dynamic_cast<ir::ConstantInt*>(aL); if (cL) aL = bL; }
+                                if (!cR) { cR = dynamic_cast<ir::ConstantInt*>(aR); if (cR) aR = bR; }
+
+                                if (aL == aR && cL && cR && ctx && iTy) {
+                                    int64_t diff = cL->getValue() - cR->getValue();
+                                    replacement = ctx->getConstantInt(iTy, diff);
+                                }
+                            }
+                        }
+                    }
+                }
             } else if (opc == ir::Instruction::TruncD) {
                 if (auto* inner = dynamic_cast<ir::Instruction*>(lhs)) {
                     if (inner->getOpcode() == ir::Instruction::ExtSW || inner->getOpcode() == ir::Instruction::ExtUW) {
