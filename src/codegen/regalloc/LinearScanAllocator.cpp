@@ -192,6 +192,9 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
             if (reg.index >= 8) stats.calleeSavedUsed++;
             current_interval.getVreg()->setPhysicalRegister(reg.index);
             vreg_to_location_map[current_interval.getVreg()] = reg;
+            if (instr && instr->getOpcode() == ir::Instruction::Copy && preferredRegIdx >= 0 && (int)reg.index == preferredRegIdx) {
+                stats.numEliminatedMoves++;
+            }
             active_intervals.push_back(&current_interval);
             std::sort(active_intervals.begin(), active_intervals.end(),
                 [](const LiveInterval* a, const LiveInterval* b) {
@@ -259,20 +262,27 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         return;
     }
 
-    const LiveInterval* spill_candidate = active_intervals.back();
+    const LiveInterval* min_spill_candidate = nullptr;
+    auto minIt = active_intervals.end();
+    for (auto it = active_intervals.begin(); it != active_intervals.end(); ++it) {
+        if (!min_spill_candidate || (*it)->getSpillWeight() < min_spill_candidate->getSpillWeight()) {
+            min_spill_candidate = *it;
+            minIt = it;
+        }
+    }
 
-    if (spill_candidate->getEnd() > current_interval.getEnd()) {
-        RegLocation loc = vreg_to_location_map.at(spill_candidate->getVreg());
+    if (min_spill_candidate && min_spill_candidate->getSpillWeight() < current_interval.getSpillWeight()) {
+        RegLocation loc = vreg_to_location_map.at(min_spill_candidate->getVreg());
         if (std::holds_alternative<PhysicalReg>(loc)) {
             PhysicalReg reg = std::get<PhysicalReg>(loc);
             if (!current_interval.isLiveAcrossCall() || reg.index >= 8) {
                 current_interval.getVreg()->setPhysicalRegister(reg.index);
                 vreg_to_location_map[current_interval.getVreg()] = reg;
 
-                spill_candidate->getVreg()->setPhysicalRegister(-1);
-                vreg_to_location_map[spill_candidate->getVreg()] = allocateStackSlot(spill_candidate->getVreg());
+                min_spill_candidate->getVreg()->setPhysicalRegister(-1);
+                vreg_to_location_map[min_spill_candidate->getVreg()] = allocateStackSlot(min_spill_candidate->getVreg());
 
-                active_intervals.pop_back();
+                active_intervals.erase(minIt);
                 active_intervals.push_back(&current_interval);
                 std::sort(active_intervals.begin(), active_intervals.end(),
                     [](const LiveInterval* a, const LiveInterval* b) {

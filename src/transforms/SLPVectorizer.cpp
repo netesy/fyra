@@ -10,7 +10,10 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <set>
+#include <vector>
 
 namespace transforms {
 namespace {
@@ -26,7 +29,15 @@ bool scalarOpcode(O op) {
     return op == O::Add || op == O::Sub || op == O::Mul ||
            op == O::FAdd || op == O::FSub || op == O::FMul ||
            op == O::And || op == O::Or || op == O::Xor ||
-           op == O::SMin || op == O::SMax;
+           op == O::SMin || op == O::SMax ||
+           op == O::Ceq || op == O::Cne || op == O::Cslt || op == O::Csle ||
+           op == O::Csgt || op == O::Csge;
+}
+
+bool isCommutative(O op) {
+    return op == O::Add || op == O::Mul || op == O::FAdd || op == O::FMul ||
+           op == O::And || op == O::Or || op == O::Xor ||
+           op == O::Ceq || op == O::Cne;
 }
 
 bool isLoad(O op) { return op == O::Load || op == O::Loads || op == O::Loadd; }
@@ -84,7 +95,7 @@ bool contiguous(const std::vector<ir::Instruction*>& accesses, bool loads, ir::T
     pack.base = first.base;
     pack.firstOffset = first.offset;
     pack.elementSize = size;
-    pack.lanes = accesses.size();
+    pack.lanes = static_cast<unsigned>(accesses.size());
     pack.isLoad = loads;
     pack.isStore = !loads;
     pack.elementType = element;
@@ -120,6 +131,8 @@ O vectorOpcode(O op) {
         case O::Xor: return O::VXor;
         case O::SMin: return O::VMin;
         case O::SMax: return O::VMax;
+        case O::Ceq: case O::Cne: case O::Cslt: case O::Csle: case O::Csgt: case O::Csge:
+            return O::VCmp;
         default: return O::VAdd;
     }
 }
@@ -175,9 +188,10 @@ struct SLPCost {
     int inputMaterializationCost = 0;
     int vectorOpCost = 0;
     int outputMaterializationCost = 0;
+    int shuffleCost = 0;
 
     int totalVectorCost() const {
-        return inputMaterializationCost + vectorOpCost + outputMaterializationCost;
+        return inputMaterializationCost + vectorOpCost + outputMaterializationCost + shuffleCost;
     }
 
     bool isProfitable(int margin = 1) const {
@@ -209,13 +223,10 @@ SLPCost evaluateArithmeticPackCost(const std::vector<ir::Instruction*>& lanes, u
         }
 
         if (allVectorProducers) {
-            // Operands are produced by vector instructions (e.g. VLoad, VAdd) -> zero materialization cost
             cost.inputMaterializationCost += 0;
         } else if (allSame) {
-            // Single scalar broadcast -> 1 instruction cost
             cost.inputMaterializationCost += 1;
         } else {
-            // Disparate scalar inputs -> VInsert sequence (1 broadcast + (numLanes - 1) inserts)
             cost.inputMaterializationCost += static_cast<int>(numLanes);
         }
     }
@@ -233,14 +244,99 @@ SLPCost evaluateArithmeticPackCost(const std::vector<ir::Instruction*>& lanes, u
     }
 
     if (allVectorConsumers) {
-        // Output feeds vector consumers (e.g. VStore or subsequent vector ALU) -> zero extraction cost
         cost.outputMaterializationCost = 0;
     } else {
-        // Scalar consumers require extraction -> VExtract per lane
         cost.outputMaterializationCost = static_cast<int>(numLanes);
     }
 
     return cost;
+}
+
+// SLP Bottom-Up Expression Tree Node
+struct SLPTreeNode {
+    std::vector<ir::Instruction*> lanes;
+    O opcode = O::Add;
+    ir::Type* scalarType = nullptr;
+    std::vector<std::shared_ptr<SLPTreeNode>> children;
+    bool isLeaf = false;
+    bool isLoadTree = false;
+    SLPVectorizer::SLPMemoryPack memoryPack;
+
+    // Commutative reordering helper: swap operands of lane i if commutative
+    void alignCommutativeLanes() {
+        if (lanes.empty() || !isCommutative(opcode)) return;
+        for (size_t i = 1; i < lanes.size(); ++i) {
+            ir::Instruction* inst = lanes[i];
+            if (!inst || inst->getOperands().size() < 2) continue;
+            if (!lanes[0] || lanes[0]->getOperands().size() < 2) continue;
+
+            ir::Value* op0_lane0 = lanes[0]->getOperands()[0]->get();
+            ir::Value* op1_lane0 = lanes[0]->getOperands()[1]->get();
+            ir::Value* op0_cur = inst->getOperands()[0]->get();
+            ir::Value* op1_cur = inst->getOperands()[1]->get();
+
+            if (op0_cur == op1_lane0 && op1_cur == op0_lane0) {
+                inst->getOperands()[0]->set(op1_cur);
+                inst->getOperands()[1]->set(op0_cur);
+            }
+        }
+    }
+};
+
+std::shared_ptr<SLPTreeNode> buildSLPTree(const std::vector<ir::Instruction*>& lanes, int depth = 0) {
+    if (lanes.empty() || depth > 4) return nullptr;
+
+    auto node = std::make_shared<SLPTreeNode>();
+    node->lanes = lanes;
+    node->opcode = lanes[0]->getOpcode();
+    node->scalarType = lanes[0]->getType();
+
+    // Check if contiguous loads
+    if (isLoad(node->opcode)) {
+        SLPVectorizer::SLPMemoryPack loadPack;
+        if (contiguous(lanes, true, node->scalarType, loadPack)) {
+            node->isLoadTree = true;
+            node->memoryPack = loadPack;
+            node->isLeaf = true;
+            return node;
+        }
+    }
+
+    // Try commutative alignment
+    node->alignCommutativeLanes();
+
+    // Trace children operands
+    if (scalarOpcode(node->opcode)) {
+        for (size_t opIdx = 0; opIdx < 2; ++opIdx) {
+            std::vector<ir::Instruction*> childLanes;
+            bool allInsts = true;
+            auto* firstChild = dynamic_cast<ir::Instruction*>(lanes[0]->getOperands()[opIdx]->get());
+            if (firstChild) {
+                for (auto* inst : lanes) {
+                    if (opIdx < inst->getOperands().size() && inst->getOperands()[opIdx]) {
+                        auto* childInst = dynamic_cast<ir::Instruction*>(inst->getOperands()[opIdx]->get());
+                        if (childInst && childInst->getOpcode() == firstChild->getOpcode()) {
+                            childLanes.push_back(childInst);
+                        } else {
+                            allInsts = false;
+                            break;
+                        }
+                    } else {
+                        allInsts = false;
+                        break;
+                    }
+                }
+
+                if (allInsts && childLanes.size() == lanes.size() && independent(childLanes)) {
+                    auto childNode = buildSLPTree(childLanes, depth + 1);
+                    if (childNode) node->children.push_back(childNode);
+                }
+            }
+        }
+    }
+
+    if (node->children.empty()) node->isLeaf = true;
+    return node;
 }
 
 } // namespace
@@ -257,8 +353,7 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
         auto& block = *blockOwner;
         if (!isStraightLine(block)) continue;
 
-        // Stores are the natural roots for useful SLP trees.  Discovery below
-        // records the complete load/arithmetic/store plan before changing IR.
+        // Stores are the natural roots for useful SLP trees.
         std::vector<ir::Instruction*> storeRoots;
         for (auto& owner : block.getInstructions()) {
             if (isSLPBarrier(*owner)) storeRoots.clear();
@@ -316,6 +411,10 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                 continue;
             }
 
+            // Build Bottom-Up Tree starting from arithmetic pack
+            auto tree = buildSLPTree(arithmetic);
+            if (tree) tree->alignCommutativeLanes();
+
             unsigned width = laneCount * bits;
             auto* vectorType = context->getVectorType(scalarType, laneCount);
             auto insertion = std::find_if(block.getInstructions().begin(), block.getInstructions().end(),
@@ -344,12 +443,8 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
             for (auto* load : leftLoads) if (load->use_empty()) dead.push_back(load);
             for (auto* load : rightLoads) if (load->use_empty()) dead.push_back(load);
             block.removeInstructions(dead);
-            diag("SLP root: " + std::to_string(laneCount) + " contiguous stores; type: " +
-                 scalarType->toString() + "; first offset: " + std::to_string(storePack.firstOffset) +
-                 "; stride: " + std::to_string(storePack.elementSize) + "; lanes: " +
-                 std::to_string(laneCount) + "; source load pack A: contiguous; source load pack B: contiguous; " +
-                 "vector width: " + std::to_string(width) + "; vector opcode: " +
-                 std::to_string(vectorOpcode(firstValue->getOpcode())) + "; accepted");
+            diag("SLP tree root: " + std::to_string(laneCount) + " contiguous stores; type: " +
+                 scalarType->toString() + "; vector width: " + std::to_string(width) + "; accepted");
             changed = true;
             storeCursor += laneCount;
         }
@@ -382,22 +477,10 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                 plan.vectorOpcode = vectorOpcode(run[cursor]->getOpcode());
                 if (!independent(plan.lanes)) { ++cursor; continue; }
 
-                // Cost Model Evaluation
+                // Evaluate Cost Model
                 SLPCost cost = evaluateArithmeticPackCost(plan.lanes, plan.widthBits);
                 if (!cost.isProfitable()) {
-                    diag("SLP candidate:\n"
-                         "  opcode: " + std::to_string(plan.vectorOpcode) + "\n"
-                         "  scalar type: " + scalarType->toString() + "\n"
-                         "  lanes: " + std::to_string(lanes) + "\n"
-                         "  vector width: " + std::to_string(plan.widthBits) + "\n"
-                         "  scalar instructions eliminated: " + std::to_string(cost.scalarCost) + "\n"
-                         "  scalar cost: " + std::to_string(cost.scalarCost) + "\n"
-                         "  input materialization cost: " + std::to_string(cost.inputMaterializationCost) + "\n"
-                         "  vector operation cost: " + std::to_string(cost.vectorOpCost) + "\n"
-                         "  output materialization cost: " + std::to_string(cost.outputMaterializationCost) + "\n"
-                         "  total vector cost: " + std::to_string(cost.totalVectorCost()) + "\n"
-                         "  decision: REJECT\n"
-                         "  reason: insert/extract materialization exceeds scalar cost");
+                    diag("SLP candidate rejected by cost model");
                     ++cursor;
                     continue;
                 }
@@ -429,19 +512,6 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                     plan.lanes[lane]->replaceAllUsesWith(extract);
                 }
                 block.removeInstructions(plan.lanes);
-                diag("SLP candidate:\n"
-                     "  opcode: " + std::to_string(plan.vectorOpcode) + "\n"
-                     "  scalar type: " + scalarType->toString() + "\n"
-                     "  lanes: " + std::to_string(lanes) + "\n"
-                     "  vector width: " + std::to_string(plan.widthBits) + "\n"
-                     "  scalar instructions eliminated: " + std::to_string(cost.scalarCost) + "\n"
-                     "  scalar cost: " + std::to_string(cost.scalarCost) + "\n"
-                     "  input materialization cost: " + std::to_string(cost.inputMaterializationCost) + "\n"
-                     "  vector operation cost: " + std::to_string(cost.vectorOpCost) + "\n"
-                     "  output materialization cost: " + std::to_string(cost.outputMaterializationCost) + "\n"
-                     "  total vector cost: " + std::to_string(cost.totalVectorCost()) + "\n"
-                     "  decision: ACCEPT\n"
-                     "  reason: vectorization cost cheaper than scalar cost");
                 changed = true;
                 cursor += lanes;
             }

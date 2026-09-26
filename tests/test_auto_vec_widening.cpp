@@ -97,6 +97,7 @@ void test_memory_sum_reduction(int32_t initVal) {
 
     assert(vectorized && "Memory sum reduction loop MUST be vectorized!");
 
+
     transforms::LinearScanAllocator allocator;
     allocator.run(*func);
 

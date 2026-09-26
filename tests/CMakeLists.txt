@@ -392,6 +392,26 @@ target_link_libraries(test_auto_vec_slp PRIVATE fyra)
 add_test(NAME AutoVecSLPTest COMMAND test_auto_vec_slp)
 set_tests_properties(AutoVecSLPTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_lsr test_lsr.cpp)
+target_link_libraries(test_lsr PRIVATE fyra)
+add_test(NAME LSRTest COMMAND test_lsr)
+set_tests_properties(LSRTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_x64_complex_addressing test_x64_complex_addressing.cpp)
+target_link_libraries(test_x64_complex_addressing PRIVATE fyra)
+add_test(NAME X64ComplexAddressingTest COMMAND test_x64_complex_addressing)
+set_tests_properties(X64ComplexAddressingTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_advanced_loop_vectorizer test_advanced_loop_vectorizer.cpp)
+target_link_libraries(test_advanced_loop_vectorizer PRIVATE fyra)
+add_test(NAME AdvancedLoopVectorizerTest COMMAND test_advanced_loop_vectorizer)
+set_tests_properties(AdvancedLoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_advanced_slp test_advanced_slp.cpp)
+target_link_libraries(test_advanced_slp PRIVATE fyra)
+add_test(NAME AdvancedSLPTest COMMAND test_advanced_slp)
+set_tests_properties(AdvancedSLPTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_backend_builder test_backend_builder.cpp)
 target_link_libraries(test_backend_builder PRIVATE fyra)
 add_test(NAME BackendBuilderTest COMMAND test_backend_builder)

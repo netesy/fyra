@@ -361,7 +361,8 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
         }
     }
     if (currentFunction && currentFunction->hasStackSlot(value)) {
-        return targetInfo->formatStackOperand(targetInfo->getStackOffset(*this, const_cast<ir::Value*>(value)));
+        int off = currentFunction->getStackSlotForVreg(value);
+        return targetInfo->formatStackOperand(-off);
     }
 
     if (stackOffsets.count(const_cast<ir::Value*>(value)))
@@ -390,7 +391,8 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
 
-    return "$" + value->getName();
+    if (targetInfo) return targetInfo->getRegisterName("rax", value->getType());
+    return "%rax";
 }
 
 int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }

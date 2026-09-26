@@ -22,7 +22,19 @@ struct X64FrameLayout {
     }
 };
 
+struct ComplexAddress {
+    std::string base;
+    std::string index;
+    int scale = 1;
+    int64_t disp = 0;
+    bool isValid = false;
+
+    std::string format(X64ABI abi) const;
+};
+
 class X64Architecture : public ArchitectureInfo {
+public:
+    ComplexAddress matchComplexAddress(CodeGen& cg, ir::Value* val) const;
 public:
     X64Architecture(X64ABI abi);
 
