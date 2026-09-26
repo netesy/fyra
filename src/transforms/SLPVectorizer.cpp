@@ -265,17 +265,17 @@ struct SLPTreeNode {
     // Commutative reordering helper: swap operands of lane i if commutative
     void alignCommutativeLanes() {
         if (lanes.empty() || !isCommutative(opcode)) return;
-        for (size_t i = 0; i < lanes.size(); ++i) {
+        for (size_t i = 1; i < lanes.size(); ++i) {
             ir::Instruction* inst = lanes[i];
             if (!inst || inst->getOperands().size() < 2) continue;
-            // Check if swapping operands aligns with lane 0 operand patterns
+            if (!lanes[0] || lanes[0]->getOperands().size() < 2) continue;
+
             ir::Value* op0_lane0 = lanes[0]->getOperands()[0]->get();
             ir::Value* op1_lane0 = lanes[0]->getOperands()[1]->get();
             ir::Value* op0_cur = inst->getOperands()[0]->get();
             ir::Value* op1_cur = inst->getOperands()[1]->get();
 
             if (op0_cur == op1_lane0 && op1_cur == op0_lane0) {
-                // Swap operands in place for lane i to minimize shuffle
                 inst->getOperands()[0]->set(op1_cur);
                 inst->getOperands()[1]->set(op0_cur);
             }

@@ -223,8 +223,8 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
                     int64_t disp = 0;
 
                     if (parseAffine(inst, iv.phi, loop, base, scale, disp)) {
-                        // Profitable to reduce if scale != 1 or scale != 0 and inst is a Mul or Add inside loop
-                        if (scale != 0 && (scale != 1 || disp != 0 || base != nullptr)) { std::cout << "[LSR Match] inst: " << inst->getName() << " op: " << inst->getOpcode() << " scale: " << scale << " disp: " << disp << " base: " << (base ? base->getName() : "null") << std::endl;
+                        // Profitable to reduce strength when addressing base pointer
+                        if (base != nullptr && (base->getType()->isPointerTy() || dynamic_cast<ir::Parameter*>(base) || dynamic_cast<ir::GlobalVariable*>(base))) {
                             AffineExpr expr;
                             expr.rootInst = inst;
                             expr.base = base;
@@ -237,7 +237,7 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
                 }
             }
 
-            if (candidates.empty()) continue;
+            if (!iv.preheader || !iv.latch || candidates.empty()) continue;
 
             auto ctx = func.getParent() ? func.getParent()->getContextShared()
                                         : std::make_shared<ir::IRContext>();

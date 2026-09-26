@@ -24,11 +24,15 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     const auto& location_map = allocator.getRegisterMap();
 
     // 2. Update the function's stack frame information
-    int stack_frame_size = 0;
+    int numRegParams = std::max(1, std::min(static_cast<int>(func.getParameters().size()), 6));
+    int paramOffsetBytes = numRegParams * 8;
+    int stack_frame_size = paramOffsetBytes;
     for (const auto& [vreg, location] : location_map) {
+        if (dynamic_cast<const ir::Parameter*>(vreg)) continue;
         if (std::holds_alternative<StackSlot>(location)) {
             StackSlot slot = std::get<StackSlot>(location);
-            int slotByteOffset = slot.index * 8;
+            int slotByteOffset = paramOffsetBytes + (slot.index + 1) * 8;
+            if (slotByteOffset <= paramOffsetBytes) slotByteOffset = paramOffsetBytes + 8;
             func.setStackSlotForVreg(vreg, slotByteOffset);
             int slotSize = 8;
             if (vreg && vreg->getType()) {
@@ -42,6 +46,18 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
         } else if (std::holds_alternative<PhysicalReg>(location)) {
             PhysicalReg reg = std::get<PhysicalReg>(location);
             vreg->setPhysicalRegister(reg.index);
+        }
+    }
+
+    for (auto& bb : func.getBasicBlocks()) {
+        for (auto& instr : bb->getInstructions()) {
+            if (!instr->getType() || instr->getType()->isVoidTy()) continue;
+            if (dynamic_cast<ir::Parameter*>(instr.get())) continue;
+            if (!func.hasStackSlot(instr.get()) && !instr->hasPhysicalRegister()) {
+                int nextSlotIdx = func.getStackSlots().size();
+                int slotByteOffset = paramOffsetBytes + (nextSlotIdx + 1) * 8;
+                func.setStackSlotForVreg(instr.get(), slotByteOffset);
+            }
         }
     }
     func.setStackFrameSize(stack_frame_size);
@@ -66,20 +82,33 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
                 if (auto* operand_vreg = dynamic_cast<ir::Instruction*>(operand_val)) {
                     if (location_map.count(operand_vreg) && std::holds_alternative<StackSlot>(location_map.at(operand_vreg))) {
                         int slot = func.getStackSlotForVreg(operand_vreg);
-                        builder.setInsertPoint(bb.get(), it);
-                        ir::Instruction* load = builder.createLoadStack(operand_vreg->getType(), slot);
-                        use->setOriginalValue(operand_vreg);
-                        use->set(load);
+                        if (slot > 0) {
+                            if (!operand_vreg->getOperands().empty() && operand_vreg->getOperands()[0]) {
+                                if (auto* c = dynamic_cast<ir::ConstantInt*>(operand_vreg->getOperands()[0]->get())) {
+                                    use->set(c);
+                                    continue;
+                                } else if (auto* cfp = dynamic_cast<ir::ConstantFP*>(operand_vreg->getOperands()[0]->get())) {
+                                    use->set(cfp);
+                                    continue;
+                                }
+                            }
+                            builder.setInsertPoint(bb.get(), it);
+                            ir::Instruction* load = builder.createLoadStack(operand_vreg->getType(), slot);
+                            use->setOriginalValue(operand_vreg);
+                            use->set(load);
+                        }
                     }
                 }
             }
 
             // Rewrite definitions
-            if (location_map.count(instr) && std::holds_alternative<StackSlot>(location_map.at(instr))) {
+            if (!dynamic_cast<ir::Parameter*>(instr) && location_map.count(instr) && std::holds_alternative<StackSlot>(location_map.at(instr))) {
                 int slot = func.getStackSlotForVreg(instr);
-                auto next_it = std::next(it);
-                builder.setInsertPoint(bb.get(), next_it);
-                builder.createStoreStack(instr, slot);
+                if (slot > 0) {
+                    auto next_it = std::next(it);
+                    builder.setInsertPoint(bb.get(), next_it);
+                    builder.createStoreStack(instr, slot);
+                }
             }
 
             ++it;

@@ -188,7 +188,8 @@ VectorInstruction* IRBuilder::createVInsert(Value* vec, Value* val, Value* idx) 
 }
 
 VectorInstruction* IRBuilder::createVBroadcast(VectorType* type, Value* val) {
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VBroadcast, {val}, 128, insertPoint));
+    unsigned w = type ? type->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VBroadcast, {val}, w, insertPoint));
     auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -750,7 +751,8 @@ VectorInstruction* IRBuilder::createVSExt(Value* val, VectorType* destVecTy) {
     if (!srcVecTy || !destVecTy) {
         throw std::invalid_argument("VSExt operands must be vector types");
     }
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VSExt, {val}, 128, insertPoint));
+    unsigned w = destVecTy ? destVecTy->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VSExt, {val}, w, insertPoint));
     auto rawPtr = instr.get();
     if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
     return rawPtr;
@@ -761,7 +763,8 @@ VectorInstruction* IRBuilder::createVZExt(Value* val, VectorType* destVecTy) {
     if (!srcVecTy || !destVecTy) {
         throw std::invalid_argument("VZExt operands must be vector types");
     }
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VZExt, {val}, 128, insertPoint));
+    unsigned w = destVecTy ? destVecTy->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VZExt, {val}, w, insertPoint));
     auto rawPtr = instr.get();
     if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
     return rawPtr;
@@ -1063,8 +1066,14 @@ Instruction* IRBuilder::createVAArg(Value* val, Type* destTy) {
     return instrPtr;
 }
 
+static unsigned getVecWidthBits(Value* val) {
+    if (!val || !val->getType()) return 128;
+    if (auto* vt = dynamic_cast<VectorType*>(val->getType())) return vt->getBitWidth();
+    return 128;
+}
+
 VectorInstruction* IRBuilder::createVAdd(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VAdd, {lhs, rhs}, 128, insertPoint));
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VAdd, {lhs, rhs}, getVecWidthBits(lhs), insertPoint));
     auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -1072,7 +1081,7 @@ VectorInstruction* IRBuilder::createVAdd(Value* lhs, Value* rhs) {
 }
 
 VectorInstruction* IRBuilder::createVSub(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VSub, {lhs, rhs}, 128, insertPoint));
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VSub, {lhs, rhs}, getVecWidthBits(lhs), insertPoint));
     auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -1080,7 +1089,7 @@ VectorInstruction* IRBuilder::createVSub(Value* lhs, Value* rhs) {
 }
 
 VectorInstruction* IRBuilder::createVMul(Value* lhs, Value* rhs) {
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VMul, {lhs, rhs}, 128, insertPoint));
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VMul, {lhs, rhs}, getVecWidthBits(lhs), insertPoint));
     auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -1089,7 +1098,7 @@ VectorInstruction* IRBuilder::createVMul(Value* lhs, Value* rhs) {
 
 VectorInstruction* IRBuilder::createVFAdd(Value* lhs, Value* rhs) {
     auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFAdd,
-                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return result;
@@ -1097,7 +1106,7 @@ VectorInstruction* IRBuilder::createVFAdd(Value* lhs, Value* rhs) {
 
 VectorInstruction* IRBuilder::createVFSub(Value* lhs, Value* rhs) {
     auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFSub,
-                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return result;
@@ -1105,7 +1114,7 @@ VectorInstruction* IRBuilder::createVFSub(Value* lhs, Value* rhs) {
 
 VectorInstruction* IRBuilder::createVFMul(Value* lhs, Value* rhs) {
     auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFMul,
-                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return result;
@@ -1113,7 +1122,7 @@ VectorInstruction* IRBuilder::createVFMul(Value* lhs, Value* rhs) {
 
 VectorInstruction* IRBuilder::createVFDiv(Value* lhs, Value* rhs) {
     auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFDiv,
-                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get();
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return result;
@@ -1121,18 +1130,19 @@ VectorInstruction* IRBuilder::createVFDiv(Value* lhs, Value* rhs) {
 
 VectorInstruction* IRBuilder::createVMin(Value* lhs, Value* rhs) {
     auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VMin,
-                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
 }
 
 VectorInstruction* IRBuilder::createVMax(Value* lhs, Value* rhs) {
     auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VMax,
-                                                     std::vector<Value*>{lhs, rhs}, 128, insertPoint);
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
 }
 
 VectorInstruction* IRBuilder::createVLoad(VectorType* type, Value* ptr) {
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VLoad, {ptr}, 128, insertPoint));
+    unsigned w = type ? type->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VLoad, {ptr}, w, insertPoint));
     auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
@@ -1140,7 +1150,8 @@ VectorInstruction* IRBuilder::createVLoad(VectorType* type, Value* ptr) {
 }
 
 VectorInstruction* IRBuilder::createVStore(Value* vec, Value* ptr) {
-    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vec->getType(), Instruction::VStore, {vec, ptr}, 128, insertPoint));
+    unsigned w = getVecWidthBits(vec);
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vec->getType(), Instruction::VStore, {vec, ptr}, w, insertPoint));
     auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));

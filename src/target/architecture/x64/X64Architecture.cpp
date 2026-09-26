@@ -175,6 +175,7 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
     if (!d.empty() && d[0] == '%') d = is32 ? to32BitReg(d) : to64BitReg(d);
     if (s == d) return;
 
+
     if (!cg.lastStoreOp.empty() && s == cg.lastStoreOp && (d == regRax || d == "%rax" || d == "%eax")) {
         return;
     }
@@ -299,6 +300,20 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
             }
         }
 
+        size_t pIdx0 = 0;
+        for (auto& param : func.getParameters()) {
+            if (pIdx0 >= 6) {
+                int stackArgOff = 16 + (pIdx0 - 6) * 8;
+                cg.getStackOffsets()[param.get()] = stackArgOff;
+            }
+            pIdx0++;
+        }
+        for (const auto& [vreg, slotBytes] : func.getStackSlots()) {
+            if (vreg) {
+                cg.getStackOffsets()[const_cast<ir::Value*>(vreg)] = -slotBytes;
+            }
+        }
+
         int maxAlign = 16;
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
@@ -319,33 +334,7 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
             for (auto& instr : bb->getInstructions()) {
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
                     if (func.hasStackSlot(instr.get())) {
-                        int slotOffset = func.getStackSlotForVreg(instr.get());
-                        if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
-                            size_t bits = vt->getSize() * 8;
-                            int align = 16;
-                            if (bits >= 512) align = 64;
-                            else if (bits >= 256) align = 32;
-                            int calleeBytes = 8 * (1 + (int)layout.usedCalleeRegs.size());
-                            int vecBase = -((calleeBytes + align - 1) & ~(align - 1));
-                            cg.getStackOffsets()[instr.get()] = vecBase - slotOffset;
-                        } else {
-                            int scalarBase = -8 - 8 * (int)layout.usedCalleeRegs.size();
-                            cg.getStackOffsets()[instr.get()] = scalarBase - slotOffset;
-                        }
-                    } else if (!instr->hasPhysicalRegister()) {
-                        unsigned slotSize = 8;
-                        unsigned align = 8;
-                        if (auto* vecTy = dynamic_cast<const ir::VectorType*>(instr->getType())) {
-                            slotSize = vecTy->getSize();
-                            if (slotSize >= 64) align = 64;
-                            else if (slotSize >= 32) align = 32;
-                            else if (slotSize >= 16) align = 16;
-                        }
-                        if (std::abs(current_offset) % align != 0) {
-                            current_offset -= (align - (std::abs(current_offset) % align));
-                        }
-                        current_offset -= slotSize;
-                        cg.getStackOffsets()[instr.get()] = current_offset;
+                        cg.getStackOffsets()[instr.get()] = -func.getStackSlotForVreg(instr.get());
                     }
                 }
             }
@@ -369,13 +358,9 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
             total_frame += (maxAlign - (total_frame % maxAlign));
         }
         layout.stackAlloc = total_frame - 8 * (1 + (int)layout.usedCalleeRegs.size());
-        // Stack-passed parameters are addressed relative to %rbp by
-        // getValueAsOperand(). Even an otherwise leaf/zero-frame function
-        // therefore needs a frame pointer when it has more integer parameters
-        // than the System V register argument set can hold.
         bool hasStackParameters = func.getParameters().size() > integerArgRegs.size();
         layout.isZeroFrame = (!layout.makesCalls && total_frame == 0 &&
-                              layout.usedCalleeRegs.empty() && !hasStackParameters);
+                              layout.usedCalleeRegs.empty() && !hasStackParameters && func.getParameters().empty());
     } else {
         layout.makesCalls = true;
         layout.usedCalleeRegs = {"rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"};
@@ -420,6 +405,17 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
         if (!layout.isZeroFrame) {
             if (auto* os = cg.getTextStream()) {
                 if (layout.stackAlloc > 0) *os << "  subq $" << layout.stackAlloc << ", %rsp\n";
+                static const std::vector<std::string> sysvArgRegs = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+                size_t pIdx = 0;
+                for (auto& param : func.getParameters()) {
+                    if (pIdx < sysvArgRegs.size() && func.hasStackSlot(param.get())) {
+                        bool is32 = is32BitType(param->getType());
+                        std::string srcReg = is32 ? to32BitReg("%" + sysvArgRegs[pIdx]) : "%" + sysvArgRegs[pIdx];
+                        std::string stackOp = formatStackOperand(cg.getStackOffsets()[param.get()]);
+                        emitMov(cg, os, srcReg, stackOp, is32);
+                    }
+                    pIdx++;
+                }
             } else {
                 auto& as = cg.getAssembler();
                 if (layout.stackAlloc > 0) {
@@ -2173,88 +2169,9 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             emitMov(cg, os, stackOp, dest, is32);
             return;
         }
-        struct SIBAddress {
-            std::string base;
-            std::string index;
-            int scale = 1;
-            int64_t disp = 0;
-            bool isValid = false;
-
-            std::string format(X64ABI abi) const {
-                if (!isValid) return "";
-                std::string res;
-                if (disp != 0) res += std::to_string(disp);
-                if (abi == X64ABI::SystemV) {
-                    res += "(" + base;
-                    if (!index.empty()) res += ", " + index + ", " + std::to_string(scale);
-                    res += ")";
-                } else {
-                    res = "[" + base;
-                    if (!index.empty()) res += " + " + index + " * " + std::to_string(scale);
-                    if (disp > 0) res += " + " + std::to_string(disp);
-                    else if (disp < 0) res += " - " + std::to_string(-disp);
-                    res += "]";
-                }
-                return res;
-            }
-        };
-
-        auto tryMatchSIB = [&](ir::Value* val) -> std::optional<SIBAddress> {
-            if (!val) return std::nullopt;
-            auto* inst = dynamic_cast<ir::Instruction*>(val);
-            if (!inst) return std::nullopt;
-
-            int64_t disp = 0;
-            ir::Instruction* addrInst = inst;
-
-            if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
-                if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get())) {
-                    disp = c->getValue();
-                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[0]->get())) addrInst = inner;
-                } else if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[0]->get())) {
-                    disp = c->getValue();
-                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[1]->get())) addrInst = inner;
-                }
-            }
-
-            if (addrInst->getOpcode() == ir::Instruction::Add && addrInst->getOperands().size() == 2) {
-                ir::Value* baseVal = addrInst->getOperands()[0]->get();
-                ir::Value* scaledIndexVal = addrInst->getOperands()[1]->get();
-
-                auto* mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
-                if (!mulInst) {
-                    std::swap(baseVal, scaledIndexVal);
-                    mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
-                }
-
-                if (mulInst && mulInst->getOpcode() == ir::Instruction::Mul && mulInst->getOperands().size() == 2) {
-                    ir::Value* idxVal = mulInst->getOperands()[0]->get();
-                    auto* scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[1]->get());
-                    if (!scaleC) {
-                        idxVal = mulInst->getOperands()[1]->get();
-                        scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[0]->get());
-                    }
-
-                    if (scaleC && (scaleC->getValue() == 1 || scaleC->getValue() == 2 || scaleC->getValue() == 4 || scaleC->getValue() == 8)) {
-                        SIBAddress sib;
-                        sib.base = cg.getValueAsOperand(baseVal);
-                        sib.index = cg.getValueAsOperand(idxVal);
-                        sib.scale = static_cast<int>(scaleC->getValue());
-                        sib.disp = disp;
-                        sib.isValid = true;
-                        if (!sib.base.empty() && !sib.index.empty() &&
-                            (abi == X64ABI::Windows || (sib.base[0] == '%' && sib.index[0] == '%'))) {
-                            if (sib.index[0] == '%') sib.index = to64BitReg(sib.index);
-                            return sib;
-                        }
-                    }
-                }
-            }
-            return std::nullopt;
-        };
-
-        if (auto sib = tryMatchSIB(ptrVal)) {
-            std::string sibStr = sib->format(abi);
+        ComplexAddress complexAddr = matchComplexAddress(cg, ptrVal);
+        if (complexAddr.isValid) {
+            std::string sibStr = complexAddr.format(abi);
             std::string destOp = cg.getValueAsOperand(&i);
             if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
                 const char* moveFP = i.getType()->isFloatTy() ? "movss" : "movsd";
@@ -2455,8 +2372,9 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
         };
 
         const std::string fpScratch = getReservedScratchVectorReg();
-        if (auto sib = tryMatchSIB(ptrVal)) {
-            std::string sibStr = sib->format(abi);
+        ComplexAddress complexAddr = matchComplexAddress(cg, ptrVal);
+        if (complexAddr.isValid) {
+            std::string sibStr = complexAddr.format(abi);
             std::string valOp = cg.getValueAsOperand(i.getOperands()[0]->get());
             if (storedType && storedType->isFloatingPoint()) {
                 std::string move = storedType->isFloatTy() ? "movss" : "movsd";
@@ -2476,7 +2394,7 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                     else if (size == 4) *os << "  mov dword ptr " << sibStr << ", eax\n";
                     else *os << "  mov " << sibStr << ", rax\n";
                 } else {
-                    if (sib->base == "%rax" || sib->index == "%rax") {
+                    if (complexAddr.base == "%rax" || complexAddr.index == "%rax") {
                         emitMov(cg, os, valOp, scratch, is32Val);
                         if (size == 1) *os << "  movb " << to8BitReg(scratch) << ", " << sibStr << "\n";
                         else if (size == 2) *os << "  movw " << to16BitReg(scratch) << ", " << sibStr << "\n";
@@ -3046,9 +2964,19 @@ bool X64Architecture::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, 
 
             if (op0[0] == '$' || (op0[0] != '%' && op1[0] != '%')) {
                 emitMov(cg, os, cg.getValueAsOperand(cmp.getOperands()[0]->get()), regRax, is32);
-                *os << "  " << cmpOp << " " << op1 << ", " << regRax << "\n";
+                if (op1 == "$0" || op1 == "$0x0") {
+                    std::string testOp = is32 ? "testl" : "testq";
+                    *os << "  " << testOp << " " << regRax << ", " << regRax << "\n";
+                } else {
+                    *os << "  " << cmpOp << " " << op1 << ", " << regRax << "\n";
+                }
             } else {
-                *os << "  " << cmpOp << " " << op1 << ", " << op0 << "\n";
+                if (op1 == "$0" || op1 == "$0x0") {
+                    std::string testOp = is32 ? "testl" : "testq";
+                    *os << "  " << testOp << " " << op0 << ", " << op0 << "\n";
+                } else {
+                    *os << "  " << cmpOp << " " << op1 << ", " << op0 << "\n";
+                }
             }
         }
 

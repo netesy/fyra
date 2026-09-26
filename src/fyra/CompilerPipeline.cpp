@@ -266,7 +266,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
                 if (cfg_simplifier.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
-                // if (optLevel >= 2 && lsr.run(*func)) optimization_changed = true;
+                if (optLevel >= 2 && lsr.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && config.enableLoopVectorization && loop_vectorizer.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && config.enableSLP && slp_vectorizer.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && config.enableLoopUnroll && loop_unroll.run(*func)) optimization_changed = true;

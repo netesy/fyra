@@ -1138,7 +1138,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // Vector Body
         builder.setInsertPoint(vLoopBodyBB);
 
-        if (!plan.memoryAccesses.empty() && !plan.isWideningReduction) {
+        if (!plan.memoryAccesses.empty()) {
             std::map<ir::Instruction*, ir::Value*> vValueMapChunk0;
             std::map<ir::Instruction*, ir::Value*> vValueMapChunk1;
 
@@ -1163,6 +1163,73 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     if (plan.unrollFactor == 2) {
                         ir::Instruction* vPtr1 = builder.createAdd(safeBase, byteOffset1);
                         vValueMapChunk1[inst.get()] = builder.createVLoad(vecTy, vPtr1);
+                    }
+                } else if (opc == ir::Instruction::ExtSW || opc == ir::Instruction::ExtUW) {
+                        ir::Value* srcVal = inst->getOperands()[0]->get();
+                        auto* srcInst = dynamic_cast<ir::Instruction*>(srcVal);
+                        ir::Value* vSrc0 = (srcInst && vValueMapChunk0.count(srcInst)) ? vValueMapChunk0[srcInst] : nullptr;
+                        if (vSrc0 && dynamic_cast<ir::VectorType*>(vSrc0->getType())) {
+                            ir::VectorType* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+                            vValueMapChunk0[inst.get()] = builder.createVSExt(vSrc0, v4i64Ty);
+                            if (plan.unrollFactor == 2 && srcInst && vValueMapChunk1.count(srcInst)) {
+                                ir::Value* vSrc1 = vValueMapChunk1[srcInst];
+                                vValueMapChunk1[inst.get()] = builder.createVSExt(vSrc1, v4i64Ty);
+                            }
+                        }
+                } else if (opc == ir::Instruction::Add || opc == ir::Instruction::Sub ||
+                           opc == ir::Instruction::Mul || opc == ir::Instruction::FAdd ||
+                           opc == ir::Instruction::FSub || opc == ir::Instruction::FMul ||
+                           opc == ir::Instruction::FDiv) {
+                    if (plan.reductions.empty() || inst.get() != plan.reductions[0].update) {
+                        ir::Value* op0 = inst->getOperands()[0]->get();
+                        ir::Value* op1 = inst->getOperands()[1]->get();
+                        auto* i0 = dynamic_cast<ir::Instruction*>(op0);
+                        auto* i1 = dynamic_cast<ir::Instruction*>(op1);
+                        if ((i0 && vValueMapChunk0.count(i0)) || (i1 && vValueMapChunk0.count(i1))) {
+                            ir::Value* v0 = (i0 && vValueMapChunk0.count(i0)) ? vValueMapChunk0[i0] : op0;
+                            ir::Value* v1 = (i1 && vValueMapChunk0.count(i1)) ? vValueMapChunk0[i1] : op1;
+                        if (!dynamic_cast<ir::VectorType*>(v0->getType())) v0 = builder.createVBroadcast(vecTy, v0);
+                        if (!dynamic_cast<ir::VectorType*>(v1->getType())) v1 = builder.createVBroadcast(vecTy, v1);
+                        ir::Instruction* vInst0 = nullptr;
+                        switch (opc) {
+                            case ir::Instruction::Add: vInst0 = builder.createVAdd(v0, v1); break;
+                            case ir::Instruction::Sub: vInst0 = builder.createVSub(v0, v1); break;
+                            case ir::Instruction::Mul: vInst0 = builder.createVMul(v0, v1); break;
+                            case ir::Instruction::FAdd: vInst0 = builder.createVFAdd(v0, v1); break;
+                            case ir::Instruction::FSub: vInst0 = builder.createVFSub(v0, v1); break;
+                            case ir::Instruction::FMul: vInst0 = builder.createVFMul(v0, v1); break;
+                            case ir::Instruction::FDiv: vInst0 = builder.createVFDiv(v0, v1); break;
+                            default: break;
+                        }
+                        if (vInst0) {
+                            vInst0->setType(vecTy);
+                            if (auto* vi = dynamic_cast<ir::VectorInstruction*>(vInst0)) vi->setVectorWidth(plan.vectorWidthBits);
+                            vValueMapChunk0[inst.get()] = vInst0;
+                        }
+
+                        if (plan.unrollFactor == 2) {
+                            ir::Value* v0_1 = (i0 && vValueMapChunk1.count(i0)) ? vValueMapChunk1[i0] : op0;
+                            ir::Value* v1_1 = (i1 && vValueMapChunk1.count(i1)) ? vValueMapChunk1[i1] : op1;
+                            if (!dynamic_cast<ir::VectorType*>(v0_1->getType())) v0_1 = builder.createVBroadcast(vecTy, v0_1);
+                            if (!dynamic_cast<ir::VectorType*>(v1_1->getType())) v1_1 = builder.createVBroadcast(vecTy, v1_1);
+                            ir::Instruction* vInst1 = nullptr;
+                            switch (opc) {
+                                case ir::Instruction::Add: vInst1 = builder.createVAdd(v0_1, v1_1); break;
+                                case ir::Instruction::Sub: vInst1 = builder.createVSub(v0_1, v1_1); break;
+                                case ir::Instruction::Mul: vInst1 = builder.createVMul(v0_1, v1_1); break;
+                                case ir::Instruction::FAdd: vInst1 = builder.createVFAdd(v0_1, v1_1); break;
+                                case ir::Instruction::FSub: vInst1 = builder.createVFSub(v0_1, v1_1); break;
+                                case ir::Instruction::FMul: vInst1 = builder.createVFMul(v0_1, v1_1); break;
+                                case ir::Instruction::FDiv: vInst1 = builder.createVFDiv(v0_1, v1_1); break;
+                                default: break;
+                            }
+                            if (vInst1) {
+                                vInst1->setType(vecTy);
+                                if (auto* vi = dynamic_cast<ir::VectorInstruction*>(vInst1)) vi->setVectorWidth(plan.vectorWidthBits);
+                                vValueMapChunk1[inst.get()] = vInst1;
+                            }
+                        }
+                        }
                     }
                 } else if (!plan.reductions.empty() && inst.get() == plan.reductions[0].update) {
                     auto& reduction = plan.reductions[0];
