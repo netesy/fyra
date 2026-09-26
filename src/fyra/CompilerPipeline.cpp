@@ -19,6 +19,7 @@
 #include "transforms/ControlFlowSimplification.h"
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/ScalarEvolution.h"
+#include "transforms/LoopStrengthReduction.h"
 #include "transforms/LoopVectorizer.h"
 #include "transforms/SLPVectorizer.h"
 #include "transforms/LoopUnroll.h"
@@ -241,6 +242,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         transforms::GVN gvn;
         transforms::LoopInvariantCodeMotion licm(error_reporter);
         transforms::ScalarEvolution scev;
+        transforms::LoopStrengthReduction lsr(error_reporter);
         transforms::LoopUnroll loop_unroll(error_reporter);
         const target::TargetDescriptor vectorTarget = desc.value_or(
             target::TargetDescriptor{target::Arch::X64, target::OS::Linux});
@@ -264,6 +266,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
                 if (cfg_simplifier.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
+                // if (optLevel >= 2 && lsr.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && config.enableLoopVectorization && loop_vectorizer.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && config.enableSLP && slp_vectorizer.run(*func)) optimization_changed = true;
                 if (optLevel >= 2 && config.enableLoopUnroll && loop_unroll.run(*func)) optimization_changed = true;

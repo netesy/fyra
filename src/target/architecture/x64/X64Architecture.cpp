@@ -603,8 +603,9 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
                 if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
                 if (!s1.empty() && s1[0] == '$') {
                     try {
-                        int64_t v = std::stoll(s1.substr(1));
-                        if (v > 2147483647LL || v < -2147483648LL) {
+                        uint64_t uv = std::stoull(s1.substr(1));
+                        int64_t v = static_cast<int64_t>(uv);
+                        if (v > 2147483647LL || v < -2147483648LL || uv > 2147483647ULL) {
                             std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
                             *os << "  movabsq " << s1 << ", " << scratch << "\n";
                             s1 = is32 ? to32BitReg(scratch) : scratch;
@@ -4198,6 +4199,159 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             }
         }
     }
+}
+
+std::string ComplexAddress::format(X64ABI abi) const {
+    if (!isValid) return "";
+    std::string res;
+    if (abi == X64ABI::SystemV) {
+        if (disp != 0) res += std::to_string(disp);
+        res += "(";
+        if (!base.empty()) res += base;
+        if (!index.empty()) {
+            if (!base.empty()) res += ", ";
+            res += index;
+            if (scale > 1) res += ", " + std::to_string(scale);
+        }
+        res += ")";
+    } else {
+        res = "[";
+        bool hasBase = false;
+        if (!base.empty()) { res += base; hasBase = true; }
+        if (!index.empty()) {
+            if (hasBase) res += " + ";
+            res += index;
+            if (scale > 1) res += " * " + std::to_string(scale);
+            hasBase = true;
+        }
+        if (disp != 0 || !hasBase) {
+            if (disp > 0) {
+                if (hasBase) res += " + ";
+                res += std::to_string(disp);
+            } else if (disp < 0) {
+                if (hasBase) res += " - ";
+                res += std::to_string(-disp);
+            } else if (!hasBase) {
+                res += "0";
+            }
+        }
+        res += "]";
+    }
+    return res;
+}
+
+ComplexAddress X64Architecture::matchComplexAddress(CodeGen& cg, ir::Value* val) const {
+    ComplexAddress result;
+    if (!val) return result;
+
+    auto unwrapExt = [](ir::Value* v) -> ir::Value* {
+        if (!v) return v;
+        while (auto* inst = dynamic_cast<ir::Instruction*>(v)) {
+            if (inst->getOpcode() == ir::Instruction::ExtSW || inst->getOpcode() == ir::Instruction::ExtUW) {
+                if (!inst->getOperands().empty() && inst->getOperands()[0] && inst->getOperands()[0]->get()) {
+                    v = inst->getOperands()[0]->get();
+                } else break;
+            } else break;
+        }
+        return v;
+    };
+
+    auto* inst = dynamic_cast<ir::Instruction*>(val);
+    if (!inst) return result;
+
+    int64_t disp = 0;
+    ir::Value* coreAddr = val;
+
+    if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
+        ir::Value* op0 = inst->getOperands()[0]->get();
+        ir::Value* op1 = inst->getOperands()[1]->get();
+        if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) {
+            disp = static_cast<int64_t>(c1->getValue());
+            coreAddr = op0;
+        } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(op0)) {
+            disp = static_cast<int64_t>(c0->getValue());
+            coreAddr = op1;
+        }
+    }
+
+    ir::Value* baseVal = nullptr;
+    ir::Value* indexVal = nullptr;
+    int scale = 1;
+
+    auto* coreInst = dynamic_cast<ir::Instruction*>(coreAddr);
+    if (coreInst && coreInst->getOpcode() == ir::Instruction::Add && coreInst->getOperands().size() == 2) {
+        ir::Value* op0 = coreInst->getOperands()[0]->get();
+        ir::Value* op1 = coreInst->getOperands()[1]->get();
+
+        auto* mul0 = dynamic_cast<ir::Instruction*>(unwrapExt(op0));
+        auto* mul1 = dynamic_cast<ir::Instruction*>(unwrapExt(op1));
+
+        if (mul1 && mul1->getOpcode() == ir::Instruction::Mul && mul1->getOperands().size() == 2) {
+            baseVal = op0;
+            ir::Value* m0 = mul1->getOperands()[0]->get();
+            ir::Value* m1 = mul1->getOperands()[1]->get();
+            if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
+                indexVal = m0; scale = static_cast<int>(c1->getValue());
+            } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
+                indexVal = m1; scale = static_cast<int>(c0->getValue());
+            }
+        } else if (mul0 && mul0->getOpcode() == ir::Instruction::Mul && mul0->getOperands().size() == 2) {
+            baseVal = op1;
+            ir::Value* m0 = mul0->getOperands()[0]->get();
+            ir::Value* m1 = mul0->getOperands()[1]->get();
+            if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
+                indexVal = m0; scale = static_cast<int>(c1->getValue());
+            } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
+                indexVal = m1; scale = static_cast<int>(c0->getValue());
+            }
+        } else {
+            baseVal = op0;
+            indexVal = op1;
+            scale = 1;
+        }
+    } else if (coreInst && coreInst->getOpcode() == ir::Instruction::Mul && coreInst->getOperands().size() == 2) {
+        ir::Value* m0 = coreInst->getOperands()[0]->get();
+        ir::Value* m1 = coreInst->getOperands()[1]->get();
+        if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
+            indexVal = m0; scale = static_cast<int>(c1->getValue());
+        } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
+            indexVal = m1; scale = static_cast<int>(c0->getValue());
+        }
+    }
+
+    if (scale != 1 && scale != 2 && scale != 4 && scale != 8) return result;
+
+    indexVal = unwrapExt(indexVal);
+    baseVal = unwrapExt(baseVal);
+
+    std::string bStr = baseVal ? cg.getValueAsOperand(baseVal) : "";
+    std::string iStr = indexVal ? cg.getValueAsOperand(indexVal) : "";
+
+    auto isReg = [this](const std::string& s) {
+        if (s.empty()) return true;
+        if (abi == X64ABI::Windows) {
+            return s[0] != '[' && s[0] != '$' && s[0] != '-' && s[0] != '+';
+        }
+        return s[0] == '%';
+    };
+
+    if (!isReg(bStr) || !isReg(iStr)) return result;
+    if (bStr.empty() && iStr.empty()) return result;
+
+    if (abi == X64ABI::SystemV) {
+        if (!bStr.empty() && bStr[0] == '%') bStr = to64BitReg(bStr);
+        if (!iStr.empty() && iStr[0] == '%') iStr = to64BitReg(iStr);
+    } else {
+        if (!bStr.empty()) bStr = to64BitReg(bStr);
+        if (!iStr.empty()) iStr = to64BitReg(iStr);
+    }
+
+    result.base = bStr;
+    result.index = iStr;
+    result.scale = scale;
+    result.disp = disp;
+    result.isValid = true;
+    return result;
 }
 
 std::string X64Architecture::getRegisterName(const std::string& base, const ir::Type* type) const {
