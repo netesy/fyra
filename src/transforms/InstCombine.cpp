@@ -110,7 +110,18 @@ bool InstCombinePass::performTransformation(ir::Function& func) {
                                 if (!cL) { cL = dynamic_cast<ir::ConstantInt*>(aL); if (cL) aL = bL; }
                                 if (!cR) { cR = dynamic_cast<ir::ConstantInt*>(aR); if (cR) aR = bR; }
 
-                                if (aL == aR && cL && cR && ctx && iTy) {
+                                auto isSameExpr = [](ir::Value* x, ir::Value* y) -> bool {
+                                    if (x == y) return true;
+                                    auto* ix = dynamic_cast<ir::Instruction*>(x);
+                                    auto* iy = dynamic_cast<ir::Instruction*>(y);
+                                    if (ix && iy && ix->getOpcode() == iy->getOpcode() && ix->getOperands().size() == 2) {
+                                        return (ix->getOperands()[0]->get() == iy->getOperands()[0]->get() && ix->getOperands()[1]->get() == iy->getOperands()[1]->get()) ||
+                                               (ix->getOperands()[0]->get() == iy->getOperands()[1]->get() && ix->getOperands()[1]->get() == iy->getOperands()[0]->get());
+                                    }
+                                    return false;
+                                };
+
+                                if (isSameExpr(aL, aR) && cL && cR && ctx && iTy) {
                                     int64_t diff = cL->getValue() - cR->getValue();
                                     replacement = ctx->getConstantInt(iTy, diff);
                                 }
