@@ -63,68 +63,34 @@ bool InstCombinePass::performTransformation(ir::Function& func) {
                         }
                     }
                 }
-                // (A + C1) + (B + C2) -> (A + B) + (C1 + C2)
-                else if (opc == ir::Instruction::Add) {
-                    if (auto* iLhs = dynamic_cast<ir::Instruction*>(lhs)) {
-                        if (auto* iRhs = dynamic_cast<ir::Instruction*>(rhs)) {
-                            if (iLhs->getOpcode() == ir::Instruction::Add && iRhs->getOpcode() == ir::Instruction::Add) {
-                                ir::Value* aL = iLhs->getOperands()[0]->get();
-                                ir::Value* bL = iLhs->getOperands()[1]->get();
-                                ir::Value* aR = iRhs->getOperands()[0]->get();
-                                ir::Value* bR = iRhs->getOperands()[1]->get();
+            } else if (opc == ir::Instruction::Sub) {
+                if (auto* iLhs = dynamic_cast<ir::Instruction*>(lhs)) {
+                    if (auto* iRhs = dynamic_cast<ir::Instruction*>(rhs)) {
+                        if (iLhs->getOpcode() == ir::Instruction::Add && iRhs->getOpcode() == ir::Instruction::Add) {
+                            ir::Value* aL = iLhs->getOperands()[0]->get();
+                            ir::Value* bL = iLhs->getOperands()[1]->get();
+                            ir::Value* aR = iRhs->getOperands()[0]->get();
+                            ir::Value* bR = iRhs->getOperands()[1]->get();
 
-                                auto* cL = dynamic_cast<ir::ConstantInt*>(bL);
-                                auto* cR = dynamic_cast<ir::ConstantInt*>(bR);
-                                if (!cL) { cL = dynamic_cast<ir::ConstantInt*>(aL); if (cL) aL = bL; }
-                                if (!cR) { cR = dynamic_cast<ir::ConstantInt*>(aR); if (cR) aR = bR; }
+                            auto* cL = dynamic_cast<ir::ConstantInt*>(bL);
+                            auto* cR = dynamic_cast<ir::ConstantInt*>(bR);
+                            if (!cL) { cL = dynamic_cast<ir::ConstantInt*>(aL); if (cL) aL = bL; }
+                            if (!cR) { cR = dynamic_cast<ir::ConstantInt*>(aR); if (cR) aR = bR; }
 
-                                if (cL && cR && ctx && iTy) {
-                                    ir::IRBuilder builder(ctx);
-                                    builder.setInsertPoint(bb.get(), it);
-                                    ir::Instruction* baseAdd = builder.createAdd(aL, aR);
-                                    int64_t combined = cL->getValue() + cR->getValue();
-                                    if (combined == 0) {
-                                        replacement = baseAdd;
-                                    } else {
-                                        inst->getOperands()[0]->set(baseAdd);
-                                        inst->getOperands()[1]->set(ctx->getConstantInt(iTy, combined));
-                                        changed = true;
-                                    }
+                            auto isSameExpr = [](ir::Value* x, ir::Value* y) -> bool {
+                                if (x == y) return true;
+                                auto* ix = dynamic_cast<ir::Instruction*>(x);
+                                auto* iy = dynamic_cast<ir::Instruction*>(y);
+                                if (ix && iy && ix->getOpcode() == iy->getOpcode() && ix->getOperands().size() == 2) {
+                                    return (ix->getOperands()[0]->get() == iy->getOperands()[0]->get() && ix->getOperands()[1]->get() == iy->getOperands()[1]->get()) ||
+                                           (ix->getOperands()[0]->get() == iy->getOperands()[1]->get() && ix->getOperands()[1]->get() == iy->getOperands()[0]->get());
                                 }
-                            }
-                        }
-                    }
-                }
-                // sub (add A, C1), (add A, C2) -> C1 - C2
-                else if (opc == ir::Instruction::Sub) {
-                    if (auto* iLhs = dynamic_cast<ir::Instruction*>(lhs)) {
-                        if (auto* iRhs = dynamic_cast<ir::Instruction*>(rhs)) {
-                            if (iLhs->getOpcode() == ir::Instruction::Add && iRhs->getOpcode() == ir::Instruction::Add) {
-                                ir::Value* aL = iLhs->getOperands()[0]->get();
-                                ir::Value* bL = iLhs->getOperands()[1]->get();
-                                ir::Value* aR = iRhs->getOperands()[0]->get();
-                                ir::Value* bR = iRhs->getOperands()[1]->get();
+                                return false;
+                            };
 
-                                auto* cL = dynamic_cast<ir::ConstantInt*>(bL);
-                                auto* cR = dynamic_cast<ir::ConstantInt*>(bR);
-                                if (!cL) { cL = dynamic_cast<ir::ConstantInt*>(aL); if (cL) aL = bL; }
-                                if (!cR) { cR = dynamic_cast<ir::ConstantInt*>(aR); if (cR) aR = bR; }
-
-                                auto isSameExpr = [](ir::Value* x, ir::Value* y) -> bool {
-                                    if (x == y) return true;
-                                    auto* ix = dynamic_cast<ir::Instruction*>(x);
-                                    auto* iy = dynamic_cast<ir::Instruction*>(y);
-                                    if (ix && iy && ix->getOpcode() == iy->getOpcode() && ix->getOperands().size() == 2) {
-                                        return (ix->getOperands()[0]->get() == iy->getOperands()[0]->get() && ix->getOperands()[1]->get() == iy->getOperands()[1]->get()) ||
-                                               (ix->getOperands()[0]->get() == iy->getOperands()[1]->get() && ix->getOperands()[1]->get() == iy->getOperands()[0]->get());
-                                    }
-                                    return false;
-                                };
-
-                                if (isSameExpr(aL, aR) && cL && cR && ctx && iTy) {
-                                    int64_t diff = cL->getValue() - cR->getValue();
-                                    replacement = ctx->getConstantInt(iTy, diff);
-                                }
+                            if (isSameExpr(aL, aR) && cL && cR && ctx && iTy) {
+                                int64_t diff = cL->getValue() - cR->getValue();
+                                replacement = ctx->getConstantInt(iTy, diff);
                             }
                         }
                     }
