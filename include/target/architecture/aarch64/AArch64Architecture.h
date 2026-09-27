@@ -9,6 +9,24 @@ namespace asm_ { class Assembler; }
 namespace target {
 using namespace codegen;
 
+struct AArch64ComplexAddress {
+    std::string base;
+    std::string index;
+    int shift = 0;
+    int64_t disp = 0;
+    bool isValid = false;
+
+    std::string format() const {
+        if (!isValid) return "";
+        if (!index.empty()) {
+            if (shift > 0) return "[" + base + ", " + index + ", lsl #" + std::to_string(shift) + "]";
+            return "[" + base + ", " + index + "]";
+        }
+        if (disp != 0) return "[" + base + ", #" + std::to_string(disp) + "]";
+        return "[" + base + "]";
+    }
+};
+
 class AArch64Architecture : public ArchitectureInfo {
 public:
     AArch64Architecture();
@@ -92,6 +110,8 @@ public:
     void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& i) override;
+
+    AArch64ComplexAddress matchComplexAddress(CodeGen& cg, ir::Value* val) const;
 
 private:
     std::string getNEONArrangement(const ir::VectorType* vecTy) const;

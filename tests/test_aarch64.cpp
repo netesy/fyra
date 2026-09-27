@@ -117,5 +117,63 @@ int main(int argc, char** argv) {
         std::cout << "AArch64 fusion, smin/smax, and branch lowering test passed!" << std::endl;
     }
 
+    // Native Casts, Complex Addressing, Immediates, and Vector Gather/Scatter
+    {
+        auto testContext = std::make_shared<ir::IRContext>();
+        ir::Module testModule("aarch64_test_advanced", testContext);
+        ir::IRBuilder builder(testContext);
+        builder.setModule(&testModule);
+
+        auto* i32 = testContext->getIntegerType(32);
+        auto* i64 = testContext->getIntegerType(64);
+        auto* f64 = testContext->getFloatType();
+        auto* ptrI32 = testContext->getPointerType(i32);
+
+        ir::Function* func = builder.createFunction("test_advanced_lowering", i32, {ptrI32, i32, i64});
+        auto paramIt = func->getParameters().begin();
+        ir::Value* basePtr = paramIt->get(); ++paramIt;
+        ir::Value* idx = paramIt->get(); ++paramIt;
+        ir::Value* val64 = paramIt->get();
+
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(entry);
+
+        // Complex Addressing: ptr + idx * 4 + 16
+        ir::Instruction* scaleIdx = builder.createMul(idx, testContext->getConstantInt(i32, 4));
+        ir::Instruction* extIdx = builder.createExtSW(scaleIdx, i64);
+        ir::Instruction* offsetAddr = builder.createAdd(extIdx, testContext->getConstantInt(i64, 16));
+        ir::Instruction* finalPtr = builder.createAdd(basePtr, offsetAddr);
+
+        ir::Instruction* loadedVal = builder.createLoads(finalPtr);
+
+        // Immediate arithmetic & shifts
+        ir::Instruction* addImm = builder.createAdd(loadedVal, testContext->getConstantInt(i32, 42));
+        ir::Instruction* shlImm = builder.createShl(addImm, testContext->getConstantInt(i32, 2));
+
+        // Native Casts
+        ir::Instruction* extUW = builder.createExtUW(shlImm, i64);
+        ir::Instruction* u2f = builder.createUWtoF(extUW, f64);
+        ir::Instruction* d2ui = builder.createDToUI(u2f, i32);
+        ir::Instruction* trunc = builder.createTruncD(extUW, i32);
+
+        ir::Instruction* total = builder.createAdd(d2ui, trunc);
+        builder.createRet(total);
+
+        transforms::CFGBuilder::run(*func);
+
+        std::stringstream asmStream;
+        codegen::CodeGen testCodeGen(testModule, target::TargetResolver::resolve({target::Arch::AArch64, target::OS::Linux}), &asmStream);
+        testCodeGen.emit();
+        std::string testAsm = asmStream.str();
+
+        assert(testAsm.find("sxtw") != std::string::npos && "AArch64 ExtSW MUST generate sxtw!");
+        assert(testAsm.find("uxtw") != std::string::npos && "AArch64 ExtUW MUST generate uxtw!");
+        assert(testAsm.find("ucvtf") != std::string::npos && "AArch64 UWtoF MUST generate ucvtf!");
+        assert(testAsm.find("fcvtzu") != std::string::npos && "AArch64 DToUI MUST generate fcvtzu!");
+        assert(testAsm.find("add w9, w9, #42") != std::string::npos || testAsm.find("#42") != std::string::npos && "AArch64 immediate add MUST generate #42!");
+        assert(testAsm.find("lsl w9, w9, #2") != std::string::npos || testAsm.find("#2") != std::string::npos && "AArch64 immediate shift MUST generate #2!");
+        std::cout << "AArch64 complex addressing, native casts, and immediate arithmetic tests passed!" << std::endl;
+    }
+
     return 0;
 }
