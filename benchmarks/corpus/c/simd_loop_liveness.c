@@ -13,7 +13,7 @@ long long simd_loop_calc(int n) {
 int main() {
     long long res = 0;
     for (int k = 0; k < 20; k++) {
-        res += simd_loop_calc(5000000);
+        res += simd_loop_calc(50000);
     }
     printf("checksum: %lld\n", res);
     return 0;

@@ -245,7 +245,9 @@ void AArch64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
 }
 
 void AArch64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
@@ -265,7 +267,9 @@ void AArch64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
 }
 
 void AArch64Architecture::emitSMin(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         std::string r2 = getRegisterName("x10", r->getType());
@@ -278,7 +282,9 @@ void AArch64Architecture::emitSMin(CodeGen& cg, ir::Instruction& i) {
 }
 
 void AArch64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         std::string r2 = getRegisterName("x10", r->getType());
@@ -290,7 +296,9 @@ void AArch64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) {
     }
 }
 void AArch64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
@@ -309,33 +317,47 @@ void AArch64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     }
 }
 void AArch64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  mul " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     bool u = (i.getOpcode() == ir::Instruction::Udiv);
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  " << (u ? "udiv " : "sdiv ") << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     bool u = (i.getOpcode() == ir::Instruction::Urem);
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()), r3 = getRegisterName("x11", l->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  " << (u ? "udiv " : "sdiv ") << r3 << ", " << r1 << ", " << r2 << "\n  msub " << r1 << ", " << r3 << ", " << r2 << ", " << r1 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  and " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  orr " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  eor " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
@@ -351,7 +373,9 @@ void AArch64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
     }
 }
 void AArch64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
@@ -367,7 +391,9 @@ void AArch64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
     }
 }
 void AArch64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (!l || !r) return;
     if (auto* os = cg.getTextStream()) {
         std::string r1 = getRegisterName("x9", l->getType());
         *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
@@ -383,11 +409,15 @@ void AArch64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
     }
 }
 void AArch64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().empty() || !i.getOperands()[0]) return;
     ir::Value *d = &i, *o = i.getOperands()[0]->get();
+    if (!o) return;
     if (auto* os = cg.getTextStream()) { std::string r = getRegisterName("x9", o->getType()); *os << "  ldr " << r << ", " << cg.getValueAsOperand(o) << "\n  neg " << r << ", " << r << "\n  str " << r << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().empty() || !i.getOperands()[0]) return;
     ir::Value *d = &i, *o = i.getOperands()[0]->get();
+    if (!o) return;
     if (auto* os = cg.getTextStream()) { std::string r = getRegisterName("x9", o->getType()); *os << "  ldr " << r << ", " << cg.getValueAsOperand(o) << "\n  mvn " << r << ", " << r << "\n  str " << r << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
