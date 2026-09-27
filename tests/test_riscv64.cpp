@@ -14,6 +14,7 @@
 int main() {
     std::string test_file = "tests/riscv64.fyra";
     std::ifstream input(test_file);
+    if (!input.good()) input.open("../" + test_file);
     assert(input.good());
 
     parser::Parser parser(input, parser::FileFormat::FYRA);

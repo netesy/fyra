@@ -57,15 +57,34 @@ void RiscV64Architecture::emitStartFunction(CodeGen& cg) {
 
 void RiscV64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (!i.getOperands().empty() && i.getOperands()[0] && i.getOperands()[0]->get() != nullptr) {
-        if (auto* os = cg.getTextStream()) *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        ir::Value* rv = i.getOperands()[0]->get();
+        if (auto* os = cg.getTextStream()) {
+            if (rv->getType() && rv->getType()->isFloatingPoint()) {
+                std::string flInst = (rv->getType()->getSize() == 4) ? "flw" : "fld";
+                *os << "  " << flInst << " fa0, " << cg.getValueAsOperand(rv) << "\n";
+            } else {
+                std::string lInst = (rv->getType() && rv->getType()->getSize() <= 4) ? "lw" : "ld";
+                *os << "  " << lInst << " a0, " << cg.getValueAsOperand(rv) << "\n";
+            }
+        }
     }
     if (auto* os = cg.getTextStream()) *os << "  j " << i.getParent()->getParent()->getName() << "_epilogue\n";
 }
 
 void RiscV64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            int64_t val = static_cast<int64_t>(ci->getValue());
+            if (val >= -2048 && val <= 2047) {
+                *os << "  addi a0, a0, " << val << "\n";
+                *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+                return;
+            }
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  add a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
@@ -90,8 +109,18 @@ void RiscV64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) {
 }
 void RiscV64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            int64_t val = static_cast<int64_t>(ci->getValue());
+            if (-val >= -2048 && -val <= 2047) {
+                *os << "  addi a0, a0, " << -val << "\n";
+                *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+                return;
+            }
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  sub a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
@@ -124,48 +153,99 @@ void RiscV64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
 }
 void RiscV64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            int64_t val = static_cast<int64_t>(ci->getValue());
+            if (val >= -2048 && val <= 2047) {
+                *os << "  andi a0, a0, " << val << "\n";
+                *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+                return;
+            }
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  and a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
 }
 void RiscV64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            int64_t val = static_cast<int64_t>(ci->getValue());
+            if (val >= -2048 && val <= 2047) {
+                *os << "  ori a0, a0, " << val << "\n";
+                *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+                return;
+            }
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  or a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
 }
 void RiscV64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            int64_t val = static_cast<int64_t>(ci->getValue());
+            if (val >= -2048 && val <= 2047) {
+                *os << "  xori a0, a0, " << val << "\n";
+                *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+                return;
+            }
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  xor a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
 }
 void RiscV64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            *os << "  slli a0, a0, " << (ci->getValue() & 63) << "\n";
+            *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+            return;
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  sll a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
 }
 void RiscV64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            *os << "  srli a0, a0, " << (ci->getValue() & 63) << "\n";
+            *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+            return;
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  srl a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
 }
 void RiscV64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        *os << "  ld a0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        *os << "  ld a1, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+        ir::Value* l = i.getOperands()[0]->get();
+        ir::Value* r = i.getOperands()[1]->get();
+        *os << "  ld a0, " << cg.getValueAsOperand(l) << "\n";
+        if (auto* ci = dynamic_cast<ir::ConstantInt*>(r)) {
+            *os << "  srai a0, a0, " << (ci->getValue() & 63) << "\n";
+            *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
+            return;
+        }
+        *os << "  ld a1, " << cg.getValueAsOperand(r) << "\n";
         *os << "  sra a0, a0, a1\n";
         *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
     }
@@ -378,43 +458,59 @@ RiscV64ComplexAddress RiscV64Architecture::matchComplexAddress(CodeGen& cg, ir::
 
 void RiscV64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        bool isFloat = i.getType() && i.getType()->isFloatingPoint();
         std::string loadMnemonic = "ld";
         size_t size = i.getType() ? i.getType()->getSize() : 8;
-        if (size == 1) loadMnemonic = "lb";
-        else if (size == 2) loadMnemonic = "lh";
-        else if (size == 4) loadMnemonic = "lw";
+        if (isFloat) {
+            loadMnemonic = (size == 4) ? "flw" : "fld";
+        } else {
+            if (size == 1) loadMnemonic = "lb";
+            else if (size == 2) loadMnemonic = "lh";
+            else if (size == 4) loadMnemonic = "lw";
+        }
 
         ir::Value* ptrVal = i.getOperands()[0]->get();
         RiscV64ComplexAddress addr = matchComplexAddress(cg, ptrVal);
+        std::string regName = isFloat ? "fa1" : "a1";
+        std::string storeBackInst = isFloat ? ((size == 4) ? "fsw" : "fsd") : "sd";
+
         if (addr.isValid) {
-            *os << "  " << loadMnemonic << " a1, " << addr.format() << "\n";
-            *os << "  sd a1, " << cg.getValueAsOperand(&i) << "\n";
+            *os << "  " << loadMnemonic << " " << regName << ", " << addr.format() << "\n";
+            *os << "  " << storeBackInst << " " << regName << ", " << cg.getValueAsOperand(&i) << "\n";
         } else {
             *os << "  ld a0, " << cg.getValueAsOperand(ptrVal) << "\n";
-            *os << "  " << loadMnemonic << " a1, 0(a0)\n";
-            *os << "  sd a1, " << cg.getValueAsOperand(&i) << "\n";
+            *os << "  " << loadMnemonic << " " << regName << ", 0(a0)\n";
+            *os << "  " << storeBackInst << " " << regName << ", " << cg.getValueAsOperand(&i) << "\n";
         }
     }
 }
 
 void RiscV64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        std::string storeMnemonic = "sd";
         ir::Value* val = i.getOperands()[0]->get();
+        bool isFloat = val->getType() && val->getType()->isFloatingPoint();
+        std::string storeMnemonic = "sd";
         size_t size = val->getType() ? val->getType()->getSize() : 8;
-        if (size == 1) storeMnemonic = "sb";
-        else if (size == 2) storeMnemonic = "sh";
-        else if (size == 4) storeMnemonic = "sw";
+        if (isFloat) {
+            storeMnemonic = (size == 4) ? "fsw" : "fsd";
+        } else {
+            if (size == 1) storeMnemonic = "sb";
+            else if (size == 2) storeMnemonic = "sh";
+            else if (size == 4) storeMnemonic = "sw";
+        }
+
+        std::string regName = isFloat ? "fa1" : "a1";
+        std::string loadValInst = isFloat ? ((size == 4) ? "flw" : "fld") : "ld";
 
         ir::Value* ptrVal = i.getOperands()[1]->get();
         RiscV64ComplexAddress addr = matchComplexAddress(cg, ptrVal);
         if (addr.isValid) {
-            *os << "  ld a1, " << cg.getValueAsOperand(val) << "\n";
-            *os << "  " << storeMnemonic << " a1, " << addr.format() << "\n";
+            *os << "  " << loadValInst << " " << regName << ", " << cg.getValueAsOperand(val) << "\n";
+            *os << "  " << storeMnemonic << " " << regName << ", " << addr.format() << "\n";
         } else {
             *os << "  ld a0, " << cg.getValueAsOperand(ptrVal) << "\n";
-            *os << "  ld a1, " << cg.getValueAsOperand(val) << "\n";
-            *os << "  " << storeMnemonic << " a1, 0(a0)\n";
+            *os << "  " << loadValInst << " " << regName << ", " << cg.getValueAsOperand(val) << "\n";
+            *os << "  " << storeMnemonic << " " << regName << ", 0(a0)\n";
         }
     }
 }
@@ -1014,11 +1110,22 @@ void RiscV64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
             *os << "  vsetvli t0, " << numElems << ", " << eew << ", m1, ta, ma\n";
             bool isFloat = (vecTy && vecTy->getElementType() && vecTy->getElementType()->isFloatingPoint());
             std::string rawDst = cg.getValueAsOperand(&i);
+            uint64_t idx = 0;
+            if (i.getOperands().size() > 1 && i.getOperands()[1]->get()) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+                    idx = ci->getValue();
+                }
+            }
+            std::string srcVec = op0;
+            if (idx > 0) {
+                *os << "  vslidedown.vi v1, " << op0 << ", " << idx << "\n";
+                srcVec = "v1";
+            }
             if (isFloat) {
-                *os << "  vfmv.f.s fa0, " << op0 << "\n";
+                *os << "  vfmv.f.s fa0, " << srcVec << "\n";
                 *os << "  fs" << (elemBits == 32 ? "w" : "d") << " fa0, " << rawDst << "\n";
             } else {
-                *os << "  vmv.x.s a0, " << op0 << "\n";
+                *os << "  vmv.x.s a0, " << srcVec << "\n";
                 *os << "  sd a0, " << rawDst << "\n";
             }
             break;
@@ -1027,12 +1134,28 @@ void RiscV64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
             *os << "  vsetvli t0, " << numElems << ", " << eew << ", m1, ta, ma\n";
             bool isFloat = (vecTy && vecTy->getElementType() && vecTy->getElementType()->isFloatingPoint());
             std::string valStr = cg.getValueAsOperand(i.getOperands()[1]->get());
+            uint64_t idx = 0;
+            if (i.getOperands().size() > 2 && i.getOperands()[2]->get()) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get())) {
+                    idx = ci->getValue();
+                }
+            }
             if (isFloat) {
                 *os << "  fl" << (elemBits == 32 ? "w" : "d") << " fa0, " << valStr << "\n";
-                *os << "  vfmv.s.f " << dst << ", fa0\n";
+                if (idx == 0) {
+                    *os << "  vfmv.s.f " << dst << ", fa0\n";
+                } else {
+                    *os << "  vfmv.s.f v1, fa0\n";
+                    *os << "  vslideup.vi " << dst << ", v1, " << idx << "\n";
+                }
             } else {
                 *os << "  ld a0, " << valStr << "\n";
-                *os << "  vmv.s.x " << dst << ", a0\n";
+                if (idx == 0) {
+                    *os << "  vmv.s.x " << dst << ", a0\n";
+                } else {
+                    *os << "  vmv.s.x v1, a0\n";
+                    *os << "  vslideup.vi " << dst << ", v1, " << idx << "\n";
+                }
             }
             break;
         }

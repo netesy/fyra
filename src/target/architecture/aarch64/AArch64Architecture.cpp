@@ -182,11 +182,40 @@ void AArch64Architecture::emitStartFunction(CodeGen& cg) {
 void AArch64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (!i.getOperands().empty() && i.getOperands()[0] && i.getOperands()[0]->get() != nullptr) {
         ir::Value* rv = i.getOperands()[0]->get();
-        if (auto* os = cg.getTextStream()) *os << "  ldr " << getRegisterName("x0", rv->getType()) << ", " << cg.getValueAsOperand(rv) << "\n";
+        if (auto* os = cg.getTextStream()) {
+            std::string regName = "x0";
+            if (rv->getType() && rv->getType()->isFloatingPoint()) {
+                regName = (rv->getType()->getSize() == 4) ? "s0" : "d0";
+            } else {
+                regName = getRegisterName("x0", rv->getType());
+            }
+            *os << "  ldr " << regName << ", " << cg.getValueAsOperand(rv) << "\n";
+        }
         else emitLoadValue(cg, cg.getAssembler(), rv, 0);
     }
-    if (auto* os = cg.getTextStream()) *os << "  b " << i.getParent()->getParent()->getName() << "_epilogue\n";
-    else emitFunctionEpilogue(cg, *i.getParent()->getParent());
+    ir::Function* func = i.getParent()->getParent();
+    size_t local_area_size = -currentStackOffset;
+    std::set<std::string> usedCS;
+    bool hasCalls = false;
+    for (auto& bb : func->getBasicBlocks()) {
+        for (auto& instr : bb->getInstructions()) {
+            if (instr->getOpcode() == ir::Instruction::Call) hasCalls = true;
+            if (instr->hasPhysicalRegister()) {
+                std::string reg = getRegisters(RegisterClass::Integer)[instr->getPhysicalRegister()];
+                if (isCalleeSaved(reg)) usedCS.insert(reg);
+            }
+        }
+    }
+    bool isLeaf = !hasCalls;
+    bool needsFrame = !isLeaf || local_area_size > 0 || !usedCS.empty();
+    if (auto* os = cg.getTextStream()) {
+        if (!needsFrame) {
+            *os << "  ret\n";
+        } else {
+            *os << "  b " << func->getName() << "_epilogue\n";
+        }
+    }
+    else emitFunctionEpilogue(cg, *func);
 }
 
 void AArch64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
@@ -668,9 +697,13 @@ void AArch64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
         std::string loadMnemonic = "ldr";
         std::string regName = "x10";
         size_t size = i.getType() ? i.getType()->getSize() : 8;
-        if (size == 1) { loadMnemonic = "ldrb"; regName = "w10"; }
-        else if (size == 2) { loadMnemonic = "ldrh"; regName = "w10"; }
-        else if (size == 4) { loadMnemonic = "ldr"; regName = "w10"; }
+        if (i.getType() && i.getType()->isFloatingPoint()) {
+            regName = (size == 4) ? "s10" : "d10";
+        } else {
+            if (size == 1) { loadMnemonic = "ldrb"; regName = "w10"; }
+            else if (size == 2) { loadMnemonic = "ldrh"; regName = "w10"; }
+            else if (size == 4) { loadMnemonic = "ldr"; regName = "w10"; }
+        }
 
         ir::Value* ptrVal = i.getOperands()[0]->get();
         AArch64ComplexAddress addr = matchComplexAddress(cg, ptrVal);
@@ -691,9 +724,13 @@ void AArch64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
         std::string regName = "x10";
         ir::Value* val = i.getOperands()[0]->get();
         size_t size = val->getType() ? val->getType()->getSize() : 8;
-        if (size == 1) { storeMnemonic = "strb"; regName = "w10"; }
-        else if (size == 2) { storeMnemonic = "strh"; regName = "w10"; }
-        else if (size == 4) { storeMnemonic = "str"; regName = "w10"; }
+        if (val->getType() && val->getType()->isFloatingPoint()) {
+            regName = (size == 4) ? "s10" : "d10";
+        } else {
+            if (size == 1) { storeMnemonic = "strb"; regName = "w10"; }
+            else if (size == 2) { storeMnemonic = "strh"; regName = "w10"; }
+            else if (size == 4) { storeMnemonic = "str"; regName = "w10"; }
+        }
 
         ir::Value* ptrVal = i.getOperands()[1]->get();
         AArch64ComplexAddress addr = matchComplexAddress(cg, ptrVal);
@@ -1330,44 +1367,107 @@ void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
             break;
         }
         case ir::Instruction::VBroadcast: {
-            std::string scalar = cg.getValueAsOperand(i.getOperands()[0]->get());
-            *os << "  dup " << dst << arrange << ", " << scalar << "\n";
+            ir::Value* sVal = i.getOperands()[0]->get();
+            std::string scalar = cg.getValueAsOperand(sVal);
+            std::string srcReg = scalar;
+            bool isFloat = sVal->getType() && sVal->getType()->isFloatingPoint();
+            if (scalar.empty() || scalar[0] == '[' || scalar[0] == '#' || scalar.find('x') == std::string::npos) {
+                if (isFloat) {
+                    srcReg = (sVal->getType()->getSize() == 4) ? "s16" : "d16";
+                    *os << "  ldr " << srcReg << ", " << scalar << "\n";
+                } else {
+                    srcReg = getRegisterName("x9", sVal->getType());
+                    if (!scalar.empty() && scalar[0] == '#') *os << "  mov " << srcReg << ", " << scalar << "\n";
+                    else *os << "  ldr " << srcReg << ", " << scalar << "\n";
+                }
+            }
+            std::string realDst = (dst.empty() || dst[0] != 'v') ? "v16" : dst;
+            *os << "  dup " << realDst << arrange << ", " << srcReg << "\n";
+            if (dst != realDst) *os << "  str " << realDst << ", " << rawDst << "\n";
             break;
         }
         case ir::Instruction::VExtract: {
-            std::string vec = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string vecStr = cg.getValueAsOperand(i.getOperands()[0]->get());
+            std::string vec = vecStr;
+            if (vec.empty() || vec[0] != 'v') {
+                *os << "  ldr q16, " << vecStr << "\n";
+                vec = "v16";
+            } else vec = getRegisterName(vec, vecTy);
+
             uint64_t idx = 0;
-            if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
-                idx = ci->getValue();
+            if (i.getOperands().size() > 1 && i.getOperands()[1]->get()) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+                    idx = ci->getValue();
+                }
             }
+
+            unsigned bits = (vecTy && vecTy->getElementType()) ? vecTy->getElementType()->getSize() * 8 : 32;
+            bool isFloat = vecTy && vecTy->getElementType() && vecTy->getElementType()->isFloatingPoint();
             std::string elementSpec = ".s[" + std::to_string(idx) + "]";
-            if (vecTy && vecTy->getElementType()) {
-                unsigned bits = vecTy->getElementType()->getSize() * 8;
-                if (bits == 8) elementSpec = ".b[" + std::to_string(idx) + "]";
-                else if (bits == 16) elementSpec = ".h[" + std::to_string(idx) + "]";
-                else if (bits == 32) elementSpec = ".s[" + std::to_string(idx) + "]";
-                else if (bits == 64) elementSpec = ".d[" + std::to_string(idx) + "]";
+            if (bits == 8) elementSpec = ".b[" + std::to_string(idx) + "]";
+            else if (bits == 16) elementSpec = ".h[" + std::to_string(idx) + "]";
+            else if (bits == 32) elementSpec = ".s[" + std::to_string(idx) + "]";
+            else if (bits == 64) elementSpec = ".d[" + std::to_string(idx) + "]";
+
+            std::string targetReg;
+            if (isFloat) {
+                targetReg = (bits == 32) ? "s16" : "d16";
+            } else {
+                targetReg = (bits == 64) ? "x9" : "w9";
             }
-            *os << "  mov " << dst << ", " << vec << elementSpec << "\n";
+
+            if (!rawDst.empty() && (rawDst[0] == 'x' || rawDst[0] == 'w' || rawDst[0] == 's' || rawDst[0] == 'd')) {
+                targetReg = rawDst;
+            }
+
+            *os << "  mov " << targetReg << ", " << vec << elementSpec << "\n";
+            if (targetReg != rawDst) {
+                *os << "  str " << targetReg << ", " << rawDst << "\n";
+            }
             break;
         }
         case ir::Instruction::VInsert: {
-            std::string vec = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
-            std::string val = cg.getValueAsOperand(i.getOperands()[1]->get());
+            std::string vecStr = cg.getValueAsOperand(i.getOperands()[0]->get());
+            std::string vec = vecStr;
+            if (vec.empty() || vec[0] != 'v') {
+                *os << "  ldr q16, " << vecStr << "\n";
+                vec = "v16";
+            } else vec = getRegisterName(vec, vecTy);
+
+            ir::Value* valVal = i.getOperands()[1]->get();
+            std::string valStr = cg.getValueAsOperand(valVal);
+            unsigned bits = (vecTy && vecTy->getElementType()) ? vecTy->getElementType()->getSize() * 8 : 32;
+            bool isFloat = vecTy && vecTy->getElementType() && vecTy->getElementType()->isFloatingPoint();
+
+            std::string valReg = valStr;
+            if (valStr.empty() || valStr[0] == '[' || valStr[0] == '#' || valStr.find('x') == std::string::npos) {
+                if (isFloat) {
+                    valReg = (bits == 32) ? "s17" : "d17";
+                    *os << "  ldr " << valReg << ", " << valStr << "\n";
+                } else {
+                    valReg = (bits == 64) ? "x10" : "w10";
+                    if (!valStr.empty() && valStr[0] == '#') *os << "  mov " << valReg << ", " << valStr << "\n";
+                    else *os << "  ldr " << valReg << ", " << valStr << "\n";
+                }
+            }
+
             uint64_t idx = 0;
-            if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get())) {
-                idx = ci->getValue();
+            if (i.getOperands().size() > 2 && i.getOperands()[2]->get()) {
+                if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get())) {
+                    idx = ci->getValue();
+                }
             }
+
             std::string elementSpec = ".s[" + std::to_string(idx) + "]";
-            if (vecTy && vecTy->getElementType()) {
-                unsigned bits = vecTy->getElementType()->getSize() * 8;
-                if (bits == 8) elementSpec = ".b[" + std::to_string(idx) + "]";
-                else if (bits == 16) elementSpec = ".h[" + std::to_string(idx) + "]";
-                else if (bits == 32) elementSpec = ".s[" + std::to_string(idx) + "]";
-                else if (bits == 64) elementSpec = ".d[" + std::to_string(idx) + "]";
-            }
-            if (dst != vec) *os << "  mov " << dst << ".16b, " << vec << ".16b\n";
-            *os << "  mov " << dst << elementSpec << ", " << val << "\n";
+            if (bits == 8) elementSpec = ".b[" + std::to_string(idx) + "]";
+            else if (bits == 16) elementSpec = ".h[" + std::to_string(idx) + "]";
+            else if (bits == 32) elementSpec = ".s[" + std::to_string(idx) + "]";
+            else if (bits == 64) elementSpec = ".d[" + std::to_string(idx) + "]";
+
+            std::string realDst = (dst.empty() || dst[0] != 'v') ? "v16" : dst;
+            if (realDst != vec) *os << "  mov " << realDst << ".16b, " << vec << ".16b\n";
+            *os << "  mov " << realDst << elementSpec << ", " << valReg << "\n";
+            if (dst != realDst) *os << "  str " << realDst << ", " << rawDst << "\n";
             break;
         }
         case ir::Instruction::FMA: {
