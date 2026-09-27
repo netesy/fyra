@@ -311,6 +311,175 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                     }
                     break;
 
+                case ir::Instruction::Neg:
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(0));
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Sub));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::Not:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(-1));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Xor));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::SMin:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32LtS));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::Select));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::SMax:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32GtS));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::Select));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::FAdd:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple((i.getType() && i.getType()->isDoubleTy()) ? WasmOpcode::F64Add : WasmOpcode::F32Add));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::FSub:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple((i.getType() && i.getType()->isDoubleTy()) ? WasmOpcode::F64Sub : WasmOpcode::F32Sub));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::FMul:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple((i.getType() && i.getType()->isDoubleTy()) ? WasmOpcode::F64Mul : WasmOpcode::F32Mul));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::FDiv:
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple((i.getType() && i.getType()->isDoubleTy()) ? WasmOpcode::F64Div : WasmOpcode::F32Div));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::ExtUB:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(255));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32And));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::ExtUH:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(65535));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32And));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::ExtUW:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I64ExtendI32U));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::ExtSB:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(24));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Shl));
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(24));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32ShrS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::ExtSH:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(16));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Shl));
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(16));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32ShrS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::ExtSW:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I64ExtendI32S));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::UWtoF:
+                case ir::Instruction::Ultof:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple((i.getType() && i.getType()->isDoubleTy()) ? WasmOpcode::F64ConvertI32U : WasmOpcode::F32ConvertI32U));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::SWtoF:
+                case ir::Instruction::Sltof:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple((i.getType() && i.getType()->isDoubleTy()) ? WasmOpcode::F64ConvertI32S : WasmOpcode::F32ConvertI32S));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::DToUI:
+                case ir::Instruction::SToUI:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32TruncF32U));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
+                case ir::Instruction::TruncD:
+                    pushOperand(i.getOperands()[0]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32WrapI64));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+
                 case ir::Instruction::Sub:
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
@@ -319,6 +488,54 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
                     break;
+
+                case ir::Instruction::VMin: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4MinS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::VMax: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4MaxS));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::VFMin: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    WasmSIMDOpcode op = WasmSIMDOpcode::F32x4Min;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->isDoubleTy()) op = WasmSIMDOpcode::F64x2Min;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::VFMax: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    WasmSIMDOpcode op = WasmSIMDOpcode::F32x4Max;
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(i.getType())) {
+                        if (vt->getElementType()->isDoubleTy()) op = WasmSIMDOpcode::F64x2Max;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(op));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
 
                 case ir::Instruction::Mul:
                     pushOperand(i.getOperands()[0]->get());
@@ -435,24 +652,154 @@ WasmModule WasmLowering::lower(const ir::Module& irModule) {
                 case ir::Instruction::Cult:
                 case ir::Instruction::Cule:
                 case ir::Instruction::Cugt:
-                case ir::Instruction::Cuge: {
+                case ir::Instruction::Cuge:
+                case ir::Instruction::Ceqf:
+                case ir::Instruction::Cnef:
+                case ir::Instruction::Cle:
+                case ir::Instruction::Clt:
+                case ir::Instruction::Cge:
+                case ir::Instruction::Cgt: {
                     pushOperand(i.getOperands()[0]->get());
                     pushOperand(i.getOperands()[1]->get());
+                    bool isFloat = i.getOperands()[0]->get()->getType() && i.getOperands()[0]->get()->getType()->isFloatingPoint();
+                    bool isDouble = isFloat && i.getOperands()[0]->get()->getType()->isDoubleTy();
                     WasmOpcode op = WasmOpcode::I32Eq;
-                    switch (i.getOpcode()) {
-                        case ir::Instruction::Ceq: op = WasmOpcode::I32Eq; break;
-                        case ir::Instruction::Cne: op = WasmOpcode::I32Ne; break;
-                        case ir::Instruction::Cslt: op = WasmOpcode::I32LtS; break;
-                        case ir::Instruction::Csle: op = WasmOpcode::I32LeS; break;
-                        case ir::Instruction::Csgt: op = WasmOpcode::I32GtS; break;
-                        case ir::Instruction::Csge: op = WasmOpcode::I32GeS; break;
-                        case ir::Instruction::Cult: op = WasmOpcode::I32LtU; break;
-                        case ir::Instruction::Cule: op = WasmOpcode::I32LeU; break;
-                        case ir::Instruction::Cugt: op = WasmOpcode::I32GtU; break;
-                        case ir::Instruction::Cuge: op = WasmOpcode::I32GeU; break;
-                        default: break;
+                    if (isDouble) {
+                        switch (i.getOpcode()) {
+                            case ir::Instruction::Ceqf: op = WasmOpcode::F64Eq; break;
+                            case ir::Instruction::Cnef: op = WasmOpcode::F64Ne; break;
+                            case ir::Instruction::Clt: op = WasmOpcode::F64Lt; break;
+                            case ir::Instruction::Cle: op = WasmOpcode::F64Le; break;
+                            case ir::Instruction::Cgt: op = WasmOpcode::F64Gt; break;
+                            case ir::Instruction::Cge: op = WasmOpcode::F64Ge; break;
+                            default: op = WasmOpcode::F64Eq; break;
+                        }
+                    } else if (isFloat) {
+                        switch (i.getOpcode()) {
+                            case ir::Instruction::Ceqf: op = WasmOpcode::F32Eq; break;
+                            case ir::Instruction::Cnef: op = WasmOpcode::F32Ne; break;
+                            case ir::Instruction::Clt: op = WasmOpcode::F32Lt; break;
+                            case ir::Instruction::Cle: op = WasmOpcode::F32Le; break;
+                            case ir::Instruction::Cgt: op = WasmOpcode::F32Gt; break;
+                            case ir::Instruction::Cge: op = WasmOpcode::F32Ge; break;
+                            default: op = WasmOpcode::F32Eq; break;
+                        }
+                    } else {
+                        switch (i.getOpcode()) {
+                            case ir::Instruction::Ceq: op = WasmOpcode::I32Eq; break;
+                            case ir::Instruction::Cne: op = WasmOpcode::I32Ne; break;
+                            case ir::Instruction::Cslt: op = WasmOpcode::I32LtS; break;
+                            case ir::Instruction::Csle: op = WasmOpcode::I32LeS; break;
+                            case ir::Instruction::Csgt: op = WasmOpcode::I32GtS; break;
+                            case ir::Instruction::Csge: op = WasmOpcode::I32GeS; break;
+                            case ir::Instruction::Cult: op = WasmOpcode::I32LtU; break;
+                            case ir::Instruction::Cule: op = WasmOpcode::I32LeU; break;
+                            case ir::Instruction::Cugt: op = WasmOpcode::I32GtU; break;
+                            case ir::Instruction::Cuge: op = WasmOpcode::I32GeU; break;
+                            default: op = WasmOpcode::I32Eq; break;
+                        }
                     }
                     wasmFunc.body.push_back(WasmInstruction::makeSimple(op));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::Load:
+                case ir::Instruction::Loadd:
+                case ir::Instruction::Loads:
+                case ir::Instruction::Loadl:
+                case ir::Instruction::Loaduw:
+                case ir::Instruction::Loadsh:
+                case ir::Instruction::Loaduh:
+                case ir::Instruction::Loadsb:
+                case ir::Instruction::Loadub: {
+                    pushOperand(i.getOperands()[0]->get());
+                    WasmOpcode op = WasmOpcode::I32Load;
+                    switch (i.getOpcode()) {
+                        case ir::Instruction::Loadd: op = WasmOpcode::F64Load; break;
+                        case ir::Instruction::Loads: op = WasmOpcode::F32Load; break;
+                        case ir::Instruction::Loadl: op = WasmOpcode::I64Load; break;
+                        case ir::Instruction::Loaduw: op = WasmOpcode::I32Load; break;
+                        case ir::Instruction::Loadsh: op = WasmOpcode::I32Load16S; break;
+                        case ir::Instruction::Loaduh: op = WasmOpcode::I32Load16U; break;
+                        case ir::Instruction::Loadsb: op = WasmOpcode::I32Load8S; break;
+                        case ir::Instruction::Loadub: op = WasmOpcode::I32Load8U; break;
+                        default:
+                            if (i.getType()) {
+                                if (i.getType()->isDoubleTy()) op = WasmOpcode::F64Load;
+                                else if (i.getType()->isFloatTy()) op = WasmOpcode::F32Load;
+                                else if (i.getType()->getSize() == 8) op = WasmOpcode::I64Load;
+                                else if (i.getType()->getSize() == 2) op = WasmOpcode::I32Load16S;
+                                else if (i.getType()->getSize() == 1) op = WasmOpcode::I32Load8S;
+                                else op = WasmOpcode::I32Load;
+                            }
+                            break;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(op));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::Store:
+                case ir::Instruction::Stored:
+                case ir::Instruction::Stores:
+                case ir::Instruction::Storel:
+                case ir::Instruction::Storeh:
+                case ir::Instruction::Storeb: {
+                    pushOperand(i.getOperands()[1]->get());
+                    pushOperand(i.getOperands()[0]->get());
+                    WasmOpcode op = WasmOpcode::I32Store;
+                    switch (i.getOpcode()) {
+                        case ir::Instruction::Stored: op = WasmOpcode::F64Store; break;
+                        case ir::Instruction::Stores: op = WasmOpcode::F32Store; break;
+                        case ir::Instruction::Storel: op = WasmOpcode::I64Store; break;
+                        case ir::Instruction::Storeh: op = WasmOpcode::I32Store16; break;
+                        case ir::Instruction::Storeb: op = WasmOpcode::I32Store8; break;
+                        default:
+                            if (i.getOperands()[0]->get() && i.getOperands()[0]->get()->getType()) {
+                                const ir::Type* st = i.getOperands()[0]->get()->getType();
+                                if (st->isDoubleTy()) op = WasmOpcode::F64Store;
+                                else if (st->isFloatTy()) op = WasmOpcode::F32Store;
+                                else if (st->getSize() == 8) op = WasmOpcode::I64Store;
+                                else if (st->getSize() == 2) op = WasmOpcode::I32Store16;
+                                else if (st->getSize() == 1) op = WasmOpcode::I32Store8;
+                                else op = WasmOpcode::I32Store;
+                            }
+                            break;
+                    }
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(op));
+                    break;
+                }
+
+                case ir::Instruction::Alloc:
+                case ir::Instruction::Alloc4:
+                case ir::Instruction::Alloc16: {
+                    wasmFunc.body.push_back(WasmInstruction::makeConstI32(0));
+                    wasmFunc.body.push_back(WasmInstruction::makeSimple(WasmOpcode::I32Load));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::VShl: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4Shl));
+                    if (localIndices.count(&i)) {
+                        wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
+                    }
+                    break;
+                }
+
+                case ir::Instruction::VShr: {
+                    pushOperand(i.getOperands()[0]->get());
+                    pushOperand(i.getOperands()[1]->get());
+                    wasmFunc.body.push_back(WasmInstruction::makeSIMD(WasmSIMDOpcode::I32x4ShrS));
                     if (localIndices.count(&i)) {
                         wasmFunc.body.push_back(WasmInstruction::makeLocalSet(localIndices.at(&i)));
                     }
@@ -972,6 +1319,26 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                 case WasmOpcode::LocalSet: ss << "    local.set " << inst.uintImm << "\n"; break;
                 case WasmOpcode::LocalTee: ss << "    local.tee " << inst.uintImm << "\n"; break;
                 case WasmOpcode::Drop: ss << "    drop\n"; break;
+                case WasmOpcode::Select: ss << "    select\n"; break;
+                case WasmOpcode::F32Add: ss << "    f32.add\n"; break;
+                case WasmOpcode::F32Sub: ss << "    f32.sub\n"; break;
+                case WasmOpcode::F32Mul: ss << "    f32.mul\n"; break;
+                case WasmOpcode::F32Div: ss << "    f32.div\n"; break;
+                case WasmOpcode::F64Add: ss << "    f64.add\n"; break;
+                case WasmOpcode::F64Sub: ss << "    f64.sub\n"; break;
+                case WasmOpcode::F64Mul: ss << "    f64.mul\n"; break;
+                case WasmOpcode::F64Div: ss << "    f64.div\n"; break;
+                case WasmOpcode::I32WrapI64: ss << "    i32.wrap_i64\n"; break;
+                case WasmOpcode::I32TruncF32S: ss << "    i32.trunc_f32_s\n"; break;
+                case WasmOpcode::I32TruncF32U: ss << "    i32.trunc_f32_u\n"; break;
+                case WasmOpcode::I32TruncF64S: ss << "    i32.trunc_f64_s\n"; break;
+                case WasmOpcode::I32TruncF64U: ss << "    i32.trunc_f64_u\n"; break;
+                case WasmOpcode::I64ExtendI32S: ss << "    i64.extend_i32_s\n"; break;
+                case WasmOpcode::I64ExtendI32U: ss << "    i64.extend_i32_u\n"; break;
+                case WasmOpcode::F32ConvertI32S: ss << "    f32.convert_i32_s\n"; break;
+                case WasmOpcode::F32ConvertI32U: ss << "    f32.convert_i32_u\n"; break;
+                case WasmOpcode::F64ConvertI32S: ss << "    f64.convert_i32_s\n"; break;
+                case WasmOpcode::F64ConvertI32U: ss << "    f64.convert_i32_u\n"; break;
                 case WasmOpcode::I32Add: ss << "    i32.add\n"; break;
                 case WasmOpcode::I32Sub: ss << "    i32.sub\n"; break;
                 case WasmOpcode::I32Mul: ss << "    i32.mul\n"; break;
@@ -995,6 +1362,32 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                 case WasmOpcode::I32GtU: ss << "    i32.gt_u\n"; break;
                 case WasmOpcode::I32GeS: ss << "    i32.ge_s\n"; break;
                 case WasmOpcode::I32GeU: ss << "    i32.ge_u\n"; break;
+                case WasmOpcode::I32Load: ss << "    i32.load\n"; break;
+                case WasmOpcode::I64Load: ss << "    i64.load\n"; break;
+                case WasmOpcode::F32Load: ss << "    f32.load\n"; break;
+                case WasmOpcode::F64Load: ss << "    f64.load\n"; break;
+                case WasmOpcode::I32Load8S: ss << "    i32.load8_s\n"; break;
+                case WasmOpcode::I32Load8U: ss << "    i32.load8_u\n"; break;
+                case WasmOpcode::I32Load16S: ss << "    i32.load16_s\n"; break;
+                case WasmOpcode::I32Load16U: ss << "    i32.load16_u\n"; break;
+                case WasmOpcode::I32Store: ss << "    i32.store\n"; break;
+                case WasmOpcode::I64Store: ss << "    i64.store\n"; break;
+                case WasmOpcode::F32Store: ss << "    f32.store\n"; break;
+                case WasmOpcode::F64Store: ss << "    f64.store\n"; break;
+                case WasmOpcode::I32Store8: ss << "    i32.store8\n"; break;
+                case WasmOpcode::I32Store16: ss << "    i32.store16\n"; break;
+                case WasmOpcode::F32Eq: ss << "    f32.eq\n"; break;
+                case WasmOpcode::F32Ne: ss << "    f32.ne\n"; break;
+                case WasmOpcode::F32Lt: ss << "    f32.lt\n"; break;
+                case WasmOpcode::F32Le: ss << "    f32.le\n"; break;
+                case WasmOpcode::F32Gt: ss << "    f32.gt\n"; break;
+                case WasmOpcode::F32Ge: ss << "    f32.ge\n"; break;
+                case WasmOpcode::F64Eq: ss << "    f64.eq\n"; break;
+                case WasmOpcode::F64Ne: ss << "    f64.ne\n"; break;
+                case WasmOpcode::F64Lt: ss << "    f64.lt\n"; break;
+                case WasmOpcode::F64Le: ss << "    f64.le\n"; break;
+                case WasmOpcode::F64Gt: ss << "    f64.gt\n"; break;
+                case WasmOpcode::F64Ge: ss << "    f64.ge\n"; break;
                 case WasmOpcode::Call: {
                     if (!inst.symbolImm.empty()) {
                         std::string sym = inst.symbolImm;
@@ -1018,6 +1411,9 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                     switch (inst.simdOpcode) {
                         case WasmSIMDOpcode::V128Load: ss << "    v128.load\n"; break;
                         case WasmSIMDOpcode::V128Store: ss << "    v128.store\n"; break;
+                        case WasmSIMDOpcode::I32x4Shl: ss << "    i32x4.shl\n"; break;
+                        case WasmSIMDOpcode::I32x4ShrS: ss << "    i32x4.shr_s\n"; break;
+                        case WasmSIMDOpcode::I32x4ShrU: ss << "    i32x4.shr_u\n"; break;
                         case WasmSIMDOpcode::I32x4Add: ss << "    i32x4.add\n"; break;
                         case WasmSIMDOpcode::I32x4Sub: ss << "    i32x4.sub\n"; break;
                         case WasmSIMDOpcode::I32x4Mul: ss << "    i32x4.mul\n"; break;
@@ -1035,6 +1431,12 @@ std::string WasmWatWriter::write(const WasmModule& module) {
                         case WasmSIMDOpcode::F32x4Eq: ss << "    f32x4.eq\n"; break;
                         case WasmSIMDOpcode::F32x4Lt: ss << "    f32x4.lt\n"; break;
                         case WasmSIMDOpcode::F32x4Gt: ss << "    f32x4.gt\n"; break;
+                        case WasmSIMDOpcode::I32x4MinS: ss << "    i32x4.min_s\n"; break;
+                        case WasmSIMDOpcode::I32x4MaxS: ss << "    i32x4.max_s\n"; break;
+                        case WasmSIMDOpcode::F32x4Min: ss << "    f32x4.min\n"; break;
+                        case WasmSIMDOpcode::F32x4Max: ss << "    f32x4.max\n"; break;
+                        case WasmSIMDOpcode::F64x2Min: ss << "    f64x2.min\n"; break;
+                        case WasmSIMDOpcode::F64x2Max: ss << "    f64x2.max\n"; break;
                         case WasmSIMDOpcode::F64x2Add: ss << "    f64x2.add\n"; break;
                         case WasmSIMDOpcode::F64x2Mul: ss << "    f64x2.mul\n"; break;
                         case WasmSIMDOpcode::V128Bitselect: ss << "    v128.bitselect\n"; break;
@@ -1148,6 +1550,23 @@ std::vector<uint8_t> WasmBinaryWriter::write(const WasmModule& module) {
                     case WasmOpcode::Br:
                     case WasmOpcode::BrIf:
                         encodeUnsignedLeb(body, inst.uintImm);
+                        break;
+                    case WasmOpcode::I32Load:
+                    case WasmOpcode::I64Load:
+                    case WasmOpcode::F32Load:
+                    case WasmOpcode::F64Load:
+                    case WasmOpcode::I32Load8S:
+                    case WasmOpcode::I32Load8U:
+                    case WasmOpcode::I32Load16S:
+                    case WasmOpcode::I32Load16U:
+                    case WasmOpcode::I32Store:
+                    case WasmOpcode::I64Store:
+                    case WasmOpcode::F32Store:
+                    case WasmOpcode::F64Store:
+                    case WasmOpcode::I32Store8:
+                    case WasmOpcode::I32Store16:
+                        encodeUnsignedLeb(body, 0); // align
+                        encodeUnsignedLeb(body, 0); // offset
                         break;
                     case WasmOpcode::SIMDPrefix:
                         encodeUnsignedLeb(body, static_cast<uint32_t>(inst.simdOpcode));
