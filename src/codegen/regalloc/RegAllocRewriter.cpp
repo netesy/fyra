@@ -83,7 +83,7 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
                     if (location_map.count(operand_vreg) && std::holds_alternative<StackSlot>(location_map.at(operand_vreg))) {
                         int slot = func.getStackSlotForVreg(operand_vreg);
                         if (slot > 0) {
-                            if (!operand_vreg->getOperands().empty() && operand_vreg->getOperands()[0]) {
+                            if (operand_vreg->getOpcode() == ir::Instruction::Copy && !operand_vreg->getOperands().empty() && operand_vreg->getOperands()[0]) {
                                 if (auto* c = dynamic_cast<ir::ConstantInt*>(operand_vreg->getOperands()[0]->get())) {
                                     use->set(c);
                                     continue;

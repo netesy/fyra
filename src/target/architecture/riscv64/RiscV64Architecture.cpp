@@ -275,7 +275,17 @@ void RiscV64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         for (size_t j = 1; j < std::min(i.getOperands().size(), (size_t)9); ++j) {
             *os << "  ld a" << (j - 1) << ", " << cg.getValueAsOperand(i.getOperands()[j]->get()) << "\n";
         }
-        *os << "  call " << i.getOperands()[0]->get()->getName() << "\n";
+        ir::Value* calleeVal = (!i.getOperands().empty() && i.getOperands()[0]) ? i.getOperands()[0]->get() : nullptr;
+        bool isDirect = calleeVal && (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                                     (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+        if (isDirect) {
+            *os << "  call " << calleeVal->getName() << "\n";
+        } else if (calleeVal) {
+            *os << "  ld t0, " << cg.getValueAsOperand(calleeVal) << "\n";
+            *os << "  jalr t0\n";
+        } else {
+            *os << "  call unk\n";
+        }
         if (i.getType() && !i.getType()->isVoidTy()) {
             *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
         }

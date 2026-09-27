@@ -158,13 +158,11 @@ set_tests_properties(WasmExecutionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOUR
 # add_test(NAME RiscVInMemoryExecTest COMMAND test_inmemory_riscv_exec)
 # set_tests_properties(RiscVInMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-if(FYRA_ENABLE_EXTENDED_TESTS)
-    add_executable(test_benchmark_suite test_benchmark_suite.cpp)
-    target_link_libraries(test_benchmark_suite PRIVATE fyra)
+add_executable(test_benchmark_suite test_benchmark_suite.cpp)
+target_link_libraries(test_benchmark_suite PRIVATE fyra)
 
-    add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
-    set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-endif()
+add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
+set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_http_server test_http_server.cpp)
 target_link_libraries(test_http_server PRIVATE fyra)

@@ -163,6 +163,7 @@ def verify_static(exec_path):
 def parse_args():
     parser = argparse.ArgumentParser(description="Fyra Backend — Multi-Category Benchmark Harness")
     parser.add_argument("--filter", type=str, default=os.environ.get("FYRA_BENCH_FILTER", ""), help="Comma-separated list of benchmarks to run")
+    parser.add_argument("--targets", type=str, default=os.environ.get("FYRA_BENCH_TARGETS", "x64-linux,aarch64-linux,riscv64-linux,wasm32-wasi"), help="Comma-separated list of target architectures (x64-linux, aarch64-linux, riscv64-linux, wasm32-wasi)")
     parser.add_argument("--samples", type=int, default=int(os.environ.get("FYRA_BENCH_SAMPLES", "15")), help="Number of timing samples per benchmark")
     parser.add_argument("--warmup", type=int, default=int(os.environ.get("FYRA_BENCH_WARMUP", "2")), help="Number of warmup executions per benchmark")
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("FYRA_BENCH_TIMEOUT", "30")), help="Execution timeout in seconds")
@@ -216,6 +217,30 @@ def main():
             f"clang -static -O2 {c_src} -o {clang_exec}",
         ]
 
+        target_list = [t.strip() for t in args.targets.split(",") if t.strip()]
+
+        for target_triple in target_list:
+            t_sanitized = target_triple.replace("-", "_")
+            t_o2_s = os.path.join(out_dir, f"fyra_{t_sanitized}_o2.s")
+            t_scalar_s = os.path.join(out_dir, f"fyra_{t_sanitized}_scalar.s")
+
+            cmd_o2 = f"{FYRA_BIN} {fyra_src} --target {target_triple} -o {t_o2_s} -O2"
+            cmd_scalar = f"{FYRA_BIN} {fyra_src} --target {target_triple} -o {t_scalar_s} -O2 --disable-slp"
+
+            rc1, stdout1, stderr1 = run_cmd(cmd_o2, timeout=args.timeout)
+            if rc1 != 0:
+                print(f"[FAILED] {bname} ({target_triple}): command failed ({rc1}): {cmd_o2}\n{stderr1}")
+                return 1
+
+            rc2, stdout2, stderr2 = run_cmd(cmd_scalar, timeout=args.timeout)
+            if rc2 != 0:
+                print(f"[FAILED] {bname} ({target_triple}): command failed ({rc2}): {cmd_scalar}\n{stderr2}")
+                return 1
+
+            t_o2_s_real = t_o2_s + ".s" if os.path.exists(t_o2_s + ".s") else (t_o2_s + ".wat" if os.path.exists(t_o2_s + ".wat") else t_o2_s)
+            asm_data = analyze_assembly(t_o2_s_real)
+            print(f"  [{target_triple:<15}] Output verified | Instrs: {asm_data['total']:<4} | Loads: {asm_data['loads']:<3} | Stores: {asm_data['stores']:<3} | VecInstrs: {asm_data['vector_instrs']}")
+
         fyra_o1_s = os.path.join(out_dir, "fyra_o1.s")
         fyra_o2_s = os.path.join(out_dir, "fyra_o2.s")
         fyra_scalar_s = os.path.join(out_dir, "fyra_scalar.s")
@@ -223,9 +248,9 @@ def main():
         fyra_scalar_exec = os.path.join(out_dir, "fyra_scalar_exec")
 
         commands += [
-            f"{FYRA_BIN} {fyra_src} -o {fyra_o1_s} -O1",
-            f"{FYRA_BIN} {fyra_src} -o {fyra_o2_s} -O2",
-            f"{FYRA_BIN} {fyra_src} -o {fyra_scalar_s} -O2 --disable-slp",
+            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_o1_s} -O1",
+            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_o2_s} -O2",
+            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_scalar_s} -O2 --disable-slp",
         ]
         for command in commands:
             t0 = time.time()

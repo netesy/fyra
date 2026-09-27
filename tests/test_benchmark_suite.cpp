@@ -106,6 +106,7 @@ bool verify_target(ir::Module& module, const std::string& targetName) {
 int main() {
     std::string test_file = "tests/benchmark_suite.fyra";
     std::ifstream input(test_file);
+    if (!input.good()) input.open("../" + test_file);
     if (!input.good()) {
         std::cerr << "Could not open " << test_file << std::endl;
         return 1;

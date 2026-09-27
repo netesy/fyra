@@ -85,7 +85,18 @@ void AArch64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) 
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getOpcode() == ir::Instruction::Call) hasCalls = true; } }
     size_t local_area_size = -currentStackOffset;
     std::set<std::string> usedCS;
-    for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->hasPhysicalRegister()) { std::string reg = getRegisters(RegisterClass::Integer)[instr->getPhysicalRegister()]; if (isCalleeSaved(reg)) usedCS.insert(reg); } } }
+    for (auto& bb : func.getBasicBlocks()) {
+        for (auto& instr : bb->getInstructions()) {
+            if (instr->hasPhysicalRegister()) {
+                size_t pReg = instr->getPhysicalRegister();
+                const auto& intRegs = getRegisters(RegisterClass::Integer);
+                if (pReg < intRegs.size()) {
+                    std::string reg = intRegs[pReg];
+                    if (isCalleeSaved(reg)) usedCS.insert(reg);
+                }
+            }
+        }
+    }
     bool isLeaf = !hasCalls;
     bool needsFrame = !isLeaf || local_area_size > 0 || !usedCS.empty();
     if (!needsFrame) return;
@@ -129,7 +140,18 @@ void AArch64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) 
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getOpcode() == ir::Instruction::Call) { hasCalls = true; break; } } if (hasCalls) break; }
     size_t local_area_size = -currentStackOffset;
     std::set<std::string> usedCS;
-    for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->hasPhysicalRegister()) { std::string reg = getRegisters(RegisterClass::Integer)[instr->getPhysicalRegister()]; if (isCalleeSaved(reg)) usedCS.insert(reg); } } }
+    for (auto& bb : func.getBasicBlocks()) {
+        for (auto& instr : bb->getInstructions()) {
+            if (instr->hasPhysicalRegister()) {
+                size_t pReg = instr->getPhysicalRegister();
+                const auto& intRegs = getRegisters(RegisterClass::Integer);
+                if (pReg < intRegs.size()) {
+                    std::string reg = intRegs[pReg];
+                    if (isCalleeSaved(reg)) usedCS.insert(reg);
+                }
+            }
+        }
+    }
     bool isLeaf = !hasCalls;
     bool needsFrame = !isLeaf || local_area_size > 0 || !usedCS.empty();
     if (!needsFrame) {
@@ -201,8 +223,12 @@ void AArch64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
         for (auto& instr : bb->getInstructions()) {
             if (instr->getOpcode() == ir::Instruction::Call) hasCalls = true;
             if (instr->hasPhysicalRegister()) {
-                std::string reg = getRegisters(RegisterClass::Integer)[instr->getPhysicalRegister()];
-                if (isCalleeSaved(reg)) usedCS.insert(reg);
+                size_t pReg = instr->getPhysicalRegister();
+                const auto& intRegs = getRegisters(RegisterClass::Integer);
+                if (pReg < intRegs.size()) {
+                    std::string reg = intRegs[pReg];
+                    if (isCalleeSaved(reg)) usedCS.insert(reg);
+                }
             }
         }
     }
@@ -394,7 +420,17 @@ void AArch64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         }
         std::reverse(s_args.begin(), s_args.end());
         for (auto* a : s_args) { *os << "  ldr x9, " << cg.getValueAsOperand(a) << "\n  str x9, [sp, #-16]!\n"; }
-        *os << "  bl " << i.getOperands()[0]->get()->getName() << "\n";
+        ir::Value* calleeVal = (!i.getOperands().empty() && i.getOperands()[0]) ? i.getOperands()[0]->get() : nullptr;
+        bool isDirect = calleeVal && (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                                     (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+        if (isDirect) {
+            *os << "  bl " << calleeVal->getName() << "\n";
+        } else if (calleeVal) {
+            *os << "  ldr x9, " << cg.getValueAsOperand(calleeVal) << "\n";
+            *os << "  blr x9\n";
+        } else {
+            *os << "  bl unk\n";
+        }
         if (!s_args.empty()) *os << "  add sp, sp, #" << s_args.size() * 16 << "\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) { std::string r = getRegisterName("x0", i.getType()); if (i.getType()->isFloatingPoint()) r = (i.getType()->getSize() == 4) ? "s0" : "d0"; *os << "  str " << r << ", " << cg.getValueAsOperand(&i) << "\n"; }
     }
@@ -697,8 +733,12 @@ void AArch64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
         std::string loadMnemonic = "ldr";
         std::string regName = "x10";
         size_t size = i.getType() ? i.getType()->getSize() : 8;
-        if (i.getType() && i.getType()->isFloatingPoint()) {
+        if (i.getType() && (i.getType()->isVectorTy() || dynamic_cast<const ir::VectorType*>(i.getType()) != nullptr)) {
+            regName = "q16";
+            loadMnemonic = "ldr";
+        } else if (i.getType() && i.getType()->isFloatingPoint()) {
             regName = (size == 4) ? "s10" : "d10";
+            loadMnemonic = "ldr";
         } else {
             if (size == 1) { loadMnemonic = "ldrb"; regName = "w10"; }
             else if (size == 2) { loadMnemonic = "ldrh"; regName = "w10"; }
@@ -724,8 +764,12 @@ void AArch64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
         std::string regName = "x10";
         ir::Value* val = i.getOperands()[0]->get();
         size_t size = val->getType() ? val->getType()->getSize() : 8;
-        if (val->getType() && val->getType()->isFloatingPoint()) {
+        if (val->getType() && (val->getType()->isVectorTy() || dynamic_cast<const ir::VectorType*>(val->getType()) != nullptr)) {
+            regName = "q16";
+            storeMnemonic = "str";
+        } else if (val->getType() && val->getType()->isFloatingPoint()) {
             regName = (size == 4) ? "s10" : "d10";
+            storeMnemonic = "str";
         } else {
             if (size == 1) { storeMnemonic = "strb"; regName = "w10"; }
             else if (size == 2) { storeMnemonic = "strh"; regName = "w10"; }
@@ -1252,7 +1296,8 @@ void AArch64Architecture::emitVectorReduction(CodeGen& cg, ir::VectorInstruction
     *os << "  ldr q16, " << val << "\n";
     switch (i.getOpcode()) {
         case ir::Instruction::VAdd:
-            *os << "  addv " << scalarReg << ", v16" << arrange << "\n";
+            if (arrange == ".2d") *os << "  addp " << scalarReg << ", v16.2d\n";
+            else *os << "  addv " << scalarReg << ", v16" << arrange << "\n";
             break;
         case ir::Instruction::VMin:
             *os << "  sminv " << scalarReg << ", v16" << arrange << "\n";
