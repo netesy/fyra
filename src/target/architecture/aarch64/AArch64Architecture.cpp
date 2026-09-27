@@ -65,11 +65,9 @@ const std::string& AArch64Architecture::getReturnRegister(const ir::Type* type) 
 }
 
 const std::vector<std::string>& AArch64Architecture::getIntegerArgumentRegisters() const {
-    static const std::vector<std::string> regs = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"}; return regs;
-}
+    static const std::vector<std::string> regs = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"}; return regs; }
 const std::vector<std::string>& AArch64Architecture::getFloatArgumentRegisters() const {
-    static const std::vector<std::string> regs = {"v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"}; return regs;
-}
+    static const std::vector<std::string> regs = {"v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"}; return regs; }
 const std::string& AArch64Architecture::getIntegerReturnRegister() const { static const std::string reg = "x0"; return reg; }
 const std::string& AArch64Architecture::getFloatReturnRegister() const { static const std::string reg = "v0"; return reg; }
 
@@ -262,23 +260,85 @@ void AArch64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) { std::string r = getRegisterName("x0", i.getType()); if (i.getType()->isFloatingPoint()) r = (i.getType()->getSize() == 4) ? "s0" : "d0"; *os << "  str " << r << ", " << cg.getValueAsOperand(&i) << "\n"; }
     }
 }
-void AArch64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {}
-void AArch64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {}
-void AArch64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {}
-void AArch64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {}
+void AArch64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
+    ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (auto* os = cg.getTextStream()) {
+        std::string regKind = (l->getType() && l->getType()->getSize() == 4) ? "s" : "d";
+        std::string r1 = regKind + "16", r2 = regKind + "17";
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  fadd " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    }
+}
+void AArch64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
+    ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (auto* os = cg.getTextStream()) {
+        std::string regKind = (l->getType() && l->getType()->getSize() == 4) ? "s" : "d";
+        std::string r1 = regKind + "16", r2 = regKind + "17";
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  fsub " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    }
+}
+void AArch64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
+    ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (auto* os = cg.getTextStream()) {
+        std::string regKind = (l->getType() && l->getType()->getSize() == 4) ? "s" : "d";
+        std::string r1 = regKind + "16", r2 = regKind + "17";
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  fmul " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    }
+}
+void AArch64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {
+    ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (auto* os = cg.getTextStream()) {
+        std::string regKind = (l->getType() && l->getType()->getSize() == 4) ? "s" : "d";
+        std::string r1 = regKind + "16", r2 = regKind + "17";
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  fdiv " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    }
+}
 void AArch64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     std::string cond = "eq"; switch(i.getOpcode()){case ir::Instruction::Ceq:cond="eq";break;case ir::Instruction::Cne:cond="ne";break;case ir::Instruction::Cslt:cond="lt";break;case ir::Instruction::Csle:cond="le";break;case ir::Instruction::Csgt:cond="gt";break;case ir::Instruction::Csge:cond="ge";break;default:cond="eq";break;}
     if (auto* os = cg.getTextStream()) { *os << "  ldr " << getRegisterName("x10", l->getType()) << ", " << cg.getValueAsOperand(l) << "\n  ldr " << getRegisterName("x11", r->getType()) << ", " << cg.getValueAsOperand(r) << "\n  cmp " << getRegisterName("x10", l->getType()) << ", " << getRegisterName("x11", r->getType()) << "\n  cset w9, " << cond << "\n  str w9, " << cg.getValueAsOperand(d) << "\n"; }
 }
-void AArch64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* f, const ir::Type* t) {}
+void AArch64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* f, const ir::Type* t) {
+    if (auto* os = cg.getTextStream()) {
+        ir::Value* src = i.getOperands()[0]->get();
+        if (f->isIntegerTy() && t->isFloatingPoint()) {
+            std::string srcReg = getRegisterName("x9", f);
+            std::string dstReg = (t->getSize() == 4) ? "s16" : "d16";
+            *os << "  ldr " << srcReg << ", " << cg.getValueAsOperand(src) << "\n  scvtf " << dstReg << ", " << srcReg << "\n  str " << dstReg << ", " << cg.getValueAsOperand(&i) << "\n";
+        } else if (f->isFloatingPoint() && t->isIntegerTy()) {
+            std::string srcReg = (f->getSize() == 4) ? "s16" : "d16";
+            std::string dstReg = getRegisterName("x9", t);
+            *os << "  ldr " << srcReg << ", " << cg.getValueAsOperand(src) << "\n  fcvtzs " << dstReg << ", " << srcReg << "\n  str " << dstReg << ", " << cg.getValueAsOperand(&i) << "\n";
+        } else {
+            *os << "  ldr x9, " << cg.getValueAsOperand(src) << "\n  str x9, " << cg.getValueAsOperand(&i) << "\n";
+        }
+    }
+}
 void AArch64Architecture::emitVAStart(CodeGen& cg, ir::Instruction& i) {}
 void AArch64Architecture::emitVAArg(CodeGen& cg, ir::Instruction& i) {}
 void AArch64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) { *os << "  ldr x9, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  ldr x10, [x9]\n  str x10, " << cg.getValueAsOperand(&i) << "\n"; }
+    if (auto* os = cg.getTextStream()) {
+        std::string loadMnemonic = "ldr";
+        std::string regName = "x10";
+        size_t size = i.getType() ? i.getType()->getSize() : 8;
+        if (size == 1) { loadMnemonic = "ldrb"; regName = "w10"; }
+        else if (size == 2) { loadMnemonic = "ldrh"; regName = "w10"; }
+        else if (size == 4) { loadMnemonic = "ldr"; regName = "w10"; }
+
+        *os << "  ldr x9, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  " << loadMnemonic << " " << regName << ", [x9]\n  str " << regName << ", " << cg.getValueAsOperand(&i) << "\n";
+    }
 }
 void AArch64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) { *os << "  ldr x9, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  ldr x10, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  str x10, [x9]\n"; }
+    if (auto* os = cg.getTextStream()) {
+        std::string storeMnemonic = "str";
+        std::string regName = "x10";
+        ir::Value* val = i.getOperands()[0]->get();
+        size_t size = val->getType() ? val->getType()->getSize() : 8;
+        if (size == 1) { storeMnemonic = "strb"; regName = "w10"; }
+        else if (size == 2) { storeMnemonic = "strh"; regName = "w10"; }
+        else if (size == 4) { storeMnemonic = "str"; regName = "w10"; }
+
+        *os << "  ldr x9, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  ldr " << regName << ", " << cg.getValueAsOperand(val) << "\n  " << storeMnemonic << " " << regName << ", [x9]\n";
+    }
 }
 void AArch64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
     uint64_t size = 8;

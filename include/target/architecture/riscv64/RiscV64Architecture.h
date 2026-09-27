@@ -68,6 +68,13 @@ public:
     bool isCalleeSaved(const std::string& reg) const override;
     std::string getImmediatePrefix() const override { return ""; }
 
+    VectorCapabilities getVectorCapabilities() const override;
+    bool supportsVectorWidth(unsigned width) const override;
+    bool supportsVectorType(const ir::VectorType* type) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
+    void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+
 private:
     int32_t currentStackOffset = 0;
 };
