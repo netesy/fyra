@@ -33,6 +33,8 @@ public:
 
     void emitRet(CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMin(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMax(CodeGen& cg, ir::Instruction& i) override;
     void emitSub(CodeGen& cg, ir::Instruction& i) override;
     void emitMul(CodeGen& cg, ir::Instruction& i) override;
     void emitDiv(CodeGen& cg, ir::Instruction& i) override;
@@ -47,6 +49,7 @@ public:
     void emitNot(CodeGen& cg, ir::Instruction& i) override;
     void emitCopy(CodeGen& cg, ir::Instruction& i) override;
     void emitCall(CodeGen& cg, ir::Instruction& i) override;
+    bool emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) override;
     void emitFAdd(CodeGen& cg, ir::Instruction& i) override;
     void emitFSub(CodeGen& cg, ir::Instruction& i) override;
     void emitFMul(CodeGen& cg, ir::Instruction& i) override;
@@ -60,6 +63,10 @@ public:
     void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     void emitBr(CodeGen& cg, ir::Instruction& i) override;
     void emitJmp(CodeGen& cg, ir::Instruction& i) override;
+    void emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::BasicBlock* target);
+
+    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
+    bool emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::Instruction& add) override;
 
     void emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
     void emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
@@ -80,7 +87,11 @@ public:
     bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
     bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
 
+    void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& i) override;
 
 private:
     std::string getNEONArrangement(const ir::VectorType* vecTy) const;

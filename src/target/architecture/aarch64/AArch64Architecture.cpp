@@ -192,6 +192,32 @@ void AArch64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  add " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
+
+void AArch64Architecture::emitSMin(CodeGen& cg, ir::Instruction& i) {
+    ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (auto* os = cg.getTextStream()) {
+        std::string r1 = getRegisterName("x9", l->getType());
+        std::string r2 = getRegisterName("x10", r->getType());
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
+        *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
+        *os << "  cmp " << r1 << ", " << r2 << "\n";
+        *os << "  csel " << r1 << ", " << r1 << ", " << r2 << ", lt\n";
+        *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    }
+}
+
+void AArch64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) {
+    ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
+    if (auto* os = cg.getTextStream()) {
+        std::string r1 = getRegisterName("x9", l->getType());
+        std::string r2 = getRegisterName("x10", r->getType());
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
+        *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
+        *os << "  cmp " << r1 << ", " << r2 << "\n";
+        *os << "  csel " << r1 << ", " << r1 << ", " << r2 << ", gt\n";
+        *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    }
+}
 void AArch64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  sub " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
@@ -259,6 +285,53 @@ void AArch64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         if (!s_args.empty()) *os << "  add sp, sp, #" << s_args.size() * 16 << "\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) { std::string r = getRegisterName("x0", i.getType()); if (i.getType()->isFloatingPoint()) r = (i.getType()->getSize() == 4) ? "s0" : "d0"; *os << "  str " << r << ", " << cg.getValueAsOperand(&i) << "\n"; }
     }
+}
+
+bool AArch64Architecture::emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) {
+    ir::Value* calleeVal = callInst.getOperands()[0]->get();
+    if (!calleeVal) return false;
+
+    if (callInst.getType()->getTypeID() != ir::Type::VoidTyID) {
+        if (retInst.getOperands().empty() || retInst.getOperands()[0]->get() != &callInst) {
+            return false;
+        }
+    } else {
+        if (!retInst.getOperands().empty()) return false;
+    }
+
+    size_t numArgs = callInst.getOperands().size() - 1;
+    if (numArgs > 8) return false;
+
+    if (auto* os = cg.getTextStream()) {
+        unsigned i_idx = 0, f_idx = 0;
+        for (size_t j = 1; j < callInst.getOperands().size(); ++j) {
+            ir::Value* a = callInst.getOperands()[j]->get();
+            TypeInfo inf = getTypeInfo(a->getType());
+            std::string op = cg.getValueAsOperand(a);
+            if (inf.regClass == RegisterClass::Float) {
+                if (f_idx < 8) {
+                    std::string r = (inf.size == 32) ? "s" : "d";
+                    r += std::to_string(f_idx++);
+                    *os << "  ldr " << r << ", " << op << "\n";
+                }
+            } else {
+                if (i_idx < 8) {
+                    std::string r = getRegisterName("x" + std::to_string(i_idx++), a->getType());
+                    *os << "  ldr " << r << ", " << op << "\n";
+                }
+            }
+        }
+        bool isDirect = (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                        (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+        if (isDirect) {
+            *os << "  b " << calleeVal->getName() << "\n";
+        } else {
+            *os << "  ldr x9, " << cg.getValueAsOperand(calleeVal) << "\n";
+            *os << "  br x9\n";
+        }
+        return true;
+    }
+    return false;
 }
 void AArch64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
@@ -360,13 +433,250 @@ void AArch64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
         *os << "  str x9, [x10, :lo12:heap_ptr]\n";
     }
 }
-void AArch64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) {
-        if (i.getOperands().size() == 1) *os << "  b " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-        else { *os << "  ldr w9, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  cmp w9, #0\n  b.ne " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n  b " << cg.getValueAsOperand(i.getOperands()[2]->get()) << "\n"; }
+void AArch64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::BasicBlock* target) {
+    if (!target) return;
+    std::vector<std::pair<ir::Value*, ir::PhiNode*>> phiMoves;
+    for (auto& instr : target->getInstructions()) {
+        if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
+            ir::Value* incomingVal = phi->getIncomingValueForBlock(source);
+            if (incomingVal) {
+                phiMoves.push_back({incomingVal, phi});
+            }
+        }
+    }
+    if (phiMoves.empty()) return;
+
+    auto* os = cg.getTextStream();
+    if (!os) return;
+
+    bool canDirectMove = true;
+    if (phiMoves.size() > 1) {
+        for (size_t i = 0; i < phiMoves.size(); ++i) {
+            std::string dest_i = cg.getValueAsOperand(phiMoves[i].second);
+            for (size_t j = i + 1; j < phiMoves.size(); ++j) {
+                std::string src_j = cg.getValueAsOperand(phiMoves[j].first);
+                if (dest_i == src_j) {
+                    canDirectMove = false;
+                    break;
+                }
+            }
+            if (!canDirectMove) break;
+        }
+    }
+
+    if (canDirectMove) {
+        for (const auto& move : phiMoves) {
+            ir::Value* incomingVal = move.first;
+            ir::PhiNode* phi = move.second;
+            std::string srcOp = cg.getValueAsOperand(incomingVal);
+            std::string destOp = cg.getValueAsOperand(phi);
+            if (srcOp == destOp) continue;
+
+            const ir::Type* type = phi->getType();
+            if (type && (type->isVectorTy() || dynamic_cast<const ir::VectorType*>(type) != nullptr)) {
+                *os << "  ldr q16, " << srcOp << "\n";
+                *os << "  str q16, " << destOp << "\n";
+            } else if (type && type->isFloatingPoint()) {
+                std::string reg = (type->getSize() == 4) ? "s16" : "d16";
+                *os << "  ldr " << reg << ", " << srcOp << "\n";
+                *os << "  str " << reg << ", " << destOp << "\n";
+            } else {
+                std::string reg = getRegisterName("x9", type);
+                *os << "  ldr " << reg << ", " << srcOp << "\n";
+                *os << "  str " << reg << ", " << destOp << "\n";
+            }
+        }
+        return;
+    }
+
+    for (const auto& move : phiMoves) {
+        ir::Value* incomingVal = move.first;
+        std::string srcOp = cg.getValueAsOperand(incomingVal);
+        const ir::Type* type = incomingVal->getType();
+        if (type && (type->isVectorTy() || dynamic_cast<const ir::VectorType*>(type) != nullptr)) {
+            *os << "  ldr q16, " << srcOp << "\n";
+            *os << "  str q16, [sp, #-16]!\n";
+        } else if (type && type->isFloatingPoint()) {
+            std::string reg = (type->getSize() == 4) ? "s16" : "d16";
+            *os << "  ldr " << reg << ", " << srcOp << "\n";
+            *os << "  str " << reg << ", [sp, #-16]!\n";
+        } else {
+            std::string reg = getRegisterName("x9", type);
+            *os << "  ldr " << reg << ", " << srcOp << "\n";
+            *os << "  str x9, [sp, #-16]!\n";
+        }
+    }
+
+    for (auto it = phiMoves.rbegin(); it != phiMoves.rend(); ++it) {
+        ir::PhiNode* phi = it->second;
+        std::string destOp = cg.getValueAsOperand(phi);
+        const ir::Type* type = phi->getType();
+        if (type && (type->isVectorTy() || dynamic_cast<const ir::VectorType*>(type) != nullptr)) {
+            *os << "  ldr q16, [sp], #16\n";
+            *os << "  str q16, " << destOp << "\n";
+        } else if (type && type->isFloatingPoint()) {
+            std::string reg = (type->getSize() == 4) ? "s16" : "d16";
+            *os << "  ldr " << reg << ", [sp], #16\n";
+            *os << "  str " << reg << ", " << destOp << "\n";
+        } else {
+            std::string reg = getRegisterName("x9", type);
+            *os << "  ldr x9, [sp], #16\n";
+            *os << "  str " << reg << ", " << destOp << "\n";
+        }
     }
 }
-void AArch64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) { if (auto* os = cg.getTextStream()) *os << "  b " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n"; }
+
+void AArch64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().size() == 1) {
+        auto* targetBB = dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get());
+        emitPhiCopies(cg, i.getParent(), targetBB);
+        if (auto* os = cg.getTextStream()) {
+            *os << "  b " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";
+        }
+        return;
+    }
+
+    auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
+    auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
+
+    if (auto* os = cg.getTextStream()) {
+        *os << "  ldr w9, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+        *os << "  cmp w9, #0\n";
+
+        std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
+        std::string falseLabel = cg.getTargetInfo()->getBBLabel(targetFalse);
+
+        bool trueHasPhis = false;
+        if (targetTrue) {
+            for (auto& inst : targetTrue->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) trueHasPhis = true;
+        }
+        bool falseHasPhis = false;
+        if (targetFalse) {
+            for (auto& inst : targetFalse->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) falseHasPhis = true;
+        }
+
+        if (trueHasPhis || falseHasPhis) {
+            std::string labelTrueCopies = ".L_true_copies_" + std::to_string((uintptr_t)&i);
+            std::string labelFalseCopies = ".L_false_copies_" + std::to_string((uintptr_t)&i);
+
+            *os << "  b.ne " << labelTrueCopies << "\n";
+            *os << "  b " << labelFalseCopies << "\n";
+
+            *os << labelTrueCopies << ":\n";
+            emitPhiCopies(cg, i.getParent(), targetTrue);
+            *os << "  b " << trueLabel << "\n";
+
+            *os << labelFalseCopies << ":\n";
+            emitPhiCopies(cg, i.getParent(), targetFalse);
+            *os << "  b " << falseLabel << "\n";
+        } else {
+            *os << "  b.ne " << trueLabel << "\n";
+            *os << "  b " << falseLabel << "\n";
+        }
+    }
+}
+
+void AArch64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {
+    auto* targetBB = dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get());
+    emitPhiCopies(cg, i.getParent(), targetBB);
+    if (auto* os = cg.getTextStream()) {
+        *os << "  b " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";
+    }
+}
+
+bool AArch64Architecture::emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::Instruction& add) {
+    if (mul.getUseList().size() != 1) return false;
+    if (!mul.getType() || !mul.getType()->isInteger()) return false;
+    if (!add.getType() || !add.getType()->isInteger()) return false;
+
+    ir::Value* m0 = mul.getOperands()[0]->get();
+    ir::Value* m1 = mul.getOperands()[1]->get();
+    ir::Value* a0 = add.getOperands()[0]->get();
+    ir::Value* a1 = add.getOperands()[1]->get();
+
+    ir::Value* addOther = (a0 == &mul) ? a1 : a0;
+
+    if (auto* os = cg.getTextStream()) {
+        std::string r1 = getRegisterName("x9", m0->getType());
+        std::string r2 = getRegisterName("x10", m1->getType());
+        std::string r3 = getRegisterName("x11", addOther->getType());
+        std::string rd = getRegisterName("x9", add.getType());
+
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(m0) << "\n";
+        *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(m1) << "\n";
+        *os << "  ldr " << r3 << ", " << cg.getValueAsOperand(addOther) << "\n";
+        *os << "  madd " << rd << ", " << r1 << ", " << r2 << ", " << r3 << "\n";
+        *os << "  str " << rd << ", " << cg.getValueAsOperand(&add) << "\n";
+        return true;
+    }
+    return false;
+}
+
+bool AArch64Architecture::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) {
+    if (br.getOperands().size() < 3) return false;
+    auto* targetTrue = dynamic_cast<ir::BasicBlock*>(br.getOperands()[1]->get());
+    auto* targetFalse = dynamic_cast<ir::BasicBlock*>(br.getOperands()[2]->get());
+    if (!targetTrue || !targetFalse) return false;
+
+    std::string cond = "eq";
+    switch (cmp.getOpcode()) {
+        case ir::Instruction::Ceq: case ir::Instruction::Ceqf: cond = "eq"; break;
+        case ir::Instruction::Cne: case ir::Instruction::Cnef: cond = "ne"; break;
+        case ir::Instruction::Cslt: cond = "lt"; break;
+        case ir::Instruction::Cult: case ir::Instruction::Clt: cond = "lo"; break;
+        case ir::Instruction::Csle: cond = "le"; break;
+        case ir::Instruction::Cule: case ir::Instruction::Cle: cond = "ls"; break;
+        case ir::Instruction::Csgt: cond = "gt"; break;
+        case ir::Instruction::Cugt: case ir::Instruction::Cgt: cond = "hi"; break;
+        case ir::Instruction::Csge: cond = "ge"; break;
+        case ir::Instruction::Cuge: case ir::Instruction::Cge: cond = "hs"; break;
+        default: cond = "ne"; break;
+    }
+
+    ir::Value* l = cmp.getOperands()[0]->get();
+    ir::Value* r = cmp.getOperands()[1]->get();
+
+    if (auto* os = cg.getTextStream()) {
+        std::string r1 = getRegisterName("x9", l->getType());
+        std::string r2 = getRegisterName("x10", r->getType());
+        *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
+        *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
+        *os << "  cmp " << r1 << ", " << r2 << "\n";
+
+        std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
+        std::string falseLabel = cg.getTargetInfo()->getBBLabel(targetFalse);
+
+        bool trueHasPhis = false;
+        if (targetTrue) {
+            for (auto& inst : targetTrue->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) trueHasPhis = true;
+        }
+        bool falseHasPhis = false;
+        if (targetFalse) {
+            for (auto& inst : targetFalse->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) falseHasPhis = true;
+        }
+
+        if (trueHasPhis || falseHasPhis) {
+            std::string labelTrueCopies = ".L_true_copies_" + std::to_string((uintptr_t)&br);
+            std::string labelFalseCopies = ".L_false_copies_" + std::to_string((uintptr_t)&br);
+
+            *os << "  b." << cond << " " << labelTrueCopies << "\n";
+            *os << "  b " << labelFalseCopies << "\n";
+
+            *os << labelTrueCopies << ":\n";
+            emitPhiCopies(cg, br.getParent(), targetTrue);
+            *os << "  b " << trueLabel << "\n";
+
+            *os << labelFalseCopies << ":\n";
+            emitPhiCopies(cg, br.getParent(), targetFalse);
+            *os << "  b " << falseLabel << "\n";
+        } else {
+            *os << "  b." << cond << " " << trueLabel << "\n";
+            *os << "  b " << falseLabel << "\n";
+        }
+        return true;
+    }
+    return false;
+}
 
 void AArch64Architecture::emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) {
     auto* si = dynamic_cast<ir::SyscallInstruction*>(&i); ir::SyscallId sid = si ? si->getSyscallId() : ir::SyscallId::None;
@@ -486,6 +796,19 @@ bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, co
         case ir::Instruction::VInsert:
         case ir::Instruction::VCmp:
         case ir::Instruction::VSelect:
+        case ir::Instruction::VMin:
+        case ir::Instruction::VMax:
+        case ir::Instruction::VFMin:
+        case ir::Instruction::VFMax:
+        case ir::Instruction::VHAdd:
+        case ir::Instruction::FMA:
+        case ir::Instruction::FMS:
+        case ir::Instruction::FNMA:
+        case ir::Instruction::FNMS:
+        case ir::Instruction::VShuffle:
+        case ir::Instruction::VSExt:
+        case ir::Instruction::VZExt:
+        case ir::Instruction::VTrunc:
             return true;
         default:
             return false;
@@ -493,7 +816,75 @@ bool AArch64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, co
 }
 
 bool AArch64Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
+    if (!srcType || !dstType) return false;
+    if (op == ir::Instruction::VSExt || op == ir::Instruction::VZExt || op == ir::Instruction::VTrunc) return true;
     return false;
+}
+
+void AArch64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
+    auto* os = cg.getTextStream();
+    if (!os) return;
+    std::string ptr = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string dst = cg.getValueAsOperand(&i);
+    *os << "  ldr x9, " << ptr << "\n";
+    *os << "  ldr q16, [x9]\n";
+    *os << "  str q16, " << dst << "\n";
+}
+
+void AArch64Architecture::emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {
+    auto* os = cg.getTextStream();
+    if (!os) return;
+    std::string val = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string ptr = cg.getValueAsOperand(i.getOperands()[1]->get());
+    *os << "  ldr q16, " << val << "\n";
+    *os << "  ldr x9, " << ptr << "\n";
+    *os << "  str q16, [x9]\n";
+}
+
+void AArch64Architecture::emitVectorReduction(CodeGen& cg, ir::VectorInstruction& i) {
+    auto* os = cg.getTextStream();
+    if (!os) return;
+
+    auto* vecTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+    std::string arrange = getNEONArrangement(vecTy);
+    std::string val = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string dst = cg.getValueAsOperand(&i);
+
+    std::string scalarReg = "s16";
+    if (vecTy && vecTy->getElementType()) {
+        unsigned bits = vecTy->getElementType()->getSize() * 8;
+        if (bits == 8) scalarReg = "b16";
+        else if (bits == 16) scalarReg = "h16";
+        else if (bits == 32) scalarReg = "s16";
+        else if (bits == 64) scalarReg = "d16";
+    }
+
+    *os << "  ldr q16, " << val << "\n";
+    switch (i.getOpcode()) {
+        case ir::Instruction::VAdd:
+            *os << "  addv " << scalarReg << ", v16" << arrange << "\n";
+            break;
+        case ir::Instruction::VMin:
+            *os << "  sminv " << scalarReg << ", v16" << arrange << "\n";
+            break;
+        case ir::Instruction::VMax:
+            *os << "  smaxv " << scalarReg << ", v16" << arrange << "\n";
+            break;
+        case ir::Instruction::VFMin:
+            *os << "  fminv " << scalarReg << ", v16" << arrange << "\n";
+            break;
+        case ir::Instruction::VFMax:
+            *os << "  fmaxv " << scalarReg << ", v16" << arrange << "\n";
+            break;
+        default:
+            *os << "  addv " << scalarReg << ", v16" << arrange << "\n";
+            break;
+    }
+    *os << "  str " << scalarReg << ", " << dst << "\n";
+}
+
+void AArch64Architecture::emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& i) {
+    emitVectorReduction(cg, i);
 }
 
 void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) {
@@ -661,6 +1052,112 @@ void AArch64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstructio
             std::string falseVal = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
             if (dst != trueVal) *os << "  mov " << dst << ".16b, " << trueVal << ".16b\n";
             *os << "  bsl " << mask << ".16b, " << trueVal << ".16b, " << falseVal << ".16b\n";
+            break;
+        }
+        case ir::Instruction::VMin: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  smin " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VMax: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  smax " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VFMin: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  fmin " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VFMax: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  fmax " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VHAdd: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            *os << "  addp " << dst << arrange << ", " << op0 << arrange << ", " << op1 << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::FMS: {
+            std::string a = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string b = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            std::string c = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
+            if (dst != c) *os << "  mov " << dst << ".16b, " << c << ".16b\n";
+            *os << "  fmls " << dst << arrange << ", " << a << arrange << ", " << b << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::FNMA: {
+            std::string a = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string b = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            std::string c = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
+            *os << "  fmul v16" << arrange << ", " << a << arrange << ", " << b << arrange << "\n";
+            *os << "  fneg v16" << arrange << ", v16" << arrange << "\n";
+            *os << "  fsub " << dst << arrange << ", v16" << arrange << ", " << c << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::FNMS: {
+            std::string a = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string b = getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy);
+            std::string c = getRegisterName(cg.getValueAsOperand(i.getOperands()[2]->get()), vecTy);
+            if (dst != c) *os << "  mov " << dst << ".16b, " << c << ".16b\n";
+            *os << "  fmls " << dst << arrange << ", " << a << arrange << ", " << b << arrange << "\n";
+            break;
+        }
+        case ir::Instruction::VShuffle: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            std::string op1 = (i.getOperands().size() > 1 && i.getOperands()[1]->get()) ? getRegisterName(cg.getValueAsOperand(i.getOperands()[1]->get()), vecTy) : op0;
+            *os << "  tbl " << dst << ".16b, {" << op0 << ".16b}, " << op1 << ".16b\n";
+            break;
+        }
+        case ir::Instruction::VSExt: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            auto* srcTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            std::string srcArrange = ".4h";
+            std::string dstArrange = ".4s";
+            if (srcTy && srcTy->getElementType()) {
+                unsigned bits = srcTy->getElementType()->getSize() * 8;
+                unsigned num = srcTy->getNumElements();
+                if (bits == 8 && num == 8) { srcArrange = ".8b"; dstArrange = ".8h"; }
+                else if (bits == 16 && num == 4) { srcArrange = ".4h"; dstArrange = ".4s"; }
+                else if (bits == 32 && num == 2) { srcArrange = ".2s"; dstArrange = ".2d"; }
+            }
+            *os << "  sxtl " << dst << dstArrange << ", " << op0 << srcArrange << "\n";
+            break;
+        }
+        case ir::Instruction::VZExt: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            auto* srcTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            std::string srcArrange = ".4h";
+            std::string dstArrange = ".4s";
+            if (srcTy && srcTy->getElementType()) {
+                unsigned bits = srcTy->getElementType()->getSize() * 8;
+                unsigned num = srcTy->getNumElements();
+                if (bits == 8 && num == 8) { srcArrange = ".8b"; dstArrange = ".8h"; }
+                else if (bits == 16 && num == 4) { srcArrange = ".4h"; dstArrange = ".4s"; }
+                else if (bits == 32 && num == 2) { srcArrange = ".2s"; dstArrange = ".2d"; }
+            }
+            *os << "  uxtl " << dst << dstArrange << ", " << op0 << srcArrange << "\n";
+            break;
+        }
+        case ir::Instruction::VTrunc: {
+            std::string op0 = getRegisterName(cg.getValueAsOperand(i.getOperands()[0]->get()), vecTy);
+            auto* srcTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            std::string srcArrange = ".4s";
+            std::string dstArrange = ".4h";
+            if (srcTy && srcTy->getElementType()) {
+                unsigned bits = srcTy->getElementType()->getSize() * 8;
+                unsigned num = srcTy->getNumElements();
+                if (bits == 16 && num == 8) { srcArrange = ".8h"; dstArrange = ".8b"; }
+                else if (bits == 32 && num == 4) { srcArrange = ".4s"; dstArrange = ".4h"; }
+                else if (bits == 64 && num == 2) { srcArrange = ".2d"; dstArrange = ".2s"; }
+            }
+            *os << "  xtn " << dst << dstArrange << ", " << op0 << srcArrange << "\n";
             break;
         }
         default:

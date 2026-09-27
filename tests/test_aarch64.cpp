@@ -70,5 +70,52 @@ int main(int argc, char** argv) {
     assert(aarch64Target->supportsVectorType(v4i32));
     std::cout << "AArch64 vector capabilities test passed!" << std::endl;
 
+    // Additional Lowering & Fusion Tests for AArch64
+    {
+        auto testContext = std::make_shared<ir::IRContext>();
+        ir::Module testModule("aarch64_test_lowering", testContext);
+        ir::IRBuilder builder(testContext);
+        builder.setModule(&testModule);
+
+        auto* i32 = testContext->getIntegerType(32);
+        ir::Function* func = builder.createFunction("test_fusion_and_lowering", i32, {i32, i32, i32});
+        auto paramIt = func->getParameters().begin();
+        ir::Value* a = paramIt->get(); ++paramIt;
+        ir::Value* b = paramIt->get(); ++paramIt;
+        ir::Value* c = paramIt->get();
+
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", func);
+        ir::BasicBlock* thenBB = builder.createBasicBlock("then", func);
+        ir::BasicBlock* elseBB = builder.createBasicBlock("else", func);
+
+        builder.setInsertPoint(entry);
+        ir::Instruction* mul = builder.createMul(a, b);
+        ir::Instruction* madd = builder.createAdd(mul, c);
+
+        ir::Instruction* minVal = builder.createSMin(a, b);
+        ir::Instruction* maxVal = builder.createSMax(minVal, c);
+
+        ir::Instruction* cmp = builder.createCslt(madd, maxVal);
+        builder.createBr(cmp, thenBB, elseBB);
+
+        builder.setInsertPoint(thenBB);
+        builder.createRet(madd);
+
+        builder.setInsertPoint(elseBB);
+        builder.createRet(maxVal);
+
+        transforms::CFGBuilder::run(*func);
+
+        std::stringstream asmStream;
+        codegen::CodeGen testCodeGen(testModule, target::TargetResolver::resolve({target::Arch::AArch64, target::OS::Linux}), &asmStream);
+        testCodeGen.emit();
+        std::string testAsm = asmStream.str();
+
+        assert(testAsm.find("madd") != std::string::npos && "AArch64 mul-add fusion MUST generate madd!");
+        assert(testAsm.find("csel") != std::string::npos && "AArch64 signed min/max MUST generate csel!");
+        assert(testAsm.find("b.lt") != std::string::npos && "AArch64 compare-and-branch fusion MUST generate b.lt!");
+        std::cout << "AArch64 fusion, smin/smax, and branch lowering test passed!" << std::endl;
+    }
+
     return 0;
 }
