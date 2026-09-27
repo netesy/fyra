@@ -11,6 +11,7 @@
 #include "transforms/CFGBuilder.h"
 #include <ostream>
 #include <algorithm>
+#include <cstring>
 #include <set>
 
 namespace target {
@@ -335,7 +336,24 @@ void AArch64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) { std::string r = getRegisterName("x9", o->getType()); *os << "  ldr " << r << ", " << cg.getValueAsOperand(o) << "\n  mvn " << r << ", " << r << "\n  str " << r << ", " << cg.getValueAsOperand(d) << "\n"; }
 }
 void AArch64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
-    if (auto* os = cg.getTextStream()) { *os << "  ldr x9, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n  str x9, " << cg.getValueAsOperand(&i) << "\n"; }
+    if (auto* os = cg.getTextStream()) {
+        const ir::Type* type = i.getType();
+        ir::Value* src = i.getOperands()[0]->get();
+        if (type && (type->isVectorTy() || dynamic_cast<const ir::VectorType*>(type) != nullptr)) {
+            *os << "  ldr q16, " << cg.getValueAsOperand(src) << "\n";
+            *os << "  str q16, " << cg.getValueAsOperand(&i) << "\n";
+        } else if (type && type->isFloatingPoint()) {
+            std::string reg = (type->getSize() == 4) ? "s16" : "d16";
+            *os << "  ldr " << reg << ", " << cg.getValueAsOperand(src) << "\n";
+            *os << "  str " << reg << ", " << cg.getValueAsOperand(&i) << "\n";
+        } else if (type && type->isInteger() && type->getSize() <= 4) {
+            *os << "  ldr w9, " << cg.getValueAsOperand(src) << "\n";
+            *os << "  str w9, " << cg.getValueAsOperand(&i) << "\n";
+        } else {
+            *os << "  ldr x9, " << cg.getValueAsOperand(src) << "\n";
+            *os << "  str x9, " << cg.getValueAsOperand(&i) << "\n";
+        }
+    }
 }
 void AArch64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
     unsigned i_idx = 0, f_idx = 0; std::vector<ir::Value*> s_args;
@@ -433,8 +451,39 @@ void AArch64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {
 }
 void AArch64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
-    std::string cond = "eq"; switch(i.getOpcode()){case ir::Instruction::Ceq:cond="eq";break;case ir::Instruction::Cne:cond="ne";break;case ir::Instruction::Cslt:cond="lt";break;case ir::Instruction::Csle:cond="le";break;case ir::Instruction::Csgt:cond="gt";break;case ir::Instruction::Csge:cond="ge";break;default:cond="eq";break;}
-    if (auto* os = cg.getTextStream()) { *os << "  ldr " << getRegisterName("x10", l->getType()) << ", " << cg.getValueAsOperand(l) << "\n  ldr " << getRegisterName("x11", r->getType()) << ", " << cg.getValueAsOperand(r) << "\n  cmp " << getRegisterName("x10", l->getType()) << ", " << getRegisterName("x11", r->getType()) << "\n  cset w9, " << cond << "\n  str w9, " << cg.getValueAsOperand(d) << "\n"; }
+    std::string cond = "eq";
+    switch (i.getOpcode()) {
+        case ir::Instruction::Ceq:  case ir::Instruction::Ceqf: cond = "eq"; break;
+        case ir::Instruction::Cne:  case ir::Instruction::Cnef: cond = "ne"; break;
+        case ir::Instruction::Cslt: cond = "lt"; break;
+        case ir::Instruction::Cult: case ir::Instruction::Clt:  cond = "lo"; break;
+        case ir::Instruction::Csle: cond = "le"; break;
+        case ir::Instruction::Cule: case ir::Instruction::Cle:  cond = "ls"; break;
+        case ir::Instruction::Csgt: cond = "gt"; break;
+        case ir::Instruction::Cugt: case ir::Instruction::Cgt:  cond = "hi"; break;
+        case ir::Instruction::Csge: cond = "ge"; break;
+        case ir::Instruction::Cuge: case ir::Instruction::Cge:  cond = "hs"; break;
+        default:                    cond = "eq"; break;
+    }
+    if (auto* os = cg.getTextStream()) {
+        if (l->getType() && l->getType()->isFloatingPoint()) {
+            std::string r1 = (l->getType()->getSize() == 4) ? "s16" : "d16";
+            std::string r2 = (r->getType()->getSize() == 4) ? "s17" : "d17";
+            *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
+            *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
+            *os << "  fcmp " << r1 << ", " << r2 << "\n";
+            *os << "  cset w9, " << cond << "\n";
+            *os << "  str w9, " << cg.getValueAsOperand(d) << "\n";
+        } else {
+            std::string r1 = getRegisterName("x10", l->getType());
+            std::string r2 = getRegisterName("x11", r->getType());
+            *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n";
+            *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
+            *os << "  cmp " << r1 << ", " << r2 << "\n";
+            *os << "  cset w9, " << cond << "\n";
+            *os << "  str w9, " << cg.getValueAsOperand(d) << "\n";
+        }
+    }
 }
 void AArch64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* f, const ir::Type* t) {
     if (auto* os = cg.getTextStream()) {
@@ -971,8 +1020,24 @@ void AArch64Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& 
 
 std::string AArch64Architecture::formatStackOperand(int o) const { return "[x29, #" + std::to_string(o) + "]"; }
 std::string AArch64Architecture::formatGlobalOperand(const std::string& n) const { return n; }
+
+std::string AArch64Architecture::formatConstant(const ir::ConstantInt* C) const {
+    if (!C) return "#0";
+    return "#" + std::to_string(C->getValue());
+}
+
+std::string AArch64Architecture::formatConstant(const ir::ConstantFP* C) const {
+    if (!C) return "#0";
+    uint64_t bits = 0;
+    double val = C->getValue();
+    std::memcpy(&bits, &val, sizeof(double));
+    return "#" + std::to_string(bits);
+}
+
 bool AArch64Architecture::isCallerSaved(const std::string& r) const { static const std::set<std::string> cs = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"}; return cs.count(r); }
 bool AArch64Architecture::isCalleeSaved(const std::string& r) const { static const std::set<std::string> cs = {"x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"}; return cs.count(r); }
+bool AArch64Architecture::isReserved(const std::string& reg) const { return reg == "sp" || reg == "x29" || reg == "x30" || reg == "w29" || reg == "w30"; }
+
 std::string AArch64Architecture::getRegisterName(const std::string& b, const ir::Type* t) const {
     if (t && (t->isVectorTy() || dynamic_cast<const ir::VectorType*>(t) != nullptr)) {
         if (b[0] == 'x') return "v" + b.substr(1);
@@ -984,8 +1049,39 @@ std::string AArch64Architecture::getRegisterName(const std::string& b, const ir:
     return b;
 }
 
-void AArch64Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) {}
-void AArch64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {}
+void AArch64Architecture::emitPassArgument(CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) {
+    if (auto* os = cg.getTextStream()) {
+        if (type && type->isFloatingPoint()) {
+            if (argIndex < 8) {
+                std::string reg = (type->getSize() == 4) ? "s" : "d";
+                reg += std::to_string(argIndex);
+                *os << "  ldr " << reg << ", " << value << "\n";
+            }
+        } else {
+            if (argIndex < 8) {
+                std::string reg = getRegisterName("x" + std::to_string(argIndex), type);
+                *os << "  ldr " << reg << ", " << value << "\n";
+            }
+        }
+    }
+}
+
+void AArch64Architecture::emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) {
+    if (auto* os = cg.getTextStream()) {
+        if (type && type->isFloatingPoint()) {
+            if (argIndex < 8) {
+                std::string reg = (type->getSize() == 4) ? "s" : "d";
+                reg += std::to_string(argIndex);
+                *os << "  str " << reg << ", " << dest << "\n";
+            }
+        } else {
+            if (argIndex < 8) {
+                std::string reg = getRegisterName("x" + std::to_string(argIndex), type);
+                *os << "  str " << reg << ", " << dest << "\n";
+            }
+        }
+    }
+}
 
 std::string AArch64Architecture::getConditionCode(const std::string& op, bool isFloat, bool isUnsigned) const { return "eq"; }
 std::string AArch64Architecture::getWRegister(const std::string& xReg) const { return xReg; }

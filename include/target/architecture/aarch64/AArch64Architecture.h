@@ -93,8 +93,13 @@ public:
 
     std::string formatStackOperand(int offset) const override;
     std::string formatGlobalOperand(const std::string& name) const override;
+    std::string formatConstant(const ir::ConstantInt* C) const override;
+    std::string formatConstant(const ir::ConstantFP* C) const override;
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
+    bool isReserved(const std::string& reg) const override;
+    std::string getReservedScratchVectorReg() const override { return "v16"; }
+    unsigned getReservedScratchVectorRegIndex() const override { return 116; }
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
     std::string getImmediatePrefix() const override { return "#"; }
     std::string getFunctionTypeSpecifier() const override { return "%function"; }

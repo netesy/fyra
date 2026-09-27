@@ -175,5 +175,42 @@ int main(int argc, char** argv) {
         std::cout << "AArch64 complex addressing, native casts, and immediate arithmetic tests passed!" << std::endl;
     }
 
+    // Floating point comparison and unsigned integer comparison lowering
+    {
+        auto testContext = std::make_shared<ir::IRContext>();
+        ir::Module testModule("aarch64_test_cmp", testContext);
+        ir::IRBuilder builder(testContext);
+        builder.setModule(&testModule);
+
+        auto* f32 = testContext->getFloatType();
+        auto* i32 = testContext->getIntegerType(32);
+
+        ir::Function* func = builder.createFunction("test_cmp_lowering", i32, {f32, f32, i32, i32});
+        auto paramIt = func->getParameters().begin();
+        ir::Value* fa = paramIt->get(); ++paramIt;
+        ir::Value* fb = paramIt->get(); ++paramIt;
+        ir::Value* ia = paramIt->get(); ++paramIt;
+        ir::Value* ib = paramIt->get();
+
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(entry);
+
+        ir::Instruction* fcmpRes = builder.createCeqf(fa, fb);
+        ir::Instruction* ucmpRes = builder.createCult(ia, ib);
+        ir::Instruction* comb = builder.createAdd(fcmpRes, ucmpRes);
+        builder.createRet(comb);
+
+        transforms::CFGBuilder::run(*func);
+
+        std::stringstream asmStream;
+        codegen::CodeGen testCodeGen(testModule, target::TargetResolver::resolve({target::Arch::AArch64, target::OS::Linux}), &asmStream);
+        testCodeGen.emit();
+        std::string testAsm = asmStream.str();
+
+        assert(testAsm.find("fcmp") != std::string::npos && "AArch64 float cmp MUST generate fcmp!");
+        assert(testAsm.find("cset w9, lo") != std::string::npos || testAsm.find("lo") != std::string::npos && "AArch64 unsigned Cult MUST generate lo condition!");
+        std::cout << "AArch64 float fcmp and unsigned Cult condition lowering tests passed!" << std::endl;
+    }
+
     return 0;
 }
