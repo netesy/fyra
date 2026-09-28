@@ -25,7 +25,14 @@ void CompositeTargetInfo::emitFunctionPrologue(codegen::CodeGen& cg, ir::Functio
 void CompositeTargetInfo::emitFunctionEpilogue(codegen::CodeGen& cg, ir::Function& func) { architecture->emitFunctionEpilogue(cg, func); }
 void CompositeTargetInfo::emitBasicBlockStart(codegen::CodeGen& cg, ir::BasicBlock& bb) { architecture->emitBasicBlockStart(cg, bb); }
 void CompositeTargetInfo::emitStructuredFunctionBody(codegen::CodeGen& cg, ir::Function& func) { architecture->emitStructuredFunctionBody(cg, func); }
-void CompositeTargetInfo::emitStartFunction(codegen::CodeGen& cg) { os->emitStartFunction(cg, *architecture); architecture->emitStartFunction(cg); }
+void CompositeTargetInfo::emitStartFunction(codegen::CodeGen& cg) {
+    if (os->getName() == "baremetal") {
+        os->emitStartFunction(cg, *architecture);
+    } else {
+        os->emitStartFunction(cg, *architecture);
+        architecture->emitStartFunction(cg);
+    }
+}
 
 size_t CompositeTargetInfo::getMaxRegistersForArgs() const { return architecture->getMaxRegistersForArgs(); }
 void CompositeTargetInfo::emitPassArgument(codegen::CodeGen& cg, size_t idx, const std::string& val, const ir::Type* type) { architecture->emitPassArgument(cg, idx, val, type); }

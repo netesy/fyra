@@ -44,6 +44,8 @@ std::string TargetDescriptor::normalizeTriple(const std::string& triple) {
     if (triple == "aarch64") return "aarch64-linux-bin";
     if (triple == "wasm32" || triple == "wasm") return "wasm32-wasi-wasm";
     if (triple == "riscv64") return "riscv64-linux-bin";
+    if (triple == "baremetal" || triple == "riscv64-baremetal") return "riscv64-baremetal-bin";
+    if (triple == "aarch64-baremetal") return "aarch64-baremetal-bin";
 
     if (triple.find('-') == std::string::npos) {
         return triple + "-linux-bin";
@@ -80,6 +82,7 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
     else if (parts[1] == "windows" || parts[1] == "win32") desc.os = OS::Windows;
     else if (parts[1] == "macos" || parts[1] == "darwin") desc.os = OS::MacOS;
     else if (parts[1] == "android") desc.os = OS::Android;
+    else if (parts[1] == "baremetal" || parts[1] == "none" || parts[1] == "elf") desc.os = OS::BareMetal;
     else if (parts[1] == "wasi" || parts[1] == "unknown") desc.os = OS::WASI;
     else return std::nullopt;
 

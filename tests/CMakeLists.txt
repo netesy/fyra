@@ -414,3 +414,8 @@ add_executable(test_backend_builder test_backend_builder.cpp)
 target_link_libraries(test_backend_builder PRIVATE fyra)
 add_test(NAME BackendBuilderTest COMMAND test_backend_builder)
 set_tests_properties(BackendBuilderTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_baremetal test_baremetal.cpp)
+target_link_libraries(test_baremetal PRIVATE fyra)
+add_test(NAME BareMetalTest COMMAND test_baremetal)
+set_tests_properties(BareMetalTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
