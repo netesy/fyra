@@ -21,6 +21,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/SLPVectorizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EGraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EGraphPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/InstructionScheduler.cpp
 )
 
 target_sources(fyra PRIVATE ${TRANSFORMS_SOURCES})

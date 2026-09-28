@@ -66,6 +66,12 @@ BackendBuilder& BackendBuilder::target(const std::string& triple) {
     return *this;
 }
 
+BackendBuilder& BackendBuilder::targetFeature(const std::string& feature) {
+    targetFeatures_.push_back(feature);
+    invalidatePrepared();
+    return *this;
+}
+
 BackendBuilder& BackendBuilder::optimize(OptimizationLevel level) {
     if (config_.optLevel != level) {
         config_.optLevel = level;
@@ -201,6 +207,9 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
         return artifact;
     }
 
+    for (const auto& feat : targetFeatures_) {
+        targetInfo->parseTargetFeatures(feat);
+    }
     codegen::CodeGen codeGenerator(*preparedModule_, std::move(targetInfo), nullptr);
     codeGenerator.emit(false);
 
@@ -347,6 +356,9 @@ BuildResult BackendBuilder::emitAssembly(const std::string& path) {
         return result;
     }
 
+    for (const auto& feat : targetFeatures_) {
+        targetInfo->parseTargetFeatures(feat);
+    }
     codegen::CodeGen codeGen(*preparedModule_, std::move(targetInfo));
     auto cRes = codeGen.compileToAssembly(path, config_.validate);
     if (cRes.success) {

@@ -429,3 +429,8 @@ add_executable(test_ir_linker_lto test_ir_linker_lto.cpp)
 target_link_libraries(test_ir_linker_lto PRIVATE fyra)
 add_test(NAME IRLinkerLTOTest COMMAND test_ir_linker_lto)
 set_tests_properties(IRLinkerLTOTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_target_features_and_scheduler test_target_features_and_scheduler.cpp)
+target_link_libraries(test_target_features_and_scheduler PRIVATE fyra)
+add_test(NAME TargetFeaturesAndSchedulerTest COMMAND test_target_features_and_scheduler)
+set_tests_properties(TargetFeaturesAndSchedulerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

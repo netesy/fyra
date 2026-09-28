@@ -7,6 +7,85 @@
 
 namespace target {
 
+void TargetFeatureFlags::setFeature(const std::string& feature, bool enabled) {
+    std::string feat = feature;
+    if (!feat.empty() && (feat[0] == '+' || feat[0] == '-')) {
+        enabled = (feat[0] == '+');
+        feat = feat.substr(1);
+    }
+    if (enabled) {
+        enabledFeatures_.insert(feat);
+    } else {
+        enabledFeatures_.erase(feat);
+    }
+}
+
+bool TargetFeatureFlags::hasFeature(std::string_view feature) const {
+    std::string feat(feature);
+    if (!feat.empty() && (feat[0] == '+' || feat[0] == '-')) {
+        feat = feat.substr(1);
+    }
+    return enabledFeatures_.count(feat) > 0;
+}
+
+void TargetFeatureFlags::parseFeatures(const std::string& featureString) {
+    size_t start = 0;
+    while (start < featureString.size()) {
+        size_t end = featureString.find(',', start);
+        if (end == std::string::npos) end = featureString.size();
+        std::string token = featureString.substr(start, end - start);
+        // Trim whitespace
+        size_t first = token.find_first_not_of(" \t");
+        size_t last = token.find_last_not_of(" \t");
+        if (first != std::string::npos && last != std::string::npos) {
+            token = token.substr(first, (last - first + 1));
+            setFeature(token);
+        }
+        start = end + 1;
+    }
+}
+
+VectorCapabilities TargetInfo::getVectorCapabilities() const {
+    VectorCapabilities caps;
+    if (hasFeature("avx512") || hasFeature("avx512f")) {
+        caps.supportsAVX512 = true;
+        caps.supportsAVX2 = true;
+        caps.supportsAVX = true;
+        caps.supportsSSE = true;
+        caps.maxVectorWidth = 512;
+        caps.supportedWidths = {128, 256, 512};
+        caps.supportsFloatVectors = true;
+        caps.supportsIntegerVectors = true;
+        caps.supportsDoubleVectors = true;
+        caps.supportsMaskedOps = true;
+        caps.supportsGatherScatter = true;
+        caps.supportsFMA = true;
+        caps.supportsHorizontalOps = true;
+        caps.simdExtension = "avx512";
+    } else if (hasFeature("avx2")) {
+        caps.supportsAVX2 = true;
+        caps.supportsAVX = true;
+        caps.supportsSSE = true;
+        caps.maxVectorWidth = 256;
+        caps.supportedWidths = {128, 256};
+        caps.supportsFloatVectors = true;
+        caps.supportsIntegerVectors = true;
+        caps.supportsDoubleVectors = true;
+        caps.supportsFMA = true;
+        caps.supportsHorizontalOps = true;
+        caps.simdExtension = "avx2";
+    } else if (hasFeature("neon")) {
+        caps.supportsNEON = true;
+        caps.maxVectorWidth = 128;
+        caps.supportedWidths = {64, 128};
+        caps.supportsFloatVectors = true;
+        caps.supportsIntegerVectors = true;
+        caps.supportsDoubleVectors = true;
+        caps.simdExtension = "neon";
+    }
+    return caps;
+}
+
 const CapabilitySpec* TargetInfo::findCapability(std::string_view name) const {
     return CapabilityRegistry::find(name);
 }

@@ -33,6 +33,7 @@ public:
     explicit BackendBuilder(ir::Module& module);
 
     BackendBuilder& target(const std::string& triple);
+    BackendBuilder& targetFeature(const std::string& feature);
     BackendBuilder& optimize(OptimizationLevel level);
 
     BackendBuilder& validate(bool enabled = true);
@@ -69,6 +70,7 @@ private:
     std::vector<std::unique_ptr<ir::Module>> additionalModules_;
     bool enableLTO_{true};
 
+    std::vector<std::string> targetFeatures_;
     std::vector<std::string> inputObjectPaths_;
     std::vector<std::string> inputStaticLibPaths_;
     std::vector<target::artifact::linker::DynamicImport> dynamicImports_;
