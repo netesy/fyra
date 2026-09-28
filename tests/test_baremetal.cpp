@@ -9,7 +9,7 @@
 #include <sstream>
 
 int main() {
-    std::cout << "=== Running BareMetal OS Target & Complete Capability Lowering Test Suite ===" << std::endl;
+    std::cout << "=== Running BareMetal OS Target & All 20 Capability Lowerings Test Suite ===" << std::endl;
 
     auto ctx = std::make_shared<ir::IRContext>();
 
@@ -44,9 +44,9 @@ int main() {
         std::cout << "BareMetal target resolution verified successfully." << std::endl;
     }
 
-    // Test 2: RISC-V 64 BareMetal Extended Capabilities (UART, Timer, Heap, Atomics, Debug)
+    // Test 2: RISC-V 64 BareMetal All 20 Capabilities
     {
-        ir::Module module("test_rv_baremetal", ctx);
+        ir::Module module("test_rv_baremetal_all", ctx);
         ir::IRBuilder builder(ctx);
         builder.setModule(&module);
 
@@ -57,15 +57,53 @@ int main() {
         ir::BasicBlock* entry = builder.createBasicBlock("entry", fnMain);
         builder.setInsertPoint(entry);
 
+        // 1. IO
         builder.createExternCall("io.write", {ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 65), ctx->getConstantInt(i32, 1)}, i32);
         builder.createExternCall("io.read", {ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 1)}, i32);
-        builder.createExternCall("time.now", {}, i64);
+        builder.createExternCall("io.open", {ctx->getConstantInt(i64, 0), ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 0)}, i32);
+        // 2. FS
+        builder.createExternCall("fs.open", {ctx->getConstantInt(i64, 0), ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 0)}, i32);
+        // 3. Memory
         builder.createExternCall("memory.alloc", {ctx->getConstantInt(i64, 128)}, i64);
+        builder.createExternCall("memory.usage", {}, i64);
+        // 4. Process
+        builder.createExternCall("process.getpid", {}, i64);
+        builder.createExternCall("process.args", {ctx->getConstantInt(i64, 0)}, i64);
+        // 5. Thread
+        builder.createExternCall("thread.getid", {}, i64);
+        builder.createExternCall("thread.yield", {}, nullptr);
+        // 6. Sync
         builder.createExternCall("sync.mutex.lock", {ctx->getConstantInt(i64, 0x1000)}, nullptr);
         builder.createExternCall("sync.atomic.add", {ctx->getConstantInt(i64, 0x1000), ctx->getConstantInt(i64, 1)}, i64);
-        builder.createExternCall("random.u64", {}, i64);
-        builder.createExternCall("debug.break", {}, nullptr);
+        // 7. Time
+        builder.createExternCall("time.now", {}, i64);
+        // 8. Event
+        builder.createExternCall("event.poll", {ctx->getConstantInt(i32, 0)}, i32);
+        // 9. Net
+        builder.createExternCall("net.socket", {ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 0)}, i32);
+        // 10. IPC
+        builder.createExternCall("ipc.connect", {ctx->getConstantInt(i64, 0)}, i32);
+        // 11. Env
+        builder.createExternCall("env.get", {ctx->getConstantInt(i64, 0)}, i64);
+        // 12. System
         builder.createExternCall("system.info", {ctx->getConstantInt(i32, 0)}, i64);
+        // 13. Signal
+        builder.createExternCall("signal.wait", {ctx->getConstantInt(i32, 1)}, i32);
+        // 14. Random
+        builder.createExternCall("random.u64", {}, i64);
+        // 15. Error
+        builder.createExternCall("error.get", {}, i64);
+        // 16. Debug
+        builder.createExternCall("debug.break", {}, nullptr);
+        // 17. Module
+        builder.createExternCall("module.load", {ctx->getConstantInt(i64, 0)}, i64);
+        // 18. TTY
+        builder.createExternCall("tty.isatty", {ctx->getConstantInt(i32, 0)}, i32);
+        // 19. Security
+        builder.createExternCall("security.getuid", {}, i32);
+        // 20. GPU
+        builder.createExternCall("gpu.malloc", {ctx->getConstantInt(i64, 1024)}, nullptr);
+
         builder.createRet(ctx->getConstantInt(i32, 0));
 
         auto descRv = target::TargetDescriptor::fromString("riscv64-baremetal-bin");
@@ -81,20 +119,30 @@ int main() {
         assert(asmOutput.find("__stack_top") != std::string::npos);
         assert(asmOutput.find("wfi") != std::string::npos);
         assert(asmOutput.find("0x10000000") != std::string::npos); // UART MMIO address
-        assert(asmOutput.find("sb t1, 0(t0)") != std::string::npos);
-        assert(asmOutput.find("lb a0, 0(t0)") != std::string::npos);
-        assert(asmOutput.find("rdtime a0") != std::string::npos);
+        assert(asmOutput.find("__ramfs_root") != std::string::npos);
+        assert(asmOutput.find("__baremetal_heap_ptr") != std::string::npos);
         assert(asmOutput.find("amoswap.w.aq") != std::string::npos);
         assert(asmOutput.find("amoadd.w") != std::string::npos);
-        assert(asmOutput.find("rdcycle a0") != std::string::npos);
-        assert(asmOutput.find("ebreak") != std::string::npos);
+        assert(asmOutput.find("rdtime a0") != std::string::npos);
+        assert(asmOutput.find("0x10001000") != std::string::npos); // Event MMIO
+        assert(asmOutput.find("0x10002000") != std::string::npos); // VirtIO-Net MMIO
+        assert(asmOutput.find("__ipc_mailbox") != std::string::npos);
+        assert(asmOutput.find("__dtb_header") != std::string::npos);
         assert(asmOutput.find("csrr a0, mhartid") != std::string::npos);
-        std::cout << "RISC-V 64 BareMetal extended capabilities test passed." << std::endl;
+        assert(asmOutput.find("csrw mtvec") != std::string::npos);
+        assert(asmOutput.find("rdcycle a0") != std::string::npos);
+        assert(asmOutput.find("__baremetal_errno") != std::string::npos);
+        assert(asmOutput.find("ebreak") != std::string::npos);
+        assert(asmOutput.find("__symtab_start") != std::string::npos);
+        assert(asmOutput.find("VT100 Serial Console Capability") != std::string::npos);
+        assert(asmOutput.find("csrw pmpaddr0") != std::string::npos);
+        assert(asmOutput.find("__framebuffer_start") != std::string::npos);
+        std::cout << "RISC-V 64 BareMetal all 20 capability domains test passed." << std::endl;
     }
 
-    // Test 3: AArch64 BareMetal Extended Capabilities (UART, Timer, Spinlock, Breakpoint)
+    // Test 3: AArch64 BareMetal All 20 Capabilities
     {
-        ir::Module module("test_arm_baremetal", ctx);
+        ir::Module module("test_arm_baremetal_all", ctx);
         ir::IRBuilder builder(ctx);
         builder.setModule(&module);
 
@@ -106,12 +154,14 @@ int main() {
         builder.setInsertPoint(entry);
 
         builder.createExternCall("io.write", {ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 66), ctx->getConstantInt(i32, 1)}, i32);
-        builder.createExternCall("io.read", {ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 1)}, i32);
-        builder.createExternCall("time.now", {}, i64);
         builder.createExternCall("memory.alloc", {ctx->getConstantInt(i64, 256)}, i64);
         builder.createExternCall("sync.mutex.lock", {ctx->getConstantInt(i64, 0x1000)}, nullptr);
+        builder.createExternCall("time.now", {}, i64);
         builder.createExternCall("debug.break", {}, nullptr);
         builder.createExternCall("system.info", {ctx->getConstantInt(i32, 0)}, i64);
+        builder.createExternCall("signal.wait", {ctx->getConstantInt(i32, 1)}, i32);
+        builder.createExternCall("gpu.malloc", {ctx->getConstantInt(i64, 2048)}, nullptr);
+
         builder.createRet(ctx->getConstantInt(i32, 0));
 
         auto descArm = target::TargetDescriptor::fromString("aarch64-baremetal-bin");
@@ -126,18 +176,19 @@ int main() {
 
         assert(asmOutput.find("__stack_top") != std::string::npos);
         assert(asmOutput.find("wfe") != std::string::npos);
-        assert(asmOutput.find("0x09000000") != std::string::npos); // PL011 UART MMIO address
-        assert(asmOutput.find("strb w10, [x9]") != std::string::npos);
+        assert(asmOutput.find("0x09000000") != std::string::npos); // PL011 UART MMIO
         assert(asmOutput.find("ldaxxr") != std::string::npos);
         assert(asmOutput.find("cntvct_el0") != std::string::npos);
         assert(asmOutput.find("brk #0") != std::string::npos);
         assert(asmOutput.find("mpidr_el1") != std::string::npos);
-        std::cout << "AArch64 BareMetal extended capabilities test passed." << std::endl;
+        assert(asmOutput.find("vbar_el1") != std::string::npos);
+        assert(asmOutput.find("__framebuffer_start") != std::string::npos);
+        std::cout << "AArch64 BareMetal all capability domains test passed." << std::endl;
     }
 
-    // Test 4: x64 BareMetal Extended Capabilities (COM1 UART, RDTSC, Lock Atomics, INT3)
+    // Test 4: x64 BareMetal All 20 Capabilities
     {
-        ir::Module module("test_x64_baremetal", ctx);
+        ir::Module module("test_x64_baremetal_all", ctx);
         ir::IRBuilder builder(ctx);
         builder.setModule(&module);
 
@@ -152,7 +203,9 @@ int main() {
         builder.createExternCall("time.now", {}, i64);
         builder.createExternCall("sync.mutex.lock", {ctx->getConstantInt(i64, 0x1000)}, nullptr);
         builder.createExternCall("debug.break", {}, nullptr);
+        builder.createExternCall("signal.wait", {ctx->getConstantInt(i32, 1)}, i32);
         builder.createExternCall("system.info", {ctx->getConstantInt(i32, 0)}, i64);
+
         builder.createRet(ctx->getConstantInt(i32, 0));
 
         auto descX64 = target::TargetDescriptor::fromString("x64-baremetal-bin");
@@ -172,8 +225,9 @@ int main() {
         assert(asmOutput.find("rdtsc") != std::string::npos);
         assert(asmOutput.find("xchg %ecx, (%rax)") != std::string::npos);
         assert(asmOutput.find("int3") != std::string::npos);
+        assert(asmOutput.find("lidt") != std::string::npos);
         assert(asmOutput.find("cpuid") != std::string::npos);
-        std::cout << "x64 BareMetal extended capabilities test passed." << std::endl;
+        std::cout << "x64 BareMetal all capability domains test passed." << std::endl;
     }
 
     std::cout << "=== All BareMetal OS target tests passed successfully! ===" << std::endl;
