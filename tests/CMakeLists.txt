@@ -419,3 +419,8 @@ add_executable(test_baremetal test_baremetal.cpp)
 target_link_libraries(test_baremetal PRIVATE fyra)
 add_test(NAME BareMetalTest COMMAND test_baremetal)
 set_tests_properties(BareMetalTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_freebsd test_freebsd.cpp)
+target_link_libraries(test_freebsd PRIVATE fyra)
+add_test(NAME FreeBSDTest COMMAND test_freebsd)
+set_tests_properties(FreeBSDTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -14,6 +14,7 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/os/macos/MacOSOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/wasi/WASIOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/baremetal/BareMetalOS.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/os/freebsd/FreeBSDOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/capabilities/CapabilityRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/APKArtifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/APKPackager.cpp
