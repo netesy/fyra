@@ -14,6 +14,7 @@
 #include "target/artifact/executable/PeImage.h"
 #include "target/architecture/wasm32/WasmModule.h"
 #include "target/artifact/apk/APKArtifact.h"
+#include "target/artifact/executable/FlatBinaryWriter.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -42,6 +43,7 @@ std::string BackendBuilder::resolveTargetTriple(const std::string& triple) {
     else if (triple == "windows-arm64") canonical = "aarch64-windows-bin";
     else if (triple == "aarch64") canonical = "aarch64-linux-bin";
     else if (triple == "android" || triple == "aarch64-android") canonical = "aarch64-android-apk";
+    else if (triple == "flat" || triple == "raw" || triple == "img") canonical = "riscv64-baremetal-flat";
     else if (triple == "wasm32" || triple == "wasm") canonical = "wasm32-wasi-wasm";
     else if (triple == "riscv64") canonical = "riscv64-linux-bin";
     else {
@@ -510,6 +512,60 @@ BuildResult BackendBuilder::emitExecutable(const std::string& path) {
             result.errors.push_back("ELF Executable generation failed: " + builder.getLastError());
             return result;
         }
+    }
+
+    result.success = true;
+    return result;
+}
+
+BuildResult BackendBuilder::emitFlatBinary(const std::string& path) {
+    BuildResult result;
+    result.kind = OutputKind::FlatBinary;
+    result.outputPath = path;
+
+    ensurePrepared(result);
+    if (!result.errors.empty()) return result;
+
+    target::artifact::object::ObjectArtifact moduleArt = buildModuleObjectArtifact(result);
+    if (!result.errors.empty()) return result;
+
+    std::vector<target::artifact::object::ObjectArtifact> artifacts;
+    artifacts.push_back(moduleArt);
+
+    std::vector<std::vector<target::artifact::archive::ArchiveObjectMember>> archives;
+
+    for (const auto& inputObjPath : inputObjectPaths_) {
+        std::ifstream f(inputObjPath, std::ios::binary);
+        if (!f.is_open()) {
+            result.errors.push_back("Cannot open input object file: " + inputObjPath);
+            return result;
+        }
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        f.close();
+
+        auto objReader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+        target::artifact::object::ObjectArtifact art;
+        if (objReader && objReader->parse(bytes, art)) {
+            artifacts.push_back(art);
+        } else {
+            result.errors.push_back("Failed to parse input object file: " + inputObjPath);
+            return result;
+        }
+    }
+
+    target::artifact::linker::InternalLinker linker;
+    linker.extractLazyArchiveMembers(artifacts, archives);
+
+    target::artifact::linker::LinkedImage image;
+    if (!linker.link(artifacts, image, target::artifact::linker::LinkOutputKind::Executable, dynamicImports_)) {
+        result.errors.push_back("Linker error: " + linker.getLastError());
+        return result;
+    }
+
+    target::artifact::executable::FlatBinaryWriter writer;
+    if (!writer.write(image, path)) {
+        result.errors.push_back("FlatBinaryWriter failed: " + writer.getLastError());
+        return result;
     }
 
     result.success = true;

@@ -31,6 +31,7 @@ std::string TargetDescriptor::toString() const {
             case Artifact::StaticLibrary: s += "static"; break;
             case Artifact::APK: s += "apk"; break;
             case Artifact::WasmModule: s += "wasm"; break;
+            case Artifact::FlatBinary: s += "flat"; break;
         }
     }
     return s;
@@ -90,6 +91,7 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
         if (parts[2] == "bin" || parts[2] == "executable") desc.artifact = Artifact::Executable;
         else if (parts[2] == "apk") desc.artifact = Artifact::APK;
         else if (parts[2] == "wasm") desc.artifact = Artifact::WasmModule;
+        else if (parts[2] == "flat" || parts[2] == "raw" || parts[2] == "img") desc.artifact = Artifact::FlatBinary;
         else if (parts[2] == "shared") desc.artifact = Artifact::SharedLibrary;
         else if (parts[2] == "static") desc.artifact = Artifact::StaticLibrary;
     }

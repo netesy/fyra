@@ -30,6 +30,10 @@ int main() {
         assert(descX64->arch == target::Arch::X64);
         assert(descX64->os == target::OS::BareMetal);
 
+        auto descFlat = target::TargetDescriptor::fromString("riscv64-baremetal-flat");
+        assert(descFlat.has_value());
+        assert(descFlat->artifact == target::Artifact::FlatBinary);
+
         auto targetRv = target::TargetResolver::resolve(*descRv);
         assert(targetRv != nullptr);
         assert(targetRv->getName().find("baremetal") != std::string::npos);

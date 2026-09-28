@@ -20,6 +20,7 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/JavaStubGen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/ManifestGen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/binary_writer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/FlatBinaryWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/ElfImage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/MachOImage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/PeImage.cpp

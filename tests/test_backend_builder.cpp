@@ -306,6 +306,30 @@ int main() {
         std::cout << "Android target emitAPK verification passed successfully!" << std::endl;
     }
 
+    // Test 8: Flat Binary (.bin / .img) Emission Test
+    {
+        ir::Module module("test_flat_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        builder.createRet(ctx->getConstantInt(i32, 0));
+
+        fyra::BackendBuilder backend(module);
+        backend.target("riscv64-baremetal-flat");
+
+        fyra::BuildResult resFlat = backend.emitFlatBinary("/tmp/test_kernel.bin");
+        assert(resFlat.success);
+        assert(resFlat.kind == fyra::OutputKind::FlatBinary);
+
+        std::ifstream binFile("/tmp/test_kernel.bin", std::ios::binary);
+        assert(binFile.is_open());
+        std::cout << "Flat binary (.bin) emission test passed successfully!" << std::endl;
+    }
+
     std::cout << "=== All BackendBuilder API direct C++ tests passed successfully! ===" << std::endl;
     return 0;
 }
