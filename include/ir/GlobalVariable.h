@@ -11,6 +11,7 @@ public:
         : GlobalValue(ty, name), initializer(initializer), threadLocal(isThreadLocal), section(section) {}
 
     Constant* getInitializer() const { return initializer; }
+    void setInitializer(Constant* init) { initializer = init; }
     bool isThreadLocal() const { return threadLocal; }
     const std::string& getSection() const { return section; }
 

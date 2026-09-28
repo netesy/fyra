@@ -15,6 +15,7 @@
 #include "target/architecture/wasm32/WasmModule.h"
 #include "target/artifact/apk/APKArtifact.h"
 #include "target/artifact/executable/FlatBinaryWriter.h"
+#include "ir/IRLinker.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -105,6 +106,22 @@ BackendBuilder& BackendBuilder::enableLoopUnroll(bool enabled) {
     return *this;
 }
 
+BackendBuilder& BackendBuilder::enableLTO(bool enabled) {
+    if (enableLTO_ != enabled) {
+        enableLTO_ = enabled;
+        invalidatePrepared();
+    }
+    return *this;
+}
+
+BackendBuilder& BackendBuilder::addModule(std::unique_ptr<ir::Module> module) {
+    if (module) {
+        additionalModules_.push_back(std::move(module));
+        invalidatePrepared();
+    }
+    return *this;
+}
+
 BackendBuilder& BackendBuilder::addObject(const std::string& path) {
     inputObjectPaths_.push_back(path);
     return *this;
@@ -135,6 +152,19 @@ void BackendBuilder::ensurePrepared(BuildResult& result) {
     if (isPrepared_ && preparedModule_) return;
 
     preparedModule_ = cloneModule(srcModule_);
+
+    if (enableLTO_ && !additionalModules_.empty()) {
+        std::string err;
+        for (const auto& mod : additionalModules_) {
+            auto clonedMod = cloneModule(*mod);
+            if (!ir::IRLinker::linkModules(*preparedModule_, std::move(clonedMod), err)) {
+                result.success = false;
+                result.errors.push_back("IR LTO Linker Error: " + err);
+                return;
+            }
+        }
+    }
+
     PipelineResult pRes = pipeline_.run(*preparedModule_, config_);
     if (!pRes.success) {
         result.success = false;

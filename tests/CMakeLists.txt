@@ -424,3 +424,8 @@ add_executable(test_freebsd test_freebsd.cpp)
 target_link_libraries(test_freebsd PRIVATE fyra)
 add_test(NAME FreeBSDTest COMMAND test_freebsd)
 set_tests_properties(FreeBSDTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_ir_linker_lto test_ir_linker_lto.cpp)
+target_link_libraries(test_ir_linker_lto PRIVATE fyra)
+add_test(NAME IRLinkerLTOTest COMMAND test_ir_linker_lto)
+set_tests_properties(IRLinkerLTOTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
