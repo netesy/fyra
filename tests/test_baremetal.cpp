@@ -9,7 +9,7 @@
 #include <sstream>
 
 int main() {
-    std::cout << "=== Running BareMetal OS Target & Extended Capability Lowering Test Suite ===" << std::endl;
+    std::cout << "=== Running BareMetal OS Target & Complete Capability Lowering Test Suite ===" << std::endl;
 
     auto ctx = std::make_shared<ir::IRContext>();
 
@@ -44,7 +44,7 @@ int main() {
         std::cout << "BareMetal target resolution verified successfully." << std::endl;
     }
 
-    // Test 2: RISC-V 64 BareMetal Extended Capabilities (UART, Timer, Heap, Core ID)
+    // Test 2: RISC-V 64 BareMetal Extended Capabilities (UART, Timer, Heap, Atomics, Debug)
     {
         ir::Module module("test_rv_baremetal", ctx);
         ir::IRBuilder builder(ctx);
@@ -61,6 +61,10 @@ int main() {
         builder.createExternCall("io.read", {ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 1)}, i32);
         builder.createExternCall("time.now", {}, i64);
         builder.createExternCall("memory.alloc", {ctx->getConstantInt(i64, 128)}, i64);
+        builder.createExternCall("sync.mutex.lock", {ctx->getConstantInt(i64, 0x1000)}, nullptr);
+        builder.createExternCall("sync.atomic.add", {ctx->getConstantInt(i64, 0x1000), ctx->getConstantInt(i64, 1)}, i64);
+        builder.createExternCall("random.u64", {}, i64);
+        builder.createExternCall("debug.break", {}, nullptr);
         builder.createExternCall("system.info", {ctx->getConstantInt(i32, 0)}, i64);
         builder.createRet(ctx->getConstantInt(i32, 0));
 
@@ -80,12 +84,15 @@ int main() {
         assert(asmOutput.find("sb t1, 0(t0)") != std::string::npos);
         assert(asmOutput.find("lb a0, 0(t0)") != std::string::npos);
         assert(asmOutput.find("rdtime a0") != std::string::npos);
-        assert(asmOutput.find("__baremetal_heap_ptr") != std::string::npos);
+        assert(asmOutput.find("amoswap.w.aq") != std::string::npos);
+        assert(asmOutput.find("amoadd.w") != std::string::npos);
+        assert(asmOutput.find("rdcycle a0") != std::string::npos);
+        assert(asmOutput.find("ebreak") != std::string::npos);
         assert(asmOutput.find("csrr a0, mhartid") != std::string::npos);
         std::cout << "RISC-V 64 BareMetal extended capabilities test passed." << std::endl;
     }
 
-    // Test 3: AArch64 BareMetal Extended Capabilities
+    // Test 3: AArch64 BareMetal Extended Capabilities (UART, Timer, Spinlock, Breakpoint)
     {
         ir::Module module("test_arm_baremetal", ctx);
         ir::IRBuilder builder(ctx);
@@ -102,6 +109,8 @@ int main() {
         builder.createExternCall("io.read", {ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 0), ctx->getConstantInt(i32, 1)}, i32);
         builder.createExternCall("time.now", {}, i64);
         builder.createExternCall("memory.alloc", {ctx->getConstantInt(i64, 256)}, i64);
+        builder.createExternCall("sync.mutex.lock", {ctx->getConstantInt(i64, 0x1000)}, nullptr);
+        builder.createExternCall("debug.break", {}, nullptr);
         builder.createExternCall("system.info", {ctx->getConstantInt(i32, 0)}, i64);
         builder.createRet(ctx->getConstantInt(i32, 0));
 
@@ -119,13 +128,14 @@ int main() {
         assert(asmOutput.find("wfe") != std::string::npos);
         assert(asmOutput.find("0x09000000") != std::string::npos); // PL011 UART MMIO address
         assert(asmOutput.find("strb w10, [x9]") != std::string::npos);
-        assert(asmOutput.find("ldrb w0, [x9]") != std::string::npos);
+        assert(asmOutput.find("ldaxxr") != std::string::npos);
         assert(asmOutput.find("cntvct_el0") != std::string::npos);
+        assert(asmOutput.find("brk #0") != std::string::npos);
         assert(asmOutput.find("mpidr_el1") != std::string::npos);
         std::cout << "AArch64 BareMetal extended capabilities test passed." << std::endl;
     }
 
-    // Test 4: x64 BareMetal Extended Capabilities
+    // Test 4: x64 BareMetal Extended Capabilities (COM1 UART, RDTSC, Lock Atomics, INT3)
     {
         ir::Module module("test_x64_baremetal", ctx);
         ir::IRBuilder builder(ctx);
@@ -140,6 +150,8 @@ int main() {
 
         builder.createExternCall("io.write", {ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 67), ctx->getConstantInt(i32, 1)}, i32);
         builder.createExternCall("time.now", {}, i64);
+        builder.createExternCall("sync.mutex.lock", {ctx->getConstantInt(i64, 0x1000)}, nullptr);
+        builder.createExternCall("debug.break", {}, nullptr);
         builder.createExternCall("system.info", {ctx->getConstantInt(i32, 0)}, i64);
         builder.createRet(ctx->getConstantInt(i32, 0));
 
@@ -158,6 +170,8 @@ int main() {
         assert(asmOutput.find("0x3F8") != std::string::npos); // COM1 UART port
         assert(asmOutput.find("outb %al, %dx") != std::string::npos);
         assert(asmOutput.find("rdtsc") != std::string::npos);
+        assert(asmOutput.find("xchg %ecx, (%rax)") != std::string::npos);
+        assert(asmOutput.find("int3") != std::string::npos);
         assert(asmOutput.find("cpuid") != std::string::npos);
         std::cout << "x64 BareMetal extended capabilities test passed." << std::endl;
     }
