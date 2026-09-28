@@ -15,7 +15,8 @@ enum class OutputKind {
     StaticLibrary,
     SharedLibrary,
     WAT,
-    Wasm
+    Wasm,
+    APK
 };
 
 struct BuildResult {
@@ -54,6 +55,7 @@ public:
     BuildResult emitStaticLibrary(const std::string& path);
     BuildResult emitSharedLibrary(const std::string& path);
     BuildResult emitExecutable(const std::string& path);
+    BuildResult emitAPK(const std::string& path);
 
 private:
     ir::Module& srcModule_;

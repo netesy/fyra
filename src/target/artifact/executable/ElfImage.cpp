@@ -160,7 +160,8 @@ uint64_t alignUp(uint64_t val, uint64_t align) {
 bool ElfImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) {
     lastError_.clear();
 
-    if (plan.arch != target::Arch::X64 || plan.os != target::OS::Linux) {
+    if ((plan.arch != target::Arch::X64 && plan.arch != target::Arch::AArch64 && plan.arch != target::Arch::RISCV64) ||
+        (plan.os != target::OS::Linux && plan.os != target::OS::Android)) {
         lastError_ = "shared-library output unsupported for target architecture/OS";
         return false;
     }
@@ -418,7 +419,9 @@ bool ElfImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std::
     ehdr.e_ident[6] = 1; // ELF version 1
     ehdr.e_ident[7] = 0; // SYSV
     ehdr.e_type = ET_DYN;
-    ehdr.e_machine = EM_X86_64;
+    if (plan.arch == target::Arch::AArch64) ehdr.e_machine = 183;
+    else if (plan.arch == target::Arch::RISCV64) ehdr.e_machine = 243;
+    else ehdr.e_machine = EM_X86_64;
     ehdr.e_version = 1;
     ehdr.e_entry = 0;
     ehdr.e_phoff = sizeof(ElfHeader64);

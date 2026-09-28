@@ -10,7 +10,7 @@ namespace linker {
 
 
 std::unique_ptr<TargetDynamicImageBuilder> TargetDynamicImageBuilder::createForTarget(target::Arch arch, target::OS os) {
-    if (arch == target::Arch::X64 && os == target::OS::Linux) {
+    if (os == target::OS::Linux || os == target::OS::Android) {
         return std::make_unique<ElfDynamicImageBuilder>();
     } else if (os == target::OS::Windows) {
         return std::make_unique<PeDynamicImageBuilder>();

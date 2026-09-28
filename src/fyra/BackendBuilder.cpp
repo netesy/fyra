@@ -13,6 +13,7 @@
 #include "target/artifact/executable/MachOImage.h"
 #include "target/artifact/executable/PeImage.h"
 #include "target/architecture/wasm32/WasmModule.h"
+#include "target/artifact/apk/APKArtifact.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -40,6 +41,7 @@ std::string BackendBuilder::resolveTargetTriple(const std::string& triple) {
     else if (triple == "windows" || triple == "windows-amd64" || triple == "win32" || triple == "win64") canonical = "x64-windows-bin";
     else if (triple == "windows-arm64") canonical = "aarch64-windows-bin";
     else if (triple == "aarch64") canonical = "aarch64-linux-bin";
+    else if (triple == "android" || triple == "aarch64-android") canonical = "aarch64-android-apk";
     else if (triple == "wasm32" || triple == "wasm") canonical = "wasm32-wasi-wasm";
     else if (triple == "riscv64") canonical = "riscv64-linux-bin";
     else {
@@ -511,6 +513,50 @@ BuildResult BackendBuilder::emitExecutable(const std::string& path) {
     }
 
     result.success = true;
+    return result;
+}
+
+BuildResult BackendBuilder::emitAPK(const std::string& path) {
+    BuildResult result;
+    result.kind = OutputKind::APK;
+    result.outputPath = path;
+
+    ensurePrepared(result);
+    if (!result.errors.empty()) return result;
+
+    std::string soPath = path + ".so";
+    BuildResult soRes = emitSharedLibrary(soPath);
+    if (!soRes.success) {
+        result.errors = soRes.errors;
+        return result;
+    }
+
+    auto desc = target::TargetDescriptor::fromString(config_.targetTriple);
+    if (!desc) {
+        result.errors.push_back("Invalid target triple: " + config_.targetTriple);
+        return result;
+    }
+
+    auto targetInfo = target::TargetResolver::resolve(*desc);
+    if (!targetInfo) {
+        result.errors.push_back("Failed to resolve target info for: " + config_.targetTriple);
+        return result;
+    }
+
+    std::string outputPrefix = path;
+    if (outputPrefix.size() > 4 && outputPrefix.substr(outputPrefix.size() - 4) == ".apk") {
+        outputPrefix = outputPrefix.substr(0, outputPrefix.size() - 4);
+    }
+
+    if (auto* apkArt = dynamic_cast<target::artifact::APKArtifact*>(targetInfo.get())) {
+        apkArt->buildAPK(outputPrefix);
+        result.success = true;
+    } else {
+        target::artifact::APKArtifact apkWrapper(std::move(targetInfo));
+        apkWrapper.buildAPK(outputPrefix);
+        result.success = true;
+    }
+
     return result;
 }
 
