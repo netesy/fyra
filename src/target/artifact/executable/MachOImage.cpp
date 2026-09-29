@@ -475,6 +475,7 @@ bool MachOImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std
         return false;
     }
 
+    std::remove(outputPath.c_str());
     if (std::rename(temporary.c_str(), outputPath.c_str()) != 0) {
         std::remove(temporary.c_str());
         lastError_ = "failed to replace Mach-O dylib output";
@@ -709,6 +710,7 @@ bool MachOImageWriter::writeExecutable(const LinkedImage& image, const std::stri
             return false;
         }
 
+        std::remove(outputPath.c_str());
         if (std::rename(temporary.c_str(), outputPath.c_str()) != 0) {
             std::remove(temporary.c_str());
             lastError_ = "failed to replace Mach-O output";
@@ -1130,6 +1132,7 @@ bool MachOImageWriter::writeExecutable(const LinkedImage& image, const std::stri
         return false;
     }
 
+    std::remove(outputPath.c_str());
     if (std::rename(temporary.c_str(), outputPath.c_str()) != 0) {
         std::remove(temporary.c_str());
         lastError_ = "failed to replace dynamic Mach-O output";

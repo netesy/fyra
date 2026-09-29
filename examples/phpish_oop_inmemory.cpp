@@ -2,7 +2,16 @@
 #include <memory>
 #include <regex>
 #include <string>
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#else
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(s) (s)
+#endif
+#ifndef WIFEXITED
+#define WIFEXITED(s) true
+#endif
+#endif
 #include <vector>
 
 #include "ir/Constant.h"

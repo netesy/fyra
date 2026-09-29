@@ -9,6 +9,7 @@
 #include "target/core/TargetResolver.h"
 #include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -106,12 +107,24 @@ bool contiguous(const std::vector<ir::Instruction*>& accesses, bool loads, ir::T
 bool knownNonAliasing(const SLPVectorizer::SLPMemoryPack& a,
                       const SLPVectorizer::SLPMemoryPack& b) {
     if (a.base != b.base) {
+        auto* ap = dynamic_cast<ir::Parameter*>(a.base);
+        auto* bp = dynamic_cast<ir::Parameter*>(b.base);
+        if (ap && bp && ap != bp) return true;
+
         auto* ai = dynamic_cast<ir::Instruction*>(a.base);
         auto* bi = dynamic_cast<ir::Instruction*>(b.base);
         auto allocation = [](ir::Instruction* i) {
             return i && (i->getOpcode() == O::Alloc || i->getOpcode() == O::Alloc4 || i->getOpcode() == O::Alloc16);
         };
-        return allocation(ai) && allocation(bi) && ai != bi;
+        if (allocation(ai) && allocation(bi) && ai != bi) return true;
+        if ((ap && allocation(bi)) || (bp && allocation(ai))) return true;
+
+        auto* ag = dynamic_cast<ir::GlobalVariable*>(a.base);
+        auto* bg = dynamic_cast<ir::GlobalVariable*>(b.base);
+        if (ag && bg && ag != bg) return true;
+        if ((ag && (ap || allocation(bi))) || (bg && (bp || allocation(ai)))) return true;
+
+        return false;
     }
     int64_t aEnd = a.firstOffset + a.elementSize * a.lanes;
     int64_t bEnd = b.firstOffset + b.elementSize * b.lanes;
@@ -381,39 +394,50 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
             std::vector<ir::Instruction*> stores(storeRoots.begin() + storeCursor,
                                                  storeRoots.begin() + storeCursor + laneCount);
             std::vector<ir::Instruction*> arithmetic;
-            std::vector<ir::Instruction*> leftLoads, rightLoads;
             bool valid = true;
             for (auto* store : stores) {
                 auto* op = dynamic_cast<ir::Instruction*>(store->getOperands()[0]->get());
                 if (!op || op->getOpcode() != firstValue->getOpcode() || op->getType() != scalarType ||
                     op->getOperands().size() != 2) { valid = false; break; }
                 arithmetic.push_back(op);
-                auto* left = dynamic_cast<ir::Instruction*>(op->getOperands()[0]->get());
-                auto* right = dynamic_cast<ir::Instruction*>(op->getOperands()[1]->get());
-                if (!left || !right || !isLoad(left->getOpcode()) || !isLoad(right->getOpcode()) ||
-                    left->getType() != scalarType || right->getType() != scalarType) { valid = false; break; }
-                leftLoads.push_back(left);
-                rightLoads.push_back(right);
             }
             if (!valid || !independent(arithmetic)) { ++storeCursor; continue; }
 
-            SLPMemoryPack storePack, leftPack, rightPack;
-            if (!contiguous(stores, false, scalarType, storePack) ||
-                !contiguous(leftLoads, true, scalarType, leftPack) ||
-                !contiguous(rightLoads, true, scalarType, rightPack)) {
+            SLPMemoryPack storePack;
+            if (!contiguous(stores, false, scalarType, storePack)) {
                 diag("reject: non-contiguous memory lanes");
-                ++storeCursor;
-                continue;
-            }
-            if (!knownNonAliasing(storePack, leftPack) || !knownNonAliasing(storePack, rightPack)) {
-                diag("reject: memory dependence across lanes");
                 ++storeCursor;
                 continue;
             }
 
             // Build Bottom-Up Tree starting from arithmetic pack
             auto tree = buildSLPTree(arithmetic);
-            if (tree) tree->alignCommutativeLanes();
+            if (!tree) {
+                ++storeCursor;
+                continue;
+            }
+            tree->alignCommutativeLanes();
+
+            std::vector<SLPMemoryPack> allLoadPacks;
+            std::function<void(std::shared_ptr<SLPTreeNode>)> collectLoads = [&](std::shared_ptr<SLPTreeNode> n) {
+                if (!n) return;
+                if (n->isLoadTree) allLoadPacks.push_back(n->memoryPack);
+                for (auto& ch : n->children) collectLoads(ch);
+            };
+            collectLoads(tree);
+
+            bool aliasOk = true;
+            for (const auto& lp : allLoadPacks) {
+                if (!knownNonAliasing(storePack, lp)) {
+                    aliasOk = false;
+                    break;
+                }
+            }
+            if (!aliasOk) {
+                diag("reject: memory dependence across lanes");
+                ++storeCursor;
+                continue;
+            }
 
             unsigned width = laneCount * bits;
             auto* vectorType = context->getVectorType(scalarType, laneCount);
@@ -426,23 +450,51 @@ bool SLPVectorizer::performTransformation(ir::Function& func) {
                 block.addInstruction(insertion, std::move(instruction));
                 return raw;
             };
-            ir::Value* leftVector = emit(std::make_unique<ir::VectorInstruction>(vectorType, O::VLoad,
-                std::vector<ir::Value*>{leftLoads.front()->getOperands()[0]->get()}, width, &block));
-            ir::Value* rightVector = emit(std::make_unique<ir::VectorInstruction>(vectorType, O::VLoad,
-                std::vector<ir::Value*>{rightLoads.front()->getOperands()[0]->get()}, width, &block));
-            ir::Value* result = emit(std::make_unique<ir::VectorInstruction>(vectorType,
-                vectorOpcode(firstValue->getOpcode()), std::vector<ir::Value*>{leftVector, rightVector}, width, &block));
+
+            std::function<ir::Value*(std::shared_ptr<SLPTreeNode>)> materializeSLPTree =
+                [&](std::shared_ptr<SLPTreeNode> n) -> ir::Value* {
+                if (!n) return nullptr;
+                if (n->isLoadTree) {
+                    return emit(std::make_unique<ir::VectorInstruction>(vectorType, O::VLoad,
+                        std::vector<ir::Value*>{n->lanes.front()->getOperands()[0]->get()}, width, &block));
+                }
+                if (n->children.size() == 2) {
+                    ir::Value* c0 = materializeSLPTree(n->children[0]);
+                    ir::Value* c1 = materializeSLPTree(n->children[1]);
+                    return emit(std::make_unique<ir::VectorInstruction>(vectorType,
+                        vectorOpcode(n->opcode), std::vector<ir::Value*>{c0, c1}, width, &block));
+                }
+                auto* i32 = context->getIntegerType(32);
+                ir::Value* vec = emit(std::make_unique<ir::VectorInstruction>(
+                    vectorType, O::VBroadcast, std::vector<ir::Value*>{n->lanes[0]}, width, &block));
+                for (unsigned lane = 1; lane < laneCount; ++lane) {
+                    auto* idx = context->getConstantInt(i32, lane);
+                    vec = emit(std::make_unique<ir::VectorInstruction>(
+                        vectorType, O::VInsert, std::vector<ir::Value*>{vec, n->lanes[lane], idx}, width, &block));
+                }
+                return vec;
+            };
+
+            ir::Value* result = materializeSLPTree(tree);
             emit(std::make_unique<ir::VectorInstruction>(context->getVoidType(), O::VStore,
                 std::vector<ir::Value*>{result, stores.front()->getOperands()[1]->get()}, width, &block));
 
             block.removeInstructions(stores);
+
+            std::vector<ir::Instruction*> allTreeInsts;
+            std::function<void(std::shared_ptr<SLPTreeNode>)> collectTreeInsts = [&](std::shared_ptr<SLPTreeNode> n) {
+                if (!n) return;
+                for (auto* inst : n->lanes) allTreeInsts.push_back(inst);
+                for (auto& ch : n->children) collectTreeInsts(ch);
+            };
+            collectTreeInsts(tree);
+
             std::vector<ir::Instruction*> dead;
-            for (auto* op : arithmetic) if (op->use_empty()) dead.push_back(op);
+            for (auto* inst : allTreeInsts) {
+                if (inst->use_empty()) dead.push_back(inst);
+            }
             block.removeInstructions(dead);
-            dead.clear();
-            for (auto* load : leftLoads) if (load->use_empty()) dead.push_back(load);
-            for (auto* load : rightLoads) if (load->use_empty()) dead.push_back(load);
-            block.removeInstructions(dead);
+
             diag("SLP tree root: " + std::to_string(laneCount) + " contiguous stores; type: " +
                  scalarType->toString() + "; vector width: " + std::to_string(width) + "; accepted");
             changed = true;

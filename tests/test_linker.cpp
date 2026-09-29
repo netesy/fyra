@@ -4,10 +4,10 @@
 #include "target/artifact/linker/InternalLinker.h"
 #include "target/artifact/linker/LinkedImage.h"
 #include "target/artifact/linker/TargetDynamicImageBuilder.h"
-#include "target/artifact/linker/DynamicLinkPlan.h"
 #include "target/artifact/executable/PeImage.h"
+#if !defined(_WIN32)
 #include <dlfcn.h>
-#include "target/artifact/archive/ArchiveWriter.h"
+#endif
 #include "target/artifact/archive/UnixArchiveWriter.h"
 #include "target/artifact/archive/ArchiveReader.h"
 #include <iostream>
@@ -371,6 +371,7 @@ void test_common_dynamic_harness() {
     bool elfOk = elfBuilder->buildSharedLibrary(neutralPlan, soPath);
     assert(elfOk);
 
+#if !defined(_WIN32)
     // Verify native dlopen / dlsym execution
     void* handle = dlopen(("./" + soPath).c_str(), RTLD_NOW);
     assert(handle != nullptr);
@@ -381,6 +382,7 @@ void test_common_dynamic_harness() {
     int res = fn();
     assert(res == 42);
     dlclose(handle);
+#endif
 
     // 2. Dispatch to PE Builder with same neutral plan
     DynamicLinkPlan pePlan = neutralPlan;

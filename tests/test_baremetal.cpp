@@ -1,5 +1,7 @@
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetDescriptor.h"
+#include "target/core/CompositeTargetInfo.h"
+#include "target/os/baremetal/BareMetalOS.h"
 #include "codegen/CodeGen.h"
 #include "ir/IRContext.h"
 #include "ir/IRBuilder.h"
@@ -232,6 +234,76 @@ int main() {
         assert(asmOutput.find("lidt") != std::string::npos);
         assert(asmOutput.find("cpuid") != std::string::npos);
         std::cout << "x64 BareMetal all capability domains test passed." << std::endl;
+    }
+
+    // Test 5: BareMetal Board Abstraction & Custom Peripheral Decoupling
+    {
+        ir::Module module("test_board_abstraction", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        builder.createExternCall("io.write", {ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 70), ctx->getConstantInt(i32, 1)}, i32);
+        builder.createRet(ctx->getConstantInt(i32, 0));
+
+        // 5a. Raspberry Pi 3 AArch64 profile (PL011 at 0x3F201000)
+        {
+            auto descArm = target::TargetDescriptor::fromString("aarch64-baremetal-bin");
+            auto targetArm = target::TargetResolver::resolve(*descArm);
+            auto* compArm = dynamic_cast<target::CompositeTargetInfo*>(targetArm.get());
+            assert(compArm != nullptr);
+            auto* bareOS = dynamic_cast<target::BareMetalOS*>(compArm->getOperatingSystem());
+            assert(bareOS != nullptr);
+            bareOS->setBoard(target::BareMetalBoard::raspberryPi3());
+
+            std::stringstream ss;
+            codegen::CodeGen codeGen(module, std::move(targetArm), &ss);
+            codeGen.emit(true);
+            std::string out = ss.str();
+            assert(out.find("0x3F201000") != std::string::npos);
+            assert(out.find("Raspberry Pi 3") != std::string::npos);
+        }
+
+        // 5b. SiFive HiFive RISC-V profile (UART0 at 0x10013000)
+        {
+            auto descRv = target::TargetDescriptor::fromString("riscv64-baremetal-bin");
+            auto targetRv = target::TargetResolver::resolve(*descRv);
+            auto* compRv = dynamic_cast<target::CompositeTargetInfo*>(targetRv.get());
+            assert(compRv != nullptr);
+            auto* bareOS = dynamic_cast<target::BareMetalOS*>(compRv->getOperatingSystem());
+            assert(bareOS != nullptr);
+            bareOS->setBoard(target::BareMetalBoard::sifiveHiFive());
+
+            std::stringstream ss;
+            codegen::CodeGen codeGen(module, std::move(targetRv), &ss);
+            codeGen.emit(true);
+            std::string out = ss.str();
+            assert(out.find("0x10013000") != std::string::npos);
+            assert(out.find("SiFive HiFive") != std::string::npos);
+        }
+
+        // 5c. Custom Microcontroller SoC profile (UART at 0x4000C000)
+        {
+            auto descRv = target::TargetDescriptor::fromString("riscv64-baremetal-bin");
+            auto targetRv = target::TargetResolver::resolve(*descRv);
+            auto* compRv = dynamic_cast<target::CompositeTargetInfo*>(targetRv.get());
+            assert(compRv != nullptr);
+            auto* bareOS = dynamic_cast<target::BareMetalOS*>(compRv->getOperatingSystem());
+            assert(bareOS != nullptr);
+            bareOS->setBoard(target::BareMetalBoard::custom("CustomSoC", 0x4000C000));
+
+            std::stringstream ss;
+            codegen::CodeGen codeGen(module, std::move(targetRv), &ss);
+            codeGen.emit(true);
+            std::string out = ss.str();
+            assert(out.find("0x4000C000") != std::string::npos);
+            assert(out.find("CustomSoC") != std::string::npos);
+        }
+
+        std::cout << "BareMetal board abstraction layer & peripheral decoupling verified successfully." << std::endl;
     }
 
     std::cout << "=== All BareMetal OS target tests passed successfully! ===" << std::endl;

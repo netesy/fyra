@@ -138,11 +138,13 @@ int main(){
  puts("floating auto-vectorization execution passed"); return 0;
 })C";
     harness.close();
+#if !defined(_WIN32)
     std::string cmd = "gcc -O0 -no-pie " + asmPath + " " + cPath + " -o " + binPath + " && " + binPath;
     int rc = std::system(cmd.c_str());
     std::cout << "asmPath: " << asmPath << std::endl;
     // std::remove(asmPath.c_str()); std::remove(cPath.c_str()); std::remove(binPath.c_str());
     assert(rc == 0 && "floating vectorized execution mismatch");
+#endif
     for (bool reduction : {false, true}) {
         Function* rejected = buildRejectedFPLoop(module, builder, reduction);
         transforms::LoopVectorizer vectorizer;

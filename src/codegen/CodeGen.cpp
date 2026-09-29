@@ -426,6 +426,7 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
         }
 
         ::target::artifact::object::ObjectArtifact artifact;
+        artifact.arch = targetInfo->getArch();
         if (auto desc = ::target::TargetDescriptor::fromString(targetInfo->getName())) {
             artifact.arch = desc->arch;
             artifact.os = desc->os;

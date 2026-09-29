@@ -1,4 +1,5 @@
 #include "target/artifact/object/CoffObjectWriter.h"
+#include "target/core/TargetInfo.h"
 #include <fstream>
 #include <cstring>
 #include <ctime>
@@ -11,6 +12,9 @@ namespace object {
 namespace {
 
 constexpr uint16_t IMAGE_FILE_MACHINE_AMD64 = 0x8664;
+constexpr uint16_t IMAGE_FILE_MACHINE_ARM64 = 0xAA64;
+constexpr uint16_t IMAGE_FILE_MACHINE_RISCV64 = 0x5064;
+
 constexpr uint32_t IMAGE_SCN_CNT_CODE = 0x00000020;
 constexpr uint32_t IMAGE_SCN_CNT_INITIALIZED_DATA = 0x00000040;
 constexpr uint32_t IMAGE_SCN_MEM_EXECUTE = 0x20000000;
@@ -20,7 +24,18 @@ constexpr uint32_t IMAGE_SCN_ALIGN_16BYTES = 0x00500000;
 constexpr uint32_t IMAGE_SCN_ALIGN_8BYTES = 0x00400000;
 constexpr uint8_t IMAGE_SYM_CLASS_EXTERNAL = 2;
 constexpr uint8_t IMAGE_SYM_CLASS_STATIC = 3;
+
+constexpr uint16_t IMAGE_REL_AMD64_ADDR64 = 0x0001;
 constexpr uint16_t IMAGE_REL_AMD64_REL32 = 0x0004;
+
+constexpr uint16_t IMAGE_REL_ARM64_BRANCH26 = 0x0003;
+constexpr uint16_t IMAGE_REL_ARM64_PAGEBASE_REL21 = 0x0004;
+constexpr uint16_t IMAGE_REL_ARM64_PAGEOFFSET_12A = 0x0006;
+constexpr uint16_t IMAGE_REL_ARM64_ADDR64 = 0x000E;
+
+constexpr uint16_t IMAGE_REL_RISCV_ADDR64 = 0x0002;
+constexpr uint16_t IMAGE_REL_RISCV_BRANCH = 0x0007;
+constexpr uint16_t IMAGE_REL_RISCV_CALL = 0x000A;
 
 #pragma pack(push, 1)
 struct CoffHeader {
@@ -136,7 +151,42 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
                 CoffRelocation cr = {};
                 cr.VirtualAddress = static_cast<uint32_t>(r.offset);
                 cr.SymbolTableIndex = symIndexMap.count(r.symbolName) ? symIndexMap[r.symbolName] : 0;
-                cr.Type = (r.type == "R_X86_64_PC32" || r.type == "R_X86_64_PLT32") ? IMAGE_REL_AMD64_REL32 : 0x0001;
+                uint16_t relType = 0x0001;
+                
+                // Architecture-specific relocation type mapping
+                if (artifact.arch == target::Arch::AArch64) {
+                    if (r.type == "R_AARCH64_CALL26" || r.type == "R_AARCH64_JUMP26" || r.type == "IMAGE_REL_ARM64_BRANCH26") {
+                        relType = IMAGE_REL_ARM64_BRANCH26;
+                    } else if (r.type == "R_AARCH64_ADR_PREL_PG_HI21" || r.type == "IMAGE_REL_ARM64_PAGEBASE_REL21") {
+                        relType = IMAGE_REL_ARM64_PAGEBASE_REL21;
+                    } else if (r.type == "R_AARCH64_ADD_ABS_LO12_NC" || r.type == "IMAGE_REL_ARM64_PAGEOFFSET_12A") {
+                        relType = IMAGE_REL_ARM64_PAGEOFFSET_12A;
+                    } else if (r.type == "R_AARCH64_ABS64" || r.type == "IMAGE_REL_ARM64_ADDR64") {
+                        relType = IMAGE_REL_ARM64_ADDR64;
+                    } else {
+                        try { relType = static_cast<uint16_t>(std::stoul(r.type)); } catch(...) { relType = IMAGE_REL_ARM64_BRANCH26; }
+                    }
+                } else if (artifact.arch == target::Arch::RISCV64) {
+                    if (r.type == "R_RISCV_CALL" || r.type == "R_RISCV_CALL_PLT" || r.type == "R_RISCV_JAL" || r.type == "IMAGE_REL_RISCV_CALL") {
+                        relType = IMAGE_REL_RISCV_CALL;
+                    } else if (r.type == "R_RISCV_BRANCH" || r.type == "IMAGE_REL_RISCV_BRANCH") {
+                        relType = IMAGE_REL_RISCV_BRANCH;
+                    } else if (r.type == "R_RISCV_64" || r.type == "IMAGE_REL_RISCV_ADDR64") {
+                        relType = IMAGE_REL_RISCV_ADDR64;
+                    } else {
+                        try { relType = static_cast<uint16_t>(std::stoul(r.type)); } catch(...) { relType = IMAGE_REL_RISCV_CALL; }
+                    }
+                } else {
+                    // x86-64 (default)
+                    if (r.type == "R_X86_64_PC32" || r.type == "R_X86_64_PLT32" || r.type == "IMAGE_REL_AMD64_REL32") {
+                        relType = IMAGE_REL_AMD64_REL32;
+                    } else if (r.type == "R_X86_64_64" || r.type == "IMAGE_REL_AMD64_ADDR64") {
+                        relType = IMAGE_REL_AMD64_ADDR64;
+                    } else {
+                        try { relType = static_cast<uint16_t>(std::stoul(r.type)); } catch(...) { relType = IMAGE_REL_AMD64_ADDR64; }
+                    }
+                }
+                cr.Type = relType;
                 s.relocs.push_back(cr);
                 break;
             }
@@ -180,8 +230,10 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
 
     std::vector<uint8_t> buffer(totalFileSize, 0);
 
+    uint16_t machine = target::TargetInfo::getCoffMachine(artifact.arch);
+
     CoffHeader ch = {};
-    ch.Machine = IMAGE_FILE_MACHINE_AMD64;
+    ch.Machine = machine;
     ch.NumberOfSections = static_cast<uint16_t>(secs.size());
     ch.TimeDateStamp = static_cast<uint32_t>(time(0));
     ch.PointerToSymbolTable = ptrToSymbolTable;

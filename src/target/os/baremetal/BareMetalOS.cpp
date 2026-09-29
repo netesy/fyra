@@ -4,8 +4,21 @@
 #include "ir/Instruction.h"
 #include "ir/Use.h"
 #include <ostream>
+#include <sstream>
+#include <iomanip>
 
 namespace target {
+
+static std::string formatPeripheralAddress(uint64_t val) {
+    std::stringstream ss;
+    ss << "0x";
+    if (val < 0x1000) {
+        ss << std::hex << std::uppercase << val;
+    } else {
+        ss << std::hex << std::setw(8) << std::setfill('0') << std::uppercase << val;
+    }
+    return ss.str();
+}
 
 void BareMetalOS::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
@@ -70,9 +83,11 @@ void BareMetalOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const Capabi
         }
 
         bool isWrite = (spec.id == CapabilityId::IO_WRITE);
+        BareMetalBoard board = getBoard(targetArch);
+        std::string uartStr = formatPeripheralAddress(board.uartAddress);
 
         if (targetArch == Arch::RISCV64) {
-            *os << "  li t0, 0x10000000 # QEMU virt UART0 MMIO\n";
+            *os << "  li t0, " << uartStr << " # " << board.name << " UART MMIO\n";
             if (isWrite) {
                 if (i.getOperands().size() > 1 && i.getOperands()[1]) {
                     std::string src = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -86,7 +101,7 @@ void BareMetalOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const Capabi
                 }
             }
         } else if (targetArch == Arch::AArch64) {
-            *os << "  mov x9, #0x09000000 # QEMU virt PL011 UART MMIO\n";
+            *os << "  mov x9, #" << uartStr << " # " << board.name << " UART MMIO\n";
             if (isWrite) {
                 if (i.getOperands().size() > 1 && i.getOperands()[1]) {
                     std::string src = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -100,7 +115,7 @@ void BareMetalOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const Capabi
                 }
             }
         } else {
-            *os << "  mov $0x3F8, %dx # COM1 UART Port\n";
+            *os << "  mov $" << uartStr << ", %dx # " << board.name << " UART Port\n";
             if (isWrite) {
                 if (i.getOperands().size() > 1 && i.getOperands()[1]) {
                     std::string src = cg.getValueAsOperand(i.getOperands()[1]->get());
@@ -401,15 +416,17 @@ void BareMetalOS::emitTimeCapability(CodeGen& cg, ir::Instruction& i, const Capa
 void BareMetalOS::emitEventCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const {
     if (auto* os = cg.getTextStream()) {
         Arch targetArch = arch.getArch();
+        BareMetalBoard board = getBoard(targetArch);
+        std::string eventStr = formatPeripheralAddress(board.eventAddress);
         *os << "  # BareMetal MMIO Event Ring Buffer (" << spec.name << ")\n";
         if (targetArch == Arch::RISCV64) {
-            *os << "  li a0, 0x10001000 # MMIO Event Register\n  ld a0, 0(a0)\n";
+            *os << "  li a0, " << eventStr << " # MMIO Event Register\n  ld a0, 0(a0)\n";
             if (i.getType() && !i.getType()->isVoidTy()) *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
         } else if (targetArch == Arch::AArch64) {
-            *os << "  mov x9, #0x09001000 # MMIO Event Register\n  ldr x0, [x9]\n";
+            *os << "  mov x9, #" << eventStr << " # MMIO Event Register\n  ldr x0, [x9]\n";
             if (i.getType() && !i.getType()->isVoidTy()) *os << "  str x0, " << cg.getValueAsOperand(&i) << "\n";
         } else {
-            *os << "  mov $0x3F0, %dx # Port Event Register\n  inb %dx, %al\n";
+            *os << "  mov $" << eventStr << ", %dx # Port Event Register\n  inb %dx, %al\n";
             if (i.getType() && !i.getType()->isVoidTy()) *os << "  movzbq %al, %rax\n  movq %rax, " << cg.getValueAsOperand(&i) << "\n";
         }
     }
@@ -419,15 +436,17 @@ void BareMetalOS::emitEventCapability(CodeGen& cg, ir::Instruction& i, const Cap
 void BareMetalOS::emitNetCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const {
     if (auto* os = cg.getTextStream()) {
         Arch targetArch = arch.getArch();
+        BareMetalBoard board = getBoard(targetArch);
+        std::string netStr = formatPeripheralAddress(board.netAddress);
         *os << "  # BareMetal VirtIO-Net Ethernet Capability (" << spec.name << ")\n";
         if (targetArch == Arch::RISCV64) {
-            *os << "  li a0, 0x10002000 # VirtIO-Net MMIO Base\n";
+            *os << "  li a0, " << netStr << " # VirtIO-Net MMIO Base\n";
             if (i.getType() && !i.getType()->isVoidTy()) *os << "  sd a0, " << cg.getValueAsOperand(&i) << "\n";
         } else if (targetArch == Arch::AArch64) {
-            *os << "  mov x9, #0x09002000 # VirtIO-Net MMIO Base\n";
+            *os << "  mov x9, #" << netStr << " # VirtIO-Net MMIO Base\n";
             if (i.getType() && !i.getType()->isVoidTy()) *os << "  str x9, " << cg.getValueAsOperand(&i) << "\n";
         } else {
-            *os << "  mov $0x300, %dx # NE2000 / VirtIO-Net IO Port\n";
+            *os << "  mov $" << netStr << ", %dx # NE2000 / VirtIO-Net IO Port\n";
             if (i.getType() && !i.getType()->isVoidTy()) *os << "  movq %rdx, " << cg.getValueAsOperand(&i) << "\n";
         }
     }

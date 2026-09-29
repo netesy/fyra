@@ -782,7 +782,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 reduction.scalarType = reductionPhi->getType();
 
                 if (reductionPhi->getType()->isFloatingPoint()) {
-                    if (update->getOpcode() == ir::Instruction::FAdd) {
+                    if (!allowFPReassociation_) {
+                        unsupportedReduction = true;
+                        term = nullptr;
+                    } else if (update->getOpcode() == ir::Instruction::FAdd) {
                         reduction.kind = ReductionKind::FAdd;
                         reduction.vectorOpcode = ir::Instruction::VFAdd;
                         reduction.fpIdentity = 0.0;

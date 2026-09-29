@@ -175,10 +175,8 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
     if (!d.empty() && d[0] == '%') d = is32 ? to32BitReg(d) : to64BitReg(d);
     if (s == d) return;
 
-
-    if (!cg.lastStoreOp.empty() && s == cg.lastStoreOp && (d == regRax || d == "%rax" || d == "%eax")) {
-        return;
-    }
+    // Do not elide load into %rax based solely on lastStoreOp without full register tracking,
+    // as intervening instructions or memory modifications can invalidate %rax.
 
     bool srcIsAddr = (!s.empty() && s[0] == '(' && s.find(',') != std::string::npos);
     if (srcIsAddr) {

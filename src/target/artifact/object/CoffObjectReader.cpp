@@ -1,4 +1,5 @@
 #include "target/artifact/object/CoffObjectReader.h"
+#include "target/core/TargetInfo.h"
 #include <fstream>
 #include <cstring>
 
@@ -73,8 +74,22 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
     }
 
     const auto* ch = reinterpret_cast<const CoffHeader*>(bytes.data());
-    if (ch->Machine != IMAGE_FILE_MACHINE_AMD64) {
-        lastError_ = "Invalid COFF machine (not x64 AMD64)";
+    
+    // Map COFF machine types to architecture enums using TargetInfo
+    bool validMachine = false;
+    if (ch->Machine == target::TargetInfo::getCoffMachine(target::Arch::X64)) {
+        outArtifact.arch = target::Arch::X64;
+        validMachine = true;
+    } else if (ch->Machine == target::TargetInfo::getCoffMachine(target::Arch::AArch64)) {
+        outArtifact.arch = target::Arch::AArch64;
+        validMachine = true;
+    } else if (ch->Machine == target::TargetInfo::getCoffMachine(target::Arch::RISCV64)) {
+        outArtifact.arch = target::Arch::RISCV64;
+        validMachine = true;
+    }
+    
+    if (!validMachine) {
+        lastError_ = "Invalid COFF machine type: 0x" + std::to_string(ch->Machine);
         return false;
     }
 
@@ -167,9 +182,27 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                 if (rel.SymbolTableIndex < symbolNames.size()) {
                     orel.symbolName = symbolNames[rel.SymbolTableIndex];
                 }
-                orel.type = (rel.Type == 0x0004) ? "R_X86_64_PC32" : "R_TYPE_" + std::to_string(rel.Type);
-                // AMD64 REL32 is relative to the end of its four-byte field.
-                if (rel.Type == 0x0004) orel.addend = -4;
+                if (outArtifact.arch == target::Arch::AArch64) {
+                    if (rel.Type == 0x0003) orel.type = "R_AARCH64_CALL26";
+                    else if (rel.Type == 0x0004) orel.type = "R_AARCH64_ADR_PREL_PG_HI21";
+                    else if (rel.Type == 0x0006) orel.type = "R_AARCH64_ADD_ABS_LO12_NC";
+                    else if (rel.Type == 0x000E) orel.type = "R_AARCH64_ABS64";
+                    else orel.type = "R_TYPE_" + std::to_string(rel.Type);
+                } else if (outArtifact.arch == target::Arch::RISCV64) {
+                    if (rel.Type == 0x000A) orel.type = "R_RISCV_CALL";
+                    else if (rel.Type == 0x0007) orel.type = "R_RISCV_BRANCH";
+                    else if (rel.Type == 0x0002) orel.type = "R_RISCV_64";
+                    else orel.type = "R_TYPE_" + std::to_string(rel.Type);
+                } else {
+                    if (rel.Type == 0x0004) {
+                        orel.type = "R_X86_64_PC32";
+                        orel.addend = -4;
+                    } else if (rel.Type == 0x0001) {
+                        orel.type = "R_X86_64_64";
+                    } else {
+                        orel.type = "R_TYPE_" + std::to_string(rel.Type);
+                    }
+                }
                 outArtifact.addRelocation(orel);
             }
         }

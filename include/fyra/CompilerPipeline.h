@@ -20,6 +20,10 @@ struct PipelineConfig {
     bool enableSLP{true};
     bool enableLoopVectorization{true};
     bool enableLoopUnroll{true};
+    // Enable E-Graph equality saturation pass at O2+.
+    // The pass rewrites arithmetic identities (e.g. udiv-by-power-of-2 → shr)
+    // using a scoped equality graph and is safe to combine with all other passes.
+    bool enableEGraph{true};
 };
 
 struct PipelineResult {

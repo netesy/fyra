@@ -103,7 +103,14 @@ public:
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
     std::string getImmediatePrefix() const override { return "#"; }
     std::string getFunctionTypeSpecifier() const override { return "%function"; }
+    std::string getDataRelocationType() const override { return "R_AARCH64_ABS64"; }
 
+    // Binary-emission note:
+    // AArch64 emits machine code directly via emitDWord() when os==nullptr
+    // (binary mode).  The ElfObjectWriter pipeline (BackendBuilder::emitObject,
+    // emitExecutable, emitStaticLibrary, emitSharedLibrary) works without any
+    // external assembler.  fyra_compiler handles the full .o / .a / .so / ELF
+    // pipeline natively for this target.
     VectorCapabilities getVectorCapabilities() const override;
     bool supportsVectorWidth(unsigned width) const override;
     bool supportsVectorType(const ir::VectorType* type) const override;
@@ -121,6 +128,7 @@ public:
 private:
     std::string getNEONArrangement(const ir::VectorType* vecTy) const;
     void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);
+    void emitStoreResult(CodeGen& cg, ir::Instruction& instr, uint8_t reg);
     std::string getWRegister(const std::string& xReg) const;
     size_t align_to_16(size_t size) const { return (size + 15) & ~15; }
     std::string getConditionCode(const std::string& op, bool isFloat = false, bool isUnsigned = false) const;

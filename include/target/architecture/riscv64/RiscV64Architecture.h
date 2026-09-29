@@ -2,6 +2,10 @@
 
 #include "target/core/ArchitectureInfo.h"
 
+namespace codegen {
+namespace asm_ { class Assembler; }
+}
+
 namespace target {
 using namespace codegen;
 
@@ -85,6 +89,14 @@ public:
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
     std::string getImmediatePrefix() const override { return ""; }
+    std::string getDataRelocationType() const override { return "R_RISCV_64"; }
+
+    // Binary-emission note:
+    // RISC-V 64 emits machine code directly via emitDWord() when os==nullptr
+    // (binary mode).  The ElfObjectWriter pipeline (BackendBuilder::emitObject,
+    // emitExecutable, emitStaticLibrary, emitSharedLibrary) works without any
+    // external assembler.  fyra_compiler handles the full .o / .a / .so / ELF
+    // pipeline natively for this target.
 
     VectorCapabilities getVectorCapabilities() const override;
     bool supportsVectorWidth(unsigned width) const override;
@@ -100,6 +112,8 @@ public:
     RiscV64ComplexAddress matchComplexAddress(CodeGen& cg, ir::Value* val) const;
 
 private:
+    void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);
+    void emitStoreResult(CodeGen& cg, ir::Instruction& instr, uint8_t reg);
     int32_t currentStackOffset = 0;
 };
 

@@ -27,7 +27,8 @@ public:
                          int64_t addend,
                          std::vector<uint8_t>& sectionData,
                          uint64_t offset,
-                         std::string& errorOut);
+                         std::string& errorOut,
+                         target::Arch arch = target::Arch::X64);
 
     static std::vector<uint8_t> getImportThunkBytes(target::Arch arch, target::OS os);
 };

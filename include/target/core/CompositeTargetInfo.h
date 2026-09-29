@@ -22,6 +22,11 @@ public:
     const std::string& getIntegerReturnRegister() const override;
     const std::string& getFloatReturnRegister() const override;
 
+    OperatingSystemInfo* getOperatingSystem() { return os.get(); }
+    const OperatingSystemInfo* getOperatingSystem() const { return os.get(); }
+    ArchitectureInfo* getArchitecture() { return architecture.get(); }
+    const ArchitectureInfo* getArchitecture() const { return architecture.get(); }
+
     void emitHeader(codegen::CodeGen& cg) override;
     void emitFooter(codegen::CodeGen& cg) override;
     void emitFunctionPrologue(codegen::CodeGen& cg, ir::Function& func) override;

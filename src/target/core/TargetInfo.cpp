@@ -1,4 +1,5 @@
 #include "target/core/TargetInfo.h"
+#include "target/core/TargetDescriptor.h"
 #include "codegen/CodeGen.h"
 #include "ir/Type.h"
 #include "ir/Instruction.h"
@@ -217,6 +218,90 @@ int32_t TargetInfo::getStackOffset(const codegen::CodeGen& cg, ir::Value* val) c
         }
     }
     return 0;
+}
+
+uint16_t TargetInfo::getElfMachine(Arch arch) {
+    switch (arch) {
+        case Arch::X64: return 62;        // EM_X86_64
+        case Arch::AArch64: return 183;   // EM_AARCH64
+        case Arch::RISCV64: return 243;   // EM_RISCV
+        case Arch::WASM32: return 0;      // Not applicable for ELF
+        default: return 0;
+    }
+}
+
+uint16_t TargetInfo::getCoffMachine(Arch arch) {
+    switch (arch) {
+        case Arch::X64: return 0x8664;     // IMAGE_FILE_MACHINE_AMD64
+        case Arch::AArch64: return 0xAA64; // IMAGE_FILE_MACHINE_ARM64
+        case Arch::RISCV64: return 0x5064; // IMAGE_FILE_MACHINE_RISCV64
+        case Arch::WASM32: return 0;       // Not applicable for COFF
+        default: return 0;
+    }
+}
+
+uint32_t TargetInfo::getElfJumpSlotRelocation(Arch arch) {
+    switch (arch) {
+        case Arch::X64: return 7;         // R_X86_64_JUMP_SLOT
+        case Arch::AArch64: return 1026;  // R_AARCH64_JUMP_SLOT
+        case Arch::RISCV64: return 5;      // R_RISCV_JUMP_SLOT
+        default: return 0;
+    }
+}
+
+uint32_t TargetInfo::getElfGlobDatRelocation(Arch arch) {
+    switch (arch) {
+        case Arch::X64: return 6;         // R_X86_64_GLOB_DAT
+        case Arch::AArch64: return 1025;  // R_AARCH64_GLOB_DAT
+        case Arch::RISCV64: return 2;      // R_RISCV_64 (used for GLOB_DAT on RISC-V)
+        default: return 0;
+    }
+}
+
+uint32_t TargetInfo::getElfRelativeRelocation(Arch arch) {
+    switch (arch) {
+        case Arch::X64: return 8;         // R_X86_64_RELATIVE
+        case Arch::AArch64: return 1027;  // R_AARCH64_RELATIVE
+        case Arch::RISCV64: return 3;      // R_RISCV_RELATIVE
+        default: return 0;
+    }
+}
+
+bool TargetInfo::supportsOutputKind(OS os, Arch arch, Artifact artifact) {
+    // ELF formats support Linux, Android, FreeBSD, and BareMetal
+    if (os == OS::Linux || os == OS::Android || os == OS::FreeBSD || os == OS::BareMetal) {
+        if (artifact == Artifact::Executable || artifact == Artifact::SharedLibrary) {
+            return arch == Arch::X64 || arch == Arch::AArch64 || arch == Arch::RISCV64;
+        }
+        if (artifact == Artifact::StaticLibrary) {
+            return true;
+        }
+    }
+    // COFF/PE formats support Windows
+    if (os == OS::Windows) {
+        if (artifact == Artifact::Executable || artifact == Artifact::SharedLibrary) {
+            return arch == Arch::X64 || arch == Arch::AArch64 || arch == Arch::RISCV64;
+        }
+        if (artifact == Artifact::StaticLibrary) {
+            return true;
+        }
+    }
+    // Mach-O formats support MacOS
+    if (os == OS::MacOS) {
+        if (artifact == Artifact::Executable || artifact == Artifact::SharedLibrary) {
+            return arch == Arch::X64 || arch == Arch::AArch64;
+        }
+        if (artifact == Artifact::StaticLibrary) {
+            return true;
+        }
+    }
+    // WASM formats support WASI
+    if (os == OS::WASI) {
+        if (artifact == Artifact::WasmModule) {
+            return arch == Arch::WASM32;
+        }
+    }
+    return false;
 }
 
 }

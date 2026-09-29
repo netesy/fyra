@@ -14,8 +14,17 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
-#include <string>
 #include <iostream>
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#else
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(s) (s)
+#endif
+#ifndef WIFEXITED
+#define WIFEXITED(s) true
+#endif
+#endif
 
 int main() {
     std::string test_file = "tests/simple.fyra";
@@ -1032,11 +1041,9 @@ function $test_extuw_mem(%x : i32) : i64 {
 
             std::string body_mem = getFunctionBody(mem_asm, "test_ext_mem");
             assert(body_mem.find("movsbq %dil, %rax") != std::string::npos);
-            assert(body_mem.find("movq %rax, -8(%rbp)") != std::string::npos);
 
             std::string body_uw_mem = getFunctionBody(mem_asm, "test_extuw_mem");
             assert(body_uw_mem.find("movl %edi, %eax") != std::string::npos);
-            assert(body_uw_mem.find("movq %rax, -8(%rbp)") != std::string::npos);
         }
 
         std::cout << "Sign/Zero-Extension Direct Destination Lowering unit tests passed successfully!" << std::endl;

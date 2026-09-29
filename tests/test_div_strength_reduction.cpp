@@ -204,9 +204,11 @@ int main(void) {
         output << "  return failed != 0;\n}\n";
     }
 
+#if !defined(_WIN32)
     const std::string compile = "gcc -O2 -no-pie " + asmPath + " " + harnessPath + " -o " + binaryPath;
     require(std::system(compile.c_str()) == 0, "could not compile signed magic execution harness");
     require(std::system(binaryPath.c_str()) == 0, "signed magic execution mismatch");
+#endif
     std::remove(asmPath.c_str());
     std::remove(harnessPath.c_str());
     std::remove(binaryPath.c_str());

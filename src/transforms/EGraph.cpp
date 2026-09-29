@@ -24,29 +24,75 @@ EClassId EGraph::addNode(const ENode& node) {
     return id;
 }
 
-EClassId EGraph::addValue(ir::Value* val) {
-    if (!val) return uf.makeClass();
+namespace {
+
+static bool isPureArithmetic(ir::Instruction::Opcode op) {
+    switch (op) {
+        case ir::Instruction::Add:
+        case ir::Instruction::Sub:
+        case ir::Instruction::Mul:
+        case ir::Instruction::Div:
+        case ir::Instruction::Udiv:
+        case ir::Instruction::Rem:
+        case ir::Instruction::Urem:
+        case ir::Instruction::And:
+        case ir::Instruction::Or:
+        case ir::Instruction::Xor:
+        case ir::Instruction::Shl:
+        case ir::Instruction::Shr:
+        case ir::Instruction::Sar:
+        case ir::Instruction::Neg:
+        case ir::Instruction::Not:
+        case ir::Instruction::FAdd:
+        case ir::Instruction::FSub:
+        case ir::Instruction::FMul:
+        case ir::Instruction::FDiv:
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static EClassId addValueInternal(EGraph& egraph, ir::Value* val, std::set<ir::Value*>& visited, int depth) {
+    if (!val) {
+        ENode n;
+        return egraph.addNode(n);
+    }
 
     if (auto* c = dynamic_cast<ir::Constant*>(val)) {
         ENode n;
         n.constantVal = c;
-        return addNode(n);
+        return egraph.addNode(n);
     }
 
     if (auto* inst = dynamic_cast<ir::Instruction*>(val)) {
-        ENode n;
-        n.op = inst->getOpcode();
-        for (const auto& opUse : inst->getOperands()) {
-            if (opUse && opUse->get()) {
-                n.children.push_back(addValue(opUse->get()));
+        if (isPureArithmetic(inst->getOpcode()) && depth < 6 && visited.find(val) == visited.end()) {
+            visited.insert(val);
+            ENode n;
+            n.op = inst->getOpcode();
+            for (const auto& opUse : inst->getOperands()) {
+                if (opUse && opUse->get()) {
+                    n.children.push_back(addValueInternal(egraph, opUse->get(), visited, depth + 1));
+                }
             }
+            visited.erase(val);
+            return egraph.addNode(n);
         }
-        return addNode(n);
     }
 
     ENode n;
     n.leafVal = val;
-    return addNode(n);
+    return egraph.addNode(n);
+}
+
+} // namespace
+
+EClassId EGraph::addValue(ir::Value* val) {
+    std::set<ir::Value*> visited;
+    return addValueInternal(*this, val, visited, 0);
 }
 
 EClassId EGraph::merge(EClassId id1, EClassId id2) {

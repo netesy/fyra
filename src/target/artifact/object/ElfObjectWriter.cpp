@@ -30,6 +30,17 @@ constexpr uint16_t SHN_UNDEF = 0;
 constexpr uint32_t R_X86_64_64 = 1;
 constexpr uint32_t R_X86_64_PC32 = 2;
 constexpr uint32_t R_X86_64_PLT32 = 4;
+constexpr uint32_t R_AARCH64_ABS64 = 257;
+constexpr uint32_t R_AARCH64_ADR_PREL_PG_HI21 = 275;
+constexpr uint32_t R_AARCH64_ADD_ABS_LO12_NC = 277;
+constexpr uint32_t R_AARCH64_CONDBR19 = 280;
+constexpr uint32_t R_AARCH64_JUMP26 = 282;
+constexpr uint32_t R_AARCH64_CALL26 = 283;
+constexpr uint32_t R_RISCV_64 = 2;
+constexpr uint32_t R_RISCV_BRANCH = 16;
+constexpr uint32_t R_RISCV_JAL = 17;
+constexpr uint32_t R_RISCV_CALL = 18;
+constexpr uint32_t R_RISCV_CALL_PLT = 19;
 
 #pragma pack(push, 1)
 struct ElfHeader64 {
@@ -211,9 +222,34 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         Elf64_Rela r = {};
         r.r_offset = reloc.offset;
         uint32_t symIdx = symbolIndexMap.count(reloc.symbolName) ? symbolIndexMap[reloc.symbolName] : 0;
-        uint32_t typeCode = R_X86_64_PC32;
-        if (reloc.type == "R_X86_64_64") typeCode = R_X86_64_64;
-        else if (reloc.type == "R_X86_64_PLT32") typeCode = R_X86_64_PLT32;
+        uint32_t typeCode = 0;
+        if (artCopy.arch == target::Arch::AArch64) {
+            typeCode = R_AARCH64_CALL26;
+            if (reloc.type == "R_AARCH64_JUMP26") typeCode = R_AARCH64_JUMP26;
+            else if (reloc.type == "R_AARCH64_CONDBR19") typeCode = R_AARCH64_CONDBR19;
+            else if (reloc.type == "R_AARCH64_ADR_PREL_PG_HI21") typeCode = R_AARCH64_ADR_PREL_PG_HI21;
+            else if (reloc.type == "R_AARCH64_ADD_ABS_LO12_NC") typeCode = R_AARCH64_ADD_ABS_LO12_NC;
+            else if (reloc.type == "R_AARCH64_ABS64") typeCode = R_AARCH64_ABS64;
+            else {
+                try { typeCode = std::stoul(reloc.type); } catch(...) {}
+            }
+        } else if (artCopy.arch == target::Arch::RISCV64) {
+            typeCode = R_RISCV_CALL;
+            if (reloc.type == "R_RISCV_BRANCH") typeCode = R_RISCV_BRANCH;
+            else if (reloc.type == "R_RISCV_JAL") typeCode = R_RISCV_JAL;
+            else if (reloc.type == "R_RISCV_CALL_PLT") typeCode = R_RISCV_CALL_PLT;
+            else if (reloc.type == "R_RISCV_64") typeCode = R_RISCV_64;
+            else {
+                try { typeCode = std::stoul(reloc.type); } catch(...) {}
+            }
+        } else {
+            typeCode = R_X86_64_PC32;
+            if (reloc.type == "R_X86_64_64") typeCode = R_X86_64_64;
+            else if (reloc.type == "R_X86_64_PLT32") typeCode = R_X86_64_PLT32;
+            else {
+                try { typeCode = std::stoul(reloc.type); } catch(...) {}
+            }
+        }
         r.r_info = ELF64_R_INFO(symIdx, typeCode);
         r.r_addend = reloc.addend;
         relaTable.push_back(r);

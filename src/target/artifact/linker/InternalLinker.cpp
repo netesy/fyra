@@ -1,5 +1,6 @@
 #include "target/artifact/linker/InternalLinker.h"
 #include "target/artifact/linker/TargetRelocationEvaluator.h"
+#include "target/core/TargetInfo.h"
 #include <map>
 #include <unordered_set>
 #include <iostream>
@@ -209,55 +210,115 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         }
     }
 
-    // Add Linux x86-64 _start entry stub if main is present and _start is missing (Linux x86-64 only, Executable output kind)
-    if (outImage.outputKind == LinkOutputKind::Executable && outImage.os == target::OS::Linux && outImage.arch == target::Arch::X64) {
+    // Add architecture-specific _start entry stub if main is present and _start is missing (Executable output kind)
+    if (outImage.outputKind == LinkOutputKind::Executable && 
+        (outImage.os == target::OS::Linux || outImage.os == target::OS::BareMetal)) {
         if (!outImage.symbols.count("_start") && (outImage.symbols.count("main") || outImage.symbols.count("$main"))) {
-        std::string mainName = outImage.symbols.count("main") ? "main" : "$main";
-        uint64_t mainAddr = outImage.symbols[mainName].virtualAddress;
+            std::string mainName = outImage.symbols.count("main") ? "main" : "$main";
+            uint64_t mainAddr = outImage.symbols[mainName].virtualAddress;
 
-        auto* textSec = outImage.findSection(".text");
-        if (textSec) {
-            uint64_t startOffset = textSec->data.size();
-            uint64_t startVma = textSec->virtualAddress + startOffset;
+            auto* textSec = outImage.findSection(".text");
+            if (textSec) {
+                uint64_t startOffset = textSec->data.size();
+                uint64_t startVma = textSec->virtualAddress + startOffset;
 
-            // x86-64 _start stub (System V ABI stack aligned)
-            // 31 ed                xor %ebp, %ebp
-            // 48 8b 3c 24          mov (%rsp), %rdi       (argc)
-            // 48 8d 74 24 08       lea 8(%rsp), %rsi      (argv)
-            // 48 83 e4 f0          and $-16, %rsp         (align stack to 16 bytes)
-            // e8 [rel32]           call main
-            // 48 89 c7             mov %rax, %rdi
-            // b8 3c 00 00 00       mov $60, %eax
-            // 0f 05                syscall
-            std::vector<uint8_t> startBytes = {
-                0x31, 0xED,
-                0x48, 0x8B, 0x3C, 0x24,
-                0x48, 0x8D, 0x74, 0x24, 0x08,
-                0x48, 0x83, 0xE4, 0xF0,
-                0xE8, 0x00, 0x00, 0x00, 0x00,
-                0x48, 0x89, 0xC7,
-                0xB8, 0x3C, 0x00, 0x00, 0x00,
-                0x0F, 0x05
-            };
+                std::vector<uint8_t> startBytes;
+                
+                if (outImage.arch == target::Arch::X64) {
+                    // x86-64 _start stub (System V ABI stack aligned)
+                    // 31 ed                xor %ebp, %ebp
+                    // 48 8b 3c 24          mov (%rsp), %rdi       (argc)
+                    // 48 8d 74 24 08       lea 8(%rsp), %rsi      (argv)
+                    // 48 83 e4 f0          and $-16, %rsp         (align stack to 16 bytes)
+                    // e8 [rel32]           call main
+                    // 48 89 c7             mov %rax, %rdi
+                    // b8 3c 00 00 00       mov $60, %eax
+                    // 0f 05                syscall
+                    startBytes = {
+                        0x31, 0xED,
+                        0x48, 0x8B, 0x3C, 0x24,
+                        0x48, 0x8D, 0x74, 0x24, 0x08,
+                        0x48, 0x83, 0xE4, 0xF0,
+                        0xE8, 0x00, 0x00, 0x00, 0x00,
+                        0x48, 0x89, 0xC7,
+                        0xB8, 0x3C, 0x00, 0x00, 0x00,
+                        0x0F, 0x05
+                    };
+                    
+                    int64_t callRel = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 20);
+                    int32_t callRel32 = static_cast<int32_t>(callRel);
+                    std::memcpy(startBytes.data() + 16, &callRel32, 4);
+                    
+                } else if (outImage.arch == target::Arch::AArch64) {
+                    // AArch64 _start stub (AArch64 Linux ABI)
+                    // mov x0, sp           (argc at [sp])
+                    // add x1, sp, #8       (argv at [sp+8])
+                    // and sp, sp, #-16     (align stack to 16 bytes)
+                    // bl main
+                    // mov x8, #93          (sys_exit)
+                    // mov x0, x0           (return value)
+                    // svc #0
+                    startBytes = {
+                        0x9F, 0x00, 0x00, 0x10,  // mov x0, sp
+                        0x91, 0x04, 0x01, 0x38,  // add x1, sp, #8
+                        0x9F, 0x00, 0x00, 0x13,  // and sp, sp, #-16
+                        0x00, 0x00, 0x00, 0x94,  // bl main (patched below)
+                        0xD0, 0x01, 0x00, 0xD2,  // mov x8, #93 (sys_exit)
+                        0xAA, 0x00, 0x00, 0x1E,  // mov x0, x0
+                        0x00, 0x00, 0x00, 0xD4   // svc #0
+                    };
+                    
+                    // Patch BL instruction for AArch64 (signed 26-bit immediate)
+                    int64_t offset = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 12);
+                    int64_t wordOffset = offset / 4;
+                    uint32_t imm26 = static_cast<uint32_t>(wordOffset) & 0x03FFFFFF;
+                    uint32_t blInstr = 0x94000000 | imm26;
+                    std::memcpy(startBytes.data() + 12, &blInstr, 4);
+                    
+                } else if (outImage.arch == target::Arch::RISCV64) {
+                    // RISC-V _start stub (RISC-V Linux ABI)
+                    // mv a0, sp            (argc at [sp])
+                    // addi a1, sp, 8       (argv at [sp+8])
+                    // andi sp, sp, -16     (align stack to 16 bytes)
+                    // jal ra, main
+                    // li a7, 93            (sys_exit)
+                    // mv a0, a0            (return value)
+                    // ecall
+                    startBytes = {
+                        0x85, 0x13, 0x02, 0x10,  // mv a0, sp
+                        0x85, 0x93, 0x41, 0x10,  // addi a1, sp, 8
+                        0x1F, 0x13, 0xF0, 0xFE,  // andi sp, sp, -16
+                        0x6F, 0x00, 0x00, 0x00,  // jal ra, main (patched below)
+                        0x93, 0x08, 0xD0, 0x05,  // li a7, 93 (sys_exit)
+                        0x85, 0x13, 0x05, 0x00,  // mv a0, a0
+                        0x73, 0x00, 0x00, 0x00   // ecall
+                    };
+                    
+                    // Patch JAL instruction for RISC-V (signed 20-bit immediate in J-type format)
+                    int64_t offset = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 12);
+                    uint32_t imm = static_cast<uint32_t>(offset);
+                    uint32_t j_imm = ((imm & 0x100000) << 11) | ((imm & 0x7FE) << 20) | 
+                                    ((imm & 0x800) << 9) | (imm & 0xFF000);
+                    uint32_t jalInstr = 0x0000006F | j_imm;
+                    std::memcpy(startBytes.data() + 12, &jalInstr, 4);
+                }
 
-            int64_t callRel = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 20);
-            int32_t callRel32 = static_cast<int32_t>(callRel);
-            std::memcpy(startBytes.data() + 16, &callRel32, 4);
+                if (!startBytes.empty()) {
+                    textSec->data.insert(textSec->data.end(), startBytes.begin(), startBytes.end());
+                    textSec->virtualSize = textSec->data.size();
 
-            textSec->data.insert(textSec->data.end(), startBytes.begin(), startBytes.end());
-            textSec->virtualSize = textSec->data.size();
+                    LinkedSymbol startSym;
+                    startSym.name = "_start";
+                    startSym.virtualAddress = startVma;
+                    startSym.size = startBytes.size();
+                    startSym.isFunction = true;
+                    startSym.isGlobal = true;
+                    startSym.sectionName = ".text";
 
-            LinkedSymbol startSym;
-            startSym.name = "_start";
-            startSym.virtualAddress = startVma;
-            startSym.size = startBytes.size();
-            startSym.isFunction = true;
-            startSym.isGlobal = true;
-            startSym.sectionName = ".text";
-
-            outImage.symbols["_start"] = startSym;
+                    outImage.symbols["_start"] = startSym;
+                }
+            }
         }
-    }
     }
 
     // Set entry point
@@ -359,7 +420,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                 return false;
             }
             std::string evalError;
-            if (!TargetRelocationEvaluator::evaluate(kind, targetSymAddr, placeAddress, reloc.addend, lsec->data, sectionDataOffset, evalError)) {
+            if (!TargetRelocationEvaluator::evaluate(kind, targetSymAddr, placeAddress, reloc.addend, lsec->data, sectionDataOffset, evalError, outImage.arch)) {
                 lastError_ = "Relocation evaluation failed for '" + reloc.symbolName + "': " + evalError;
                 return false;
             }

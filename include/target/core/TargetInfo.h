@@ -183,6 +183,14 @@ public:
     virtual void resetStackOffset() { currentStackOffset = 0; }
     virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const { return func.getName() + "_epilogue"; }
     virtual std::string getBBLabel(const ir::BasicBlock* bb) const { if (!bb) return "null_bb"; return bb->getParent()->getName() + "_" + bb->getName(); }
+    
+    // Binary format metadata methods for multi-architecture support (static helpers)
+    static uint16_t getElfMachine(Arch arch);
+    static uint16_t getCoffMachine(Arch arch);
+    static uint32_t getElfJumpSlotRelocation(Arch arch);
+    static uint32_t getElfGlobDatRelocation(Arch arch);
+    static uint32_t getElfRelativeRelocation(Arch arch);
+    static bool supportsOutputKind(OS os, Arch arch, Artifact artifact);
 protected:
     int32_t currentStackOffset = 0;
     TargetFeatureFlags features_;

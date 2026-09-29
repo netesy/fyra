@@ -3,6 +3,7 @@
 #include "ir/BasicBlock.h"
 #include "ir/IRBuilder.h"
 #include <iostream>
+#include <algorithm>
 
 namespace transforms {
 
@@ -18,9 +19,14 @@ bool EGraphPass::performTransformation(ir::Function& func) {
         ir::BasicBlock* bb = bbPtr.get();
         if (!bb) continue;
 
-        EGraph egraph;
-        std::vector<std::pair<ir::Instruction*, EClassId>> instRoots;
+        // Collect candidates first to avoid iterator invalidation during RAUW.
+        struct Candidate {
+            ir::Instruction* inst;
+            EClassId root;
+        };
+        std::vector<Candidate> candidates;
 
+        EGraph egraph;
         for (auto& instPtr : bb->getInstructions()) {
             ir::Instruction* inst = instPtr.get();
             if (!inst) continue;
@@ -31,15 +37,24 @@ bool EGraphPass::performTransformation(ir::Function& func) {
                 op == ir::Instruction::Mul || op == ir::Instruction::VMul ||
                 op == ir::Instruction::VAdd || op == ir::Instruction::VSub) {
                 EClassId root = egraph.addValue(inst);
-                instRoots.push_back({inst, root});
+                candidates.push_back({inst, root});
             }
         }
 
-        if (instRoots.empty()) continue;
+        if (candidates.empty()) continue;
 
         if (egraph.saturate(5)) {
             std::map<EClassId, ir::Value*> extractedMap;
-            for (auto& [origInst, root] : instRoots) {
+            for (auto& [origInst, root] : candidates) {
+                // Insert replacement immediately BEFORE the original instruction
+                // to preserve SSA use-def dominance ordering.
+                auto it = std::find_if(bb->getInstructions().begin(), bb->getInstructions().end(),
+                                       [&](const auto& p) { return p.get() == origInst; });
+                if (it != bb->getInstructions().end()) {
+                    builder.setInsertPoint(bb, it);
+                } else {
+                    builder.setInsertPoint(bb);
+                }
                 ir::Value* bestVal = egraph.extractBest(root, builder, bb, extractedMap);
                 if (bestVal && bestVal != origInst) {
                     origInst->replaceAllUsesWith(bestVal);
@@ -51,6 +66,7 @@ bool EGraphPass::performTransformation(ir::Function& func) {
 
     return changed;
 }
+
 
 bool EGraphPass::validatePreconditions(ir::Function& f) {
     return !f.getBasicBlocks().empty();

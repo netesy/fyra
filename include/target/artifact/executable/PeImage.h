@@ -2,6 +2,7 @@
 
 #include "target/artifact/linker/DynamicLinkPlan.h"
 #include "target/artifact/linker/LinkedImage.h"
+#include "target/core/TargetDescriptor.h"
 
 #include <array>
 #include <cstdint>
@@ -46,6 +47,7 @@ struct PeDataDirectory {
 // Target-specific semantic description below the neutral linker boundary.
 struct PeImage {
     PeImageKind kind = PeImageKind::Executable;
+    target::Arch arch = target::Arch::X64;
     uint16_t machine = 0x8664;
     uint64_t imageBase = 0x140000000ULL;
     uint32_t sectionAlignment = 0x1000;

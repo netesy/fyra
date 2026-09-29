@@ -114,6 +114,29 @@ public:
     virtual std::string getAssemblyFileExtension() const { return ".s"; }
     virtual std::string getObjectFileExtension() const { return ".o"; }
     virtual std::string getDataRelocationType() const { return "R_X86_64_64"; }
+
+    // ---------------------------------------------------------------------------
+    // Binary-emission capability
+    //
+    // ALL backends (x86-64, AArch64, RISC-V 64, WASM32) emit machine code
+    // directly in-process via emitDWord() when CodeGen::os == nullptr (binary
+    // mode).  The ElfObjectWriter / COFF / Mach-O / WASM writers then produce
+    // standards-compliant object files, static libraries, shared libraries, and
+    // executables without invoking any external assembler.
+    //
+    // fyra_compiler (BackendBuilder) is a fully self-contained toolchain:
+    //   emitObject()         → .o  via internal ObjectWriter
+    //   emitStaticLibrary()  → .a  via internal ArchiveWriter
+    //   emitSharedLibrary()  → .so / .dll / .dylib via internal linker
+    //   emitExecutable()     → ELF / PE / Mach-O via internal image builder
+    //
+    // canEmitDirectBinary() returns true for all current backends.  Override
+    // only when a future backend cannot produce binary code and must use text
+    // assembly as an intermediate form.
+    // ---------------------------------------------------------------------------
+    virtual bool canEmitDirectBinary() const { return true; }
+    virtual bool needsExternalAssembler() const { return !canEmitDirectBinary(); }
+    virtual std::string getExternalAssemblerHint() const { return ""; }
     virtual bool isCallerSaved(const std::string& reg) const = 0;
     virtual bool isCalleeSaved(const std::string& reg) const = 0;
     virtual bool isReserved(const std::string& reg) const { return false; }

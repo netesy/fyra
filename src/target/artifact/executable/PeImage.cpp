@@ -1,5 +1,6 @@
 #include "target/artifact/executable/PeImage.h"
 #include "target/artifact/linker/TargetRelocationEvaluator.h"
+#include "target/core/TargetInfo.h"
 
 #include <algorithm>
 #include <cstring>
@@ -92,10 +93,14 @@ void appendLinkedSections(const SectionMap& input, std::vector<PeSection>& outpu
 
 bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
     lastError_.clear();
-    if (image.machine != 0x8664) {
-        lastError_ = "PE image writer currently supports AMD64 PE32+ only";
+    
+    // Validate machine type against supported architectures
+    uint16_t validMachine = target::TargetInfo::getCoffMachine(image.arch);
+    if (image.machine != validMachine) {
+        lastError_ = "PE image writer machine type mismatch";
         return false;
     }
+    
     if (!image.sectionAlignment || !image.fileAlignment) {
         lastError_ = "PE alignment values must be non-zero";
         return false;
@@ -419,13 +424,21 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
 
 bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std::string& outputPath) {
     lastError_.clear();
-    if (image.os != target::OS::Windows || image.arch != target::Arch::X64 ||
-        image.outputKind != linker::LinkOutputKind::Executable) {
-        lastError_ = "PE executable builder requires a Windows x64 executable LinkedImage";
+    if (image.os != target::OS::Windows || image.outputKind != linker::LinkOutputKind::Executable) {
+        lastError_ = "PE executable builder requires a Windows executable LinkedImage";
         return false;
     }
+    
+    // Validate architecture support for PE
+    if (!target::TargetInfo::supportsOutputKind(image.os, image.arch, target::Artifact::Executable)) {
+        lastError_ = "PE executable builder does not support this architecture";
+        return false;
+    }
+    
     PeImage pe;
     pe.kind = PeImageKind::Executable;
+    pe.arch = image.arch;
+    pe.machine = target::TargetInfo::getCoffMachine(image.arch);
     pe.relocationFixupVmas = image.relocationFixupVmas;
     pe.importThunkVmas = image.importThunkVmas;
     pe.dataImportFixups = image.dataImportFixups;
@@ -439,12 +452,21 @@ bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std
 
 bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan, const std::string& outputPath) {
     lastError_.clear();
-    if (plan.os != target::OS::Windows || plan.arch != target::Arch::X64) {
-        lastError_ = "PE executable builder requires a Windows x64 plan";
+    if (plan.os != target::OS::Windows) {
+        lastError_ = "PE executable builder requires a Windows plan";
         return false;
     }
+    
+    // Validate architecture support for PE
+    if (!target::TargetInfo::supportsOutputKind(plan.os, plan.arch, target::Artifact::Executable)) {
+        lastError_ = "PE executable builder does not support this architecture";
+        return false;
+    }
+    
     PeImage pe;
     pe.kind = PeImageKind::Executable;
+    pe.arch = plan.arch;
+    pe.machine = target::TargetInfo::getCoffMachine(plan.arch);
     pe.relocationFixupVmas = plan.relocationFixupVmas;
     pe.importThunkVmas = plan.importThunkVmas;
     pe.dataImportFixups = plan.dataImportFixups;
@@ -474,6 +496,8 @@ bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan
 PeImage createPeImageFromDynamicPlan(const linker::DynamicLinkPlan& plan, const std::string& imageName) {
     PeImage pe;
     pe.kind = PeImageKind::Dll;
+    pe.arch = plan.arch;
+    pe.machine = target::TargetInfo::getCoffMachine(plan.arch);
     pe.imageName = imageName;
     pe.dllCharacteristics = 0;
     pe.relocationFixupVmas = plan.relocations.empty() ? std::vector<uint64_t>{} : [&] {

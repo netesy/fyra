@@ -1,5 +1,6 @@
 #include "target/artifact/executable/ElfImage.h"
 #include "target/os/linux/LinuxOS.h"
+#include "target/core/TargetInfo.h"
 
 #include <algorithm>
 #include <cstring>
@@ -16,6 +17,8 @@ namespace {
 constexpr uint16_t ET_EXEC = 2;
 constexpr uint16_t ET_DYN = 3;
 constexpr uint16_t EM_X86_64 = 62;
+constexpr uint16_t EM_AARCH64 = 183;
+constexpr uint16_t EM_RISCV = 243;
 constexpr uint32_t SHT_NULL = 0;
 constexpr uint32_t SHT_PROGBITS = 1;
 constexpr uint32_t SHT_SYMTAB = 2;
@@ -69,6 +72,14 @@ constexpr uint32_t R_X86_64_64 = 1;
 constexpr uint32_t R_X86_64_GLOB_DAT = 6;
 constexpr uint32_t R_X86_64_JUMP_SLOT = 7;
 constexpr uint32_t R_X86_64_RELATIVE = 8;
+
+constexpr uint32_t R_AARCH64_GLOB_DAT = 1025;
+constexpr uint32_t R_AARCH64_JUMP_SLOT = 1026;
+constexpr uint32_t R_AARCH64_RELATIVE = 1027;
+
+constexpr uint32_t R_RISCV_64 = 2;
+constexpr uint32_t R_RISCV_RELATIVE = 3;
+constexpr uint32_t R_RISCV_JUMP_SLOT = 5;
 
 #pragma pack(push, 1)
 struct ElfHeader64 {
@@ -160,8 +171,7 @@ uint64_t alignUp(uint64_t val, uint64_t align) {
 bool ElfImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std::string& outputPath) {
     lastError_.clear();
 
-    if ((plan.arch != target::Arch::X64 && plan.arch != target::Arch::AArch64 && plan.arch != target::Arch::RISCV64) ||
-        (plan.os != target::OS::Linux && plan.os != target::OS::Android)) {
+    if (!target::TargetInfo::supportsOutputKind(plan.os, plan.arch, target::Artifact::SharedLibrary)) {
         lastError_ = "shared-library output unsupported for target architecture/OS";
         return false;
     }
@@ -267,7 +277,8 @@ bool ElfImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std::
     for (uint64_t fixupVma : plan.relocationFixupVmas) {
         Elf64_Rela r = {};
         r.r_offset = fixupVma;
-        r.r_info = ELF64_R_INFO(0, R_X86_64_RELATIVE);
+        uint32_t relType = target::TargetInfo::getElfRelativeRelocation(plan.arch);
+        r.r_info = ELF64_R_INFO(0, relType);
         // Addend is original value at location
         r.r_addend = 0;
         relaDynList.push_back(r);
@@ -419,9 +430,7 @@ bool ElfImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std::
     ehdr.e_ident[6] = 1; // ELF version 1
     ehdr.e_ident[7] = 0; // SYSV
     ehdr.e_type = ET_DYN;
-    if (plan.arch == target::Arch::AArch64) ehdr.e_machine = 183;
-    else if (plan.arch == target::Arch::RISCV64) ehdr.e_machine = 243;
-    else ehdr.e_machine = EM_X86_64;
+    ehdr.e_machine = target::TargetInfo::getElfMachine(plan.arch);
     ehdr.e_version = 1;
     ehdr.e_entry = 0;
     ehdr.e_phoff = sizeof(ElfHeader64);
@@ -489,15 +498,21 @@ bool ElfImageWriter::writeSharedLibrary(const DynamicLinkPlan& plan, const std::
 
 bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string& outputPath) {
     lastError_.clear();
-    if (image.arch != target::Arch::X64 || image.os != target::OS::Linux ||
-        image.outputKind != LinkOutputKind::Executable) {
-        lastError_ = "ELF executable writer requires a Linux x86-64 executable LinkedImage";
+    if (image.outputKind != LinkOutputKind::Executable) {
+        lastError_ = "ELF executable writer requires an executable LinkedImage";
         return false;
     }
     if (image.entryAddress == 0) {
         lastError_ = "ELF executable image has no resolved entrypoint";
         return false;
     }
+
+    if (!target::TargetInfo::supportsOutputKind(image.os, image.arch, target::Artifact::Executable)) {
+        lastError_ = "ELF executable output unsupported for target architecture/OS";
+        return false;
+    }
+
+    uint16_t machine = target::TargetInfo::getElfMachine(image.arch);
 
     // Check if we have dynamic imports / fixups
     bool isDynamicExecutable = !image.importThunkVmas.empty() || !image.dataImportFixups.empty();
@@ -541,7 +556,7 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
         ElfHeader64 header{};
         header.e_ident[0] = 0x7f; header.e_ident[1] = 'E'; header.e_ident[2] = 'L'; header.e_ident[3] = 'F';
         header.e_ident[4] = 2; header.e_ident[5] = 1; header.e_ident[6] = 1;
-        header.e_type = ET_EXEC; header.e_machine = EM_X86_64; header.e_version = 1;
+        header.e_type = ET_EXEC; header.e_machine = machine; header.e_version = 1;
         header.e_entry = image.entryAddress; header.e_phoff = phoff; header.e_shoff = shoff;
         header.e_ehsize = sizeof(ElfHeader64); header.e_phentsize = sizeof(ProgramHeader64); header.e_phnum = phnum;
         header.e_shentsize = sizeof(SectionHeader64); header.e_shnum = static_cast<uint16_t>(sections.size() + 2);
@@ -589,6 +604,7 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
         file.seekp(shoff); file.write(reinterpret_cast<const char*>(shdrs.data()), shdrs.size() * sizeof(SectionHeader64));
         file.close();
         if (!file) { std::remove(temporary.c_str()); lastError_ = "failed while writing ELF output"; return false; }
+        std::remove(outputPath.c_str());
         if (std::rename(temporary.c_str(), outputPath.c_str()) != 0) {
             std::remove(temporary.c_str()); lastError_ = "failed to replace ELF output"; return false;
         }
@@ -603,7 +619,9 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
         interpPath = linuxOS.getDynamicInterpreterPath(image.arch);
     }
     if (interpPath.empty()) {
-        interpPath = "/lib64/ld-linux-x86-64.so.2";
+        if (image.arch == target::Arch::AArch64) interpPath = "/lib/ld-linux-aarch64.so.1";
+        else if (image.arch == target::Arch::RISCV64) interpPath = "/lib/ld-linux-riscv64-lp64d.so.1";
+        else interpPath = "/lib64/ld-linux-x86-64.so.2";
     }
     std::string interpStr = interpPath + '\0';
 
@@ -790,26 +808,70 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
         // GOT slots start at index 3 after reserved 0, 1, 2
         imports[i].gotSlotVma = gotVma + (3 + i) * sizeof(uint64_t);
 
+        uint32_t jumpSlotReloc = target::TargetInfo::getElfJumpSlotRelocation(image.arch);
+        uint32_t globDatReloc = target::TargetInfo::getElfGlobDatRelocation(image.arch);
+
         if (imports[i].isFunction) {
             Elf64_Rela r = {};
             r.r_offset = imports[i].gotSlotVma;
-            r.r_info = ELF64_R_INFO(symIdx, R_X86_64_JUMP_SLOT);
+            r.r_info = ELF64_R_INFO(symIdx, jumpSlotReloc);
             r.r_addend = 0;
             relaPltList.push_back(r);
 
-            // Fixup function thunk indirect jump displacement!
-            // Thunk is at (imports[i].thunkVma + textAddrDiff) in textBytes
-            // Instruction: FF 25 [disp32]
-            // disp32 = GOT_VMA - (Thunk_VMA + 6)
             uint64_t realThunkVma = imports[i].thunkVma + textAddrDiff;
             uint64_t thunkTextOffset = realThunkVma - textVma;
-            int64_t disp = static_cast<int64_t>(imports[i].gotSlotVma) - static_cast<int64_t>(realThunkVma + 6);
-            int32_t disp32 = static_cast<int32_t>(disp);
-            std::memcpy(textBytes.data() + thunkTextOffset + 2, &disp32, 4);
+
+            if (image.arch == target::Arch::AArch64) {
+                // AArch64 indirect branch through GOT:
+                // ADRP x16, page(GOT)
+                // LDR  x16, [x16, page_offset(GOT)]
+                // BR   x16
+                // NOP
+                int64_t pageDiff = (static_cast<int64_t>(imports[i].gotSlotVma & ~0xFFFULL) - static_cast<int64_t>(realThunkVma & ~0xFFFULL)) >> 12;
+                uint32_t immlo = (pageDiff & 0x3) << 29;
+                uint32_t immhi = ((pageDiff >> 2) & 0x7FFFF) << 5;
+                uint32_t adrp = 0x90000010 | immlo | immhi;
+                uint32_t pageOff = static_cast<uint32_t>(imports[i].gotSlotVma & 0xFFF);
+                uint32_t ldr = 0xF9400010 | ((pageOff >> 3) << 10);
+                uint32_t br = 0xD61F0200;
+                uint32_t nop = 0xD503201F;
+                if (thunkTextOffset + 16 <= textBytes.size()) {
+                    std::memcpy(textBytes.data() + thunkTextOffset, &adrp, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 4, &ldr, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 8, &br, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 12, &nop, 4);
+                }
+            } else if (image.arch == target::Arch::RISCV64) {
+                // RISC-V indirect branch through GOT:
+                // AUIPC t0, %pcrel_hi(GOT)
+                // LD    t0, %pcrel_lo(GOT)(t0)
+                // JR    t0
+                // NOP
+                int64_t diff = static_cast<int64_t>(imports[i].gotSlotVma) - static_cast<int64_t>(realThunkVma);
+                int32_t hi20 = static_cast<int32_t>((diff + 0x800) >> 12);
+                int32_t lo12 = static_cast<int32_t>(diff - (static_cast<int64_t>(hi20) << 12));
+                uint32_t auipc = 0x00000297 | ((hi20 & 0xFFFFF) << 12);
+                uint32_t ld = 0x0002B283 | ((lo12 & 0xFFF) << 20);
+                uint32_t jr = 0x00028067;
+                uint32_t nop = 0x00000013;
+                if (thunkTextOffset + 16 <= textBytes.size()) {
+                    std::memcpy(textBytes.data() + thunkTextOffset, &auipc, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 4, &ld, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 8, &jr, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 12, &nop, 4);
+                }
+            } else {
+                // x86-64 indirect jump instruction: FF 25 [disp32]
+                int64_t disp = static_cast<int64_t>(imports[i].gotSlotVma) - static_cast<int64_t>(realThunkVma + 6);
+                int32_t disp32 = static_cast<int32_t>(disp);
+                if (thunkTextOffset + 6 <= textBytes.size()) {
+                    std::memcpy(textBytes.data() + thunkTextOffset + 2, &disp32, 4);
+                }
+            }
         } else {
             Elf64_Rela r = {};
             r.r_offset = imports[i].gotSlotVma;
-            r.r_info = ELF64_R_INFO(symIdx, R_X86_64_GLOB_DAT);
+            r.r_info = ELF64_R_INFO(symIdx, globDatReloc);
             r.r_addend = 0;
             relaDynList.push_back(r);
         }
@@ -1002,7 +1064,7 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
     ElfHeader64 header{};
     header.e_ident[0] = 0x7f; header.e_ident[1] = 'E'; header.e_ident[2] = 'L'; header.e_ident[3] = 'F';
     header.e_ident[4] = 2; header.e_ident[5] = 1; header.e_ident[6] = 1;
-    header.e_type = ET_EXEC; header.e_machine = EM_X86_64; header.e_version = 1;
+    header.e_type = ET_EXEC; header.e_machine = machine; header.e_version = 1;
     header.e_entry = realEntry; header.e_phoff = sizeof(ElfHeader64); header.e_shoff = shoff;
     header.e_ehsize = sizeof(ElfHeader64); header.e_phentsize = sizeof(ProgramHeader64); header.e_phnum = static_cast<uint16_t>(phdrs.size());
     header.e_shentsize = sizeof(SectionHeader64); header.e_shnum = static_cast<uint16_t>(shdrs.size());
@@ -1058,6 +1120,7 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
     file.close();
 
     if (!file) { std::remove(temporary.c_str()); lastError_ = "failed while writing dynamic ELF output"; return false; }
+    std::remove(outputPath.c_str());
     if (std::rename(temporary.c_str(), outputPath.c_str()) != 0) {
         std::remove(temporary.c_str()); lastError_ = "failed to replace DYNAMIC ELF output"; return false;
     }

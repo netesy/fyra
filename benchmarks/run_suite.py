@@ -15,7 +15,13 @@ BENCHMARKS_DIR = os.path.dirname(os.path.abspath(__file__))
 CORPUS_C_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "c")
 CORPUS_FYRA_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "fyra")
 BUILD_DIR = os.path.join(BENCHMARKS_DIR, "..", "build")
-FYRA_BIN = os.path.join(BUILD_DIR, "fyra_compiler")
+FYRA_BIN = os.path.join(BUILD_DIR, "fyra_compiler.exe" if os.path.exists(os.path.join(BUILD_DIR, "fyra_compiler.exe")) else "fyra_compiler")
+
+import tempfile
+msys_tmp = "C:/msys64/tmp" if os.path.exists("C:/msys64/tmp") else tempfile.gettempdir()
+os.environ["TMPDIR"] = msys_tmp
+os.environ["TMP"] = msys_tmp
+os.environ["TEMP"] = msys_tmp
 
 def geomean(iterable):
     vals = [x for x in iterable if x > 0]
@@ -115,12 +121,14 @@ def analyze_assembly(asm_file):
 
 def run_cmd(cmd, timeout=30.0):
     try:
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, shell=True, env=os.environ, capture_output=True, text=True, timeout=timeout)
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         return 124, "", f"timeout after {timeout}s"
 
 def run_exec(exec_path, timeout=30.0):
+    if not os.path.exists(exec_path) and os.path.exists(exec_path + ".exe"):
+        exec_path = exec_path + ".exe"
     try:
         p = subprocess.run([exec_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
         return p.returncode, p.stdout, p.stderr
@@ -128,6 +136,8 @@ def run_exec(exec_path, timeout=30.0):
         return 124, "", f"timeout after {timeout}s"
 
 def measure_execution(exec_path, samples=15, warmup=2, timeout=30.0):
+    if not os.path.exists(exec_path) and os.path.exists(exec_path + ".exe"):
+        exec_path = exec_path + ".exe"
     if not os.path.exists(exec_path):
         return {"median": 0.0, "min": 0.0, "stddev": 0.0, "output": ""}
 
@@ -210,11 +220,22 @@ def main():
         clang_s = os.path.join(out_dir, "clang.s")
         clang_exec = os.path.join(out_dir, "clang_exec")
 
+        c_src_f = c_src.replace('\\', '/')
+        gcc_s_f = gcc_s.replace('\\', '/')
+        gcc_exec_f = gcc_exec.replace('\\', '/')
+        clang_s_f = clang_s.replace('\\', '/')
+        clang_exec_f = clang_exec.replace('\\', '/')
+        fyra_src_f = fyra_src.replace('\\', '/')
+        fyra_bin_f = FYRA_BIN.replace('\\', '/')
+
+        static_flag = "-static" if sys.platform != "win32" else ""
+        no_pie_flag = "-no-pie" if sys.platform != "win32" else ""
+
         commands = [
-            f"gcc -static -O2 {c_src} -S -o {gcc_s}",
-            f"gcc -static -O2 {c_src} -o {gcc_exec}",
-            f"clang -static -O2 {c_src} -S -o {clang_s}",
-            f"clang -static -O2 {c_src} -o {clang_exec}",
+            f"gcc {static_flag} -O2 {c_src_f} -S -o {gcc_s_f}",
+            f"gcc {static_flag} -O2 {c_src_f} -o {gcc_exec_f}",
+            f"clang {static_flag} -O2 {c_src_f} -S -o {clang_s_f}",
+            f"clang {static_flag} -O2 {c_src_f} -o {clang_exec_f}",
         ]
 
         target_list = [t.strip() for t in args.targets.split(",") if t.strip()]
@@ -223,9 +244,11 @@ def main():
             t_sanitized = target_triple.replace("-", "_")
             t_o2_s = os.path.join(out_dir, f"fyra_{t_sanitized}_o2.s")
             t_scalar_s = os.path.join(out_dir, f"fyra_{t_sanitized}_scalar.s")
+            t_o2_s_f = t_o2_s.replace('\\', '/')
+            t_scalar_s_f = t_scalar_s.replace('\\', '/')
 
-            cmd_o2 = f"{FYRA_BIN} {fyra_src} --target {target_triple} -o {t_o2_s} -O2"
-            cmd_scalar = f"{FYRA_BIN} {fyra_src} --target {target_triple} -o {t_scalar_s} -O2 --disable-slp"
+            cmd_o2 = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_o2_s_f} -O2"
+            cmd_scalar = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_scalar_s_f} -O2 --disable-slp"
 
             rc1, stdout1, stderr1 = run_cmd(cmd_o2, timeout=args.timeout)
             if rc1 != 0:
@@ -247,10 +270,14 @@ def main():
         fyra_exec = os.path.join(out_dir, "fyra_exec")
         fyra_scalar_exec = os.path.join(out_dir, "fyra_scalar_exec")
 
+        fyra_o1_s_f = fyra_o1_s.replace('\\', '/')
+        fyra_o2_s_f = fyra_o2_s.replace('\\', '/')
+        fyra_scalar_s_f = fyra_scalar_s.replace('\\', '/')
+
         commands += [
-            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_o1_s} -O1",
-            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_o2_s} -O2",
-            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_scalar_s} -O2 --disable-slp",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o1_s_f} -O1",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o2_s_f} -O2",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_scalar_s_f} -O2 --disable-slp",
         ]
         for command in commands:
             t0 = time.time()
@@ -267,8 +294,22 @@ def main():
         fyra_scalar_s = fyra_scalar_s + ".s" if os.path.exists(fyra_scalar_s + ".s") else fyra_scalar_s
 
         harness_c = os.path.join(BENCHMARKS_DIR, "harness.c")
-        for command in [f"gcc -static -no-pie {fyra_o2_s} {harness_c} -o {fyra_exec}",
-                        f"gcc -static -no-pie {fyra_scalar_s} {harness_c} -o {fyra_scalar_exec}"]:
+        harness_c_f = harness_c.replace('\\', '/')
+        fyra_o2_s_f = fyra_o2_s.replace('\\', '/')
+        fyra_scalar_s_f = fyra_scalar_s.replace('\\', '/')
+        fyra_exec_f = fyra_exec.replace('\\', '/')
+        fyra_scalar_exec_f = fyra_scalar_exec.replace('\\', '/')
+
+        if sys.platform == "win32":
+            for s_path in [fyra_o2_s, fyra_scalar_s]:
+                if os.path.exists(s_path):
+                    with open(s_path, 'r') as sf:
+                        filtered = [l for l in sf.readlines() if not re.match(r'^\s*\.(type|size|section\s+\.note\.GNU-stack)', l)]
+                    with open(s_path, 'w') as sf:
+                        sf.writelines(filtered)
+
+        for command in [f"gcc {static_flag} {no_pie_flag} {fyra_o2_s_f} {harness_c_f} -o {fyra_exec_f}",
+                        f"gcc {static_flag} {no_pie_flag} {fyra_scalar_s_f} {harness_c_f} -o {fyra_scalar_exec_f}"]:
             rc, stdout, stderr = run_cmd(command, timeout=args.timeout)
             if rc != 0:
                 print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")

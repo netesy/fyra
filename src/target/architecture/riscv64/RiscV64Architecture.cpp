@@ -6,6 +6,7 @@
 #include "ir/PhiNode.h"
 #include "target/architecture/riscv64/RiscV64Architecture.h"
 #include "codegen/CodeGen.h"
+#include "codegen/asm/Assembler.h"
 #include "target/core/OperatingSystemInfo.h"
 #include <ostream>
 #include <vector>
@@ -13,6 +14,50 @@
 namespace target {
 
 RiscV64Architecture::RiscV64Architecture() {}
+
+void RiscV64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& as, ir::Value* val, uint8_t reg) {
+    if (auto* instr = dynamic_cast<ir::Instruction*>(val)) {
+        if (instr->hasPhysicalRegister()) {
+            uint8_t src = static_cast<uint8_t>(instr->getPhysicalRegister());
+            if (src == reg) return;
+            // addi reg, src, 0
+            as.emitDWord((0 << 20) | (src << 15) | (0 << 12) | (reg << 7) | 0x13);
+            return;
+        }
+    }
+    if (auto* constInt = dynamic_cast<ir::ConstantInt*>(val)) {
+        int64_t v = static_cast<int64_t>(constInt->getValue());
+        if (v >= -2048 && v <= 2047) {
+            // addi reg, zero, v
+            as.emitDWord(((v & 0xFFF) << 20) | (0 << 15) | (0 << 12) | (reg << 7) | 0x13);
+        } else {
+            int32_t imm32 = static_cast<int32_t>(v);
+            int32_t hi = (imm32 + 0x800) >> 12;
+            int32_t lo = imm32 - (hi << 12);
+            as.emitDWord(((hi & 0xFFFFF) << 12) | (reg << 7) | 0x37); // lui reg, hi
+            as.emitDWord(((lo & 0xFFF) << 20) | (reg << 15) | (0 << 12) | (reg << 7) | 0x13); // addi reg, reg, lo
+        }
+    } else {
+        int32_t offset = cg.getStackOffset(val);
+        uint32_t funct3 = (val->getType() && val->getType()->getSize() <= 4) ? 2 : 3;
+        as.emitDWord(((offset & 0xFFF) << 20) | (8 << 15) | (funct3 << 12) | (reg << 7) | 0x03);
+    }
+}
+
+void RiscV64Architecture::emitStoreResult(CodeGen& cg, ir::Instruction& instr, uint8_t reg) {
+    if (instr.hasPhysicalRegister()) {
+        uint8_t dst = static_cast<uint8_t>(instr.getPhysicalRegister());
+        if (dst != reg) {
+            cg.getAssembler().emitDWord((0 << 20) | (reg << 15) | (0 << 12) | (dst << 7) | 0x13);
+        }
+        return;
+    }
+    int32_t offset = cg.getStackOffset(&instr);
+    uint32_t funct3 = (instr.getType() && instr.getType()->getSize() <= 4) ? 2 : 3;
+    uint32_t imm = offset & 0xFFF;
+    uint32_t op = (((imm >> 5) & 0x7F) << 25) | (reg << 20) | (8 << 15) | (funct3 << 12) | ((imm & 0x1F) << 7) | 0x23;
+    cg.getAssembler().emitDWord(op);
+}
 
 TypeInfo RiscV64Architecture::getTypeInfo(const ir::Type* type) const {
     return {type->getSize() * 8, type->getAlignment() * 8, type->isFloatingPoint() ? RegisterClass::Float : RegisterClass::Integer, type->isFloatingPoint(), true};
@@ -42,16 +87,47 @@ void RiscV64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) 
     }
     for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { if (instr->getType()->getTypeID() != ir::Type::VoidTyID) { currentStackOffset -= 8; cg.getStackOffsets()[instr.get()] = currentStackOffset; } } }
     int stack_size = (-currentStackOffset + 15) & ~15;
-    if (auto* os = cg.getTextStream()) { *os << "  addi sp, sp, -" << stack_size << "\n  sd ra, " << stack_size - 8 << "(sp)\n  sd s0, " << stack_size - 16 << "(sp)\n  addi s0, sp, " << stack_size << "\n"; }
+    if (auto* os = cg.getTextStream()) {
+        *os << "  addi sp, sp, -" << stack_size << "\n  sd ra, " << stack_size - 8 << "(sp)\n  sd s0, " << stack_size - 16 << "(sp)\n  addi s0, sp, " << stack_size << "\n";
+    } else {
+        cg.getAssembler().emitDWord(((-stack_size & 0xFFF) << 20) | (2 << 15) | (0 << 12) | (2 << 7) | 0x13); // addi sp, sp, -stack_size
+        uint32_t off1 = (stack_size - 8) & 0xFFF;
+        cg.getAssembler().emitDWord((((off1 >> 5) & 0x7F) << 25) | (1 << 20) | (2 << 15) | (3 << 12) | ((off1 & 0x1F) << 7) | 0x23); // sd ra, (stack_size-8)(sp)
+        uint32_t off2 = (stack_size - 16) & 0xFFF;
+        cg.getAssembler().emitDWord((((off2 >> 5) & 0x7F) << 25) | (8 << 20) | (2 << 15) | (3 << 12) | ((off2 & 0x1F) << 7) | 0x23); // sd s0, (stack_size-16)(sp)
+        cg.getAssembler().emitDWord(((stack_size & 0xFFF) << 20) | (2 << 15) | (0 << 12) | (8 << 7) | 0x13); // addi s0, sp, stack_size
+        int arg_i = 0;
+        for (auto& param : func.getParameters()) {
+            if (arg_i < 8) {
+                int32_t off = cg.getStackOffset(param.get());
+                uint32_t funct3 = (param->getType()->getSize() <= 4) ? 2 : 3;
+                uint32_t imm = off & 0xFFF;
+                cg.getAssembler().emitDWord((((imm >> 5) & 0x7F) << 25) | ((10 + arg_i) << 20) | (8 << 15) | (funct3 << 12) | ((imm & 0x1F) << 7) | 0x23);
+                arg_i++;
+            }
+        }
+    }
 }
 
 void RiscV64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
-    if (auto* os = cg.getTextStream()) { *os << func.getName() << "_epilogue:\n  ld ra, -8(s0)\n  ld s0, -16(s0)\n  addi sp, s0, 0\n  jr ra\n"; }
+    if (auto* os = cg.getTextStream()) {
+        *os << func.getName() << "_epilogue:\n  ld ra, -8(s0)\n  ld s0, -16(s0)\n  addi sp, s0, 0\n  jr ra\n";
+    } else {
+        cg.getAssembler().emitDWord(((-8 & 0xFFF) << 20) | (8 << 15) | (3 << 12) | (1 << 7) | 0x03); // ld ra, -8(s0)
+        cg.getAssembler().emitDWord(((-16 & 0xFFF) << 20) | (8 << 15) | (3 << 12) | (8 << 7) | 0x03); // ld s0, -16(s0)
+        cg.getAssembler().emitDWord((0 << 20) | (8 << 15) | (0 << 12) | (2 << 7) | 0x13); // addi sp, s0, 0
+        cg.getAssembler().emitDWord(0x00008067); // jr ra (jalr x0, ra, 0)
+    }
 }
 
 void RiscV64Architecture::emitStartFunction(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << ".text\n.globl _start\n_start:\n  call main\n  li a7, 93\n  ecall\n";
+    } else {
+        cg.addRelocation({cg.getAssembler().getCodeSize(), "R_RISCV_CALL", 0, "main", ".text"});
+        cg.getAssembler().emitDWord(0x000000EF); // jal ra, 0
+        cg.getAssembler().emitDWord(((93 & 0xFFF) << 20) | (0 << 15) | (0 << 12) | (17 << 7) | 0x13); // li a7, 93
+        cg.getAssembler().emitDWord(0x00000073); // ecall
     }
 }
 
@@ -66,9 +142,15 @@ void RiscV64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
                 std::string lInst = (rv->getType() && rv->getType()->getSize() <= 4) ? "lw" : "ld";
                 *os << "  " << lInst << " a0, " << cg.getValueAsOperand(rv) << "\n";
             }
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), rv, 10); // a0
         }
     }
-    if (auto* os = cg.getTextStream()) *os << "  j " << i.getParent()->getParent()->getName() << "_epilogue\n";
+    if (auto* os = cg.getTextStream()) {
+        *os << "  j " << i.getParent()->getParent()->getName() << "_epilogue\n";
+    } else {
+        emitFunctionEpilogue(cg, *i.getParent()->getParent());
+    }
 }
 
 void RiscV64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {

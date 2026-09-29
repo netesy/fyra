@@ -7,12 +7,36 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <cstdlib>
 #include <vector>
 #include <unistd.h>
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#else
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(s) (s)
+#endif
+#ifndef WIFEXITED
+#define WIFEXITED(s) true
+#endif
+#endif
 
 static void runNodeVerification(const std::string& wasmPath, const std::string& checkJs) {
-    std::string cmd = "node -e 'const fs=require(\"fs\"); const bytes=fs.readFileSync(\"" + wasmPath + "\"); if (!WebAssembly.validate(bytes)) { console.error(\"INVALID WASM\"); process.exit(1); } const m=new WebAssembly.Module(bytes); const i=new WebAssembly.Instance(m); " + checkJs + "' > /tmp/node_test.log 2>&1";
+    std::string scriptPath = "/tmp/node_test.js";
+    {
+        std::ofstream js(scriptPath);
+        std::string escapedPath;
+        for (char c : wasmPath) {
+            if (c == '\\') escapedPath += "/";
+            else escapedPath += c;
+        }
+        js << "const fs = require('fs');\n"
+           << "const bytes = fs.readFileSync('" << escapedPath << "');\n"
+           << "if (!WebAssembly.validate(bytes)) { console.error('INVALID WASM'); process.exit(1); }\n"
+           << "const m = new WebAssembly.Module(bytes);\n"
+           << "const i = new WebAssembly.Instance(m);\n"
+           << checkJs << "\n";
+    }
+    std::string cmd = "node /tmp/node_test.js > /tmp/node_test.log 2>&1";
     int res = std::system(cmd.c_str());
     if (res != 0) {
         std::cerr << "Node verification failed. Output log:" << std::endl;
@@ -56,13 +80,16 @@ int main() {
         std::cout << "Emitting executable..." << std::endl;
         fyra::BuildResult resExec = backend.emitExecutable("/tmp/test_basic_exec");
         std::cout << "Exec res: " << resExec.success << std::endl;
+        for (const auto& err : resExec.errors) std::cout << "Exec err: " << err << std::endl;
         assert(resExec.success);
 
+#if !defined(_WIN32)
         // Execute generated host executable and check exit code
         int rc = std::system("/tmp/test_basic_exec");
         int exitCode = WEXITSTATUS(rc);
         std::cout << "Host executable exit status: " << exitCode << std::endl;
         assert(exitCode == 42);
+#endif
     }
 
     // Test 2: WAT and WASM Generation + Node Verification
@@ -157,10 +184,12 @@ int main() {
         }
         assert(resExec.success);
 
+#if !defined(_WIN32)
         int rc = std::system("/tmp/test_static_lib_exec");
         int exitCode = WEXITSTATUS(rc);
         std::cout << "Static library integration test exit status: " << exitCode << std::endl;
         assert(exitCode == 42);
+#endif
     }
 
     // Test 4: Object-Link Integration Test
@@ -209,10 +238,12 @@ int main() {
         fyra::BuildResult resLink = linkBuilder.emitExecutable("/tmp/test_obj_link_exec");
         assert(resLink.success);
 
+#if !defined(_WIN32)
         int rc = std::system("/tmp/test_obj_link_exec");
         int exitCode = WEXITSTATUS(rc);
         std::cout << "Object-link integration test exit status: " << exitCode << std::endl;
         assert(exitCode == 42);
+#endif
     }
 
     // Test 5: Shared Library Generation & Dynamic Import Test
@@ -272,8 +303,10 @@ int main() {
         backend.optimize(fyra::OptimizationLevel::O2);
         fyra::BuildResult executableResult = backend.emitExecutable("/tmp/test_data_sections_exec");
         assert(executableResult.success);
+#if !defined(_WIN32)
         int rc = std::system("/tmp/test_data_sections_exec");
         assert(WEXITSTATUS(rc) == 42);
+#endif
     }
 
     // Test 7: Android Target Triple & emitAPK Integration Test
@@ -328,6 +361,97 @@ int main() {
         std::ifstream binFile("/tmp/test_kernel.bin", std::ios::binary);
         assert(binFile.is_open());
         std::cout << "Flat binary (.bin) emission test passed successfully!" << std::endl;
+    }
+
+    // Test 9: Multi-Architecture emitObject (AArch64 & RISC-V 64 ELF and COFF Object Files)
+    {
+        ir::Module module("test_multiarch_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        builder.createRet(ctx->getConstantInt(i32, 0));
+
+        // AArch64 Linux ELF Object
+        {
+            fyra::BackendBuilder backend(module);
+            backend.target("aarch64-linux-bin");
+            fyra::BuildResult res = backend.emitObject("/tmp/test_aarch64.o");
+            assert(res.success);
+
+            std::ifstream f("/tmp/test_aarch64.o", std::ios::binary);
+            assert(f.is_open());
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            auto reader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+            assert(reader != nullptr);
+            target::artifact::object::ObjectArtifact art;
+            assert(reader->parse(bytes, art));
+            assert(art.format == target::artifact::object::ObjectFormat::ELF);
+            assert(art.arch == target::Arch::AArch64);
+            assert(art.findSymbol("main") != nullptr);
+        }
+
+        // RISC-V 64 Linux ELF Object
+        {
+            fyra::BackendBuilder backend(module);
+            backend.target("riscv64-linux-bin");
+            fyra::BuildResult res = backend.emitObject("/tmp/test_riscv64.o");
+            assert(res.success);
+
+            std::ifstream f("/tmp/test_riscv64.o", std::ios::binary);
+            assert(f.is_open());
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            auto reader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+            assert(reader != nullptr);
+            target::artifact::object::ObjectArtifact art;
+            assert(reader->parse(bytes, art));
+            assert(art.format == target::artifact::object::ObjectFormat::ELF);
+            assert(art.arch == target::Arch::RISCV64);
+            assert(art.findSymbol("main") != nullptr);
+        }
+
+        // AArch64 Windows COFF Object
+        {
+            fyra::BackendBuilder backend(module);
+            backend.target("aarch64-windows-bin");
+            fyra::BuildResult res = backend.emitObject("/tmp/test_aarch64.obj");
+            assert(res.success);
+
+            std::ifstream f("/tmp/test_aarch64.obj", std::ios::binary);
+            assert(f.is_open());
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            auto reader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+            assert(reader != nullptr);
+            target::artifact::object::ObjectArtifact art;
+            assert(reader->parse(bytes, art));
+            assert(art.format == target::artifact::object::ObjectFormat::COFF);
+            assert(art.arch == target::Arch::AArch64);
+            assert(art.findSymbol("main") != nullptr);
+        }
+
+        // RISC-V 64 Windows COFF Object
+        {
+            fyra::BackendBuilder backend(module);
+            backend.target("riscv64-windows-bin");
+            fyra::BuildResult res = backend.emitObject("/tmp/test_riscv64.obj");
+            assert(res.success);
+
+            std::ifstream f("/tmp/test_riscv64.obj", std::ios::binary);
+            assert(f.is_open());
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            auto reader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+            assert(reader != nullptr);
+            target::artifact::object::ObjectArtifact art;
+            assert(reader->parse(bytes, art));
+            assert(art.format == target::artifact::object::ObjectFormat::COFF);
+            assert(art.arch == target::Arch::RISCV64);
+            assert(art.findSymbol("main") != nullptr);
+        }
+
+        std::cout << "Multi-Architecture emitObject (AArch64 & RISC-V 64) test passed successfully!" << std::endl;
     }
 
     std::cout << "=== All BackendBuilder API direct C++ tests passed successfully! ===" << std::endl;

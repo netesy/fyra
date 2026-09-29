@@ -1,4 +1,5 @@
 #include "target/artifact/object/ElfObjectReader.h"
+#include "target/core/TargetInfo.h"
 #include <fstream>
 #include <cstring>
 #include <iostream>
@@ -26,6 +27,17 @@ constexpr uint16_t SHN_UNDEF = 0;
 constexpr uint32_t R_X86_64_64 = 1;
 constexpr uint32_t R_X86_64_PC32 = 2;
 constexpr uint32_t R_X86_64_PLT32 = 4;
+constexpr uint32_t R_AARCH64_ABS64 = 257;
+constexpr uint32_t R_AARCH64_ADR_PREL_PG_HI21 = 275;
+constexpr uint32_t R_AARCH64_ADD_ABS_LO12_NC = 277;
+constexpr uint32_t R_AARCH64_CONDBR19 = 280;
+constexpr uint32_t R_AARCH64_JUMP26 = 282;
+constexpr uint32_t R_AARCH64_CALL26 = 283;
+constexpr uint32_t R_RISCV_64 = 2;
+constexpr uint32_t R_RISCV_BRANCH = 16;
+constexpr uint32_t R_RISCV_JAL = 17;
+constexpr uint32_t R_RISCV_CALL = 18;
+constexpr uint32_t R_RISCV_CALL_PLT = 19;
 
 #pragma pack(push, 1)
 struct ElfHeader64 {
@@ -97,9 +109,23 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
         return false;
     }
 
-    if (ehdr->e_machine == EM_AARCH64) outArtifact.arch = target::Arch::AArch64;
-    else if (ehdr->e_machine == EM_RISCV) outArtifact.arch = target::Arch::RISCV64;
-    else outArtifact.arch = target::Arch::X64;
+    // Map ELF machine types to architecture enums using TargetInfo
+    bool validMachine = false;
+    if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::X64)) {
+        outArtifact.arch = target::Arch::X64;
+        validMachine = true;
+    } else if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::AArch64)) {
+        outArtifact.arch = target::Arch::AArch64;
+        validMachine = true;
+    } else if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::RISCV64)) {
+        outArtifact.arch = target::Arch::RISCV64;
+        validMachine = true;
+    }
+    
+    if (!validMachine) {
+        lastError_ = "Invalid ELF machine type: " + std::to_string(ehdr->e_machine);
+        return false;
+    }
 
     outArtifact.os = target::OS::Linux;
 
@@ -237,10 +263,27 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
                     orel.symbolName = symbolNames[symIdx];
                 }
 
-                if (typeCode == R_X86_64_64) orel.type = "R_X86_64_64";
-                else if (typeCode == R_X86_64_PC32) orel.type = "R_X86_64_PC32";
-                else if (typeCode == R_X86_64_PLT32) orel.type = "R_X86_64_PLT32";
-                else orel.type = "R_TYPE_" + std::to_string(typeCode);
+                if (outArtifact.arch == target::Arch::AArch64) {
+                    if (typeCode == R_AARCH64_CALL26) orel.type = "R_AARCH64_CALL26";
+                    else if (typeCode == R_AARCH64_JUMP26) orel.type = "R_AARCH64_JUMP26";
+                    else if (typeCode == R_AARCH64_CONDBR19) orel.type = "R_AARCH64_CONDBR19";
+                    else if (typeCode == R_AARCH64_ADR_PREL_PG_HI21) orel.type = "R_AARCH64_ADR_PREL_PG_HI21";
+                    else if (typeCode == R_AARCH64_ADD_ABS_LO12_NC) orel.type = "R_AARCH64_ADD_ABS_LO12_NC";
+                    else if (typeCode == R_AARCH64_ABS64) orel.type = "R_AARCH64_ABS64";
+                    else orel.type = "R_TYPE_" + std::to_string(typeCode);
+                } else if (outArtifact.arch == target::Arch::RISCV64) {
+                    if (typeCode == R_RISCV_CALL) orel.type = "R_RISCV_CALL";
+                    else if (typeCode == R_RISCV_CALL_PLT) orel.type = "R_RISCV_CALL_PLT";
+                    else if (typeCode == R_RISCV_JAL) orel.type = "R_RISCV_JAL";
+                    else if (typeCode == R_RISCV_BRANCH) orel.type = "R_RISCV_BRANCH";
+                    else if (typeCode == R_RISCV_64) orel.type = "R_RISCV_64";
+                    else orel.type = "R_TYPE_" + std::to_string(typeCode);
+                } else {
+                    if (typeCode == R_X86_64_64) orel.type = "R_X86_64_64";
+                    else if (typeCode == R_X86_64_PC32) orel.type = "R_X86_64_PC32";
+                    else if (typeCode == R_X86_64_PLT32) orel.type = "R_X86_64_PLT32";
+                    else orel.type = "R_TYPE_" + std::to_string(typeCode);
+                }
 
                 outArtifact.addRelocation(orel);
             }

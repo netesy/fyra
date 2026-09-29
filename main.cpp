@@ -123,14 +123,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string inputFile;
+    std::vector<std::string> inputFiles;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if ((arg == "-o" || arg == "--target") && i + 1 < argc) {
             i++;
         } else if (!arg.empty() && arg[0] != '-') {
-            inputFile = arg;
-            break;
+            std::string ext = getFileExtension(arg);
+            if (ext == ".fyra" || ext == ".fy") {
+                inputFiles.push_back(arg);
+            }
         }
     }
     std::string outputFile = get_arg(argc, argv, "-o");
@@ -141,6 +143,9 @@ int main(int argc, char** argv) {
     bool generateObject = false;
     bool createStaticLib = false;
     bool generateExecutable = false;
+    bool emitFlat = false;
+    bool emitShared = false;
+    bool enableLTO = false;
     bool enableUnroll = true;
     bool enableSLP = true;
 
@@ -161,6 +166,12 @@ int main(int argc, char** argv) {
             generateObject = true;
         } else if (arg == "--gen-exec") {
             generateExecutable = true;
+        } else if (arg == "--flat") {
+            emitFlat = true;
+        } else if (arg == "--shared") {
+            emitShared = true;
+        } else if (arg == "--lto") {
+            enableLTO = true;
         } else if (arg == "-O0") {
             optLevel = fyra::OptimizationLevel::O0;
         } else if (arg == "-O1") {
@@ -170,25 +181,31 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (inputFiles.empty()) {
+        std::cerr << "Error: no input files provided." << std::endl;
+        return 1;
+    }
+
     if (outputFile.empty()) {
         std::cerr << "Error: missing output file (-o <output>)" << std::endl;
         return 1;
     }
 
-    parser::FileFormat format = detectFileFormat(inputFile);
+    std::string primaryInput = inputFiles[0];
+    parser::FileFormat format = detectFileFormat(primaryInput);
     std::string formatName = (format == parser::FileFormat::FYRA) ? "Fyra (.fyra)" : "Fyra (.fy)";
 
-    std::ifstream inFile(inputFile);
+    std::ifstream inFile(primaryInput);
     if (!inFile.is_open()) {
-        std::cerr << "Error: could not open input file " << inputFile << std::endl;
+        std::cerr << "Error: could not open input file " << primaryInput << std::endl;
         return 1;
     }
 
-    std::cout << "--- Parsing " << formatName << " input file: " << inputFile << " ---\n" << std::flush;
+    std::cout << "--- Parsing " << formatName << " input file: " << primaryInput << " ---\n" << std::flush;
     parser::Parser p(inFile, static_cast<parser::FileFormat>(format));
     std::unique_ptr<ir::Module> module = p.parseModule();
     if (!module) {
-        std::cerr << "Error: failed to parse module." << std::endl;
+        std::cerr << "Error: failed to parse module: " << primaryInput << std::endl;
         return 1;
     }
     std::cout << "--- Parsing complete. ---\n" << std::flush;
@@ -200,6 +217,24 @@ int main(int argc, char** argv) {
            .enableSLP(enableSLP)
            .enableLoopUnroll(enableUnroll);
 
+    if (enableLTO || inputFiles.size() > 1) {
+        builder.enableLTO(true);
+        for (size_t i = 1; i < inputFiles.size(); ++i) {
+            std::ifstream subFile(inputFiles[i]);
+            if (!subFile.is_open()) {
+                std::cerr << "Error: could not open input file " << inputFiles[i] << std::endl;
+                return 1;
+            }
+            parser::Parser subP(subFile, detectFileFormat(inputFiles[i]));
+            auto subMod = subP.parseModule();
+            if (!subMod) {
+                std::cerr << "Error: failed to parse module: " << inputFiles[i] << std::endl;
+                return 1;
+            }
+            builder.addModule(std::move(subMod));
+        }
+    }
+
     fyra::BuildResult result;
     std::string ext = getFileExtension(outputFile);
 
@@ -209,6 +244,12 @@ int main(int argc, char** argv) {
         result = builder.emitExecutable(outputFile);
     } else if (generateObject) {
         result = builder.emitObject(outputFile);
+    } else if (emitShared || ext == ".so" || ext == ".dylib" || ext == ".dll") {
+        result = builder.emitSharedLibrary(outputFile);
+    } else if (emitFlat || ext == ".bin" || ext == ".img") {
+        result = builder.emitFlatBinary(outputFile);
+    } else if (ext == ".apk") {
+        result = builder.emitAPK(outputFile);
     } else if (ext == ".wat") {
         result = builder.emitWAT(outputFile);
     } else if (ext == ".wasm") {

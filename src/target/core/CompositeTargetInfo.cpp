@@ -6,7 +6,14 @@ CompositeTargetInfo::CompositeTargetInfo(std::unique_ptr<ArchitectureInfo> arch,
     : architecture(std::move(arch)), os(std::move(os)) {}
 
 std::string CompositeTargetInfo::getName() const {
-    return os->getName();
+    std::string archStr;
+    switch (architecture->getArch()) {
+        case Arch::X64: archStr = "x64"; break;
+        case Arch::AArch64: archStr = "aarch64"; break;
+        case Arch::RISCV64: archStr = "riscv64"; break;
+        case Arch::WASM32: archStr = "wasm32"; break;
+    }
+    return archStr + "-" + os->getName();
 }
 
 size_t CompositeTargetInfo::getPointerSize() const { return architecture->getPointerSize(); }

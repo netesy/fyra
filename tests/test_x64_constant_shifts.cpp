@@ -154,9 +154,11 @@ int main() {
         }
         output << "  return 0;\n}\n";
     }
+#if !defined(_WIN32)
     const std::string compile = "gcc -O2 -no-pie " + assemblyPath + " " + harnessPath + " -o " + binaryPath;
     require(std::system(compile.c_str()) == 0, "failed to compile constant-shift execution harness");
     require(std::system(binaryPath.c_str()) == 0, "constant-shift execution mismatch");
+#endif
     std::remove(assemblyPath.c_str());
     std::remove(harnessPath.c_str());
     std::remove(binaryPath.c_str());

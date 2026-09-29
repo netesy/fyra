@@ -248,7 +248,12 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
                 if (!expr.rootInst || expr.rootInst->use_empty()) continue;
 
                 ir::Type* resTy = expr.resultType;
-                if (!resTy || !resTy->isIntegerTy()) continue;
+                if (!resTy || (!resTy->isIntegerTy() && !resTy->isPointerTy())) continue;
+
+                auto* intResTy = dynamic_cast<ir::IntegerType*>(resTy);
+                if (!intResTy) {
+                    intResTy = ctx->getIntegerType(64);
+                }
 
                 // 1. Materialize initial value in preheader
                 ir::Instruction* preheaderTerm = preheader->getInstructions().empty() ? nullptr : preheader->getInstructions().back().get();
@@ -262,15 +267,15 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
                 int64_t initC = 0;
                 if (auto* cInit = dynamic_cast<ir::ConstantInt*>(iv.initVal)) {
                     initC = cInit->getValue() * expr.scale + expr.displacement;
-                    initScaled = ctx->getConstantInt(dynamic_cast<ir::IntegerType*>(resTy), initC);
+                    initScaled = ctx->getConstantInt(intResTy, initC);
                 } else {
                     ir::Value* initVal64 = iv.initVal;
-                    if (iv.initVal->getType() != resTy) {
-                        initVal64 = builder.createExtSW(iv.initVal, resTy);
+                    if (iv.initVal->getType() != intResTy) {
+                        initVal64 = builder.createExtSW(iv.initVal, intResTy);
                     }
-                    ir::Value* scaled = builder.createMul(initVal64, ctx->getConstantInt(dynamic_cast<ir::IntegerType*>(resTy), expr.scale));
+                    ir::Value* scaled = builder.createMul(initVal64, ctx->getConstantInt(intResTy, expr.scale));
                     if (expr.displacement != 0) {
-                        scaled = builder.createAdd(scaled, ctx->getConstantInt(dynamic_cast<ir::IntegerType*>(resTy), expr.displacement));
+                        scaled = builder.createAdd(scaled, ctx->getConstantInt(intResTy, expr.displacement));
                     }
                     initScaled = scaled;
                 }
@@ -300,7 +305,7 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
 
                 int64_t stepDelta = iv.stepConst * expr.scale;
                 ir::Instruction* derivedNext = builder.createAdd(
-                    derivedPhi, ctx->getConstantInt(dynamic_cast<ir::IntegerType*>(resTy), stepDelta));
+                    derivedPhi, ctx->getConstantInt(intResTy, stepDelta));
 
                 derivedPhi->addIncoming(derivedNext, latch);
 

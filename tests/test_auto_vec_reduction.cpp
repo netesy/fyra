@@ -54,6 +54,10 @@ static int32_t addref(int32_t*a,int n,int s,int32_t v){for(int i=s;i<n;i++)v=(in
 #define CHECK(F,R,A,N,S,I) do{int32_t g=F(A,N,S,I),e=R(A,N,S,I);if(g!=e){printf("FAIL %s n=%d s=%d init=%d got=%d expected=%d\n",#F,N,S,I,g,e);return 1;}}while(0)
 int main(){int32_t sum[40]={0,0,0,0,10,20,30,40};int32_t prod[40]={1,1,1,1,2,3,4,5};int32_t mn[40]={100,100,100,100,-50,-40,-30,-20};int32_t mx[40]={-100,-100,-100,-100,50,40,30,20};for(int i=8;i<40;i++){sum[i]=i-10;prod[i]=1;mn[i]=i-5;mx[i]=-i;}
  int ns[]={0,1,7,8,9,15,16,17,31};for(unsigned j=0;j<9;j++){int n=ns[j];CHECK(reduce_add,addref,sum,n,0,7);CHECK(reduce_add,addref,sum,n,0,-9);CHECK(reduce_mul,mulref,prod,n,0,2);CHECK(reduce_mul,mulref,prod,n,0,-3);CHECK(reduce_min,minref,mn,n,0,500);CHECK(reduce_min,minref,mn,n,0,-10);CHECK(reduce_max,maxref,mx,n,0,-500);CHECK(reduce_max,maxref,mx,n,0,10);}for(int n=20;n<=22;n+=2){CHECK(reduce_add,addref,sum,n,3,7);CHECK(reduce_min,minref,mn,n,3,500);CHECK(reduce_max,maxref,mx,n,3,-500);}puts("reduction execution passed");return 0;}
-)C";h.close();std::string cmd="gcc -O0 -no-pie "+asmPath+" "+cPath+" -o "+binPath+" && "+binPath;int rc=std::system(cmd.c_str());
+)C";
+h.close();
+#if !defined(_WIN32)
+std::string cmd="gcc -O0 -no-pie "+asmPath+" "+cPath+" -o "+binPath+" && "+binPath;int rc=std::system(cmd.c_str());
 std::remove(asmPath.c_str());std::remove(cPath.c_str());std::remove(binPath.c_str());assert(rc==0);
+#endif
  for(Kind k:{Kind::Sub,Kind::Div}){Function*f=build(m,b,k);transforms::LoopVectorizer v;assert(!v.performTransformation(*f));}return 0;}

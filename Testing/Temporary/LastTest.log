@@ -1,0 +1,19 @@
+Start testing: Sep 29 16:18 W. Central Africa Standard Time
+----------------------------------------------------------
+Unable to find executable: C:/Projects/Quick/Debug/test_object_generation.exe
+31/43 Testing: ObjectGenerationTest
+31/43 Test: ObjectGenerationTest
+Command: ""
+Directory: C:/Projects/Quick
+"ObjectGenerationTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ObjectGenerationTest" end time: Sep 29 16:18 W. Central Africa Standard Time
+"ObjectGenerationTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 29 16:18 W. Central Africa Standard Time

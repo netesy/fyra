@@ -208,6 +208,7 @@ int main(void){const int ns[]={0,1,7,8,9,31,1024,100000};for(unsigned i=0;i<size
     harness.close();
     const std::string command = "gcc -O0 -no-pie " + asmPath + " " + cPath +
                                 " -o " + binPath + " && " + binPath;
+#if !defined(_WIN32)
     const int rc = std::system(command.c_str());
     if (rc != 0) std::fprintf(stderr, "alias harness status=%d\n", rc);
     if (std::getenv("FYRA_KEEP_ALIAS_ARTIFACTS"))
@@ -216,5 +217,6 @@ int main(void){const int ns[]={0,1,7,8,9,31,1024,100000};for(unsigned i=0;i<size
         std::remove(asmPath.c_str()); std::remove(cPath.c_str()); std::remove(binPath.c_str());
     }
     assert(rc == 0);
+#endif
     return 0;
 }

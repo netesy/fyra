@@ -5,7 +5,16 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#else
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(s) (s)
+#endif
+#ifndef WIFEXITED
+#define WIFEXITED(s) true
+#endif
+#endif
 
 #include "target/artifact/executable/ElfImage.h"
 #include "target/artifact/linker/InternalLinker.h"
@@ -115,8 +124,10 @@ int main() {
     std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)), {});
     assert(bytes.size() > 64);
     assert(bytes[0] == 0x7f && bytes[1] == 'E' && bytes[2] == 'L' && bytes[3] == 'F');
+#if !defined(_WIN32)
     int status = std::system(("./" + output).c_str());
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 42);
+#endif
     std::remove(output.c_str());
 
     // 2. Negative test - sentinel preservation on failure
@@ -145,10 +156,12 @@ int main() {
     assert(dynBuilder != nullptr);
     assert(dynBuilder->buildSharedLibrary(libPlan, libPath));
 
+#if !defined(_WIN32)
     // Verify libfixture.so with readelf / objdump independent tool checks
     assert(std::system(("readelf -h " + libPath + " > /dev/null").c_str()) == 0);
     assert(std::system(("readelf -d " + libPath + " > /dev/null").c_str()) == 0);
     assert(std::system(("readelf -s " + libPath + " > /dev/null").c_str()) == 0);
+#endif
 
     // Link consumer executable against libfixture.so dynamic imports
     std::vector<DynamicImport> imports = {
@@ -161,6 +174,7 @@ int main() {
 
     assert(builder.build(consumerImage, consumerPath));
 
+#if !defined(_WIN32)
     // Verify consumer binary with readelf
     assert(std::system(("readelf -h " + consumerPath + " > /dev/null").c_str()) == 0);
     assert(std::system(("readelf -d " + consumerPath + " > /dev/null").c_str()) == 0);
@@ -170,11 +184,13 @@ int main() {
     int runStatus = std::system(("LD_LIBRARY_PATH=. ./" + consumerPath).c_str());
     assert(WIFEXITED(runStatus));
     assert(WEXITSTATUS(runStatus) == 142); // 42 + 100
+#endif
 
     // Cleanup
     std::remove(libPath.c_str());
     std::remove(consumerPath.c_str());
 
+#if !defined(_WIN32)
     // 4. External ELF shared library consumption test
     const std::string extSrcPath = "ext_fixture.c";
     const std::string extLibPath = "libextfixture.so";
@@ -205,6 +221,7 @@ int main() {
     std::remove(extSrcPath.c_str());
     std::remove(extLibPath.c_str());
     std::remove(extConsumerPath.c_str());
+#endif
 
     std::cout << "Canonical linked-image ELF executable & shared library tests passed.\n";
 }

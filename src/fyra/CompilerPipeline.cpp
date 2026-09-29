@@ -24,6 +24,7 @@
 #include "transforms/SLPVectorizer.h"
 #include "transforms/LoopUnroll.h"
 #include "transforms/DeadInstructionElimination.h"
+#include "transforms/EGraphPass.h"
 #include "transforms/InstructionScheduler.h"
 #include "transforms/ErrorReporter.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
@@ -250,6 +251,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         transforms::LoopVectorizer loop_vectorizer(error_reporter, vectorTarget);
         transforms::SLPVectorizer slp_vectorizer(error_reporter, vectorTarget);
         transforms::DivisionStrengthReduction div_sr(error_reporter);
+        transforms::EGraphPass egraph(error_reporter);
         transforms::InstCombinePass inst_combine;
 
         bool optimization_changed = true;
@@ -260,6 +262,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
             while (optimization_changed && iteration <= maxIterations) {
                 optimization_changed = false;
                 if (inst_combine.run(*func)) optimization_changed = true;
+                if (optLevel >= 2 && config.enableEGraph && egraph.run(*func)) optimization_changed = true;
                 if (div_sr.run(*func)) optimization_changed = true;
                 if (enhanced_sccp.run(*func)) optimization_changed = true;
                 if (copy_elim.run(*func)) optimization_changed = true;

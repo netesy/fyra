@@ -45,6 +45,24 @@ void AArch64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& assembler,
     }
 }
 
+void AArch64Architecture::emitStoreResult(CodeGen& cg, ir::Instruction& instr, uint8_t reg) {
+    if (instr.hasPhysicalRegister()) {
+        uint8_t dst_reg = static_cast<uint8_t>(instr.getPhysicalRegister());
+        if (dst_reg != reg) {
+            uint32_t instruction = 0xAA0003E0 | ((reg & 0x1F) << 16) | (dst_reg & 0x1F);
+            if (instr.getType()->getSize() <= 4) instruction &= ~0x80000000;
+            else instruction |= 0x80000000;
+            cg.getAssembler().emitDWord(instruction);
+        }
+        return;
+    }
+    int32_t offset = cg.getStackOffset(&instr);
+    const ir::Type* type = instr.getType();
+    uint32_t base = type->isFloatingPoint() ? ((type->getSize() > 4) ? 0xFC000000 : 0xBC000000) : ((type->getSize() > 4) ? 0xF8000000 : 0xB8000000);
+    uint32_t instruction = base | ((offset & 0x1FF) << 12) | (29 << 5) | (reg & 0x1F);
+    cg.getAssembler().emitDWord(instruction);
+}
+
 TypeInfo AArch64Architecture::getTypeInfo(const ir::Type* type) const {
     if (auto* intTy = dynamic_cast<const ir::IntegerType*>(type)) {
         uint64_t bitWidth = intTy->getBitwidth();
@@ -131,6 +149,33 @@ void AArch64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) 
             if (info.regClass == RegisterClass::Float) { if (f_idx < 8) { std::string reg = (info.size == 32) ? "s" : "d"; reg += std::to_string(f_idx++); *os << "  str " << reg << ", [x29, #" << cg.getStackOffset(param.get()) << "]\n"; } }
             else { if (i_idx < 8) { std::string reg = getRegisterName("x" + std::to_string(i_idx++), param->getType()); *os << "  str " << reg << ", [x29, #" << cg.getStackOffset(param.get()) << "]\n"; } }
         }
+    } else {
+        cg.getAssembler().emitDWord(0xA9BF7BFD); // stp x29, x30, [sp, #-16]!
+        cg.getAssembler().emitDWord(0x910003FD); // mov x29, sp
+        if (total_frame_size > 0) {
+            if (total_frame_size <= 4095) {
+                cg.getAssembler().emitDWord(0xD10003FF | ((total_frame_size & 0xFFF) << 10)); // sub sp, sp, #frame
+            } else {
+                cg.getAssembler().emitDWord(0xD2800000 | ((total_frame_size & 0xFFFF) << 5) | 9); // movz x9, imm
+                cg.getAssembler().emitDWord(0xCB0903FF); // sub sp, sp, x9
+            }
+        }
+        int i_idx = 0, f_idx = 0;
+        for (auto& param : func.getParameters()) {
+            TypeInfo info = getTypeInfo(param->getType());
+            int32_t off = cg.getStackOffset(param.get());
+            if (info.regClass == RegisterClass::Float) {
+                if (f_idx < 8) {
+                    uint32_t base = (info.size == 32) ? 0xBC000000 : 0xFC000000;
+                    cg.getAssembler().emitDWord(base | ((off & 0x1FF) << 12) | (29 << 5) | (f_idx++ & 0x1F));
+                }
+            } else {
+                if (i_idx < 8) {
+                    uint32_t base = (param->getType()->getSize() <= 4) ? 0xB8000000 : 0xF8000000;
+                    cg.getAssembler().emitDWord(base | ((off & 0x1FF) << 12) | (29 << 5) | (i_idx++ & 0x1F));
+                }
+            }
+        }
     }
 }
 
@@ -192,12 +237,25 @@ void AArch64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) 
         }
         *os << "  ret\n";
         *os << "  .cfi_endproc\n";
+    } else {
+        if (!isLeaf) {
+            cg.getAssembler().emitDWord(0x910003BF); // mov sp, x29 (add sp, x29, #0)
+            cg.getAssembler().emitDWord(0xA8C17BFD); // ldp x29, x30, [sp], #16
+        } else if (total_frame_size > 0) {
+            cg.getAssembler().emitDWord(0x910003FF | ((total_frame_size & 0xFFF) << 10)); // add sp, sp, #frame
+        }
+        cg.getAssembler().emitDWord(0xD65F03C0); // ret
     }
 }
 
 void AArch64Architecture::emitStartFunction(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << ".section .rodata\n.Lproc_environ:\n  .string \"/proc/self/environ\"\n.Lproc_cmdline:\n  .string \"/proc/self/cmdline\"\n.text\n.globl _start\n_start:\n  bl main\n  mov x8, #93\n  svc #0\n";
+    } else {
+        cg.addRelocation({cg.getAssembler().getCodeSize(), "R_AARCH64_CALL26", 0, "main", ".text"});
+        cg.getAssembler().emitDWord(0x94000000); // bl main
+        cg.getAssembler().emitDWord(0xD2800BA8); // mov x8, #93 (movz x8, #93)
+        cg.getAssembler().emitDWord(0xD4000001); // svc #0
     }
 }
 
@@ -263,6 +321,12 @@ void AArch64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
         *os << "  add " << r1 << ", " << r1 << ", " << r2 << "\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x0B0A0129 : 0x8B0A0129;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
     }
 }
 
@@ -278,6 +342,12 @@ void AArch64Architecture::emitSMin(CodeGen& cg, ir::Instruction& i) {
         *os << "  cmp " << r1 << ", " << r2 << "\n";
         *os << "  csel " << r1 << ", " << r1 << ", " << r2 << ", lt\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        cg.getAssembler().emitDWord(0xEB0A013F); // cmp x9, x10
+        cg.getAssembler().emitDWord(0x9A8AB129); // csel x9, x9, x10, lt
+        emitStoreResult(cg, i, 9);
     }
 }
 
@@ -293,6 +363,12 @@ void AArch64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) {
         *os << "  cmp " << r1 << ", " << r2 << "\n";
         *os << "  csel " << r1 << ", " << r1 << ", " << r2 << ", gt\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        cg.getAssembler().emitDWord(0xEB0A013F); // cmp x9, x10
+        cg.getAssembler().emitDWord(0x9A8AC129); // csel x9, x9, x10, gt
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
@@ -314,6 +390,12 @@ void AArch64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
         *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
         *os << "  sub " << r1 << ", " << r1 << ", " << r2 << "\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x4B0A0129 : 0xCB0A0129;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
@@ -321,6 +403,13 @@ void AArch64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  mul " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x1B0A7D29 : 0x9B0A7D29;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
@@ -328,6 +417,13 @@ void AArch64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
     if (!l || !r) return;
     bool u = (i.getOpcode() == ir::Instruction::Udiv);
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  " << (u ? "udiv " : "sdiv ") << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? (u ? 0x1ACA0929 : 0x1ACA0D29) : (u ? 0x9ACA0929 : 0x9ACA0D29);
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
@@ -335,24 +431,54 @@ void AArch64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
     if (!l || !r) return;
     bool u = (i.getOpcode() == ir::Instruction::Urem);
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()), r3 = getRegisterName("x11", l->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  " << (u ? "udiv " : "sdiv ") << r3 << ", " << r1 << ", " << r2 << "\n  msub " << r1 << ", " << r3 << ", " << r2 << ", " << r1 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t div_op = (i.getType()->getSize() <= 4) ? (u ? 0x1ACA092B : 0x1ACA0D2B) : (u ? 0x9ACA092B : 0x9ACA0D2B);
+        cg.getAssembler().emitDWord(div_op);
+        uint32_t msub_op = (i.getType()->getSize() <= 4) ? 0x1B0AA569 : 0x9B0AA569;
+        cg.getAssembler().emitDWord(msub_op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  and " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x0A0A0129 : 0x8A0A0129;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  orr " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x2A0A0129 : 0xAA0A0129;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
     ir::Value *d = &i, *l = i.getOperands()[0]->get(), *r = i.getOperands()[1]->get();
     if (!l || !r) return;
     if (auto* os = cg.getTextStream()) { std::string r1 = getRegisterName("x9", l->getType()), r2 = getRegisterName("x10", r->getType()); *os << "  ldr " << r1 << ", " << cg.getValueAsOperand(l) << "\n  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n  eor " << r1 << ", " << r1 << ", " << r2 << "\n  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x4A0A0129 : 0xCA0A0129;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().size() < 2 || !i.getOperands()[0] || !i.getOperands()[1]) return;
@@ -370,6 +496,12 @@ void AArch64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
         *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
         *os << "  lsl " << r1 << ", " << r1 << ", " << r2 << "\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x1ACA2129 : 0x9ACA2129;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
@@ -388,6 +520,12 @@ void AArch64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
         *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
         *os << "  lsr " << r1 << ", " << r1 << ", " << r2 << "\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x1ACA2529 : 0x9ACA2529;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
@@ -406,6 +544,12 @@ void AArch64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
         *os << "  ldr " << r2 << ", " << cg.getValueAsOperand(r) << "\n";
         *os << "  asr " << r1 << ", " << r1 << ", " << r2 << "\n";
         *os << "  str " << r1 << ", " << cg.getValueAsOperand(d) << "\n";
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 9);
+        emitLoadValue(cg, cg.getAssembler(), r, 10);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x1ACA2829 : 0x9ACA2829;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
@@ -413,12 +557,24 @@ void AArch64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
     ir::Value *d = &i, *o = i.getOperands()[0]->get();
     if (!o) return;
     if (auto* os = cg.getTextStream()) { std::string r = getRegisterName("x9", o->getType()); *os << "  ldr " << r << ", " << cg.getValueAsOperand(o) << "\n  neg " << r << ", " << r << "\n  str " << r << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), o, 9);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x4B0903E9 : 0xCB0903E9;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
     if (i.getOperands().empty() || !i.getOperands()[0]) return;
     ir::Value *d = &i, *o = i.getOperands()[0]->get();
     if (!o) return;
     if (auto* os = cg.getTextStream()) { std::string r = getRegisterName("x9", o->getType()); *os << "  ldr " << r << ", " << cg.getValueAsOperand(o) << "\n  mvn " << r << ", " << r << "\n  str " << r << ", " << cg.getValueAsOperand(d) << "\n"; }
+    else {
+        emitLoadValue(cg, cg.getAssembler(), o, 9);
+        uint32_t op = (i.getType()->getSize() <= 4) ? 0x2A2903E9 : 0xAA2903E9;
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 9);
+    }
 }
 void AArch64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
@@ -438,6 +594,9 @@ void AArch64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
             *os << "  ldr x9, " << cg.getValueAsOperand(src) << "\n";
             *os << "  str x9, " << cg.getValueAsOperand(&i) << "\n";
         }
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 9);
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
@@ -463,6 +622,25 @@ void AArch64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         }
         if (!s_args.empty()) *os << "  add sp, sp, #" << s_args.size() * 16 << "\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) { std::string r = getRegisterName("x0", i.getType()); if (i.getType()->isFloatingPoint()) r = (i.getType()->getSize() == 4) ? "s0" : "d0"; *os << "  str " << r << ", " << cg.getValueAsOperand(&i) << "\n"; }
+    } else {
+        for (size_t j = 1; j < i.getOperands().size(); ++j) {
+            if (i_idx < 8) {
+                emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), i_idx++);
+            }
+        }
+        ir::Value* calleeVal = (!i.getOperands().empty() && i.getOperands()[0]) ? i.getOperands()[0]->get() : nullptr;
+        bool isDirect = calleeVal && (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                                     (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+        if (isDirect) {
+            cg.addRelocation({cg.getAssembler().getCodeSize(), "R_AARCH64_CALL26", 0, calleeVal->getName(), ".text"});
+            cg.getAssembler().emitDWord(0x94000000); // bl 0
+        } else if (calleeVal) {
+            emitLoadValue(cg, cg.getAssembler(), calleeVal, 9);
+            cg.getAssembler().emitDWord(0xD63F0120); // blr x9
+        }
+        if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
+            emitStoreResult(cg, i, 0); // x0
+        }
     }
 }
 
@@ -578,6 +756,23 @@ void AArch64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             *os << "  cset w9, " << cond << "\n";
             *os << "  str w9, " << cg.getValueAsOperand(d) << "\n";
         }
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), l, 10);
+        emitLoadValue(cg, cg.getAssembler(), r, 11);
+        uint32_t cmp_op = (l->getType() && l->getType()->getSize() <= 4) ? 0x6B0B015F : 0xEB0B015F;
+        cg.getAssembler().emitDWord(cmp_op); // cmp x10, x11
+        uint32_t cond_num = 0;
+        if (cond == "ne") cond_num = 1;
+        else if (cond == "hs") cond_num = 2;
+        else if (cond == "lo") cond_num = 3;
+        else if (cond == "hi") cond_num = 8;
+        else if (cond == "ls") cond_num = 9;
+        else if (cond == "ge") cond_num = 10;
+        else if (cond == "lt") cond_num = 11;
+        else if (cond == "gt") cond_num = 12;
+        else if (cond == "le") cond_num = 13;
+        cg.getAssembler().emitDWord(0x1A9F07E0 | ((cond_num ^ 1) << 12) | 9); // cset w9, cond
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* f, const ir::Type* t) {
@@ -641,6 +836,24 @@ void AArch64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Ty
         } else {
             *os << "  ldr x9, " << cg.getValueAsOperand(src) << "\n  str x9, " << cg.getValueAsOperand(&i) << "\n";
         }
+    } else {
+        ir::Value* src = i.getOperands()[0]->get();
+        ir::Instruction::Opcode op = i.getOpcode();
+        emitLoadValue(cg, cg.getAssembler(), src, 9);
+        if (op == ir::Instruction::ExtUB) {
+            cg.getAssembler().emitDWord(0x53001D29); // uxtb w9, w9
+        } else if (op == ir::Instruction::ExtUH) {
+            cg.getAssembler().emitDWord(0x53003D29); // uxth w9, w9
+        } else if (op == ir::Instruction::ExtUW) {
+            cg.getAssembler().emitDWord(0xD3007D29); // uxtw x9, w9
+        } else if (op == ir::Instruction::ExtSB) {
+            cg.getAssembler().emitDWord(0x93401D29); // sxtb x9, w9
+        } else if (op == ir::Instruction::ExtSH) {
+            cg.getAssembler().emitDWord(0x93403D29); // sxth x9, w9
+        } else if (op == ir::Instruction::ExtSW) {
+            cg.getAssembler().emitDWord(0x93407D29); // sxtw x9, w9
+        }
+        emitStoreResult(cg, i, 9);
     }
 }
 void AArch64Architecture::emitVAStart(CodeGen& cg, ir::Instruction& i) {}
@@ -785,6 +998,13 @@ void AArch64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             *os << "  " << loadMnemonic << " " << regName << ", [x9]\n";
             *os << "  str " << regName << ", " << cg.getValueAsOperand(&i) << "\n";
         }
+    } else {
+        ir::Value* ptrVal = i.getOperands()[0]->get();
+        emitLoadValue(cg, cg.getAssembler(), ptrVal, 9);
+        size_t size = i.getType() ? i.getType()->getSize() : 8;
+        uint32_t op = (size <= 4) ? 0xB940012A : 0xF940012A; // ldr w10/x10, [x9]
+        cg.getAssembler().emitDWord(op);
+        emitStoreResult(cg, i, 10);
     }
 }
 
@@ -816,6 +1036,14 @@ void AArch64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
             *os << "  ldr " << regName << ", " << cg.getValueAsOperand(val) << "\n";
             *os << "  " << storeMnemonic << " " << regName << ", [x9]\n";
         }
+    } else {
+        ir::Value* val = i.getOperands()[0]->get();
+        ir::Value* ptrVal = i.getOperands()[1]->get();
+        emitLoadValue(cg, cg.getAssembler(), val, 10);
+        emitLoadValue(cg, cg.getAssembler(), ptrVal, 9);
+        size_t size = val->getType() ? val->getType()->getSize() : 8;
+        uint32_t op = (size <= 4) ? 0xB900012A : 0xF900012A; // str w10/x10, [x9]
+        cg.getAssembler().emitDWord(op);
     }
 }
 void AArch64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
@@ -852,7 +1080,13 @@ void AArch64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir:
     if (phiMoves.empty()) return;
 
     auto* os = cg.getTextStream();
-    if (!os) return;
+    if (!os) {
+        for (auto& move : phiMoves) {
+            emitLoadValue(cg, cg.getAssembler(), move.first, 9);
+            emitStoreResult(cg, *move.second, 9);
+        }
+        return;
+    }
 
     bool canDirectMove = true;
     if (phiMoves.size() > 1) {
@@ -937,6 +1171,10 @@ void AArch64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
         emitPhiCopies(cg, i.getParent(), targetBB);
         if (auto* os = cg.getTextStream()) {
             *os << "  b " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";
+        } else {
+            std::string targetLabel = cg.getTargetInfo()->getBBLabel(targetBB);
+            cg.addRelocation({cg.getAssembler().getCodeSize(), "R_AARCH64_JUMP26", 0, targetLabel, ".text"});
+            cg.getAssembler().emitDWord(0x14000000); // b 0
         }
         return;
     }
@@ -978,6 +1216,15 @@ void AArch64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
             *os << "  b.ne " << trueLabel << "\n";
             *os << "  b " << falseLabel << "\n";
         }
+    } else {
+        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 9);
+        cg.getAssembler().emitDWord(0x7100011F); // cmp w9, #0 (subs wzr, w9, #0)
+        std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
+        std::string falseLabel = cg.getTargetInfo()->getBBLabel(targetFalse);
+        cg.addRelocation({cg.getAssembler().getCodeSize(), "R_AARCH64_CONDBR19", 0, trueLabel, ".text"});
+        cg.getAssembler().emitDWord(0x54000001); // b.ne 0
+        cg.addRelocation({cg.getAssembler().getCodeSize(), "R_AARCH64_JUMP26", 0, falseLabel, ".text"});
+        cg.getAssembler().emitDWord(0x14000000); // b 0
     }
 }
 
@@ -986,6 +1233,10 @@ void AArch64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {
     emitPhiCopies(cg, i.getParent(), targetBB);
     if (auto* os = cg.getTextStream()) {
         *os << "  b " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";
+    } else {
+        std::string targetLabel = cg.getTargetInfo()->getBBLabel(targetBB);
+        cg.addRelocation({cg.getAssembler().getCodeSize(), "R_AARCH64_JUMP26", 0, targetLabel, ".text"});
+        cg.getAssembler().emitDWord(0x14000000); // b 0
     }
 }
 

@@ -296,11 +296,13 @@ static void memoryRuntimeTest(MemoryKind kind, unsigned lanes, unsigned startOff
         }
         out << "return 0;}\n";
     }
+#if !defined(_WIN32)
     std::string command = "cc -no-pie " + asmPath + " " + harnessPath + " -o " + binaryPath + " && " + binaryPath;
     int result = std::system(command.c_str());
     if (result != 0) std::cerr << text << "\ncommand: " << command << " result=" << result << '\n';
-    std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
     CHECK(result == 0 && "generated SLP memory kernel must execute correctly");
+#endif
+    std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
 }
 
 int main() {

@@ -418,6 +418,10 @@ set_tests_properties(BackendBuilderTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOU
 add_executable(test_baremetal test_baremetal.cpp)
 target_link_libraries(test_baremetal PRIVATE fyra)
 add_test(NAME BareMetalTest COMMAND test_baremetal)
+
+add_executable(test_multiarch_object_writer test_multiarch_object_writer.cpp)
+target_link_libraries(test_multiarch_object_writer PRIVATE fyra)
+add_test(NAME MultiArchObjectWriterTest COMMAND test_multiarch_object_writer)
 set_tests_properties(BareMetalTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_freebsd test_freebsd.cpp)

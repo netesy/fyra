@@ -51,8 +51,11 @@ std::unique_ptr<ObjectReader> ObjectReader::detectAndCreate(const std::vector<ui
     if (bytes.size() >= 4 && *reinterpret_cast<const uint32_t*>(bytes.data()) == 0xfeedfacf) {
         return std::make_unique<MachObjectReader>();
     }
-    if (bytes.size() >= 2 && (*reinterpret_cast<const uint16_t*>(bytes.data()) == 0x8664 || *reinterpret_cast<const uint16_t*>(bytes.data()) == 0xAA64)) {
-        return std::make_unique<CoffObjectReader>();
+    if (bytes.size() >= 2) {
+        uint16_t machine = *reinterpret_cast<const uint16_t*>(bytes.data());
+        if (machine == 0x8664 || machine == 0xAA64 || machine == 0x5064 || machine == 0x014c) {
+            return std::make_unique<CoffObjectReader>();
+        }
     }
     return std::make_unique<ElfObjectReader>(); // Fallback
 }
