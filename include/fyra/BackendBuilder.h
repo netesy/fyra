@@ -15,7 +15,9 @@ enum class OutputKind {
     StaticLibrary,
     SharedLibrary,
     WAT,
-    Wasm
+    Wasm,
+    APK,
+    FlatBinary
 };
 
 struct BuildResult {
@@ -31,13 +33,16 @@ public:
     explicit BackendBuilder(ir::Module& module);
 
     BackendBuilder& target(const std::string& triple);
+    BackendBuilder& targetFeature(const std::string& feature);
     BackendBuilder& optimize(OptimizationLevel level);
 
     BackendBuilder& validate(bool enabled = true);
     BackendBuilder& enableSLP(bool enabled = true);
     BackendBuilder& enableLoopVectorization(bool enabled = true);
     BackendBuilder& enableLoopUnroll(bool enabled = true);
+    BackendBuilder& enableLTO(bool enabled = true);
 
+    BackendBuilder& addModule(std::unique_ptr<ir::Module> module);
     BackendBuilder& addObject(const std::string& path);
     BackendBuilder& addStaticLibrary(const std::string& path);
 
@@ -54,12 +59,18 @@ public:
     BuildResult emitStaticLibrary(const std::string& path);
     BuildResult emitSharedLibrary(const std::string& path);
     BuildResult emitExecutable(const std::string& path);
+    BuildResult emitAPK(const std::string& path);
+    BuildResult emitFlatBinary(const std::string& path);
 
 private:
     ir::Module& srcModule_;
     CompilerPipeline pipeline_;
     PipelineConfig config_;
 
+    std::vector<std::unique_ptr<ir::Module>> additionalModules_;
+    bool enableLTO_{true};
+
+    std::vector<std::string> targetFeatures_;
     std::vector<std::string> inputObjectPaths_;
     std::vector<std::string> inputStaticLibPaths_;
     std::vector<target::artifact::linker::DynamicImport> dynamicImports_;

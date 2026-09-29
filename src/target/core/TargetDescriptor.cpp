@@ -31,6 +31,7 @@ std::string TargetDescriptor::toString() const {
             case Artifact::StaticLibrary: s += "static"; break;
             case Artifact::APK: s += "apk"; break;
             case Artifact::WasmModule: s += "wasm"; break;
+            case Artifact::FlatBinary: s += "flat"; break;
         }
     }
     return s;
@@ -44,6 +45,11 @@ std::string TargetDescriptor::normalizeTriple(const std::string& triple) {
     if (triple == "aarch64") return "aarch64-linux-bin";
     if (triple == "wasm32" || triple == "wasm") return "wasm32-wasi-wasm";
     if (triple == "riscv64") return "riscv64-linux-bin";
+    if (triple == "freebsd" || triple == "x64-freebsd") return "x64-freebsd-bin";
+    if (triple == "aarch64-freebsd") return "aarch64-freebsd-bin";
+    if (triple == "riscv64-freebsd") return "riscv64-freebsd-bin";
+    if (triple == "baremetal" || triple == "riscv64-baremetal") return "riscv64-baremetal-bin";
+    if (triple == "aarch64-baremetal") return "aarch64-baremetal-bin";
 
     if (triple.find('-') == std::string::npos) {
         return triple + "-linux-bin";
@@ -80,6 +86,8 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
     else if (parts[1] == "windows" || parts[1] == "win32") desc.os = OS::Windows;
     else if (parts[1] == "macos" || parts[1] == "darwin") desc.os = OS::MacOS;
     else if (parts[1] == "android") desc.os = OS::Android;
+    else if (parts[1] == "freebsd") desc.os = OS::FreeBSD;
+    else if (parts[1] == "baremetal" || parts[1] == "none" || parts[1] == "elf") desc.os = OS::BareMetal;
     else if (parts[1] == "wasi" || parts[1] == "unknown") desc.os = OS::WASI;
     else return std::nullopt;
 
@@ -87,6 +95,7 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
         if (parts[2] == "bin" || parts[2] == "executable") desc.artifact = Artifact::Executable;
         else if (parts[2] == "apk") desc.artifact = Artifact::APK;
         else if (parts[2] == "wasm") desc.artifact = Artifact::WasmModule;
+        else if (parts[2] == "flat" || parts[2] == "raw" || parts[2] == "img") desc.artifact = Artifact::FlatBinary;
         else if (parts[2] == "shared") desc.artifact = Artifact::SharedLibrary;
         else if (parts[2] == "static") desc.artifact = Artifact::StaticLibrary;
     }

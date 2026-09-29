@@ -132,6 +132,7 @@ void CodeGen::emitFunction(ir::Function& func) {
     targetInfo->emitFunctionPrologue(*this, func);
     for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
     targetInfo->emitFunctionEpilogue(*this, func);
+    currentFunction = nullptr;
     if (os) {
         *os << ".Lfunc_end_" << func.getName() << ":\n";
         if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {

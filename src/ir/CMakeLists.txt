@@ -16,6 +16,7 @@ set(IR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/FunctionType.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IRBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Validator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IRLinker.cpp
 )
 
 target_sources(fyra PRIVATE ${IR_SOURCES})

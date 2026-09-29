@@ -13,7 +13,7 @@ long long dot_product(int n) {
 int main() {
     long long res = 0;
     for (int k = 0; k < 20; k++) {
-        res += dot_product(5000000);
+        res += dot_product(50000);
     }
     printf("checksum: %lld\n", res);
     return 0;

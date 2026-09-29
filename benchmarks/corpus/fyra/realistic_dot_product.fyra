@@ -37,7 +37,7 @@ export function $main() : i32 {
     jnz %cond, @body, @exit
 
 @body
-    %v = call $dot_product(i32 5000000) : i64
+    %v = call $dot_product(i32 50000) : i64
     %res_next = add %res, %v : i64
     %k_next = add %k, i32 1 : i32
     jmp @loop

@@ -13,6 +13,9 @@
 #include "target/artifact/executable/MachOImage.h"
 #include "target/artifact/executable/PeImage.h"
 #include "target/architecture/wasm32/WasmModule.h"
+#include "target/artifact/apk/APKArtifact.h"
+#include "target/artifact/executable/FlatBinaryWriter.h"
+#include "ir/IRLinker.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -40,6 +43,8 @@ std::string BackendBuilder::resolveTargetTriple(const std::string& triple) {
     else if (triple == "windows" || triple == "windows-amd64" || triple == "win32" || triple == "win64") canonical = "x64-windows-bin";
     else if (triple == "windows-arm64") canonical = "aarch64-windows-bin";
     else if (triple == "aarch64") canonical = "aarch64-linux-bin";
+    else if (triple == "android" || triple == "aarch64-android") canonical = "aarch64-android-apk";
+    else if (triple == "flat" || triple == "raw" || triple == "img") canonical = "riscv64-baremetal-flat";
     else if (triple == "wasm32" || triple == "wasm") canonical = "wasm32-wasi-wasm";
     else if (triple == "riscv64") canonical = "riscv64-linux-bin";
     else {
@@ -58,6 +63,12 @@ BackendBuilder& BackendBuilder::target(const std::string& triple) {
         config_.targetTriple = res;
         invalidatePrepared();
     }
+    return *this;
+}
+
+BackendBuilder& BackendBuilder::targetFeature(const std::string& feature) {
+    targetFeatures_.push_back(feature);
+    invalidatePrepared();
     return *this;
 }
 
@@ -101,6 +112,22 @@ BackendBuilder& BackendBuilder::enableLoopUnroll(bool enabled) {
     return *this;
 }
 
+BackendBuilder& BackendBuilder::enableLTO(bool enabled) {
+    if (enableLTO_ != enabled) {
+        enableLTO_ = enabled;
+        invalidatePrepared();
+    }
+    return *this;
+}
+
+BackendBuilder& BackendBuilder::addModule(std::unique_ptr<ir::Module> module) {
+    if (module) {
+        additionalModules_.push_back(std::move(module));
+        invalidatePrepared();
+    }
+    return *this;
+}
+
 BackendBuilder& BackendBuilder::addObject(const std::string& path) {
     inputObjectPaths_.push_back(path);
     return *this;
@@ -131,6 +158,19 @@ void BackendBuilder::ensurePrepared(BuildResult& result) {
     if (isPrepared_ && preparedModule_) return;
 
     preparedModule_ = cloneModule(srcModule_);
+
+    if (enableLTO_ && !additionalModules_.empty()) {
+        std::string err;
+        for (const auto& mod : additionalModules_) {
+            auto clonedMod = cloneModule(*mod);
+            if (!ir::IRLinker::linkModules(*preparedModule_, std::move(clonedMod), err)) {
+                result.success = false;
+                result.errors.push_back("IR LTO Linker Error: " + err);
+                return;
+            }
+        }
+    }
+
     PipelineResult pRes = pipeline_.run(*preparedModule_, config_);
     if (!pRes.success) {
         result.success = false;
@@ -167,6 +207,9 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
         return artifact;
     }
 
+    for (const auto& feat : targetFeatures_) {
+        targetInfo->parseTargetFeatures(feat);
+    }
     codegen::CodeGen codeGenerator(*preparedModule_, std::move(targetInfo), nullptr);
     codeGenerator.emit(false);
 
@@ -313,6 +356,9 @@ BuildResult BackendBuilder::emitAssembly(const std::string& path) {
         return result;
     }
 
+    for (const auto& feat : targetFeatures_) {
+        targetInfo->parseTargetFeatures(feat);
+    }
     codegen::CodeGen codeGen(*preparedModule_, std::move(targetInfo));
     auto cRes = codeGen.compileToAssembly(path, config_.validate);
     if (cRes.success) {
@@ -511,6 +557,104 @@ BuildResult BackendBuilder::emitExecutable(const std::string& path) {
     }
 
     result.success = true;
+    return result;
+}
+
+BuildResult BackendBuilder::emitFlatBinary(const std::string& path) {
+    BuildResult result;
+    result.kind = OutputKind::FlatBinary;
+    result.outputPath = path;
+
+    ensurePrepared(result);
+    if (!result.errors.empty()) return result;
+
+    target::artifact::object::ObjectArtifact moduleArt = buildModuleObjectArtifact(result);
+    if (!result.errors.empty()) return result;
+
+    std::vector<target::artifact::object::ObjectArtifact> artifacts;
+    artifacts.push_back(moduleArt);
+
+    std::vector<std::vector<target::artifact::archive::ArchiveObjectMember>> archives;
+
+    for (const auto& inputObjPath : inputObjectPaths_) {
+        std::ifstream f(inputObjPath, std::ios::binary);
+        if (!f.is_open()) {
+            result.errors.push_back("Cannot open input object file: " + inputObjPath);
+            return result;
+        }
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        f.close();
+
+        auto objReader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+        target::artifact::object::ObjectArtifact art;
+        if (objReader && objReader->parse(bytes, art)) {
+            artifacts.push_back(art);
+        } else {
+            result.errors.push_back("Failed to parse input object file: " + inputObjPath);
+            return result;
+        }
+    }
+
+    target::artifact::linker::InternalLinker linker;
+    linker.extractLazyArchiveMembers(artifacts, archives);
+
+    target::artifact::linker::LinkedImage image;
+    if (!linker.link(artifacts, image, target::artifact::linker::LinkOutputKind::Executable, dynamicImports_)) {
+        result.errors.push_back("Linker error: " + linker.getLastError());
+        return result;
+    }
+
+    target::artifact::executable::FlatBinaryWriter writer;
+    if (!writer.write(image, path)) {
+        result.errors.push_back("FlatBinaryWriter failed: " + writer.getLastError());
+        return result;
+    }
+
+    result.success = true;
+    return result;
+}
+
+BuildResult BackendBuilder::emitAPK(const std::string& path) {
+    BuildResult result;
+    result.kind = OutputKind::APK;
+    result.outputPath = path;
+
+    ensurePrepared(result);
+    if (!result.errors.empty()) return result;
+
+    std::string soPath = path + ".so";
+    BuildResult soRes = emitSharedLibrary(soPath);
+    if (!soRes.success) {
+        result.errors = soRes.errors;
+        return result;
+    }
+
+    auto desc = target::TargetDescriptor::fromString(config_.targetTriple);
+    if (!desc) {
+        result.errors.push_back("Invalid target triple: " + config_.targetTriple);
+        return result;
+    }
+
+    auto targetInfo = target::TargetResolver::resolve(*desc);
+    if (!targetInfo) {
+        result.errors.push_back("Failed to resolve target info for: " + config_.targetTriple);
+        return result;
+    }
+
+    std::string outputPrefix = path;
+    if (outputPrefix.size() > 4 && outputPrefix.substr(outputPrefix.size() - 4) == ".apk") {
+        outputPrefix = outputPrefix.substr(0, outputPrefix.size() - 4);
+    }
+
+    if (auto* apkArt = dynamic_cast<target::artifact::APKArtifact*>(targetInfo.get())) {
+        apkArt->buildAPK(outputPrefix);
+        result.success = true;
+    } else {
+        target::artifact::APKArtifact apkWrapper(std::move(targetInfo));
+        apkWrapper.buildAPK(outputPrefix);
+        result.success = true;
+    }
+
     return result;
 }
 

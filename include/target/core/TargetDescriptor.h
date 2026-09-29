@@ -26,7 +26,8 @@ enum class Artifact {
     SharedLibrary,
     StaticLibrary,
     APK,
-    WasmModule
+    WasmModule,
+    FlatBinary
 };
 
 struct TargetDescriptor {

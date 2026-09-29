@@ -24,6 +24,7 @@
 #include "transforms/SLPVectorizer.h"
 #include "transforms/LoopUnroll.h"
 #include "transforms/DeadInstructionElimination.h"
+#include "transforms/InstructionScheduler.h"
 #include "transforms/ErrorReporter.h"
 #include "codegen/regalloc/RegAllocRewriter.h"
 #include "target/core/TargetResolver.h"
@@ -273,6 +274,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
                 if (enhanced_dce.run(*func)) optimization_changed = true;
                 iteration++;
             }
+            transforms::InstructionScheduler::run(*func);
         }
     }
 

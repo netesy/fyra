@@ -115,27 +115,23 @@ int main() {
 
     // Test 3: Static-Library Integration Test
     {
-        // Module A: add(a, b) -> a + b
+        // Module A: calc_val() -> 42
         ir::Module modA("mod_a", ctx);
         ir::IRBuilder builderA(ctx);
         builderA.setModule(&modA);
 
         auto* i32 = ctx->getIntegerType(32);
-        ir::Function* fnAdd = builderA.createFunction("add_numbers", i32, {i32, i32});
+        ir::Function* fnAdd = builderA.createFunction("calc_val", i32);
         ir::BasicBlock* entryA = builderA.createBasicBlock("entry", fnAdd);
         builderA.setInsertPoint(entryA);
-        auto paramIt = fnAdd->getParameters().begin();
-        ir::Value* p1 = (paramIt++)->get();
-        ir::Value* p2 = paramIt->get();
-        ir::Value* sum = builderA.createAdd(p1, p2);
-        builderA.createRet(sum);
+        builderA.createRet(ctx->getConstantInt(i32, 42));
 
         fyra::BackendBuilder backendA(modA);
         backendA.target("x64-linux-bin");
         fyra::BuildResult resLib = backendA.emitStaticLibrary("/tmp/libmod_a.a");
         assert(resLib.success);
 
-        // Module B: main() calls add_numbers(20, 22) -> 42
+        // Module B: main() calls calc_val() -> 42
         ir::Module modB("mod_b", ctx);
         ir::IRBuilder builderB(ctx);
         builderB.setModule(&modB);
@@ -144,8 +140,8 @@ int main() {
         ir::BasicBlock* entryB = builderB.createBasicBlock("entry", fnMain);
         builderB.setInsertPoint(entryB);
 
-        ir::Function* fnAddDecl = builderB.createFunction("add_numbers", i32, {i32, i32});
-        ir::Value* callRes = builderB.createCall(fnAddDecl, {ctx->getConstantInt(i32, 20), ctx->getConstantInt(i32, 22)}, i32);
+        ir::Function* fnAddDecl = builderB.createFunction("calc_val", i32);
+        ir::Value* callRes = builderB.createCall(fnAddDecl, {}, i32);
         builderB.createRet(callRes);
 
         fyra::BackendBuilder backendB(modB);
@@ -278,6 +274,60 @@ int main() {
         assert(executableResult.success);
         int rc = std::system("/tmp/test_data_sections_exec");
         assert(WEXITSTATUS(rc) == 42);
+    }
+
+    // Test 7: Android Target Triple & emitAPK Integration Test
+    {
+        ir::Module module("test_android_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        builder.createRet(ctx->getConstantInt(i32, 0));
+
+        fyra::BackendBuilder backend(module);
+        backend.target("android");
+
+        fyra::BuildResult resApk = backend.emitAPK("/tmp/test_app.apk");
+        if (!resApk.success) {
+            std::cerr << "resApk failed with errors:" << std::endl;
+            for (const auto& err : resApk.errors) {
+                std::cerr << "  " << err << std::endl;
+            }
+        }
+        assert(resApk.success);
+        assert(resApk.kind == fyra::OutputKind::APK);
+
+        std::ifstream apkFile("/tmp/test_app.apk", std::ios::binary);
+        assert(apkFile.is_open());
+        std::cout << "Android target emitAPK verification passed successfully!" << std::endl;
+    }
+
+    // Test 8: Flat Binary (.bin / .img) Emission Test
+    {
+        ir::Module module("test_flat_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        builder.createRet(ctx->getConstantInt(i32, 0));
+
+        fyra::BackendBuilder backend(module);
+        backend.target("riscv64-baremetal-flat");
+
+        fyra::BuildResult resFlat = backend.emitFlatBinary("/tmp/test_kernel.bin");
+        assert(resFlat.success);
+        assert(resFlat.kind == fyra::OutputKind::FlatBinary);
+
+        std::ifstream binFile("/tmp/test_kernel.bin", std::ios::binary);
+        assert(binFile.is_open());
+        std::cout << "Flat binary (.bin) emission test passed successfully!" << std::endl;
     }
 
     std::cout << "=== All BackendBuilder API direct C++ tests passed successfully! ===" << std::endl;

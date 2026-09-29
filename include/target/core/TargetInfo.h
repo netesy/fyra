@@ -10,8 +10,23 @@
 #include "target/core/TargetDescriptor.h"
 #include <string>
 #include <vector>
+#include <set>
 #include <ostream>
 #include <string_view>
+
+namespace target {
+
+class TargetFeatureFlags {
+public:
+    void setFeature(const std::string& feature, bool enabled = true);
+    bool hasFeature(std::string_view feature) const;
+    void parseFeatures(const std::string& featureString);
+    const std::set<std::string>& getEnabledFeatures() const { return enabledFeatures_; }
+private:
+    std::set<std::string> enabledFeatures_;
+};
+
+} // namespace target
 namespace codegen { class CodeGen; }
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
@@ -106,7 +121,11 @@ public:
     virtual uint64_t getSyscallNumber(ir::SyscallId) const { return 0; }
     virtual void emitBr(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitJmp(codegen::CodeGen&, ir::Instruction&) = 0;
-    virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
+    virtual void setFeature(const std::string& feature, bool enabled = true) { features_.setFeature(feature, enabled); }
+    virtual bool hasFeature(std::string_view feature) const { return features_.hasFeature(feature); }
+    virtual void parseTargetFeatures(const std::string& featureString) { features_.parseFeatures(featureString); }
+    virtual const TargetFeatureFlags& getTargetFeatures() const { return features_; }
+    virtual VectorCapabilities getVectorCapabilities() const;
     virtual bool supportsVectorWidth(unsigned) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType*) const { return false; }
     virtual bool supportsVectorOperation(ir::Instruction::Opcode, const ir::VectorType*) const { return false; }
@@ -166,5 +185,6 @@ public:
     virtual std::string getBBLabel(const ir::BasicBlock* bb) const { if (!bb) return "null_bb"; return bb->getParent()->getName() + "_" + bb->getName(); }
 protected:
     int32_t currentStackOffset = 0;
+    TargetFeatureFlags features_;
 };
 }

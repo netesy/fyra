@@ -16,6 +16,7 @@ public:
     BasicBlock(Function* parent = nullptr, const std::string& name = "");
 
     Function* getParent() const { return parent; }
+    void setParent(Function* f) { parent = f; }
     std::list<std::unique_ptr<Instruction>>& getInstructions() { return instructions; }
     const std::list<std::unique_ptr<Instruction>>& getInstructions() const { return instructions; }
 
