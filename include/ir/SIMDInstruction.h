@@ -4,6 +4,7 @@
 #include "Type.h"
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace ir {
 
@@ -68,11 +69,17 @@ public:
     bool isVectorMemory() const;
     bool isVectorComparison() const;
     bool isVectorShuffle() const;
+
+    const ShuffleMask* getShuffleMask() const {
+        return shuffleMask ? &*shuffleMask : nullptr;
+    }
+    void setShuffleMask(const ShuffleMask& mask) { shuffleMask = mask; }
     
     void print(std::ostream& os) const override;
 
 private:
     unsigned vectorWidth; // Width in bits (128, 256, 512, etc.)
+    std::optional<ShuffleMask> shuffleMask;
 };
 
 // Fused instruction specialization

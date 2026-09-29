@@ -1,0 +1,50 @@
+function $simd_loop_calc(%n : i32) : i64 {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry i32 0, @body %i_next : i32
+    %sum = phi @entry i64 0, @body %sum_next : i64
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %t1 = mul %i, i32 5 : i32
+    %a_w = add %t1, i32 3 : i32
+    %a = extsw %a_w : i64
+
+    %t2 = mul %i, i32 2 : i32
+    %b_w = add %t2, i32 7 : i32
+    %b = extsw %b_w : i64
+
+    %prod = mul %a, %b : i64
+    %diff = sub %a, %b : i64
+    %step = add %prod, %diff : i64
+    %sum_next = add %sum, %step : i64
+    %i_next = add %i, i32 1 : i32
+    jmp @loop
+
+@exit
+    ret %sum : i64
+}
+
+export function $main() : i32 {
+@entry
+    jmp @loop
+
+@loop
+    %k = phi @entry i32 0, @body %k_next : i32
+    %res = phi @entry i64 0, @body %res_next : i64
+    %cond = slt %k, i32 20 : i32
+    jnz %cond, @body, @exit
+
+@body
+    %v = call $simd_loop_calc(i32 50000) : i64
+    %res_next = add %res, %v : i64
+    %k_next = add %k, i32 1 : i32
+    jmp @loop
+
+@exit
+    call $print_checksum(i64 %res)
+    ret i32 0 : i32
+}
