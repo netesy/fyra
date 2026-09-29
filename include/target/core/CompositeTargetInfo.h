@@ -11,6 +11,7 @@ public:
     CompositeTargetInfo(std::unique_ptr<ArchitectureInfo> arch, std::unique_ptr<OperatingSystemInfo> os);
 
     std::string getName() const override;
+    Arch getArch() const override { return architecture->getArch(); }
     size_t getPointerSize() const override;
     size_t getStackAlignment() const override;
     TypeInfo getTypeInfo(const ir::Type* type) const override;
@@ -35,6 +36,8 @@ public:
 
     void emitRet(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(codegen::CodeGen& cg, ir::Instruction& i) override;
+    void emitSMin(codegen::CodeGen& cg, ir::Instruction& i) override;
+    void emitSMax(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitSub(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitMul(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitDiv(codegen::CodeGen& cg, ir::Instruction& i) override;
@@ -49,6 +52,7 @@ public:
     void emitNot(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitCopy(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitCall(codegen::CodeGen& cg, ir::Instruction& i) override;
+    bool emitTailCall(codegen::CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) override;
     void emitFAdd(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitFSub(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitFMul(codegen::CodeGen& cg, ir::Instruction& i) override;
@@ -94,6 +98,8 @@ public:
     VectorCapabilities getVectorCapabilities() const override;
     bool supportsVectorWidth(unsigned w) const override;
     bool supportsVectorType(const ir::VectorType* t) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
     unsigned getOptimalVectorWidth(const ir::Type* t) const override;
     void emitVectorLoad(codegen::CodeGen& cg, ir::VectorInstruction& i) override;
     void emitVectorStore(codegen::CodeGen& cg, ir::VectorInstruction& i) override;
@@ -126,6 +132,9 @@ public:
 
     std::string formatStackOperand(int o) const override;
     std::string formatGlobalOperand(const std::string& n) const override;
+    bool supportsGNUAssemblyMetadata() const override;
+    std::string formatFunctionTypeDirective(const std::string& name) const override;
+    std::string formatFunctionSizeDirective(const std::string& name) const override;
     std::string getImmediatePrefix() const override;
     std::string getLabelPrefix() const override;
     std::string getAssemblyFileExtension() const override;
@@ -135,6 +144,8 @@ public:
     bool isCallerSaved(const std::string& r) const override;
     bool isCalleeSaved(const std::string& r) const override;
     bool isReserved(const std::string& r) const override;
+    std::string getReservedScratchVectorReg() const override;
+    unsigned getReservedScratchVectorRegIndex() const override;
     std::string getRegisterName(const std::string& b, const ir::Type* t) const override;
 
 protected:

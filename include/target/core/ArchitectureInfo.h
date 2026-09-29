@@ -14,6 +14,7 @@ using namespace codegen;
 class ArchitectureInfo {
 public:
     virtual ~ArchitectureInfo() = default;
+    virtual Arch getArch() const = 0;
     virtual size_t getPointerSize() const = 0;
     virtual size_t getStackAlignment() const { return 16; }
     virtual TypeInfo getTypeInfo(const ir::Type* type) const = 0;
@@ -38,6 +39,8 @@ public:
 
     virtual void emitRet(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitAdd(CodeGen& cg, ir::Instruction& i) = 0;
+    virtual void emitSMin(CodeGen&, ir::Instruction&) {}
+    virtual void emitSMax(CodeGen&, ir::Instruction&) {}
     virtual void emitSub(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitMul(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitDiv(CodeGen& cg, ir::Instruction& i) = 0;
@@ -52,6 +55,7 @@ public:
     virtual void emitNot(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitCopy(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitCall(CodeGen& cg, ir::Instruction& i) = 0;
+    virtual bool emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) { return false; }
     virtual void emitFAdd(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitFSub(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitFMul(CodeGen& cg, ir::Instruction& i) = 0;
@@ -70,6 +74,8 @@ public:
     virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
     virtual bool supportsVectorWidth(unsigned width) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType* type) const { return false; }
+    virtual bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const { return false; }
+    virtual bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type* type) const { return 0; }
     virtual void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {}
     virtual void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {}
@@ -104,12 +110,15 @@ public:
     virtual std::string formatGlobalOperand(const std::string& name) const = 0;
     virtual std::string getImmediatePrefix() const { return "$"; }
     virtual std::string getLabelPrefix() const { return "L"; }
+    virtual std::string getFunctionTypeSpecifier() const { return "@function"; }
     virtual std::string getAssemblyFileExtension() const { return ".s"; }
     virtual std::string getObjectFileExtension() const { return ".o"; }
     virtual std::string getDataRelocationType() const { return "R_X86_64_64"; }
     virtual bool isCallerSaved(const std::string& reg) const = 0;
     virtual bool isCalleeSaved(const std::string& reg) const = 0;
     virtual bool isReserved(const std::string& reg) const { return false; }
+    virtual std::string getReservedScratchVectorReg() const { return ""; }
+    virtual unsigned getReservedScratchVectorRegIndex() const { return 0; }
     virtual std::string getRegisterName(const std::string& base, const ir::Type* type) const { return base; }
     virtual std::string formatConstant(const ir::ConstantInt* C) const;
     virtual std::string formatConstant(const ir::ConstantFP* C) const;

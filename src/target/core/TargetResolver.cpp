@@ -8,6 +8,8 @@
 #include "target/os/windows/WindowsOS.h"
 #include "target/os/macos/MacOSOS.h"
 #include "target/os/wasi/WASIOS.h"
+#include "target/os/baremetal/BareMetalOS.h"
+#include "target/os/freebsd/FreeBSDOS.h"
 #include "target/artifact/apk/APKArtifact.h"
 #include <map>
 
@@ -36,6 +38,8 @@ std::unique_ptr<TargetInfo> TargetResolver::resolve(const ::target::TargetDescri
         case ::target::OS::Windows: os = std::make_unique<WindowsOS>(); break;
         case ::target::OS::MacOS: os = std::make_unique<MacOSOS>(); break;
         case ::target::OS::Android: os = std::make_unique<LinuxOS>(); break; // Android uses Linux OS base
+        case ::target::OS::FreeBSD: os = std::make_unique<FreeBSDOS>(); break;
+        case ::target::OS::BareMetal: os = std::make_unique<BareMetalOS>(); break;
         case ::target::OS::WASI: os = std::make_unique<WASIOS>(); break;
         default: os = std::make_unique<LinuxOS>(); break;
     }

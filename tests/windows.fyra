@@ -1,70 +1,70 @@
-function $fibonacci_with_jumps(%n : w) : w {
+function $fibonacci_with_jumps(%n : i32) : i32 {
 @entry
-    %zero = copy 0 : w
-    %one = copy 1 : w
-    %two = copy 2 : w
+    %zero = copy 0 : i32
+    %one = copy 1 : i32
+    %two = copy 2 : i32
     
-    %is_zero = eq %n, %zero : w
+    %is_zero = eq %n, %zero : i32
     jnz %is_zero, @return_zero, @check_one
 
 @return_zero
-    ret %zero : w
+    ret %zero : i32
 
 @check_one
-    %is_one = eq %n, %one : w
+    %is_one = eq %n, %one : i32
     jnz %is_one, @return_one, @calculate
 
 @return_one
-    ret %one : w
+    ret %one : i32
 
 @calculate
-    %prev = copy %zero : w
-    %curr = copy %one : w
-    %counter = copy %two : w
+    %prev = copy %zero : i32
+    %curr = copy %one : i32
+    %counter = copy %two : i32
     jmp @loop_start
 
 @loop_start
-    %continue = sle %counter, %n : w
+    %continue = sle %counter, %n : i32
     jnz %continue, @loop_body, @done
 
 @loop_body
-    %next = add %prev, %curr : w
-    %prev = copy %curr : w
-    %curr = copy %next : w
-    %counter = add %counter, %one : w
+    %next = add %prev, %curr : i32
+    %prev = copy %curr : i32
+    %curr = copy %next : i32
+    %counter = add %counter, %one : i32
     jmp @loop_start
 
 @done
-    ret %curr : w
+    ret %curr : i32
 }
 
-function $test_conditions(%x : w) : w {
+function $test_conditions(%x : i32) : i32 {
 @start
-    %five = copy 5 : w
-    %ten = copy 10 : w
+    %five = copy 5 : i32
+    %ten = copy 10 : i32
     
-    %lt_five = slt %x, %five : w
+    %lt_five = slt %x, %five : i32
     jnz %lt_five, @small_case, @check_ten
 
 @small_case
-    %doubled = mul %x, 2 : w
-    ret %doubled : w
+    %doubled = mul %x, 2 : i32
+    ret %doubled : i32
 
 @check_ten
-    %eq_ten = eq %x, %ten : w
+    %eq_ten = eq %x, %ten : i32
     jnz %eq_ten, @ten_case, @large_case
 
 @ten_case
-    ret %ten : w
+    ret %ten : i32
 
 @large_case
-    %halved = div %x, 2 : w
-    ret %halved : w
+    %halved = div %x, 2 : i32
+    ret %halved : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %fib_10 = call $fibonacci_with_jumps(w 10) : w
-    %test_result = call $test_conditions(%fib_10) : w
-    ret %test_result : w
+    %fib_10 = call $fibonacci_with_jumps(i32 10) : i32
+    %test_result = call $test_conditions(%fib_10) : i32
+    ret %test_result : i32
 }

@@ -6,7 +6,7 @@ CompositeTargetInfo::CompositeTargetInfo(std::unique_ptr<ArchitectureInfo> arch,
     : architecture(std::move(arch)), os(std::move(os)) {}
 
 std::string CompositeTargetInfo::getName() const {
-    return architecture->getAssemblyFileExtension() + "-" + os->getName(); // or some other combination
+    return os->getName();
 }
 
 size_t CompositeTargetInfo::getPointerSize() const { return architecture->getPointerSize(); }
@@ -25,7 +25,14 @@ void CompositeTargetInfo::emitFunctionPrologue(codegen::CodeGen& cg, ir::Functio
 void CompositeTargetInfo::emitFunctionEpilogue(codegen::CodeGen& cg, ir::Function& func) { architecture->emitFunctionEpilogue(cg, func); }
 void CompositeTargetInfo::emitBasicBlockStart(codegen::CodeGen& cg, ir::BasicBlock& bb) { architecture->emitBasicBlockStart(cg, bb); }
 void CompositeTargetInfo::emitStructuredFunctionBody(codegen::CodeGen& cg, ir::Function& func) { architecture->emitStructuredFunctionBody(cg, func); }
-void CompositeTargetInfo::emitStartFunction(codegen::CodeGen& cg) { os->emitStartFunction(cg, *architecture); architecture->emitStartFunction(cg); }
+void CompositeTargetInfo::emitStartFunction(codegen::CodeGen& cg) {
+    if (os->getName() == "baremetal") {
+        os->emitStartFunction(cg, *architecture);
+    } else {
+        os->emitStartFunction(cg, *architecture);
+        architecture->emitStartFunction(cg);
+    }
+}
 
 size_t CompositeTargetInfo::getMaxRegistersForArgs() const { return architecture->getMaxRegistersForArgs(); }
 void CompositeTargetInfo::emitPassArgument(codegen::CodeGen& cg, size_t idx, const std::string& val, const ir::Type* type) { architecture->emitPassArgument(cg, idx, val, type); }
@@ -33,6 +40,8 @@ void CompositeTargetInfo::emitGetArgument(codegen::CodeGen& cg, size_t idx, cons
 
 void CompositeTargetInfo::emitRet(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitRet(cg, i); }
 void CompositeTargetInfo::emitAdd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitAdd(cg, i); }
+void CompositeTargetInfo::emitSMin(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSMin(cg, i); }
+void CompositeTargetInfo::emitSMax(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSMax(cg, i); }
 void CompositeTargetInfo::emitSub(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSub(cg, i); }
 void CompositeTargetInfo::emitMul(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitMul(cg, i); }
 void CompositeTargetInfo::emitDiv(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitDiv(cg, i); }
@@ -47,6 +56,7 @@ void CompositeTargetInfo::emitNeg(codegen::CodeGen& cg, ir::Instruction& i) { ar
 void CompositeTargetInfo::emitNot(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitNot(cg, i); }
 void CompositeTargetInfo::emitCopy(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitCopy(cg, i); }
 void CompositeTargetInfo::emitCall(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitCall(cg, i); }
+bool CompositeTargetInfo::emitTailCall(codegen::CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) { return architecture->emitTailCall(cg, callInst, retInst); }
 void CompositeTargetInfo::emitFAdd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitFAdd(cg, i); }
 void CompositeTargetInfo::emitFSub(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitFSub(cg, i); }
 void CompositeTargetInfo::emitFMul(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitFMul(cg, i); }
@@ -92,6 +102,8 @@ void CompositeTargetInfo::emitJmp(codegen::CodeGen& cg, ir::Instruction& i) { ar
 VectorCapabilities CompositeTargetInfo::getVectorCapabilities() const { return architecture->getVectorCapabilities(); }
 bool CompositeTargetInfo::supportsVectorWidth(unsigned w) const { return architecture->supportsVectorWidth(w); }
 bool CompositeTargetInfo::supportsVectorType(const ir::VectorType* t) const { return architecture->supportsVectorType(t); }
+bool CompositeTargetInfo::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const { return architecture->supportsVectorOperation(op, type); }
+bool CompositeTargetInfo::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const { return architecture->supportsVectorConversion(op, srcType, dstType); }
 unsigned CompositeTargetInfo::getOptimalVectorWidth(const ir::Type* t) const { return architecture->getOptimalVectorWidth(t); }
 void CompositeTargetInfo::emitVectorLoad(codegen::CodeGen& cg, ir::VectorInstruction& i) { architecture->emitVectorLoad(cg, i); }
 void CompositeTargetInfo::emitVectorStore(codegen::CodeGen& cg, ir::VectorInstruction& i) { architecture->emitVectorStore(cg, i); }
@@ -124,6 +136,13 @@ void CompositeTargetInfo::emitStackUnwindInfo(codegen::CodeGen& cg, const ir::Fu
 
 std::string CompositeTargetInfo::formatStackOperand(int o) const { return architecture->formatStackOperand(o); }
 std::string CompositeTargetInfo::formatGlobalOperand(const std::string& n) const { return architecture->formatGlobalOperand(n); }
+bool CompositeTargetInfo::supportsGNUAssemblyMetadata() const { return os->supportsGNUAssemblyMetadata(); }
+std::string CompositeTargetInfo::formatFunctionTypeDirective(const std::string& name) const {
+    return os->formatFunctionTypeDirective(name, *architecture);
+}
+std::string CompositeTargetInfo::formatFunctionSizeDirective(const std::string& name) const {
+    return os->formatFunctionSizeDirective(name);
+}
 std::string CompositeTargetInfo::getImmediatePrefix() const { return architecture->getImmediatePrefix(); }
 std::string CompositeTargetInfo::getLabelPrefix() const { return architecture->getLabelPrefix(); }
 std::string CompositeTargetInfo::getAssemblyFileExtension() const { return architecture->getAssemblyFileExtension(); }
@@ -133,6 +152,8 @@ std::string CompositeTargetInfo::getDataRelocationType() const { return architec
 bool CompositeTargetInfo::isCallerSaved(const std::string& r) const { return architecture->isCallerSaved(r); }
 bool CompositeTargetInfo::isCalleeSaved(const std::string& r) const { return architecture->isCalleeSaved(r); }
 bool CompositeTargetInfo::isReserved(const std::string& r) const { return architecture->isReserved(r); }
+std::string CompositeTargetInfo::getReservedScratchVectorReg() const { return architecture->getReservedScratchVectorReg(); }
+unsigned CompositeTargetInfo::getReservedScratchVectorRegIndex() const { return architecture->getReservedScratchVectorRegIndex(); }
 std::string CompositeTargetInfo::getRegisterName(const std::string& b, const ir::Type* t) const { return architecture->getRegisterName(b, t); }
 
 }

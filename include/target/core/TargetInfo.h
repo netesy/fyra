@@ -7,21 +7,38 @@
 #include "ir/Syscall.h"
 #include "ir/BasicBlock.h"
 #include "target/capabilities/Capabilities.h"
+#include "target/core/TargetDescriptor.h"
 #include <string>
 #include <vector>
+#include <set>
 #include <ostream>
 #include <string_view>
+
+namespace target {
+
+class TargetFeatureFlags {
+public:
+    void setFeature(const std::string& feature, bool enabled = true);
+    bool hasFeature(std::string_view feature) const;
+    void parseFeatures(const std::string& featureString);
+    const std::set<std::string>& getEnabledFeatures() const { return enabledFeatures_; }
+private:
+    std::set<std::string> enabledFeatures_;
+};
+
+} // namespace target
 namespace codegen { class CodeGen; }
 namespace target {
 enum class RegisterClass { Integer, Float, Vector };
 enum class FusedPattern { MultiplyAdd, MultiplySubtract, LoadAndOperate, CompareAndBranch, AddressCalculation };
-struct VectorCapabilities { bool supportsSSE = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
+struct VectorCapabilities { bool supportsSSE = false, supportsSSSE3 = false, supportsAVX = false, supportsAVX2 = false, supportsAVX512 = false, supportsNEON = false, maxVectorWidth = 0; std::vector<unsigned> supportedWidths; bool supportsFloatVectors = false, supportsIntegerVectors = false, supportsDoubleVectors = false, supportsMaskedOps = false, supportsGatherScatter = false, supportsFMA = false, supportsHorizontalOps = false; std::string simdExtension; };
 struct TypeInfo { uint64_t size, align; RegisterClass regClass; bool isFloatingPoint, isSigned; };
 struct SIMDContext { unsigned vectorWidth; ir::VectorType* vectorType; std::string elementSuffix, widthSuffix; };
 class TargetInfo {
 public:
     virtual ~TargetInfo() = default;
     virtual std::string getName() const = 0;
+    virtual Arch getArch() const = 0;
     virtual size_t getPointerSize() const { return 8; }
     virtual size_t getStackAlignment() const { return 16; }
     virtual TypeInfo getTypeInfo(const ir::Type* type) const = 0;
@@ -45,6 +62,8 @@ public:
     virtual void emitGetArgument(codegen::CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
     virtual void emitRet(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitAdd(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitSMin(codegen::CodeGen&, ir::Instruction&) {}
+    virtual void emitSMax(codegen::CodeGen&, ir::Instruction&) {}
     virtual void emitSub(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitMul(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitDiv(codegen::CodeGen&, ir::Instruction&) = 0;
@@ -59,6 +78,7 @@ public:
     virtual void emitNot(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitCopy(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitCall(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual bool emitTailCall(codegen::CodeGen&, ir::Instruction&, ir::Instruction&) { return false; }
     virtual void emitFAdd(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitFSub(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitFMul(codegen::CodeGen&, ir::Instruction&) = 0;
@@ -101,9 +121,15 @@ public:
     virtual uint64_t getSyscallNumber(ir::SyscallId) const { return 0; }
     virtual void emitBr(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitJmp(codegen::CodeGen&, ir::Instruction&) = 0;
-    virtual VectorCapabilities getVectorCapabilities() const { return VectorCapabilities(); }
+    virtual void setFeature(const std::string& feature, bool enabled = true) { features_.setFeature(feature, enabled); }
+    virtual bool hasFeature(std::string_view feature) const { return features_.hasFeature(feature); }
+    virtual void parseTargetFeatures(const std::string& featureString) { features_.parseFeatures(featureString); }
+    virtual const TargetFeatureFlags& getTargetFeatures() const { return features_; }
+    virtual VectorCapabilities getVectorCapabilities() const;
     virtual bool supportsVectorWidth(unsigned) const { return false; }
     virtual bool supportsVectorType(const ir::VectorType*) const { return false; }
+    virtual bool supportsVectorOperation(ir::Instruction::Opcode, const ir::VectorType*) const { return false; }
+    virtual bool supportsVectorConversion(ir::Instruction::Opcode, const ir::VectorType*, const ir::VectorType*) const { return false; }
     virtual unsigned getOptimalVectorWidth(const ir::Type*) const { return 0; }
     virtual void emitVectorLoad(codegen::CodeGen&, ir::VectorInstruction&) {}
     virtual void emitVectorStore(codegen::CodeGen&, ir::VectorInstruction&) {}
@@ -139,6 +165,9 @@ public:
     virtual std::string formatStackOperand(int offset) const = 0;
     virtual std::string formatGlobalOperand(const std::string& name) const = 0;
     virtual std::string getImmediatePrefix() const { return "$"; }
+    virtual bool supportsGNUAssemblyMetadata() const { return false; }
+    virtual std::string formatFunctionTypeDirective(const std::string& name) const { return ""; }
+    virtual std::string formatFunctionSizeDirective(const std::string& name) const { return ""; }
     virtual std::string getLabelPrefix() const { return "L"; }
     virtual std::string getAssemblyFileExtension() const { return ".s"; }
     virtual std::string getObjectFileExtension() const { return ".o"; }
@@ -147,6 +176,8 @@ public:
     virtual bool isCallerSaved(const std::string&) const = 0;
     virtual bool isCalleeSaved(const std::string&) const = 0;
     virtual bool isReserved(const std::string&) const { return false; }
+    virtual std::string getReservedScratchVectorReg() const { return ""; }
+    virtual unsigned getReservedScratchVectorRegIndex() const { return 0; }
     virtual std::string getRegisterName(const std::string& baseReg, const ir::Type* type) const { (void)type; return baseReg; }
     virtual int32_t getStackOffset(const codegen::CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
@@ -154,5 +185,6 @@ public:
     virtual std::string getBBLabel(const ir::BasicBlock* bb) const { if (!bb) return "null_bb"; return bb->getParent()->getName() + "_" + bb->getName(); }
 protected:
     int32_t currentStackOffset = 0;
+    TargetFeatureFlags features_;
 };
 }

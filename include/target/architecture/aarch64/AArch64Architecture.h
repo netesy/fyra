@@ -9,10 +9,29 @@ namespace asm_ { class Assembler; }
 namespace target {
 using namespace codegen;
 
+struct AArch64ComplexAddress {
+    std::string base;
+    std::string index;
+    int shift = 0;
+    int64_t disp = 0;
+    bool isValid = false;
+
+    std::string format() const {
+        if (!isValid) return "";
+        if (!index.empty()) {
+            if (shift > 0) return "[" + base + ", " + index + ", lsl #" + std::to_string(shift) + "]";
+            return "[" + base + ", " + index + "]";
+        }
+        if (disp != 0) return "[" + base + ", #" + std::to_string(disp) + "]";
+        return "[" + base + "]";
+    }
+};
+
 class AArch64Architecture : public ArchitectureInfo {
 public:
     AArch64Architecture();
 
+    Arch getArch() const override { return Arch::AArch64; }
     size_t getPointerSize() const override { return 64; }
     TypeInfo getTypeInfo(const ir::Type* type) const override;
     const std::vector<std::string>& getRegisters(RegisterClass regClass) const override;
@@ -32,6 +51,8 @@ public:
 
     void emitRet(CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMin(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMax(CodeGen& cg, ir::Instruction& i) override;
     void emitSub(CodeGen& cg, ir::Instruction& i) override;
     void emitMul(CodeGen& cg, ir::Instruction& i) override;
     void emitDiv(CodeGen& cg, ir::Instruction& i) override;
@@ -46,6 +67,7 @@ public:
     void emitNot(CodeGen& cg, ir::Instruction& i) override;
     void emitCopy(CodeGen& cg, ir::Instruction& i) override;
     void emitCall(CodeGen& cg, ir::Instruction& i) override;
+    bool emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) override;
     void emitFAdd(CodeGen& cg, ir::Instruction& i) override;
     void emitFSub(CodeGen& cg, ir::Instruction& i) override;
     void emitFMul(CodeGen& cg, ir::Instruction& i) override;
@@ -59,6 +81,10 @@ public:
     void emitAlloc(CodeGen& cg, ir::Instruction& i) override;
     void emitBr(CodeGen& cg, ir::Instruction& i) override;
     void emitJmp(CodeGen& cg, ir::Instruction& i) override;
+    void emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::BasicBlock* target);
+
+    bool emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, ir::Instruction& br) override;
+    bool emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::Instruction& add) override;
 
     void emitSyscall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
     void emitExternCall(CodeGen& cg, ir::Instruction& i, const OperatingSystemInfo& osInfo) override;
@@ -67,12 +93,33 @@ public:
 
     std::string formatStackOperand(int offset) const override;
     std::string formatGlobalOperand(const std::string& name) const override;
+    std::string formatConstant(const ir::ConstantInt* C) const override;
+    std::string formatConstant(const ir::ConstantFP* C) const override;
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
+    bool isReserved(const std::string& reg) const override;
+    std::string getReservedScratchVectorReg() const override { return "v16"; }
+    unsigned getReservedScratchVectorRegIndex() const override { return 116; }
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
     std::string getImmediatePrefix() const override { return "#"; }
+    std::string getFunctionTypeSpecifier() const override { return "%function"; }
+
+    VectorCapabilities getVectorCapabilities() const override;
+    bool supportsVectorWidth(unsigned width) const override;
+    bool supportsVectorType(const ir::VectorType* type) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
+
+    void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorReduction(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorHorizontalOp(CodeGen& cg, ir::VectorInstruction& i) override;
+
+    AArch64ComplexAddress matchComplexAddress(CodeGen& cg, ir::Value* val) const;
 
 private:
+    std::string getNEONArrangement(const ir::VectorType* vecTy) const;
     void emitLoadValue(CodeGen& cg, class asm_::Assembler& assembler, ir::Value* val, uint8_t reg);
     std::string getWRegister(const std::string& xReg) const;
     size_t align_to_16(size_t size) const { return (size + 15) & ~15; }

@@ -1,90 +1,90 @@
-function $fibonacci_optimized(%n : w) : w {
+function $fibonacci_optimized(%n : i32) : i32 {
 @entry
-    %zero = copy 0 : w
-    %one = copy 1 : w
+    %zero = copy 0 : i32
+    %one = copy 1 : i32
     
-    %is_small = sle %n, %one : w
+    %is_small = sle %n, %one : i32
     jnz %is_small, @base_case, @iterative
 
 @base_case
-    ret %n : w
+    ret %n : i32
 
 @iterative
-    %a = copy %zero : w
-    %b = copy %one : w
-    %i = copy 2 : w
+    %a = copy %zero : i32
+    %b = copy %one : i32
+    %i = copy 2 : i32
     jmp @loop
 
 @loop
-    %done = sgt %i, %n : w
+    %done = sgt %i, %n : i32
     jnz %done, @exit, @compute
 
 @compute
-    %temp = add %a, %b : w
-    %a = copy %b : w
-    %b = copy %temp : w
-    %i = add %i, 1 : w
+    %temp = add %a, %b : i32
+    %a = copy %b : i32
+    %b = copy %temp : i32
+    %i = add %i, 1 : i32
     jmp @loop
 
 @exit
-    ret %b : w
+    ret %b : i32
 }
 
-function $sum_fibonacci_series(%count : w) : w {
+function $sum_fibonacci_series(%count : i32) : i32 {
 @start
-    %sum = copy 0 : w
-    %i = copy 0 : w
+    %sum = copy 0 : i32
+    %i = copy 0 : i32
     jmp @sum_loop
 
 @sum_loop
-    %continue = slt %i, %count : w
+    %continue = slt %i, %count : i32
     jnz %continue, @add_fib, @return_sum
 
 @add_fib
-    %fib_i = call $fibonacci_optimized(%i) : w
-    %sum = add %sum, %fib_i : w
-    %i = add %i, 1 : w
+    %fib_i = call $fibonacci_optimized(%i) : i32
+    %sum = add %sum, %fib_i : i32
+    %i = add %i, 1 : i32
     jmp @sum_loop
 
 @return_sum
-    ret %sum : w
+    ret %sum : i32
 }
 
-function $factorial(%n : w) : w {
+function $factorial(%n : i32) : i32 {
 @start
-    %zero = copy 0 : w
-    %one = copy 1 : w
+    %zero = copy 0 : i32
+    %one = copy 1 : i32
     
-    %is_zero = eq %n, %zero : w
+    %is_zero = eq %n, %zero : i32
     jnz %is_zero, @return_one, @calc_factorial
 
 @return_one
-    ret %one : w
+    ret %one : i32
 
 @calc_factorial
-    %result = copy %one : w
-    %counter = copy %one : w
+    %result = copy %one : i32
+    %counter = copy %one : i32
     jmp @fact_loop
 
 @fact_loop
-    %done = sgt %counter, %n : w
+    %done = sgt %counter, %n : i32
     jnz %done, @fact_done, @multiply
 
 @multiply
-    %result = mul %result, %counter : w
-    %counter = add %counter, %one : w
+    %result = mul %result, %counter : i32
+    %counter = add %counter, %one : i32
     jmp @fact_loop
 
 @fact_done
-    ret %result : w
+    ret %result : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %fib_10 = call $fibonacci_optimized(w 10) : w
-    %sum_first_10 = call $sum_fibonacci_series(w 10) : w
-    %fact_5 = call $factorial(w 5) : w
-    %combined = add %fib_10, %sum_first_10 : w
-    %final = add %combined, %fact_5 : w
-    ret %final : w
+    %fib_10 = call $fibonacci_optimized(i32 10) : i32
+    %sum_first_10 = call $sum_fibonacci_series(i32 10) : i32
+    %fact_5 = call $factorial(i32 5) : i32
+    %combined = add %fib_10, %sum_first_10 : i32
+    %final = add %combined, %fact_5 : i32
+    ret %final : i32
 }

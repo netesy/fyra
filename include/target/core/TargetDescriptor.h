@@ -26,7 +26,8 @@ enum class Artifact {
     SharedLibrary,
     StaticLibrary,
     APK,
-    WasmModule
+    WasmModule,
+    FlatBinary
 };
 
 struct TargetDescriptor {
@@ -36,6 +37,7 @@ struct TargetDescriptor {
 
     std::string toString() const;
     static std::optional<TargetDescriptor> fromString(const std::string& triple);
+    static std::string normalizeTriple(const std::string& triple);
 };
 
 }

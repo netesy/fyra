@@ -389,6 +389,14 @@ void LinuxOS::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const Capabilit
     }
 }
 
+std::string LinuxOS::formatFunctionTypeDirective(const std::string& name, const ArchitectureInfo& arch) const {
+    return ".type " + name + ", " + arch.getFunctionTypeSpecifier();
+}
+
+std::string LinuxOS::formatFunctionSizeDirective(const std::string& name) const {
+    return ".size " + name + ", .-" + name;
+}
+
 void LinuxOS::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << ".section .rodata\n.Lproc_environ:\n  .string \"/proc/self/environ\"\n";
@@ -396,6 +404,12 @@ void LinuxOS::emitHeader(CodeGen& cg) {
         *os << ".section .data\n.align 8\nheap_ptr:\n  .quad __fyra_heap\n";
         *os << ".section .bss\n.align 16\n__fyra_heap:\n  .zero 67108864\n";
         *os << ".text\n";
+    }
+}
+
+void LinuxOS::emitFooter(CodeGen& cg) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "\n.section .note.GNU-stack,\"\",@progbits\n";
     }
 }
 

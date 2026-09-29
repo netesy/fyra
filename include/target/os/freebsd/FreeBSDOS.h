@@ -3,12 +3,13 @@
 
 namespace target {
 
-class LinuxOS : public OperatingSystemInfo {
+class FreeBSDOS : public OperatingSystemInfo {
 public:
-    std::string getName() const override { return "linux"; }
+    std::string getName() const override { return "freebsd"; }
     uint64_t getSyscallNumber(ir::SyscallId id) const override;
 
-    bool supportsCapability(const CapabilitySpec& spec) const override;
+    bool supportsCapability(const CapabilitySpec& spec) const override { return true; }
+
     void emitIOCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
     void emitFSCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
     void emitMemoryCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
@@ -31,15 +32,15 @@ public:
     void emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
 
     std::string getDynamicInterpreterPath(target::Arch arch) const override {
-        if (arch == target::Arch::X64) return "/lib64/ld-linux-x86-64.so.2";
-        return "";
+        if (arch == target::Arch::X64) return "/libexec/ld-elf.so.1";
+        if (arch == target::Arch::AArch64) return "/libexec/ld-elf.so.1";
+        return "/libexec/ld-elf.so.1";
     }
     bool supportsGNUAssemblyMetadata() const override { return true; }
     std::string formatFunctionTypeDirective(const std::string& name, const ArchitectureInfo& arch) const override;
     std::string formatFunctionSizeDirective(const std::string& name) const override;
 
     void emitHeader(CodeGen& cg) override;
-    void emitFooter(CodeGen& cg) override;
     void emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) override;
 };
 

@@ -1,89 +1,89 @@
-function $fibonacci_tail_recursive(%n : w, %acc1 : w, %acc2 : w) : w {
+function $fibonacci_tail_recursive(%n : i32, %acc1 : i32, %acc2 : i32) : i32 {
 @start
-    %zero = copy 0 : w
-    %one = copy 1 : w
+    %zero = copy 0 : i32
+    %one = copy 1 : i32
     
-    %is_zero = eq %n, %zero : w
+    %is_zero = eq %n, %zero : i32
     jnz %is_zero, @return_acc1, @continue
 
 @return_acc1
-    ret %acc1 : w
+    ret %acc1 : i32
 
 @continue
-    %is_one = eq %n, %one : w
+    %is_one = eq %n, %one : i32
     jnz %is_one, @return_acc2, @recurse
 
 @return_acc2
-    ret %acc2 : w
+    ret %acc2 : i32
 
 @recurse
-    %n_minus_1 = sub %n, %one : w
-    %new_acc = add %acc1, %acc2 : w
-    %result = call $fibonacci_tail_recursive(%n_minus_1, %acc2, %new_acc) : w
-    ret %result : w
+    %n_minus_1 = sub %n, %one : i32
+    %new_acc = add %acc1, %acc2 : i32
+    %result = call $fibonacci_tail_recursive(%n_minus_1, %acc2, %new_acc) : i32
+    ret %result : i32
 }
 
-function $fibonacci_wrapper(%n : w) : w {
+function $fibonacci_wrapper(%n : i32) : i32 {
 @start
-    %zero = copy 0 : w
-    %one = copy 1 : w
-    %result = call $fibonacci_tail_recursive(%n, %zero, %one) : w
-    ret %result : w
+    %zero = copy 0 : i32
+    %one = copy 1 : i32
+    %result = call $fibonacci_tail_recursive(%n, %zero, %one) : i32
+    ret %result : i32
 }
 
-function $power_of_two(%exp : w) : w {
+function $power_of_two(%exp : i32) : i32 {
 @start
-    %zero = copy 0 : w
-    %one = copy 1 : w
-    %two = copy 2 : w
+    %zero = copy 0 : i32
+    %one = copy 1 : i32
+    %two = copy 2 : i32
     
-    %is_zero = eq %exp, %zero : w
+    %is_zero = eq %exp, %zero : i32
     jnz %is_zero, @return_one, @calculate
 
 @return_one
-    ret %one : w
+    ret %one : i32
 
 @calculate
-    %result = copy %one : w
-    %counter = copy %zero : w
+    %result = copy %one : i32
+    %counter = copy %zero : i32
     jmp @power_loop
 
 @power_loop
-    %done = sge %counter, %exp : w
+    %done = sge %counter, %exp : i32
     jnz %done, @power_done, @multiply
 
 @multiply
-    %result = mul %result, %two : w
-    %counter = add %counter, %one : w
+    %result = mul %result, %two : i32
+    %counter = add %counter, %one : i32
     jmp @power_loop
 
 @power_done
-    ret %result : w
+    ret %result : i32
 }
 
-function $gcd(%a : w, %b : w) : w {
+function $gcd(%a : i32, %b : i32) : i32 {
 @start
-    %zero = copy 0 : w
+    %zero = copy 0 : i32
     
-    %b_is_zero = eq %b, %zero : w
+    %b_is_zero = eq %b, %zero : i32
     jnz %b_is_zero, @return_a, @euclidean
 
 @return_a
-    ret %a : w
+    ret %a : i32
 
 @euclidean
-    %remainder = rem %a, %b : w
-    %result = call $gcd(%b, %remainder) : w
-    ret %result : w
+    %remainder = rem %a, %b : i32
+    %result = call $gcd(%b, %remainder) : i32
+    ret %result : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %fib_10 = call $fibonacci_wrapper(w 10) : w
-    %power_4 = call $power_of_two(w 4) : w
-    %gcd_result = call $gcd(%fib_10, %power_4) : w
+    %fib_10 = call $fibonacci_wrapper(i32 10) : i32
+    %power_4 = call $power_of_two(i32 4) : i32
+    %gcd_result = call $gcd(%fib_10, %power_4) : i32
     
-    %temp1 = add %fib_10, %power_4 : w
-    %final = add %temp1, %gcd_result : w
-    ret %final : w
+    %temp1 = add %fib_10, %power_4 : i32
+    %final = add %temp1, %gcd_result : i32
+    ret %final : i32
 }

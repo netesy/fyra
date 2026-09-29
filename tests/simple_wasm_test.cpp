@@ -13,9 +13,9 @@
 int main() {
     // Create a simple test case directly in code
     std::stringstream input(R"(
-export function $main() : w {
+export function $main() : i32 {
 @start
-    ret 42 : w
+    ret 42 : i32
 }
 )");
 
@@ -62,6 +62,16 @@ export function $main() : w {
             std::cout << "ERROR: Generated binary too small\n";
         }
     }
+
+    // Verify Wasm32 vector support capabilities
+    auto wasmTarget = target::TargetResolver::resolve({target::Arch::WASM32, target::OS::WASI});
+    ir::IRContext ctx;
+    ir::Type* i32Ty = ir::IntegerType::get(32);
+    ir::VectorType* v4i32 = ctx.getVectorType(i32Ty, 4);
+
+    assert(wasmTarget->supportsVectorWidth(128));
+    assert(wasmTarget->supportsVectorType(v4i32));
+    std::cout << "Wasm32 vector capabilities test passed!\n";
 
     return 0;
 }
