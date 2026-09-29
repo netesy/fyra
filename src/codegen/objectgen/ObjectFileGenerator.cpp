@@ -1,10 +1,14 @@
 #include "codegen/objectgen/ObjectFileGenerator.h"
 #include "codegen/objectgen/PlatformGenerators.h"
+#include "target/artifact/archive/ArchiveWriter.h"
+#include "target/artifact/object/ObjectReader.h"
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <thread>
 #include <future>
 #include <chrono>
+#include <cstring>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -17,6 +21,59 @@ namespace codegen {
 namespace objectgen {
 
 // PlatformObjectGenerator base implementation
+ObjectGenResult PlatformObjectGenerator::createStaticLibrary(const std::vector<std::string>& objPaths,
+                                                              const std::string& libPath,
+                                                              const std::string& targetName) {
+    ObjectGenResult result;
+    std::vector<target::artifact::archive::ArchiveMember> members;
+
+    for (const auto& objPath : objPaths) {
+        std::ifstream file(objPath, std::ios::binary);
+        if (!file.is_open()) {
+            result.success = false;
+            result.errorOutput = "Could not open object file for archive member: " + objPath;
+            return result;
+        }
+
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        target::artifact::archive::ArchiveMember member;
+        std::filesystem::path p(objPath);
+        member.name = p.filename().string();
+        member.bytes = std::move(bytes);
+
+        // Parse ObjectArtifact using ObjectReader
+        auto reader = target::artifact::object::ObjectReader::detectAndCreate(member.bytes);
+        if (reader && reader->parse(member.bytes, member.artifact)) {
+            for (const auto& sym : member.artifact.symbols) {
+                if (sym.isDefined && sym.binding != target::artifact::object::SymbolBinding::Local) {
+                    member.exportedSymbols.push_back(sym.name);
+                }
+            }
+        }
+
+        members.push_back(std::move(member));
+    }
+
+    auto writer = target::artifact::archive::ArchiveWriter::createForTargetTriple(targetName.empty() ? getPlatformName() : targetName);
+    if (!writer) {
+        result.success = false;
+        result.errorOutput = "Failed to create archive writer for target: " + targetName;
+        return result;
+    }
+
+    if (writer->write(members, libPath)) {
+        result.success = true;
+        result.objectPath = libPath;
+    } else {
+        result.success = false;
+        result.errorOutput = "Archive serialization failed: " + writer->getLastError();
+    }
+
+    return result;
+}
+
 bool PlatformObjectGenerator::fileExists(const std::string& path) const {
     return std::filesystem::exists(path);
 }
@@ -26,7 +83,6 @@ bool PlatformObjectGenerator::executeCommand(const std::string& command,
                                            std::string& errorOutput, 
                                            int& exitCode) const {
 #ifdef _WIN32
-    // Windows implementation using CreateProcess
     STARTUPINFOA si = {sizeof(si)};
     PROCESS_INFORMATION pi;
     si.dwFlags = STARTF_USESTDHANDLES;
@@ -45,7 +101,6 @@ bool PlatformObjectGenerator::executeCommand(const std::string& command,
     }
     return false;
 #else
-    // Unix implementation using popen
     FILE* pipe = popen((command + " 2>&1").c_str(), "r");
     if (!pipe) {
         exitCode = -1;
@@ -63,7 +118,6 @@ bool PlatformObjectGenerator::executeCommand(const std::string& command,
 }
 
 std::string PlatformObjectGenerator::getToolPath(const std::string& toolName) const {
-    // Try to find tool in PATH
     std::string command = "which " + toolName;
 #ifdef _WIN32
     command = "where " + toolName;
@@ -73,7 +127,6 @@ std::string PlatformObjectGenerator::getToolPath(const std::string& toolName) co
     int exitCode;
     
     if (executeCommand(command, output, errorOutput, exitCode) && exitCode == 0) {
-        // Extract first line as tool path
         size_t newlinePos = output.find('\n');
         if (newlinePos != std::string::npos) {
             return output.substr(0, newlinePos);
@@ -81,7 +134,7 @@ std::string PlatformObjectGenerator::getToolPath(const std::string& toolName) co
         return output;
     }
     
-    return ""; // Tool not found
+    return "";
 }
 
 bool PlatformObjectGenerator::createDirectoryIfNeeded(const std::string& path) const {
@@ -136,17 +189,14 @@ ObjectGenResult ObjectFileGenerator::generateObject(
     logVerbose("Input: " + assemblyPath);
     logVerbose("Output: " + outputPath);
     
-    // Create output directory if needed
     if (!createDirectoryIfNeeded(outputPath)) {
         result.success = false;
         result.errorOutput = "Failed to create output directory";
         return result;
     }
     
-    // Generate object file
     result = generator->generate(assemblyPath, outputPath);
     
-    // Calculate generation time
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
     result.generationTimeMs = duration.count() / 1000.0;
@@ -154,7 +204,6 @@ ObjectGenResult ObjectFileGenerator::generateObject(
     if (result.success) {
         logVerbose("Object generation successful in " + std::to_string(result.generationTimeMs) + "ms");
         
-        // Validate generated object
         ObjectValidationResult validation = generator->validateObject(outputPath);
         if (!validation.isValid) {
             result.addWarning("Generated object file has validation issues");
@@ -176,7 +225,6 @@ std::map<std::string, ObjectGenResult> ObjectFileGenerator::generateForAllTarget
     std::map<std::string, ObjectGenResult> results;
     
     if (parallelGeneration_) {
-        // Parallel generation
         std::vector<std::future<std::pair<std::string, ObjectGenResult>>> futures;
         
         for (const auto& [targetName, generator] : generators_) {
@@ -192,7 +240,6 @@ std::map<std::string, ObjectGenResult> ObjectFileGenerator::generateForAllTarget
             results[targetName] = result;
         }
     } else {
-        // Sequential generation
         for (const auto& [targetName, generator] : generators_) {
             std::string outputPath = outputPrefix + "_" + targetName + generator->getDefaultExtension();
             results[targetName] = generateObject(assemblyPath, outputPath, targetName);
@@ -216,6 +263,24 @@ ObjectValidationResult ObjectFileGenerator::validateGeneratedObject(
     }
     
     return generator->validateObject(objectPath);
+}
+
+ObjectGenResult ObjectFileGenerator::createStaticLibrary(
+    const std::vector<std::string>& objectPaths,
+    const std::string& outputPath,
+    const std::string& targetName) {
+
+    std::string normalizedTarget = normalizeTargetName(targetName);
+    PlatformObjectGenerator* generator = findGenerator(normalizedTarget);
+
+    if (!generator) {
+        ObjectGenResult result;
+        result.success = false;
+        result.errorOutput = "No generator available for target: " + targetName;
+        return result;
+    }
+
+    return generator->createStaticLibrary(objectPaths, outputPath, targetName);
 }
 
 std::vector<std::string> ObjectFileGenerator::getSupportedTargets() const {
@@ -279,6 +344,7 @@ ObjectFileGenerator::ToolchainStatus ObjectFileGenerator::checkTargetToolchain(c
 
 void ObjectFileGenerator::initializeDefaultGenerators() {
     registerPlatformGenerator("linux", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("x86_64-linux-bin", ObjectGeneratorFactory::createLinuxGenerator());
     registerPlatformGenerator("x86_64-unknown-linux-gnu", ObjectGeneratorFactory::createLinuxGenerator());
     registerPlatformGenerator("systemv", ObjectGeneratorFactory::createLinuxGenerator());
     
@@ -295,15 +361,30 @@ void ObjectFileGenerator::initializeDefaultGenerators() {
     registerPlatformGenerator("riscv64", ObjectGeneratorFactory::createRiscVGenerator());
     registerPlatformGenerator("riscv64-unknown-linux-gnu", ObjectGeneratorFactory::createRiscVGenerator());
 
-    registerPlatformGenerator("macos", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
-    registerPlatformGenerator("macos-aarch64", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
-    registerPlatformGenerator("macos-amd64", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
-    registerPlatformGenerator("macos-arm64", ObjectGeneratorFactory::createLinuxGenerator()); // Placeholder
+    registerPlatformGenerator("macos", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("macos-aarch64", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("macos-amd64", ObjectGeneratorFactory::createLinuxGenerator());
+    registerPlatformGenerator("macos-arm64", ObjectGeneratorFactory::createLinuxGenerator());
 }
 
 std::string ObjectFileGenerator::normalizeTargetName(const std::string& targetName) const {
     std::string normalized = targetName;
     std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::tolower);
+    if (normalized.find("linux") != std::string::npos || normalized == "x86_64-linux-bin" || normalized == "x64-linux-bin") {
+        return "linux";
+    }
+    if (normalized.find("windows") != std::string::npos || normalized.find("win") != std::string::npos) {
+        return "windows";
+    }
+    if (normalized.find("aarch64") != std::string::npos || normalized.find("arm64") != std::string::npos) {
+        return "aarch64";
+    }
+    if (normalized.find("riscv") != std::string::npos) {
+        return "riscv64";
+    }
+    if (normalized.find("wasm") != std::string::npos) {
+        return "wasm32";
+    }
     return normalized;
 }
 

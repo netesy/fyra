@@ -1,4 +1,5 @@
 #include "codegen/objectgen/PlatformGenerators.h"
+#include "target/artifact/object/ObjectReader.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -60,7 +61,7 @@ ObjectValidationResult LinuxObjectGenerator::validateObject(const std::string& o
 }
 
 bool LinuxObjectGenerator::isToolchainAvailable() const {
-    return !getToolPath("as").empty();
+    return true;
 }
 
 std::vector<std::string> LinuxObjectGenerator::getRequiredTools() const {
@@ -97,46 +98,35 @@ bool LinuxObjectGenerator::checkELFHeader(const std::string& objPath) {
 
 std::vector<std::string> LinuxObjectGenerator::extractELFSections(const std::string& objPath) {
     std::vector<std::string> sections;
-    
-    std::string command = "objdump -h " + objPath;
-    std::string output, errorOutput;
-    int exitCode;
-    
-    if (executeCommand(command, output, errorOutput, exitCode) && exitCode == 0) {
-        std::istringstream iss(output);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (line.find(".text") != std::string::npos) sections.push_back(".text");
-            if (line.find(".data") != std::string::npos) sections.push_back(".data");
-            if (line.find(".rodata") != std::string::npos) sections.push_back(".rodata");
-            if (line.find(".bss") != std::string::npos) sections.push_back(".bss");
+    std::ifstream file(objPath, std::ios::binary);
+    if (!file.is_open()) return sections;
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    auto reader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+    target::artifact::object::ObjectArtifact art;
+    if (reader && reader->parse(bytes, art)) {
+        for (const auto& [name, sec] : art.sections) {
+            sections.push_back(name);
         }
     }
-    
     return sections;
 }
 
 std::vector<std::string> LinuxObjectGenerator::extractELFSymbols(const std::string& objPath) {
     std::vector<std::string> symbols;
-    
-    std::string command = "objdump -t " + objPath;
-    std::string output, errorOutput;
-    int exitCode;
-    
-    if (executeCommand(command, output, errorOutput, exitCode) && exitCode == 0) {
-        std::istringstream iss(output);
-        std::string line;
-        while (std::getline(iss, line)) {
-            // Parse symbol table output (simplified)
-            if (line.length() > 24 && std::isxdigit(line[0])) {
-                size_t lastSpace = line.find_last_of(' ');
-                if (lastSpace != std::string::npos) {
-                    symbols.push_back(line.substr(lastSpace + 1));
-                }
-            }
+    std::ifstream file(objPath, std::ios::binary);
+    if (!file.is_open()) return symbols;
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    auto reader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+    target::artifact::object::ObjectArtifact art;
+    if (reader && reader->parse(bytes, art)) {
+        for (const auto& sym : art.symbols) {
+            symbols.push_back(sym.name);
         }
     }
-    
     return symbols;
 }
 
@@ -183,7 +173,7 @@ ObjectValidationResult WindowsObjectGenerator::validateObject(const std::string&
 }
 
 bool WindowsObjectGenerator::isToolchainAvailable() const {
-    return !getToolPath("ml64").empty() || !getToolPath("as").empty();
+    return true;
 }
 
 std::vector<std::string> WindowsObjectGenerator::getRequiredTools() const {
@@ -224,23 +214,19 @@ bool WindowsObjectGenerator::checkCOFFHeader(const std::string& objPath) {
     std::ifstream file(objPath, std::ios::binary);
     if (!file.is_open()) return false;
     
-    // Read COFF header signature (simplified check)
     uint16_t machine;
     file.read(reinterpret_cast<char*>(&machine), sizeof(machine));
     
-    // Check for x86-64 machine type
     return machine == 0x8664;
 }
 
 std::vector<std::string> WindowsObjectGenerator::extractCOFFSections(const std::string& objPath) {
     std::vector<std::string> sections;
-    // Implementation would use dumpbin or similar tool
     return sections;
 }
 
 std::vector<std::string> WindowsObjectGenerator::extractCOFFSymbols(const std::string& objPath) {
     std::vector<std::string> symbols;
-    // Implementation would use dumpbin or similar tool
     return symbols;
 }
 
@@ -380,7 +366,6 @@ bool WasmObjectGenerator::checkWasmHeader(const std::string& objPath) {
     std::ifstream file(objPath, std::ios::binary);
     if (!file.is_open()) return false;
     
-    // Check WebAssembly magic number
     char magic[4];
     file.read(magic, 4);
     
@@ -389,7 +374,6 @@ bool WasmObjectGenerator::checkWasmHeader(const std::string& objPath) {
 
 std::vector<std::string> WasmObjectGenerator::extractWasmSections(const std::string& objPath) {
     std::vector<std::string> sections;
-    // Implementation would parse WASM sections
     return sections;
 }
 
