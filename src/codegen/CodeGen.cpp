@@ -1,5 +1,7 @@
 #include "codegen/CodeGen.h"
 #include "codegen/asm/Assembler.h"
+#include "codegen/objectgen/PlatformGenerators.h"
+#include "target/artifact/object/ObjectWriter.h"
 #include "ir/Constant.h"
 #include "ir/GlobalValue.h"
 #include "ir/Function.h"
@@ -38,7 +40,7 @@ std::unique_ptr<target::TargetInfo> createTargetInfoForName(const std::string& t
             d.arch = ::target::Arch::X64; d.os = ::target::OS::MacOS;
         } else if (n == "macos-aarch64" || n == "macos-arm64") {
             d.arch = ::target::Arch::AArch64; d.os = ::target::OS::MacOS;
-        } else if (n == "wasm32") {
+        } else if (n == "wasm32" || n == "wasm32-wasi" || n == "wasm32-unknown-unknown" || n.find("wasm") != std::string::npos) {
             d.arch = ::target::Arch::WASM32; d.os = ::target::OS::WASI;
         } else if (n == "aarch64") {
             d.arch = ::target::Arch::AArch64; d.os = ::target::OS::Linux;
@@ -88,9 +90,16 @@ void CodeGen::emit(bool forExecutable) {
         }
     }
 
-    emitTargetSpecificHeader(); emitDataSection(); emitTextSection();
+    emitTargetSpecificHeader();
+    if (targetInfo->getArch() == ::target::Arch::WASM32) {
+        return;
+    }
+    emitDataSection(); emitTextSection();
     if (forExecutable) targetInfo->emitStartFunction(*this);
     for (auto& func : module.getFunctions()) emitFunction(*func);
+    // Targets may intern constants while lowering functions, so finalize the
+    // pool only after instruction emission has discovered every entry.
+    emitVectorConstantPool();
     targetInfo->emitFooter(*this);
     emitDebugInfo();
 }
@@ -101,41 +110,42 @@ void CodeGen::emitFunction(ir::Function& func) {
     stackOffsets.clear();
     lastStoreOp = "";
     liveness.run(func);
-    if (targetInfo->getName() == "wasm32" && !os) {
-        auto funcBodyAsm = std::make_unique<asm_::Assembler>();
-        auto oldAsm = std::move(assembler); assembler = std::move(funcBodyAsm);
-        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
-        wasmFunctionBodies.push_back(assembler->getCode());
-        assembler = std::move(oldAsm);
+    if (debugInfoManager->isDebugEnabled() && os) {
+        debugInfoManager->beforeFunctionEmission(*this, *os, func);
+    }
+    if (os) {
+        if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
+            *os << "\n" << targetInfo->formatFunctionTypeDirective(func.getName()) << "\n";
+        } else {
+            *os << "\n";
+        }
+        *os << ".globl " << func.getName() << "\n" << func.getName() << ":\n";
     } else {
-        if (debugInfoManager->isDebugEnabled() && os) {
-            debugInfoManager->beforeFunctionEmission(*this, *os, func);
+        SymbolInfo func_sym;
+        func_sym.name = func.getName();
+        func_sym.sectionName = ".text";
+        func_sym.value = assembler ? assembler->getCodeSize() : 0;
+        func_sym.type = 2; // STT_FUNC
+        func_sym.binding = 1; // STB_GLOBAL
+        addSymbol(func_sym);
+    }
+    targetInfo->emitFunctionPrologue(*this, func);
+    for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
+    targetInfo->emitFunctionEpilogue(*this, func);
+    currentFunction = nullptr;
+    if (os) {
+        *os << ".Lfunc_end_" << func.getName() << ":\n";
+        if (targetInfo && targetInfo->supportsGNUAssemblyMetadata()) {
+            *os << targetInfo->formatFunctionSizeDirective(func.getName()) << "\n";
         }
-        if (os) {
-            *os << "\n.globl " << func.getName() << "\n" << func.getName() << ":\n";
-        } else if (assembler) {
-            SymbolInfo func_sym;
-            func_sym.name = func.getName();
-            func_sym.sectionName = ".text";
-            func_sym.value = assembler->getCodeSize();
-            func_sym.type = 2; // STT_FUNC
-            func_sym.binding = 1; // STB_GLOBAL
-            addSymbol(func_sym);
-        }
-        targetInfo->emitFunctionPrologue(*this, func);
-        for (auto& bb : func.getBasicBlocks()) emitBasicBlock(*bb);
-        targetInfo->emitFunctionEpilogue(*this, func);
-        if (os) {
-            *os << ".Lfunc_end_" << func.getName() << ":\n";
-        } else if (assembler) {
-            SymbolInfo end_sym;
-            end_sym.name = ".Lfunc_end_" + func.getName();
-            end_sym.sectionName = ".text";
-            end_sym.value = assembler->getCodeSize();
-            end_sym.type = 0;
-            end_sym.binding = 0; // Local
-            addSymbol(end_sym);
-        }
+    } else if (assembler) {
+        SymbolInfo end_sym;
+        end_sym.name = ".Lfunc_end_" + func.getName();
+        end_sym.sectionName = ".text";
+        end_sym.value = assembler->getCodeSize();
+        end_sym.type = 0;
+        end_sym.binding = 0; // Local
+        addSymbol(end_sym);
     }
 }
 
@@ -207,6 +217,14 @@ void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
                 ++it; // Advance past Add
                 continue; // Skip emitInstruction for current (Mul) as well!
             }
+
+            const bool isCallFollowedByRet = (current->getOpcode() == ir::Instruction::Call) &&
+                                              (nextInst->getOpcode() == ir::Instruction::Ret);
+
+            if (isCallFollowedByRet && targetInfo->emitTailCall(*this, *current, *nextInst)) {
+                ++it; // Consume Ret
+                continue; // Skip standard emitInstruction for Call
+            }
         }
 
         emitInstruction(*current);
@@ -222,6 +240,8 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
     switch (instr.getOpcode()) {
         case ir::Instruction::Ret: targetInfo->emitRet(*this, instr); break;
         case ir::Instruction::Add: targetInfo->emitAdd(*this, instr); break;
+        case ir::Instruction::SMin: targetInfo->emitSMin(*this, instr); break;
+        case ir::Instruction::SMax: targetInfo->emitSMax(*this, instr); break;
         case ir::Instruction::Sub: targetInfo->emitSub(*this, instr); break;
         case ir::Instruction::Mul: targetInfo->emitMul(*this, instr); break;
         case ir::Instruction::Div: case ir::Instruction::Udiv: targetInfo->emitDiv(*this, instr); break;
@@ -272,6 +292,53 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::Cast:
             targetInfo->emitCast(*this, instr, instr.getOperands()[0]->get()->getType(), instr.getType());
             break;
+        case ir::Instruction::VLoad:
+            targetInfo->emitVectorLoad(*this, static_cast<ir::VectorInstruction&>(instr));
+            break;
+        case ir::Instruction::VStore:
+            targetInfo->emitVectorStore(*this, static_cast<ir::VectorInstruction&>(instr));
+            break;
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+        case ir::Instruction::VDiv:
+        case ir::Instruction::VFAdd:
+        case ir::Instruction::VFSub:
+        case ir::Instruction::VFMul:
+        case ir::Instruction::VFDiv:
+        case ir::Instruction::VAnd:
+        case ir::Instruction::VOr:
+        case ir::Instruction::VXor:
+        case ir::Instruction::VShl:
+        case ir::Instruction::VShr:
+        case ir::Instruction::VNot:
+        case ir::Instruction::VBroadcast:
+        case ir::Instruction::VExtract:
+        case ir::Instruction::VInsert:
+        case ir::Instruction::VShuffle:
+        case ir::Instruction::VCmp:
+        case ir::Instruction::VSelect:
+        case ir::Instruction::VHAdd:
+        case ir::Instruction::VHSub:
+        case ir::Instruction::VHMul:
+        case ir::Instruction::VHAnd:
+        case ir::Instruction::VHOr:
+        case ir::Instruction::VHXor:
+        case ir::Instruction::VMin:
+        case ir::Instruction::VMax:
+        case ir::Instruction::VFMin:
+        case ir::Instruction::VFMax:
+        case ir::Instruction::VSExt:
+        case ir::Instruction::VZExt:
+        case ir::Instruction::VTrunc:
+        case ir::Instruction::FMA:
+        case ir::Instruction::FMS:
+        case ir::Instruction::FNMA:
+        case ir::Instruction::FNMS:
+        case ir::Instruction::VGather:
+        case ir::Instruction::VScatter:
+            targetInfo->emitVectorArithmetic(*this, static_cast<ir::VectorInstruction&>(instr));
+            break;
         default: break;
     }
 }
@@ -283,14 +350,20 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
 
     // Handle physical registers and stack slots assigned by Register Allocator
     if (value->hasPhysicalRegister()) {
+        int physReg = value->getPhysicalRegister();
+        if (physReg >= 100 && physReg <= 115) {
+            std::string xmmName = "xmm" + std::to_string(physReg - 100);
+            return targetInfo->getRegisterName(xmmName, value->getType());
+        }
         auto regClass = value->getType()->isFloatingPoint() ? target::RegisterClass::Float : target::RegisterClass::Integer;
         auto& regs = targetInfo->getRegisters(regClass);
-        if (static_cast<size_t>(value->getPhysicalRegister()) < regs.size()) {
-            return targetInfo->getRegisterName(regs[value->getPhysicalRegister()], value->getType());
+        if (static_cast<size_t>(physReg) < regs.size()) {
+            return targetInfo->getRegisterName(regs[physReg], value->getType());
         }
     }
     if (currentFunction && currentFunction->hasStackSlot(value)) {
-        return targetInfo->formatStackOperand(targetInfo->getStackOffset(*this, const_cast<ir::Value*>(value)));
+        int off = currentFunction->getStackSlotForVreg(value);
+        return targetInfo->formatStackOperand(-off);
     }
 
     if (stackOffsets.count(const_cast<ir::Value*>(value)))
@@ -319,7 +392,8 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
 
-    return "$" + value->getName();
+    if (targetInfo) return targetInfo->getRegisterName("rax", value->getType());
+    return "%rax";
 }
 
 int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }
@@ -328,12 +402,118 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
     CompilationTimer timer; CompilationResult result; result.targetName = targetInfo->getName();
     std::stringstream ss; std::ostream* old_os = os; os = &ss; emit(false); os = old_os;
     std::string assembly = ss.str();
-    std::string assemblyPath = outputPrefix + targetInfo->getAssemblyFileExtension();
+    std::string assemblyPath = outputPrefix;
+    std::string asmExt = targetInfo->getAssemblyFileExtension();
+    if (assemblyPath.size() < asmExt.size() || assemblyPath.compare(assemblyPath.size() - asmExt.size(), asmExt.size(), asmExt) != 0) {
+        assemblyPath += asmExt;
+    }
     result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
     if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {
-        result.objGen = objectGenerator_->generateObject(result.assemblyPath, outputPrefix, targetInfo->getName());
-        if (result.objGen.success) result.objectPath = result.objGen.objectPath;
+        // Emit in binary mode (os = nullptr) to populate assembler, symbols, and relocations
+        assembler = std::make_unique<asm_::Assembler>();
+        rodataAssembler = std::make_unique<asm_::Assembler>();
+        symbols.clear();
+        relocations.clear();
+        os = nullptr;
+        emit(false);
+        os = old_os;
+
+        std::string objPath = outputPrefix;
+        if (objPath.rfind(".s") != std::string::npos && objPath.rfind(".s") == objPath.size() - 2) {
+            std::string objExt = (targetInfo->getName().find("windows") != std::string::npos || targetInfo->getName().find("win") != std::string::npos) ? ".obj" : ".o";
+            objPath = objPath.substr(0, objPath.size() - 2) + objExt;
+        }
+
+        ::target::artifact::object::ObjectArtifact artifact;
+        if (auto desc = ::target::TargetDescriptor::fromString(targetInfo->getName())) {
+            artifact.arch = desc->arch;
+            artifact.os = desc->os;
+        }
+
+        // Text section
+        ::target::artifact::object::ObjectSection textSec;
+        textSec.name = ".text";
+        textSec.flags = 0x6; // SHF_ALLOC | SHF_EXECINSTR
+        textSec.alignment = 16;
+        if (assembler) {
+            textSec.data = assembler->getCode();
+        }
+        artifact.sections[textSec.name] = textSec;
+
+        // Data / Rodata sections
+        if (rodataAssembler && !rodataAssembler->getCode().empty()) {
+            ::target::artifact::object::ObjectSection dataSec;
+            dataSec.name = ".data";
+            dataSec.flags = 0x3; // SHF_WRITE | SHF_ALLOC
+            dataSec.alignment = 8;
+            dataSec.data = rodataAssembler->getCode();
+            artifact.sections[dataSec.name] = dataSec;
+        }
+
+        // Symbols
+        for (const auto& sym : symbols) {
+            ::target::artifact::object::ObjectSymbol s;
+            s.name = sym.name;
+            s.value = sym.value;
+            s.size = sym.size;
+            s.sectionName = sym.sectionName;
+            s.binding = (sym.binding == 1) ? ::target::artifact::object::SymbolBinding::Global : ::target::artifact::object::SymbolBinding::Local;
+            s.type = (sym.type == 2) ? ::target::artifact::object::SymbolType::Function : ::target::artifact::object::SymbolType::Object;
+            s.isDefined = true;
+            artifact.symbols.push_back(s);
+        }
+
+        // Add defined module functions if missing from in-memory symbol table
+        for (auto& func : module.getFunctions()) {
+            if (func->getBasicBlocks().empty()) continue;
+            std::string fnName = func->getName();
+            if (!artifact.findSymbol(fnName)) {
+                ::target::artifact::object::ObjectSymbol s;
+                s.name = fnName;
+                s.value = 0;
+                s.size = 0;
+                s.sectionName = ".text";
+                s.binding = ::target::artifact::object::SymbolBinding::Global;
+                s.type = ::target::artifact::object::SymbolType::Function;
+                s.isDefined = true;
+                artifact.symbols.push_back(s);
+            }
+        }
+
+        // Relocations
+        for (const auto& rel : relocations) {
+            ::target::artifact::object::ObjectRelocation r;
+            r.offset = rel.offset;
+            r.symbolName = rel.symbolName;
+            r.type = rel.type;
+            r.sectionName = rel.sectionName;
+            r.addend = rel.addend;
+            artifact.relocations.push_back(r);
+
+            if (!rel.symbolName.empty() && !artifact.findSymbol(rel.symbolName)) {
+                ::target::artifact::object::ObjectSymbol s;
+                s.name = rel.symbolName;
+                s.value = 0;
+                s.size = 0;
+                s.sectionName = "";
+                s.binding = ::target::artifact::object::SymbolBinding::Global;
+                s.type = ::target::artifact::object::SymbolType::Function;
+                s.isDefined = false;
+                artifact.symbols.push_back(s);
+            }
+        }
+
+        auto writer = ::target::artifact::object::ObjectWriter::createForTargetTriple(targetInfo->getName());
+
+        if (writer && writer->write(artifact, objPath)) {
+            result.objGen.success = true;
+            result.objGen.objectPath = objPath;
+            result.objectPath = objPath;
+        } else {
+            result.objGen.success = false;
+            result.objGen.errorOutput = writer ? writer->getLastError() : "Failed to create ObjectWriter for target: " + targetInfo->getName();
+        }
     }
     result.success = !result.hasValidationErrors() && (!generateObject || result.objGen.success);
     result.totalTimeMs = timer.getElapsedMs(); return result;
@@ -376,6 +556,15 @@ void CodeGen::emitTargetSpecificHeader() {
             *os << ".att_syntax prefix\n";
     }
 }
+std::string CodeGen::getOrCreateVectorConstantLabel(const VectorConstant& bytes) {
+    auto existing = vectorConstantLabels.find(bytes);
+    if (existing != vectorConstantLabels.end()) return existing->second;
+
+    const std::string label = ".LCvec_" + std::to_string(vectorConstantLabels.size());
+    vectorConstantLabels.emplace(bytes, label);
+    return label;
+}
+
 void CodeGen::emitDataSection() {
     if (module.getGlobalVariables().empty() && !usesHeap) return;
     if (os) {
@@ -515,6 +704,31 @@ void CodeGen::emitDataSection() {
         }
     }
 }
+void CodeGen::emitVectorConstantPool() {
+    if (vectorConstantLabels.empty()) return;
+    if (os) {
+        *os << "\n.section .rodata\n";
+        for (const auto& [bytes, label] : vectorConstantLabels) {
+            *os << ".balign 16\n" << label << ":\n  .byte ";
+            for (size_t index = 0; index < bytes.size(); ++index) {
+                if (index != 0) *os << ", ";
+                *os << static_cast<unsigned>(bytes[index]);
+            }
+            *os << "\n";
+        }
+        return;
+    }
+
+    if (!rodataAssembler) return;
+    for (const auto& [bytes, label] : vectorConstantLabels) {
+        while (rodataAssembler->getCodeSize() % 16 != 0)
+            rodataAssembler->emitByte(0);
+        const uint64_t offset = rodataAssembler->getCodeSize();
+        symbols.push_back({label, offset, bytes.size(), 0, 0, ".rodata"});
+        for (uint8_t byte : bytes) rodataAssembler->emitByte(byte);
+    }
+}
+
 void CodeGen::emitTextSection() {
     if (os) {
         *os << ".text\n.globl main\n";

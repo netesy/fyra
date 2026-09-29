@@ -1,5 +1,7 @@
 #include "codegen/regalloc/LivenessAnalysis.h"
 #include "transforms/CFGBuilder.h"
+#include "transforms/LoopInvariantCodeMotion.h"
+#include "transforms/Loop.h"
 #include "ir/BasicBlock.h"
 #include "ir/PhiNode.h"
 #include "ir/User.h"
@@ -51,6 +53,44 @@ void LivenessAnalysis::run(ir::Function& func) {
                     if (auto* op_instr = dynamic_cast<ir::Instruction*>(operand->get())) {
                         if (liveRanges.count(op_instr)) {
                             liveRanges[op_instr].end = std::max(liveRanges[op_instr].end, use_site);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Extend live ranges across loop latches for non-Phi loop-invariant variables defined outside the loop
+    std::vector<std::unique_ptr<Loop>> loops;
+    LoopInvariantCodeMotion licm;
+    licm.findLoops(func, loops);
+
+    for (const auto& loopPtr : loops) {
+        if (!loopPtr) continue;
+        int max_latch_site = -1;
+        for (ir::BasicBlock* bb : loopPtr->blocks) {
+            if (bb->getInstructions().empty()) continue;
+            int bb_end_site = instrNumbering[bb->getInstructions().back().get()];
+            for (ir::BasicBlock* succ : bb->getSuccessors()) {
+                if (succ == loopPtr->header) {
+                    max_latch_site = std::max(max_latch_site, bb_end_site);
+                    break;
+                }
+            }
+        }
+        if (max_latch_site < 0) continue;
+
+        for (ir::BasicBlock* bb : loopPtr->blocks) {
+            for (auto& instr_ptr : bb->getInstructions()) {
+                for (auto& operand : instr_ptr->getOperands()) {
+                    if (auto* op_instr = dynamic_cast<ir::Instruction*>(operand->get())) {
+                        if (liveRanges.count(op_instr)) {
+                            // Extend live range to loop latch for:
+                            // 1. Loop-invariants defined outside the loop
+                            // 2. Loop-carried variables defined in loop header
+                            if (loopPtr->blocks.count(op_instr->getParent()) == 0 || op_instr->getParent() == loopPtr->header) {
+                                liveRanges[op_instr].end = std::max(liveRanges[op_instr].end, max_latch_site);
+                            }
                         }
                     }
                 }

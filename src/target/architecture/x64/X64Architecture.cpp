@@ -88,6 +88,7 @@ static std::string to64BitReg(const std::string& reg) {
 
 static bool is32BitType(const ir::Type* type) {
     if (!type) return false;
+    if (type->isFloatTy()) return true;
     if (type->isInteger()) return type->getSize() <= 4;
     if (auto* it = dynamic_cast<const ir::IntegerType*>(type)) {
         return it->getBitwidth() <= 32;
@@ -101,8 +102,70 @@ static bool is32BitRegisterName(const std::string& reg) {
     return false;
 }
 
-static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const std::string& dst, bool is32) {
+static bool isXmmRegisterName(const std::string& reg) {
+    return reg.find("xmm") != std::string::npos || reg.find("ymm") != std::string::npos || reg.find("zmm") != std::string::npos;
+}
+
+static std::string toYmmReg(const std::string& reg) {
+    std::string r = reg;
+    size_t pos = r.find("xmm");
+    if (pos != std::string::npos) {
+        r.replace(pos, 3, "ymm");
+    }
+    return r;
+}
+
+static std::string toZmmReg(const std::string& reg) {
+    std::string r = reg;
+    size_t pos = r.find("xmm");
+    if (pos != std::string::npos) {
+        r.replace(pos, 3, "zmm");
+    }
+    return r;
+}
+
+static bool isDirectGprRegister(const std::string& op) {
+    if (op.empty()) return false;
+    if (isXmmRegisterName(op)) return false;
+    if (op[0] == '%' || op[0] == 'r' || op[0] == 'e') {
+        if (op[0] == '-' || op[0] == '[' || op[0] == '$') return false;
+        if (op.find('(') != std::string::npos || op.find(')') != std::string::npos) return false;
+        return true;
+    }
+    return false;
+}
+
+static bool isYmmRegisterName(const std::string& reg) {
+    return reg.find("ymm") != std::string::npos;
+}
+
+static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const std::string& dst, bool is32, unsigned totalBits = 128) {
     if (!os) return;
+    if (isXmmRegisterName(src) || isXmmRegisterName(dst)) {
+        if (src == dst) return;
+        if (isXmmRegisterName(src) && isXmmRegisterName(dst)) {
+            if (totalBits == 256 || isYmmRegisterName(src) || isYmmRegisterName(dst)) {
+                *os << "  vmovdqu " << toYmmReg(src) << ", " << toYmmReg(dst) << "\n";
+            } else {
+                *os << "  movdqu " << src << ", " << dst << "\n";
+            }
+        } else if (isXmmRegisterName(src)) {
+            if (is32BitRegisterName(dst) || is32) {
+                *os << "  movd " << src << ", " << to32BitReg(dst) << "\n";
+            } else {
+                *os << "  movq " << src << ", " << to64BitReg(dst) << "\n";
+            }
+        } else {
+            if (is32BitRegisterName(src) || is32) {
+                *os << "  movd " << to32BitReg(src) << ", " << dst << "\n";
+            } else {
+                *os << "  movq " << to64BitReg(src) << ", " << dst << "\n";
+            }
+        }
+        cg.lastStoreOp = "";
+        return;
+    }
+
     if (is32BitRegisterName(src) || is32BitRegisterName(dst)) is32 = true;
     std::string regRax = is32 ? "%eax" : "%rax";
     std::string s = src.empty() ? regRax : src;
@@ -112,8 +175,38 @@ static void emitMov(CodeGen& cg, std::ostream* os, const std::string& src, const
     if (!d.empty() && d[0] == '%') d = is32 ? to32BitReg(d) : to64BitReg(d);
     if (s == d) return;
 
+
     if (!cg.lastStoreOp.empty() && s == cg.lastStoreOp && (d == regRax || d == "%rax" || d == "%eax")) {
-        std::cerr << "SKIPPED emitMov: s=" << s << " d=" << d << " lastStoreOp=" << cg.lastStoreOp << "\n";
+        return;
+    }
+
+    bool srcIsAddr = (!s.empty() && s[0] == '(' && s.find(',') != std::string::npos);
+    if (srcIsAddr) {
+        std::string reg = is32 ? "%eax" : "%rax";
+        *os << "  leaq " << s << ", " << reg << "\n";
+        if (d != reg) {
+            *os << "  movq " << reg << ", " << d << "\n";
+        }
+        cg.lastStoreOp = d;
+        return;
+    }
+
+    bool srcIsMem = (!s.empty() && (s[0] == '-' || s[0] == '[' || s.find("(%rbp)") != std::string::npos));
+    bool dstIsMem = (!d.empty() && (d[0] == '-' || d[0] == '[' || d.find("(%rbp)") != std::string::npos));
+
+    if (srcIsMem && dstIsMem) {
+        bool isWin = cg.getTargetInfo() && (cg.getTargetInfo()->getName().find("windows") != std::string::npos || cg.getTargetInfo()->getName().find("win64") != std::string::npos);
+        if (isWin) {
+            std::string reg = is32 ? "eax" : "rax";
+            *os << "  mov " << reg << ", " << s << "\n";
+            *os << "  mov " << d << ", " << reg << "\n";
+        } else {
+            std::string reg = is32 ? "%eax" : "%rax";
+            std::string op = is32 ? "movl" : "movq";
+            *os << "  " << op << " " << s << ", " << reg << "\n";
+            *os << "  " << op << " " << reg << ", " << d << "\n";
+        }
+        cg.lastStoreOp = d;
         return;
     }
 
@@ -149,6 +242,8 @@ void X64Architecture::initRegisters() {
 
 TypeInfo X64Architecture::getTypeInfo(const ir::Type* type) const {
     if (!type || type->isVoidTy()) return {0, 0, RegisterClass::Integer, false, false};
+    if (type->isFloatTy()) return {4, 4, RegisterClass::Float, false, false};
+    if (type->isDoubleTy()) return {8, 8, RegisterClass::Float, false, false};
     if (type->isPointerTy()) return {8, 8, RegisterClass::Integer, false, false};
     if (auto* it = dynamic_cast<const ir::IntegerType*>(type)) {
         int w = it->getBitwidth();
@@ -174,21 +269,20 @@ const std::string& X64Architecture::getReturnRegister(const ir::Type* type) cons
 void X64Architecture::emitHeader(CodeGen& cg) {
 }
 
-void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
+X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& func) const {
+    X64FrameLayout layout;
     if (abi == X64ABI::SystemV) {
-        bool makesCalls = false;
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 auto opc = instr->getOpcode();
                 if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                    makesCalls = true;
+                    layout.makesCalls = true;
                     break;
                 }
             }
-            if (makesCalls) break;
+            if (layout.makesCalls) break;
         }
 
-        std::vector<std::string> usedCalleeRegs;
         static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
@@ -197,8 +291,8 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                     if (regIdx < integerRegs.size()) {
                         const std::string& regName = integerRegs[regIdx];
                         if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                usedCalleeRegs.push_back(regName);
+                            if (std::find(layout.usedCalleeRegs.begin(), layout.usedCalleeRegs.end(), regName) == layout.usedCalleeRegs.end()) {
+                                layout.usedCalleeRegs.push_back(regName);
                             }
                         }
                     }
@@ -206,41 +300,101 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
 
-        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
+        size_t pIdx0 = 0;
+        for (auto& param : func.getParameters()) {
+            if (pIdx0 >= 6) {
+                int stackArgOff = 16 + (pIdx0 - 6) * 8;
+                cg.getStackOffsets()[param.get()] = stackArgOff;
+            }
+            pIdx0++;
+        }
+        for (const auto& [vreg, slotBytes] : func.getStackSlots()) {
+            if (vreg) {
+                cg.getStackOffsets()[const_cast<ir::Value*>(vreg)] = -slotBytes;
+            }
+        }
+
+        int maxAlign = 16;
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
-                if (instr->getType() && !instr->getType()->isVoidTy()) {
-                    if (func.hasStackSlot(instr.get())) {
-                        cg.getStackOffsets()[instr.get()] = -8 - 8 * (int)usedCalleeRegs.size() - func.getStackSlotForVreg(instr.get());
-                    } else if (!instr->hasPhysicalRegister()) {
-                        cg.getStackOffsets()[instr.get()] = current_offset;
-                        current_offset -= 8;
+                if (instr->getType()) {
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                        unsigned bits = vt->getSize() * 8;
+                        if (bits >= 512) maxAlign = std::max(maxAlign, 64);
+                        else if (bits >= 256) maxAlign = std::max(maxAlign, 32);
+                        else if (bits >= 128) maxAlign = std::max(maxAlign, 16);
                     }
                 }
             }
         }
-        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
 
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
+        int current_offset = -8 * (int)layout.usedCalleeRegs.size();
 
+        for (auto& bb : func.getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (instr->getType() && !instr->getType()->isVoidTy()) {
+                    if (func.hasStackSlot(instr.get())) {
+                        cg.getStackOffsets()[instr.get()] = -func.getStackSlotForVreg(instr.get());
+                    }
+                }
+            }
+        }
+
+        int min_offset = current_offset;
+        for (auto& [val, off] : cg.getStackOffsets()) {
+            int slotSize = 8;
+            if (val->getType()) {
+                if (auto* vt = dynamic_cast<const ir::VectorType*>(val->getType())) {
+                    slotSize = vt->getSize();
+                }
+            }
+            if (off - slotSize < min_offset) {
+                min_offset = off - slotSize;
+            }
+        }
+
+        int total_frame = std::abs(min_offset);
+        if (total_frame % maxAlign != 0) {
+            total_frame += (maxAlign - (total_frame % maxAlign));
+        }
+        layout.stackAlloc = total_frame - 8 * (1 + (int)layout.usedCalleeRegs.size());
+        bool hasStackParameters = func.getParameters().size() > integerArgRegs.size();
+        layout.isZeroFrame = (!layout.makesCalls && total_frame == 0 &&
+                              layout.usedCalleeRegs.empty() && !hasStackParameters && func.getParameters().empty());
+    } else {
+        layout.makesCalls = true;
+        layout.usedCalleeRegs = {"rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"};
+        int current_offset = -64;
+        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
+        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
+        layout.stackAlloc = std::abs(current_offset + 56) + 32; // Shadow space
+        if ((layout.stackAlloc + 64 + 8) % 16 != 0) layout.stackAlloc += 16 - ((layout.stackAlloc + 64 + 8) % 16);
+        layout.isZeroFrame = false;
+    }
+    return layout;
+}
+
+void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
+    X64FrameLayout layout = computeFrameLayout(cg, func);
+    if (abi == X64ABI::SystemV) {
         if (auto* os = cg.getTextStream()) {
             *os << "  .cfi_startproc\n";
-            if (!isZeroFrame) {
+            if (!layout.isZeroFrame) {
                 *os << "  pushq %rbp\n";
                 *os << "  .cfi_def_cfa_offset 16\n";
                 *os << "  .cfi_offset 6, -16\n";
                 *os << "  movq %rsp, %rbp\n";
                 *os << "  .cfi_def_cfa_register 6\n";
-                for (const auto& reg : usedCalleeRegs) {
+                for (const auto& reg : layout.usedCalleeRegs) {
                     *os << "  pushq %" << reg << "\n";
                 }
             }
         } else {
             auto& as = cg.getAssembler();
-            if (!isZeroFrame) {
+            if (!layout.isZeroFrame) {
                 as.emitByte(0x55);
                 as.emitBytes({0x48, 0x89, 0xE5});
-                for (const auto& reg : usedCalleeRegs) {
+                for (const auto& reg : layout.usedCalleeRegs) {
                     uint8_t r = getArchRegIndex(reg);
                     if (r >= 8) as.emitByte(0x41);
                     as.emitByte(0x50 + (r & 7));
@@ -248,18 +402,25 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         }
 
-        if (!isZeroFrame) {
-            int total_frame = 8 * (1 + (int)usedCalleeRegs.size()) + stack_alloc;
-            if (total_frame % 16 != 0) {
-                stack_alloc += (16 - (total_frame % 16));
-            }
+        if (!layout.isZeroFrame) {
             if (auto* os = cg.getTextStream()) {
-                if (stack_alloc > 0) *os << "  subq $" << stack_alloc << ", %rsp\n";
+                if (layout.stackAlloc > 0) *os << "  subq $" << layout.stackAlloc << ", %rsp\n";
+                static const std::vector<std::string> sysvArgRegs = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+                size_t pIdx = 0;
+                for (auto& param : func.getParameters()) {
+                    if (pIdx < sysvArgRegs.size() && func.hasStackSlot(param.get())) {
+                        bool is32 = is32BitType(param->getType());
+                        std::string srcReg = is32 ? to32BitReg("%" + sysvArgRegs[pIdx]) : "%" + sysvArgRegs[pIdx];
+                        std::string stackOp = formatStackOperand(cg.getStackOffsets()[param.get()]);
+                        emitMov(cg, os, srcReg, stackOp, is32);
+                    }
+                    pIdx++;
+                }
             } else {
                 auto& as = cg.getAssembler();
-                if (stack_alloc > 0) {
-                    if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc});
-                    else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); }
+                if (layout.stackAlloc > 0) {
+                    if (layout.stackAlloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)layout.stackAlloc});
+                    else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(layout.stackAlloc); }
                 }
             }
         }
@@ -273,13 +434,8 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             as.emitByte(0x53); as.emitByte(0x56); as.emitByte(0x57);
             as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57});
         }
-        int current_offset = -64;
-        for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
-        for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
-        int stack_alloc = std::abs(current_offset + 56) + 32; // Shadow space
-        if ((stack_alloc + 64 + 8) % 16 != 0) stack_alloc += 16 - ((stack_alloc + 64 + 8) % 16);
         if (auto* os = cg.getTextStream()) {
-            if (stack_alloc > 0) *os << "  sub rsp, " << stack_alloc << "\n";
+            if (layout.stackAlloc > 0) *os << "  sub rsp, " << layout.stackAlloc << "\n";
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
@@ -293,7 +449,7 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         } else {
             auto& as = cg.getAssembler();
-            if (stack_alloc > 0) { if (stack_alloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)stack_alloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_alloc); } }
+            if (layout.stackAlloc > 0) { if (layout.stackAlloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)layout.stackAlloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(layout.stackAlloc); } }
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
@@ -311,61 +467,18 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
 }
 
 void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
+    X64FrameLayout layout = computeFrameLayout(cg, func);
     if (abi == X64ABI::SystemV) {
-        bool makesCalls = false;
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                auto opc = instr->getOpcode();
-                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                    makesCalls = true;
-                    break;
-                }
-            }
-            if (makesCalls) break;
-        }
-
-        std::vector<std::string> usedCalleeRegs;
-        static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->hasPhysicalRegister()) {
-                    size_t regIdx = instr->getPhysicalRegister();
-                    if (regIdx < integerRegs.size()) {
-                        const std::string& regName = integerRegs[regIdx];
-                        if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                usedCalleeRegs.push_back(regName);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->getType() && !instr->getType()->isVoidTy()) {
-                    if (func.hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
-                        current_offset -= 8;
-                    }
-                }
-            }
-        }
-        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
-
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
-
         if (auto* os = cg.getTextStream()) {
             *os << func.getName() << "_epilogue" << ":\n";
-            if (!usedCalleeRegs.empty()) {
-                size_t bytes = usedCalleeRegs.size() * 8;
+            if (!layout.usedCalleeRegs.empty()) {
+                size_t bytes = layout.usedCalleeRegs.size() * 8;
                 *os << "  leaq -" << bytes << "(%rbp), %rsp\n";
-                for (auto it = usedCalleeRegs.rbegin(); it != usedCalleeRegs.rend(); ++it) {
+                for (auto it = layout.usedCalleeRegs.rbegin(); it != layout.usedCalleeRegs.rend(); ++it) {
                     *os << "  popq %" << *it << "\n";
                 }
                 *os << "  popq %rbp\n";
-            } else if (!isZeroFrame) {
+            } else if (!layout.isZeroFrame) {
                 *os << "  leave\n";
             }
             *os << "  .cfi_def_cfa 7, 8\n";
@@ -381,16 +494,16 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             epilogue_sym.binding = 0; // STB_LOCAL
             cg.addSymbol(epilogue_sym);
 
-            if (!usedCalleeRegs.empty()) {
-                size_t bytes = usedCalleeRegs.size() * 8;
+            if (!layout.usedCalleeRegs.empty()) {
+                size_t bytes = layout.usedCalleeRegs.size() * 8;
                 emitRegMem(as, 0x48, 0x8D, 4, -(int32_t)bytes); // leaq -N(%rbp), %rsp
-                for (auto it = usedCalleeRegs.rbegin(); it != usedCalleeRegs.rend(); ++it) {
+                for (auto it = layout.usedCalleeRegs.rbegin(); it != layout.usedCalleeRegs.rend(); ++it) {
                     uint8_t r = getArchRegIndex(*it);
                     if (r >= 8) as.emitByte(0x41);
                     as.emitByte(0x58 + (r & 7));
                 }
                 as.emitByte(0x5D); // pop rbp
-            } else if (!isZeroFrame) {
+            } else if (!layout.isZeroFrame) {
                 as.emitByte(0xC9); // leave
             }
             as.emitByte(0xC3); // ret
@@ -421,7 +534,7 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
 
 void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
-        if (!i.getOperands().empty()) {
+        if (!i.getOperands().empty() && i.getOperands()[0]->get() != nullptr) {
             ir::Value* retVal = i.getOperands()[0]->get();
             bool is32 = is32BitType(retVal->getType());
             std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
@@ -432,48 +545,9 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
                 emitMov(cg, os, src, rax, is32);
             }
         }
-        bool makesCalls = false;
         ir::Function* func = i.getParent()->getParent();
-        for (auto& bb : func->getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                auto opc = instr->getOpcode();
-                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                    makesCalls = true;
-                    break;
-                }
-            }
-            if (makesCalls) break;
-        }
-        std::vector<std::string> usedCalleeRegs;
-        static const std::vector<std::string> calleeList = {"rbx", "r12", "r13", "r14", "r15"};
-        for (auto& bb : func->getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->hasPhysicalRegister()) {
-                    size_t regIdx = instr->getPhysicalRegister();
-                    if (regIdx < integerRegs.size()) {
-                        const std::string& regName = integerRegs[regIdx];
-                        if (std::find(calleeList.begin(), calleeList.end(), regName) != calleeList.end()) {
-                            if (std::find(usedCalleeRegs.begin(), usedCalleeRegs.end(), regName) == usedCalleeRegs.end()) {
-                                usedCalleeRegs.push_back(regName);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        int current_offset = -8 - 8 * (int)usedCalleeRegs.size();
-        for (auto& bb : func->getBasicBlocks()) {
-            for (auto& instr : bb->getInstructions()) {
-                if (instr->getType() && !instr->getType()->isVoidTy()) {
-                    if (func->hasStackSlot(instr.get()) || !instr->hasPhysicalRegister()) {
-                        current_offset -= 8;
-                    }
-                }
-            }
-        }
-        int stack_alloc = std::abs(current_offset + 8 + 8 * (int)usedCalleeRegs.size());
-        bool isZeroFrame = (!makesCalls && stack_alloc == 0 && usedCalleeRegs.empty());
-        if (isZeroFrame) {
+        X64FrameLayout layout = computeFrameLayout(cg, *func);
+        if (layout.permitsBareReturn()) {
             *os << "  ret\n";
         } else {
             *os << "  jmp " << func->getName() << "_epilogue\n";
@@ -523,6 +597,17 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             } else {
                 std::string s1 = op1;
                 if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                if (!s1.empty() && s1[0] == '$') {
+                    try {
+                        uint64_t uv = std::stoull(s1.substr(1));
+                        int64_t v = static_cast<int64_t>(uv);
+                        if (v > 2147483647LL || v < -2147483648LL || uv > 2147483647ULL) {
+                            std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                            *os << "  movabsq " << s1 << ", " << scratch << "\n";
+                            s1 = is32 ? to32BitReg(scratch) : scratch;
+                        }
+                    } catch (...) {}
+                }
                 *os << "  " << addOp << " " << s1 << ", " << d << "\n";
             }
             cg.lastStoreOp = "";
@@ -537,28 +622,126 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
             } else {
                 std::string s0 = op0;
                 if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                if (!s0.empty() && s0[0] == '$') {
+                    try {
+                        int64_t v = std::stoll(s0.substr(1));
+                        if (v > 2147483647LL || v < -2147483648LL) {
+                            std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                            *os << "  movabsq " << s0 << ", " << scratch << "\n";
+                            s0 = is32 ? to32BitReg(scratch) : scratch;
+                        }
+                    } catch (...) {}
+                }
                 *os << "  " << addOp << " " << s0 << ", " << d << "\n";
             }
             cg.lastStoreOp = "";
             return;
         }
 
+        bool isStackDst = !isDirectGprRegister(dst);
+        std::string rax = (abi == X64ABI::Windows) ? (is32 ? "eax" : "rax") : (is32 ? "%eax" : "%rax");
+        std::string d = isStackDst ? rax : (is32 ? to32BitReg(dst) : to64BitReg(dst));
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
+        // 3-operand LEA optimization for non-destructive constant additions (dst = val + C where dst != val)
+        if (abi != X64ABI::Windows && !isGlobal0 && !isGlobal1) {
+            auto tryEmitLeaConstAdd = [&](const std::string& regOp, const std::string& immOp) -> bool {
+                if (!immOp.empty() && immOp[0] == '$' && isDirectGprRegister(regOp)) {
+                    try {
+                        int64_t v = std::stoll(immOp.substr(1));
+                        if (v >= -2147483648LL && v <= 2147483647LL) {
+                            std::string baseReg = to64BitReg(regOp);
+                            std::string targetReg = isStackDst ? rax : d;
+                            if (is32) targetReg = to32BitReg(targetReg);
+                            std::string leaInst = is32 ? "leal" : "leaq";
+                            std::string disp = (v != 0) ? std::to_string(v) : "";
+                            *os << "  " << leaInst << " " << disp << "(" << baseReg << "), " << targetReg << "\n";
+                            if (isStackDst) {
+                                emitMov(cg, os, rax, dst, is32);
+                            }
+                            cg.lastStoreOp = "";
+                            return true;
+                        }
+                    } catch (...) {}
+                }
+                return false;
+            };
+
+            std::string d64 = to64BitReg(d);
+            std::string s0_64 = to64BitReg(s0);
+            std::string s1_64 = to64BitReg(s1);
+
+            if (d64 != s0_64 && tryEmitLeaConstAdd(s0, s1)) return;
+            if (d64 != s1_64 && tryEmitLeaConstAdd(s1, s0)) return;
+        }
+
         if (abi == X64ABI::Windows) {
-            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
-            else *os << "  mov " << rax << ", " << op0 << "\n";
-            
-            if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << rax << ", rdx\n";
-            else *os << "  add " << rax << ", " << op1 << "\n";
-            
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 + src1
+                if (isGlobal1) *os << "  lea " << d << ", " << op1 << "\n";
+                else *os << "  mov " << d << ", " << op1 << "\n";
+
+                if (isGlobal0) *os << "  lea rdx, " << op0 << "\n  add " << d << ", rdx\n";
+                else *os << "  add " << d << ", " << op0 << "\n";
+            } else {
+                // Direct: dst = src1 + src2
+                if (isGlobal0) *os << "  lea " << d << ", " << op0 << "\n";
+                else *os << "  mov " << d << ", " << op0 << "\n";
+
+                if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  add " << d << ", rdx\n";
+                else *os << "  add " << d << ", " << op1 << "\n";
+            }
+            if (isStackDst) {
+                *os << "  mov " << dst << ", " << rax << "\n";
+            }
         } else {
-            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else emitMov(cg, os, op0, rax, is32);
-            
-            if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << rax << "\n";
-            else *os << "  " << addOp << " " << op1 << ", " << rax << "\n";
-            
-            emitMov(cg, os, rax, dst, is32);
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 + src1
+                if (isGlobal1) *os << "  leaq " << op1 << ", " << (isStackDst ? rax : d) << "\n";
+                else emitMov(cg, os, op1, d, is32);
+
+                if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+                else {
+                    if (!s0.empty() && s0[0] == '$') {
+                        try {
+                            int64_t v = std::stoll(s0.substr(1));
+                            if (v > 2147483647LL || v < -2147483648LL) {
+                                std::string scratch = (d == "%rax" || d == "%eax") ? "%rdx" : "%rax";
+                                *os << "  movabsq " << s0 << ", " << scratch << "\n";
+                                s0 = is32 ? to32BitReg(scratch) : scratch;
+                            }
+                        } catch (...) {}
+                    }
+                    *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                }
+            } else {
+                // Direct: dst = src1 + src2
+                if (isGlobal0) *os << "  leaq " << op0 << ", " << (isStackDst ? rax : d) << "\n";
+                else emitMov(cg, os, op0, d, is32);
+
+                if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << addOp << " %rdx, " << d << "\n";
+                else {
+                    if (!s1.empty() && s1[0] == '$') {
+                        try {
+                            int64_t v = std::stoll(s1.substr(1));
+                            if (v > 2147483647LL || v < -2147483648LL) {
+                                *os << "  movabsq " << s1 << ", " << d << "\n";
+                                *os << "  " << addOp << " " << s0 << ", " << d << "\n";
+                                if (isStackDst) emitMov(cg, os, rax, dst, is32);
+                                cg.lastStoreOp = "";
+                                return;
+                            }
+                        } catch (...) {}
+                    }
+                    *os << "  " << addOp << " " << s1 << ", " << d << "\n";
+                }
+            }
+            if (isStackDst) {
+                emitMov(cg, os, rax, dst, is32);
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -567,6 +750,29 @@ void X64Architecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         emitStoreResult(cg, i, 0);
     }
 }
+
+static void emitSignedMinMaxText(X64Architecture&, CodeGen& cg,
+                                 ir::Instruction& i, bool isMin) {
+    auto* os = cg.getTextStream();
+    if (!os) return;
+    bool is32 = i.getType()->getSize() == 4;
+    std::string lhs = cg.getValueAsOperand(i.getOperands()[0]->get());
+    std::string rhs = cg.getValueAsOperand(i.getOperands()[1]->get());
+    std::string dst = cg.getValueAsOperand(&i);
+    if (dst == rhs && dst != lhs) {
+        // Keep the coalesced RHS in place.  Comparing dst against lhs and
+        // reversing the candidate avoids borrowing an untracked scratch reg.
+        *os << "  " << (is32 ? "cmpl" : "cmpq") << " " << lhs << ", " << dst << "\n";
+        *os << "  " << (isMin ? "cmovg" : "cmovl") << " " << lhs << ", " << dst << "\n";
+        return;
+    }
+    if (dst != lhs) *os << "  " << (is32 ? "movl" : "movq") << " " << lhs << ", " << dst << "\n";
+    *os << "  " << (is32 ? "cmpl" : "cmpq") << " " << rhs << ", " << dst << "\n";
+    *os << "  " << (isMin ? "cmovg" : "cmovl") << " " << rhs << ", " << dst << "\n";
+}
+
+void X64Architecture::emitSMin(CodeGen& cg, ir::Instruction& i) { emitSignedMinMaxText(*this, cg, i, true); }
+void X64Architecture::emitSMax(CodeGen& cg, ir::Instruction& i) { emitSignedMinMaxText(*this, cg, i, false); }
 
 void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
@@ -587,14 +793,38 @@ void X64Architecture::emitSub(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  sub " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
+        if (d != s1) {
+            // Safe direct lowering: dst = src1 - src2
+            if (abi == X64ABI::Windows) {
+                *os << "  mov " << d << ", " << op0 << "\n";
+                *os << "  sub " << d << ", " << op1 << "\n";
+            } else {
+                emitMov(cg, os, op0, d, is32);
+                std::string realS1 = s1;
+                if (!isDirectGprRegister(d) && !isDirectGprRegister(s1)) {
+                    std::string scratch = is32 ? "%r11d" : "%r11";
+                    emitMov(cg, os, s1, scratch, is32);
+                    realS1 = scratch;
+                }
+                *os << "  " << subOp << " " << realS1 << ", " << d << "\n";
+            }
         } else {
-            emitMov(cg, os, op0, rax, is32);
-            *os << "  " << subOp << " " << op1 << ", " << rax << "\n";
-            emitMov(cg, os, rax, dst, is32);
+            // Fallback for SUB when dst == src2 (non-commutative)
+            if (abi == X64ABI::Windows) {
+                *os << "  mov " << rax << ", " << op0 << "\n";
+                *os << "  sub " << rax << ", " << op1 << "\n";
+                *os << "  mov " << dst << ", " << rax << "\n";
+            } else {
+                emitMov(cg, os, op0, rax, is32);
+                *os << "  " << subOp << " " << s1 << ", " << rax << "\n";
+                emitMov(cg, os, rax, dst, is32);
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -623,14 +853,43 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  imul " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                // Commute: dst = src2 * src1
+                *os << "  mov " << d << ", " << op1 << "\n";
+                *os << "  imul " << d << ", " << op0 << "\n";
+            } else {
+                // Direct: dst = src1 * src2
+                *os << "  mov " << d << ", " << op0 << "\n";
+                *os << "  imul " << d << ", " << op1 << "\n";
+            }
         } else {
-            emitMov(cg, os, op0, rax, is32);
-            *os << "  " << mulOp << " " << op1 << ", " << rax << "\n";
-            emitMov(cg, os, rax, dst, is32);
+            if (!isDirectGprRegister(d)) {
+                std::string reg = is32 ? "%eax" : "%rax";
+                emitMov(cg, os, op0, reg, is32);
+                std::string realS1 = s1;
+                if (!isDirectGprRegister(s1)) {
+                    std::string scratch = is32 ? "%r11d" : "%r11";
+                    emitMov(cg, os, s1, scratch, is32);
+                    realS1 = scratch;
+                }
+                *os << "  " << mulOp << " " << realS1 << ", " << (is32 ? "%eax" : "%rax") << "\n";
+                emitMov(cg, os, (is32 ? "%eax" : "%rax"), d, is32);
+            } else if (d == s1 && d != s0) {
+                // Commute: dst = src2 * src1
+                emitMov(cg, os, op1, d, is32);
+                *os << "  " << mulOp << " " << s0 << ", " << d << "\n";
+            } else {
+                // Direct: dst = src1 * src2
+                emitMov(cg, os, op0, d, is32);
+                *os << "  " << mulOp << " " << s1 << ", " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -642,9 +901,6 @@ void X64Architecture::emitMul(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
-    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
-    std::string movOp = is32 ? "movl" : "movq";
     std::string idivOp = is32 ? "idivl" : "idivq";
 
     if (auto* os = cg.getTextStream()) {
@@ -656,21 +912,29 @@ void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
         bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
                          (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
-            else *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  push rcx\n  push rdx\n  push rax\n";
+            if (isGlobal0) *os << "  lea rax, " << op0 << "\n";
+            else *os << "  mov rax, " << op0 << "\n";
             if (is32) *os << "  cdq\n"; else *os << "  cqo\n";
-            if (isGlobal1) *os << "  lea " << rcx << ", " << op1 << "\n";
-            else *os << "  mov " << rcx << ", " << op1 << "\n";
-            *os << "  idiv " << rcx << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (isGlobal1) *os << "  lea rcx, " << op1 << "\n";
+            else *os << "  mov rcx, " << op1 << "\n";
+            *os << "  idiv rcx\n";
+            *os << "  mov [rsp], rax\n"; // Store quotient into pushed rax slot on stack
+            *os << "  pop rax\n  pop rdx\n  pop rcx\n";
+            *os << "  mov " << dst << ", rax\n";
         } else {
-            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else emitMov(cg, os, op0, rax, is32);
+            std::string raxReg = is32 ? "%eax" : "%rax";
+            std::string rcxReg = is32 ? "%ecx" : "%rcx";
+            *os << "  pushq %rax\n  pushq %rcx\n  pushq %rdx\n";
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << raxReg << "\n";
+            else emitMov(cg, os, op0, raxReg, is32);
             if (is32) *os << "  cltd\n"; else *os << "  cqto\n";
-            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcx << "\n";
-            else emitMov(cg, os, op1, rcx, is32);
-            *os << "  " << idivOp << " " << rcx << "\n";
-            emitMov(cg, os, rax, dst, is32);
+            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcxReg << "\n";
+            else emitMov(cg, os, op1, rcxReg, is32);
+            *os << "  " << idivOp << " " << rcxReg << "\n";
+            *os << "  movq %rax, 16(%rsp)\n"; // Store quotient into pushed rax slot on stack
+            *os << "  popq %rdx\n  popq %rcx\n  popq %rax\n";
+            emitMov(cg, os, raxReg, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -683,9 +947,6 @@ void X64Architecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
     bool is32 = is32BitType(i.getType());
-    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
-    std::string rdx = (abi == X64ABI::SystemV) ? (is32 ? "%edx" : "%rdx") : (is32 ? "edx" : "rdx");
     std::string idivOp = is32 ? "idivl" : "idivq";
 
     if (auto* os = cg.getTextStream()) {
@@ -697,21 +958,29 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
         bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[1]->get()) != nullptr || 
                          (dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[1]->get()));
         if (abi == X64ABI::Windows) {
-            if (isGlobal0) *os << "  lea " << rax << ", " << op0 << "\n";
-            else *os << "  mov " << rax << ", " << op0 << "\n";
+            *os << "  push rcx\n  push rdx\n  push rax\n";
+            if (isGlobal0) *os << "  lea rax, " << op0 << "\n";
+            else *os << "  mov rax, " << op0 << "\n";
             if (is32) *os << "  cdq\n"; else *os << "  cqo\n";
-            if (isGlobal1) *os << "  lea " << rcx << ", " << op1 << "\n";
-            else *os << "  mov " << rcx << ", " << op1 << "\n";
-            *os << "  idiv " << rcx << "\n";
-            *os << "  mov " << dst << ", " << rdx << "\n";
+            if (isGlobal1) *os << "  lea rcx, " << op1 << "\n";
+            else *os << "  mov rcx, " << op1 << "\n";
+            *os << "  idiv rcx\n";
+            *os << "  mov [rsp], rdx\n"; // Store remainder into pushed rax slot on stack
+            *os << "  pop rax\n  pop rdx\n  pop rcx\n";
+            *os << "  mov " << dst << ", rax\n";
         } else {
-            if (isGlobal0) *os << "  leaq " << op0 << ", " << rax << "\n";
-            else emitMov(cg, os, op0, rax, is32);
+            std::string raxReg = is32 ? "%eax" : "%rax";
+            std::string rcxReg = is32 ? "%ecx" : "%rcx";
+            *os << "  pushq %rax\n  pushq %rcx\n  pushq %rdx\n";
+            if (isGlobal0) *os << "  leaq " << op0 << ", " << raxReg << "\n";
+            else emitMov(cg, os, op0, raxReg, is32);
             if (is32) *os << "  cltd\n"; else *os << "  cqto\n";
-            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcx << "\n";
-            else emitMov(cg, os, op1, rcx, is32);
-            *os << "  " << idivOp << " " << rcx << "\n";
-            emitMov(cg, os, rdx, dst, is32);
+            if (isGlobal1) *os << "  leaq " << op1 << ", " << rcxReg << "\n";
+            else emitMov(cg, os, op1, rcxReg, is32);
+            *os << "  " << idivOp << " " << rcxReg << "\n";
+            *os << "  movq %rdx, 16(%rsp)\n"; // Store remainder into pushed rax slot on stack
+            *os << "  popq %rdx\n  popq %rcx\n  popq %rax\n";
+            emitMov(cg, os, raxReg, dst, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -723,19 +992,78 @@ void X64Architecture::emitRem(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string andOp = is32 ? "andl" : "andq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
-        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto* val1 = i.getOperands()[1]->get();
+        auto op0 = cg.getValueAsOperand(val0);
+        auto op1 = cg.getValueAsOperand(val1);
         auto dst = cg.getValueAsOperand(&i);
+
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(val0) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val0) != nullptr && !dynamic_cast<ir::Function*>(val0));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(val1) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val1) != nullptr && !dynamic_cast<ir::Function*>(val1));
+
+        if (!isGlobal0 && canUseInPlace(cg, i, val0)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal1) {
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  and " : ", %rdx\n  andl %rdx, ") << d << "\n";
+            } else {
+                std::string s1 = op1;
+                if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                if (abi == X64ABI::Windows) *os << "  and " << d << ", " << op1 << "\n";
+                else *os << "  " << andOp << " " << s1 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
+        if (!isGlobal1 && canUseInPlace(cg, i, val1)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal0) {
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  and " : ", %rdx\n  andl %rdx, ") << d << "\n";
+            } else {
+                std::string s0 = op0;
+                if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                if (abi == X64ABI::Windows) *os << "  and " << d << ", " << op0 << "\n";
+                else *os << "  " << andOp << " " << s0 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  and " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                if (isGlobal1) *os << "  lea " << d << ", " << op1 << "\n";
+                else *os << "  mov " << d << ", " << op1 << "\n";
+                if (isGlobal0) *os << "  lea rdx, " << op0 << "\n  and " << d << ", rdx\n";
+                else *os << "  and " << d << ", " << op0 << "\n";
+            } else {
+                if (isGlobal0) *os << "  lea " << d << ", " << op0 << "\n";
+                else *os << "  mov " << d << ", " << op0 << "\n";
+                if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  and " << d << ", rdx\n";
+                else *os << "  and " << d << ", " << op1 << "\n";
+            }
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  andq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            if (d == s1 && d != s0) {
+                if (isGlobal1) *os << "  leaq " << op1 << ", " << d << "\n";
+                else emitMov(cg, os, op1, d, is32);
+                if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << andOp << " %rdx, " << d << "\n";
+                else *os << "  " << andOp << " " << s0 << ", " << d << "\n";
+            } else {
+                if (isGlobal0) *os << "  leaq " << op0 << ", " << d << "\n";
+                else emitMov(cg, os, op0, d, is32);
+                if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << andOp << " %rdx, " << d << "\n";
+                else *os << "  " << andOp << " " << s1 << ", " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -746,19 +1074,78 @@ void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string orOp = is32 ? "orl" : "orq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
-        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto* val1 = i.getOperands()[1]->get();
+        auto op0 = cg.getValueAsOperand(val0);
+        auto op1 = cg.getValueAsOperand(val1);
         auto dst = cg.getValueAsOperand(&i);
+
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(val0) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val0) != nullptr && !dynamic_cast<ir::Function*>(val0));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(val1) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val1) != nullptr && !dynamic_cast<ir::Function*>(val1));
+
+        if (!isGlobal0 && canUseInPlace(cg, i, val0)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal1) {
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  or " : ", %rdx\n  orl %rdx, ") << d << "\n";
+            } else {
+                std::string s1 = op1;
+                if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                if (abi == X64ABI::Windows) *os << "  or " << d << ", " << op1 << "\n";
+                else *os << "  " << orOp << " " << s1 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
+        if (!isGlobal1 && canUseInPlace(cg, i, val1)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal0) {
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  or " : ", %rdx\n  orl %rdx, ") << d << "\n";
+            } else {
+                std::string s0 = op0;
+                if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                if (abi == X64ABI::Windows) *os << "  or " << d << ", " << op0 << "\n";
+                else *os << "  " << orOp << " " << s0 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  or " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                if (isGlobal1) *os << "  lea " << d << ", " << op1 << "\n";
+                else *os << "  mov " << d << ", " << op1 << "\n";
+                if (isGlobal0) *os << "  lea rdx, " << op0 << "\n  or " << d << ", rdx\n";
+                else *os << "  or " << d << ", " << op0 << "\n";
+            } else {
+                if (isGlobal0) *os << "  lea " << d << ", " << op0 << "\n";
+                else *os << "  mov " << d << ", " << op0 << "\n";
+                if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  or " << d << ", rdx\n";
+                else *os << "  or " << d << ", " << op1 << "\n";
+            }
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  orq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            if (d == s1 && d != s0) {
+                if (isGlobal1) *os << "  leaq " << op1 << ", " << d << "\n";
+                else emitMov(cg, os, op1, d, is32);
+                if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << orOp << " %rdx, " << d << "\n";
+                else *os << "  " << orOp << " " << s0 << ", " << d << "\n";
+            } else {
+                if (isGlobal0) *os << "  leaq " << op0 << ", " << d << "\n";
+                else emitMov(cg, os, op0, d, is32);
+                if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << orOp << " %rdx, " << d << "\n";
+                else *os << "  " << orOp << " " << s1 << ", " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -769,19 +1156,78 @@ void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string xorOp = is32 ? "xorl" : "xorq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
-        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto* val1 = i.getOperands()[1]->get();
+        auto op0 = cg.getValueAsOperand(val0);
+        auto op1 = cg.getValueAsOperand(val1);
         auto dst = cg.getValueAsOperand(&i);
+
+        bool isGlobal0 = dynamic_cast<ir::GlobalVariable*>(val0) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val0) != nullptr && !dynamic_cast<ir::Function*>(val0));
+        bool isGlobal1 = dynamic_cast<ir::GlobalVariable*>(val1) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(val1) != nullptr && !dynamic_cast<ir::Function*>(val1));
+
+        if (!isGlobal0 && canUseInPlace(cg, i, val0)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal1) {
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  xor " : ", %rdx\n  xorl %rdx, ") << d << "\n";
+            } else {
+                std::string s1 = op1;
+                if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+                if (abi == X64ABI::Windows) *os << "  xor " << d << ", " << op1 << "\n";
+                else *os << "  " << xorOp << " " << s1 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
+        if (!isGlobal1 && canUseInPlace(cg, i, val1)) {
+            std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+            if (isGlobal0) {
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  xor " : ", %rdx\n  xorl %rdx, ") << d << "\n";
+            } else {
+                std::string s0 = op0;
+                if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+                if (abi == X64ABI::Windows) *os << "  xor " << d << ", " << op0 << "\n";
+                else *os << "  " << xorOp << " " << s0 << ", " << d << "\n";
+            }
+            cg.lastStoreOp = "";
+            return;
+        }
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        std::string s1 = op1;
+        if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  xor " << rax << ", " << op1 << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (d == s1 && d != s0) {
+                if (isGlobal1) *os << "  lea " << d << ", " << op1 << "\n";
+                else *os << "  mov " << d << ", " << op1 << "\n";
+                if (isGlobal0) *os << "  lea rdx, " << op0 << "\n  xor " << d << ", rdx\n";
+                else *os << "  xor " << d << ", " << op0 << "\n";
+            } else {
+                if (isGlobal0) *os << "  lea " << d << ", " << op0 << "\n";
+                else *os << "  mov " << d << ", " << op0 << "\n";
+                if (isGlobal1) *os << "  lea rdx, " << op1 << "\n  xor " << d << ", rdx\n";
+                else *os << "  xor " << d << ", " << op1 << "\n";
+            }
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  xorq " << op1 << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            if (d == s1 && d != s0) {
+                if (isGlobal1) *os << "  leaq " << op1 << ", " << d << "\n";
+                else emitMov(cg, os, op1, d, is32);
+                if (isGlobal0) *os << "  leaq " << op0 << ", %rdx\n  " << xorOp << " %rdx, " << d << "\n";
+                else *os << "  " << xorOp << " " << s0 << ", " << d << "\n";
+            } else {
+                if (isGlobal0) *os << "  leaq " << op0 << ", " << d << "\n";
+                else emitMov(cg, os, op0, d, is32);
+                if (isGlobal1) *os << "  leaq " << op1 << ", %rdx\n  " << xorOp << " %rdx, " << d << "\n";
+                else *os << "  " << xorOp << " " << s1 << ", " << d << "\n";
+            }
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -792,66 +1238,176 @@ void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitShl(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string shiftOp = is32 ? "shll" : "shlq";
+    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  shlq %cl, " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get());
+
+        if (abi == X64ABI::Windows) {
+            if (constantCount) {
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  shl " << d << ", " << count << "\n";
+            } else {
+                *os << "  mov " << rcx << ", " << op1 << "\n";
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                *os << "  shl " << d << ", cl\n";
+            }
+        } else {
+            if (constantCount) {
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  " << shiftOp << " $" << count << ", " << d << "\n";
+            } else {
+                emitMov(cg, os, op1, rcx, is32);
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                *os << "  " << shiftOp << " %cl, " << d << "\n";
+            }
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xD3, 0xE0});
+        if (auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+            uint8_t count = static_cast<uint8_t>(constantCount->getValue() & (is32 ? 31ULL : 63ULL));
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xC1, 0xE0, count});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xD3, 0xE0});
+        }
         emitStoreResult(cg, i, 0);
     }
 }
 
 void X64Architecture::emitShr(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string shiftOp = is32 ? "shrl" : "shrq";
+    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  shrq %cl, " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get());
+
+        if (abi == X64ABI::Windows) {
+            if (constantCount) {
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  shr " << d << ", " << count << "\n";
+            } else {
+                *os << "  mov " << rcx << ", " << op1 << "\n";
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                *os << "  shr " << d << ", cl\n";
+            }
+        } else {
+            if (constantCount) {
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  " << shiftOp << " $" << count << ", " << d << "\n";
+            } else {
+                emitMov(cg, os, op1, rcx, is32);
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                *os << "  " << shiftOp << " %cl, " << d << "\n";
+            }
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xD3, 0xE8});
+        if (auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+            uint8_t count = static_cast<uint8_t>(constantCount->getValue() & (is32 ? 31ULL : 63ULL));
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xC1, 0xE8, count});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xD3, 0xE8});
+        }
         emitStoreResult(cg, i, 0);
     }
 }
 
 void X64Architecture::emitSar(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-    std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string shiftOp = is32 ? "sarl" : "sarq";
+    std::string rcx = (abi == X64ABI::SystemV) ? (is32 ? "%ecx" : "%rcx") : (is32 ? "ecx" : "rcx");
     if (auto* os = cg.getTextStream()) {
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-        *os << "  movq " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << rcx << "\n";
-        *os << "  sarq %cl, " << rax << "\n";
-        *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
+        auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto dst = cg.getValueAsOperand(&i);
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+        auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get());
+
+        if (abi == X64ABI::Windows) {
+            if (constantCount) {
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  sar " << d << ", " << count << "\n";
+            } else {
+                *os << "  mov " << rcx << ", " << op1 << "\n";
+                if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+                *os << "  sar " << d << ", cl\n";
+            }
+        } else {
+            if (constantCount) {
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                uint64_t count = constantCount->getValue() & (is32 ? 31ULL : 63ULL);
+                *os << "  " << shiftOp << " $" << count << ", " << d << "\n";
+            } else {
+                emitMov(cg, os, op1, rcx, is32);
+                if (s0 != d) emitMov(cg, os, s0, d, is32);
+                *os << "  " << shiftOp << " %cl, " << d << "\n";
+            }
+        }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
-        cg.getAssembler().emitBytes({0x48, 0xD3, 0xF8});
+        if (auto* constantCount = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
+            uint8_t count = static_cast<uint8_t>(constantCount->getValue() & (is32 ? 31ULL : 63ULL));
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xC1, 0xF8, count});
+        } else {
+            emitLoadValue(cg, cg.getAssembler(), i.getOperands()[1]->get(), 1);
+            if (!is32) cg.getAssembler().emitByte(0x48);
+            cg.getAssembler().emitBytes({0xD3, 0xF8});
+        }
         emitStoreResult(cg, i, 0);
     }
 }
 
 void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string negOp = is32 ? "negl" : "negq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
         auto dst = cg.getValueAsOperand(&i);
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  neg " << rax << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+            *os << "  neg " << d << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  negq " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            if (s0 != d) emitMov(cg, os, s0, d, is32);
+            *os << "  " << negOp << " " << d << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -861,18 +1417,23 @@ void X64Architecture::emitNeg(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitNot(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getType());
+    std::string notOp = is32 ? "notl" : "notq";
     if (auto* os = cg.getTextStream()) {
-        auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        auto* val0 = i.getOperands()[0]->get();
+        auto op0 = cg.getValueAsOperand(val0);
         auto dst = cg.getValueAsOperand(&i);
+
+        std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
+        std::string s0 = op0;
+        if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
+
         if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << op0 << "\n";
-            *os << "  not " << rax << "\n";
-            *os << "  mov " << dst << ", " << rax << "\n";
+            if (s0 != d) *os << "  mov " << d << ", " << s0 << "\n";
+            *os << "  not " << d << "\n";
         } else {
-            *os << "  movq " << op0 << ", " << rax << "\n";
-            *os << "  notq " << rax << "\n";
-            *os << "  movq " << rax << ", " << dst << "\n";
+            if (s0 != d) emitMov(cg, os, s0, d, is32);
+            *os << "  " << notOp << " " << d << "\n";
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -886,14 +1447,30 @@ void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
     std::string destOp = cg.getValueAsOperand(&i);
     if (srcOp == destOp) return; // Move elimination (self-move)
 
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool isVector = i.getType() && (i.getType()->isVectorTy() || i.getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(i.getType()) != nullptr);
+    if (isVector) {
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+        unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+        std::string movInst = (totalBits == 256) ? "vmovdqu" : "movdqu";
+        std::string src = (totalBits == 256) ? toYmmReg(srcOp) : srcOp;
+        std::string dest = (totalBits == 256) ? toYmmReg(destOp) : destOp;
+        if (auto* os = cg.getTextStream()) {
+            *os << "  " << movInst << " " << src << ", " << dest << "\n";
+        }
+        return;
+    }
+
+    bool is32 = is32BitType(i.getType());
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
+    std::string movOp = is32 ? "movl" : "movq";
+
     if (auto* os = cg.getTextStream()) {
         if (abi == X64ABI::Windows) {
             *os << "  mov " << rax << ", " << srcOp << "\n";
             *os << "  mov " << destOp << ", " << rax << "\n";
         } else {
-            *os << "  movq " << srcOp << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << destOp << "\n";
+            emitMov(cg, os, srcOp, rax, is32);
+            emitMov(cg, os, rax, destOp, is32);
         }
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
@@ -907,47 +1484,101 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
                          (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
 
     if (auto* os = cg.getTextStream()) {
-        size_t int_idx = 0, float_idx = 0;
-        for (size_t j = 1; j < i.getOperands().size(); ++j) {
-            ir::Value* argVal = i.getOperands()[j]->get();
-            bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
-            bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
-                               (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
-            if (isFloat) {
-                if (float_idx < floatArgRegs.size()) {
-                    std::string reg = floatArgRegs[float_idx++];
-                    if (abi == X64ABI::Windows)
-                        *os << "  movsd " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
-                    else
-                        *os << "  movsd " << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
-                }
-            } else {
-                size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
-                if (int_idx < maxArgs) {
-                    bool is32 = is32BitType(argVal->getType());
-                    std::string reg = getRegisterName(integerArgRegs[int_idx++], argVal->getType());
-                    if (argIsGlobal && abi == X64ABI::Windows) {
-                        *os << "  lea " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
-                    } else if (argIsGlobal && abi == X64ABI::SystemV) {
-                        *os << "  leaq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+        size_t systemVStackBytes = 0;
+        if (abi == X64ABI::Windows) {
+            for (size_t j = 1; j < i.getOperands().size(); ++j) {
+                ir::Value* argVal = i.getOperands()[j]->get();
+                size_t paramIdx = j - 1;
+                bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
+                bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
+                                   (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
+                std::string argOp = cg.getValueAsOperand(argVal);
+
+                if (paramIdx < 4) {
+                    if (isFloat) {
+                        std::string reg = floatArgRegs[paramIdx];
+                        *os << "  movsd " << reg << ", " << argOp << "\n";
                     } else {
-                        if (abi == X64ABI::Windows)
-                            *os << "  mov " << reg << ", " << cg.getValueAsOperand(argVal) << "\n";
-                        else
-                            emitMov(cg, os, cg.getValueAsOperand(argVal), reg, is32);
+                        std::string reg = getRegisterName(integerArgRegs[paramIdx], argVal->getType());
+                        if (argIsGlobal) {
+                            *os << "  lea " << reg << ", " << argOp << "\n";
+                        } else {
+                            *os << "  mov " << reg << ", " << argOp << "\n";
+                        }
+                    }
+                } else {
+                    size_t stackOff = paramIdx * 8;
+                    if (argIsGlobal) {
+                        *os << "  lea rax, " << argOp << "\n";
+                        *os << "  mov [rsp + " << stackOff << "], rax\n";
+                    } else {
+                        *os << "  mov rax, " << argOp << "\n";
+                        *os << "  mov [rsp + " << stackOff << "], rax\n";
                     }
                 }
             }
-            if (false) if (abi == X64ABI::Windows) {
-                // Stack arg (5th+): load into rax then store at [rsp + (j-1)*8]
-                size_t stackOff = (j - 1) * 8;
-                if (argIsGlobal) {
-                    *os << "  lea rax, " << cg.getValueAsOperand(argVal) << "\n";
+        } else {
+            size_t int_idx = 0, float_idx = 0;
+            struct RegisterArgument {
+                std::string destination;
+                std::string source;
+                bool isGlobal;
+            };
+            std::vector<RegisterArgument> integerArgs;
+            std::vector<std::pair<std::string, bool>> stackArgs;
+            auto pushArgument = [&](const std::pair<std::string, bool>& arg) {
+                const auto& [source, isGlobal] = arg;
+                if (isGlobal) {
+                    *os << "  leaq " << source << ", %rax\n  pushq %rax\n";
+                } else if (!source.empty() && source[0] == '%') {
+                    *os << "  pushq " << to64BitReg(source) << "\n";
+                } else if (!source.empty() && source[0] == '$') {
+                    // pushq only accepts a sign-extended 32-bit immediate.
+                    *os << "  movabsq " << source << ", %rax\n  pushq %rax\n";
                 } else {
-                    *os << "  mov rax, " << cg.getValueAsOperand(argVal) << "\n";
+                    *os << "  pushq " << source << "\n";
                 }
-                *os << "  mov [rsp + " << stackOff << "], rax\n";
+            };
+            for (size_t j = 1; j < i.getOperands().size(); ++j) {
+                ir::Value* argVal = i.getOperands()[j]->get();
+                bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
+                bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
+                                   (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
+                if (isFloat) {
+                    if (float_idx < floatArgRegs.size()) {
+                        std::string reg = floatArgRegs[float_idx++];
+                        *os << "  movsd " << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
+                    }
+                } else {
+                    if (int_idx < 6) {
+                        std::string reg = getRegisterName(integerArgRegs[int_idx++], argVal->getType());
+                        integerArgs.push_back({reg, cg.getValueAsOperand(argVal), argIsGlobal});
+                    } else {
+                        stackArgs.push_back({cg.getValueAsOperand(argVal), argIsGlobal});
+                    }
+                }
             }
+            // System V passes integer arguments after the sixth on the stack,
+            // right-to-left. Keep the call-site stack 16-byte aligned; padding
+            // precedes the arguments so the first stack argument remains at
+            // 8(%rsp) on callee entry.
+            if (stackArgs.size() % 2 != 0) {
+                *os << "  subq $8, %rsp\n";
+                systemVStackBytes += 8;
+            }
+            for (auto it = stackArgs.rbegin(); it != stackArgs.rend(); ++it) {
+                pushArgument(*it);
+                systemVStackBytes += 8;
+            }
+
+            // Calls require a parallel copy into ABI argument registers. Save
+            // every source only after the stack arguments are in place, then
+            // pop in reverse destination order. This also preserves stack-arg
+            // sources which happen to reside in an ABI argument register.
+            for (const auto& arg : integerArgs)
+                pushArgument({arg.source, arg.isGlobal});
+            for (auto it = integerArgs.rbegin(); it != integerArgs.rend(); ++it)
+                *os << "  popq " << to64BitReg(it->destination) << "\n";
         }
         if (isDirectCall) {
             *os << "  call " << calleeVal->getName() << "\n";
@@ -960,11 +1591,17 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
                 *os << "  call *%rax\n";
             }
         }
+        if (systemVStackBytes != 0)
+            *os << "  addq $" << systemVStackBytes << ", %rsp\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
-            if (abi == X64ABI::Windows)
-                *os << "  mov " << cg.getValueAsOperand(&i) << ", rax\n";
-            else
-                *os << "  movq %rax, " << cg.getValueAsOperand(&i) << "\n";
+            bool resultIs32 = is32BitType(i.getType());
+            if (abi == X64ABI::Windows) {
+                std::string destination = resultIs32 ? to32BitReg(cg.getValueAsOperand(&i)) : to64BitReg(cg.getValueAsOperand(&i));
+                *os << "  mov " << destination << ", " << (resultIs32 ? "eax" : "rax") << "\n";
+            } else {
+                std::string destination = resultIs32 ? to32BitReg(cg.getValueAsOperand(&i)) : to64BitReg(cg.getValueAsOperand(&i));
+                *os << "  " << (resultIs32 ? "movl %eax, " : "movq %rax, ") << destination << "\n";
+            }
         }
     } else {
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
@@ -991,19 +1628,113 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
     }
 }
 
+bool X64Architecture::emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) {
+    ir::Value* calleeVal = callInst.getOperands()[0]->get();
+    bool isDirectCall = (dynamic_cast<ir::Function*>(calleeVal) != nullptr ||
+                         (dynamic_cast<ir::GlobalValue*>(calleeVal) != nullptr && dynamic_cast<ir::GlobalVariable*>(calleeVal) == nullptr));
+    if (!isDirectCall) return false;
+
+    // Safety Predicate: Check return value consumption
+    if (callInst.getType()->getTypeID() != ir::Type::VoidTyID) {
+        if (retInst.getOperands().empty() || retInst.getOperands()[0]->get() != &callInst) {
+            return false;
+        }
+    } else {
+        if (!retInst.getOperands().empty()) return false;
+    }
+
+    // Safety Predicate: No stack-passed arguments
+    size_t numArgs = callInst.getOperands().size() - 1;
+    size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
+    if (numArgs > maxArgs) return false;
+
+    if (auto* os = cg.getTextStream()) {
+        if (abi == X64ABI::Windows) {
+            for (size_t j = 1; j < callInst.getOperands().size(); ++j) {
+                ir::Value* argVal = callInst.getOperands()[j]->get();
+                size_t paramIdx = j - 1;
+                bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
+                bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
+                                   (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
+                std::string argOp = cg.getValueAsOperand(argVal);
+
+                if (paramIdx < 4) {
+                    if (isFloat) {
+                        std::string reg = floatArgRegs[paramIdx];
+                        *os << "  movsd " << reg << ", " << argOp << "\n";
+                    } else {
+                        std::string reg = getRegisterName(integerArgRegs[paramIdx], argVal->getType());
+                        if (argIsGlobal) {
+                            *os << "  lea " << reg << ", " << argOp << "\n";
+                        } else {
+                            *os << "  mov " << reg << ", " << argOp << "\n";
+                        }
+                    }
+                }
+            }
+        } else {
+            size_t int_idx = 0, float_idx = 0;
+            for (size_t j = 1; j < callInst.getOperands().size(); ++j) {
+                ir::Value* argVal = callInst.getOperands()[j]->get();
+                bool isFloat = argVal->getType() && (argVal->getType()->isFloatTy() || argVal->getType()->isDoubleTy());
+                bool argIsGlobal = dynamic_cast<ir::GlobalVariable*>(argVal) != nullptr ||
+                                   (dynamic_cast<ir::GlobalValue*>(argVal) != nullptr && !dynamic_cast<ir::Function*>(argVal));
+                if (isFloat) {
+                    if (float_idx < floatArgRegs.size()) {
+                        std::string reg = floatArgRegs[float_idx++];
+                        *os << "  movsd " << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
+                    }
+                } else {
+                    if (int_idx < 6) {
+                        bool is32 = is32BitType(argVal->getType());
+                        std::string reg = getRegisterName(integerArgRegs[int_idx++], argVal->getType());
+                        if (argIsGlobal) {
+                            *os << "  leaq " << cg.getValueAsOperand(argVal) << ", " << reg << "\n";
+                        } else {
+                            emitMov(cg, os, cg.getValueAsOperand(argVal), reg, is32);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Frame Teardown
+        ir::Function* func = callInst.getParent()->getParent();
+        X64FrameLayout layout = computeFrameLayout(cg, *func);
+        if (abi == X64ABI::SystemV) {
+            if (!layout.usedCalleeRegs.empty()) {
+                *os << "  jmp " << func->getName() << "_epilogue\n";
+                return true;
+            }
+            if (!layout.isZeroFrame) {
+                *os << "  leave\n";
+            }
+            *os << "  jmp " << calleeVal->getName() << "\n";
+        } else {
+            *os << "  jmp " << func->getName() << "_epilogue\n";
+        }
+        return true;
+    }
+    return false;
+}
+
 void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "addss" : "addsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  addsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  addsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1019,17 +1750,21 @@ void X64Architecture::emitFAdd(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "subss" : "subsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  subsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  subsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1045,17 +1780,21 @@ void X64Architecture::emitFSub(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "mulss" : "mulsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  mulsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  mulsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1071,17 +1810,21 @@ void X64Architecture::emitFMul(CodeGen& cg, ir::Instruction& i) {
 
 void X64Architecture::emitFDiv(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
+        const bool single = i.getType() && i.getType()->isFloatTy();
+        const char* moveFP = single ? "movss" : "movsd";
+        const char* binaryFP = single ? "divss" : "divsd";
+        const std::string fpScratch = getReservedScratchVectorReg();
         auto op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
         auto op1 = cg.getValueAsOperand(i.getOperands()[1]->get());
         auto dst = cg.getValueAsOperand(&i);
         if (abi == X64ABI::Windows) {
-            *os << "  movsd xmm0, " << op0 << "\n";
-            *os << "  divsd xmm0, " << op1 << "\n";
-            *os << "  movsd " << dst << ", xmm0\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << op0 << "\n";
+            *os << "  " << binaryFP << " " << fpScratch << ", " << op1 << "\n";
+            *os << "  " << moveFP << " " << dst << ", " << fpScratch << "\n";
         } else {
-            *os << "  movsd " << op0 << ", %xmm0\n";
-            *os << "  divsd " << op1 << ", %xmm0\n";
-            *os << "  movsd %xmm0, " << dst << "\n";
+            *os << "  " << moveFP << " " << op0 << ", " << fpScratch << "\n";
+            *os << "  " << binaryFP << " " << op1 << ", " << fpScratch << "\n";
+            *os << "  " << moveFP << " " << fpScratch << ", " << dst << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1118,6 +1861,9 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             default:                    set = "sete"; break;
         }
         if (isFloatCmp) {
+            const bool single = i.getOperands()[0]->get()->getType()->isFloatTy();
+            const char* move = single ? "movss" : "movsd";
+            const char* compare = single ? "ucomiss" : "ucomisd";
             if (abi == X64ABI::Windows) {
                 *os << "  movsd xmm0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
                 *os << "  ucomisd xmm0, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
@@ -1125,11 +1871,11 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
                 *os << "  movzx " << eax << ", " << al << "\n";
                 *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
             } else {
-                *os << "  movsd " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
-                *os << "  ucomisd " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
+                *os << "  " << move << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
+                *os << "  " << compare << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
                 *os << "  " << set << " " << al << "\n";
                 *os << "  movzbq " << al << ", " << rax << "\n";
-                *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+                *os << "  movl " << eax << ", " << cg.getValueAsOperand(&i) << "\n";
             }
         } else {
             bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
@@ -1201,7 +1947,7 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
 
     if (auto* os = cg.getTextStream()) {
         ir::Instruction::Opcode op = i.getOpcode();
-        if (op == ir::Instruction::Sltof || op == ir::Instruction::SWtoF || op == ir::Instruction::UWtoF || op == ir::Instruction::Ultof) {
+        if (op == ir::Instruction::Sltof || op == ir::Instruction::SWtoF) {
             if (abi == X64ABI::Windows) {
                 *os << "  cvtsi2sd xmm0, " << srcOp << "\n";
                 *os << "  movsd " << destOp << ", xmm0\n";
@@ -1209,46 +1955,130 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
                 *os << "  cvtsi2sd " << srcOp << ", %xmm0\n";
                 *os << "  movsd %xmm0, " << destOp << "\n";
             }
+        } else if (op == ir::Instruction::UWtoF) {
+            if (abi == X64ABI::Windows) {
+                *os << "  mov eax, " << srcOp << "\n";
+                *os << "  cvtsi2sd xmm0, rax\n";
+                *os << "  movsd " << destOp << ", xmm0\n";
+            } else {
+                std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
+                *os << "  movl " << s32 << ", %eax\n";
+                *os << "  cvtsi2sd %rax, %xmm0\n";
+                *os << "  movsd %xmm0, " << destOp << "\n";
+            }
+        } else if (op == ir::Instruction::Ultof) {
+            std::string labelHigh = ".L_ultof_high_" + std::to_string((uintptr_t)&i);
+            std::string labelDone = ".L_ultof_done_" + std::to_string((uintptr_t)&i);
+            if (abi == X64ABI::Windows) {
+                *os << "  mov rax, " << srcOp << "\n";
+                *os << "  test rax, rax\n";
+                *os << "  js " << labelHigh << "\n";
+                *os << "  cvtsi2sd xmm0, rax\n";
+                *os << "  jmp " << labelDone << "\n";
+                *os << labelHigh << ":\n";
+                *os << "  mov rdx, rax\n";
+                *os << "  shr rax, 1\n";
+                *os << "  and rdx, 1\n";
+                *os << "  or rax, rdx\n";
+                *os << "  cvtsi2sd xmm0, rax\n";
+                *os << "  addsd xmm0, xmm0\n";
+                *os << labelDone << ":\n";
+                *os << "  movsd " << destOp << ", xmm0\n";
+            } else {
+                *os << "  movq " << srcOp << ", %rax\n";
+                *os << "  testq %rax, %rax\n";
+                *os << "  js " << labelHigh << "\n";
+                *os << "  cvtsi2sd %rax, %xmm0\n";
+                *os << "  jmp " << labelDone << "\n";
+                *os << labelHigh << ":\n";
+                *os << "  movq %rax, %rdx\n";
+                *os << "  shrq $1, %rax\n";
+                *os << "  andq $1, %rdx\n";
+                *os << "  orq %rdx, %rax\n";
+                *os << "  cvtsi2sd %rax, %xmm0\n";
+                *os << "  addsd %xmm0, %xmm0\n";
+                *os << labelDone << ":\n";
+                *os << "  movsd %xmm0, " << destOp << "\n";
+            }
+        } else if (op == ir::Instruction::DToUI || op == ir::Instruction::SToUI) {
+            std::string labelHigh = ".L_dtoui_high_" + std::to_string((uintptr_t)&i);
+            std::string labelDone = ".L_dtoui_done_" + std::to_string((uintptr_t)&i);
+            if (abi == X64ABI::Windows) {
+                *os << "  movsd xmm0, " << srcOp << "\n";
+                *os << "  mov rax, 0x43E0000000000000\n";
+                *os << "  movq xmm1, rax\n";
+                *os << "  comisd xmm0, xmm1\n";
+                *os << "  jae " << labelHigh << "\n";
+                *os << "  cvttsd2si rax, xmm0\n";
+                *os << "  jmp " << labelDone << "\n";
+                *os << labelHigh << ":\n";
+                *os << "  subsd xmm0, xmm1\n";
+                *os << "  cvttsd2si rax, xmm0\n";
+                *os << "  mov rdx, 0x8000000000000000\n";
+                *os << "  add rax, rdx\n";
+                *os << labelDone << ":\n";
+                *os << "  mov " << destOp << ", rax\n";
+            } else {
+                *os << "  movsd " << srcOp << ", %xmm0\n";
+                *os << "  movabsq $0x43E0000000000000, %rax\n";
+                *os << "  movq %rax, %xmm1\n";
+                *os << "  comisd %xmm1, %xmm0\n";
+                *os << "  jae " << labelHigh << "\n";
+                *os << "  cvttsd2si %xmm0, %rax\n";
+                *os << "  jmp " << labelDone << "\n";
+                *os << labelHigh << ":\n";
+                *os << "  subsd %xmm1, %xmm0\n";
+                *os << "  cvttsd2si %xmm0, %rax\n";
+                *os << "  movabsq $0x8000000000000000, %rdx\n";
+                *os << "  addq %rdx, %rax\n";
+                *os << labelDone << ":\n";
+                *os << "  movq %rax, " << destOp << "\n";
+            }
         } else if (op == ir::Instruction::ExtUB) {
             std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movzbl " << srcOp << ", %eax\n";
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movzbl " << r8 << ", " << d32 << "\n";
             } else {
-                *os << "  movzbl " << r8 << ", %eax\n";
+                *os << "  movzbl " << r8 << ", " << eax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUH) {
             std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movzwl " << srcOp << ", %eax\n";
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movzwl " << r16 << ", " << d32 << "\n";
             } else {
-                *os << "  movzwl " << r16 << ", %eax\n";
+                *os << "  movzwl " << r16 << ", " << eax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtUW) {
             std::string r32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movl " << srcOp << ", " << eax << "\n";
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movl " << r32 << ", " << d32 << "\n";
             } else {
                 *os << "  movl " << r32 << ", " << eax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSB) {
             std::string r8 = (srcOp[0] == '%') ? to8BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movsbq " << srcOp << ", %rax\n";
+            std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movsbq " << r8 << ", " << d64 << "\n";
             } else {
-                *os << "  movsbq " << r8 << ", %rax\n";
+                *os << "  movsbq " << r8 << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSH) {
             std::string r16 = (srcOp[0] == '%') ? to16BitReg(srcOp) : srcOp;
-            if (srcOp[0] != '%') {
-                *os << "  movswq " << srcOp << ", %rax\n";
+            std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
+            if (destOp[0] == '%') {
+                *os << "  movswq " << r16 << ", " << d64 << "\n";
             } else {
-                *os << "  movswq " << r16 << ", %rax\n";
+                *os << "  movswq " << r16 << ", " << rax << "\n";
+                *os << "  movq " << rax << ", " << destOp << "\n";
             }
-            *os << "  movq " << rax << ", " << destOp << "\n";
         } else if (op == ir::Instruction::ExtSW) {
             std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
             std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
@@ -1258,9 +2088,21 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
                 *os << "  movslq " << s32 << ", " << rax << "\n";
                 *os << "  movq " << rax << ", " << destOp << "\n";
             }
+        } else if (op == ir::Instruction::TruncD) {
+            std::string d32 = (destOp[0] == '%') ? to32BitReg(destOp) : destOp;
+            std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
+            if (destOp[0] == '%') {
+                *os << "  movl " << s32 << ", " << d32 << "\n";
+            } else {
+                *os << "  movl " << s32 << ", " << eax << "\n";
+                *os << "  movl " << eax << ", " << destOp << "\n";
+            }
         } else {
+            bool is32 = is32BitType(to);
+            std::string movOp = is32 ? "movl" : "movq";
+            std::string regRax = is32 ? eax : rax;
             *os << "  movq " << srcOp << ", " << rax << "\n";
-            *os << "  movq " << rax << ", " << destOp << "\n";
+            *os << "  " << movOp << " " << regRax << ", " << destOp << "\n";
         }
     } else {
         auto& as = cg.getAssembler();
@@ -1311,9 +2153,52 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
     }
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
+    std::string fpScratch = getReservedScratchVectorReg();
     if (auto* os = cg.getTextStream()) {
-        std::string op = cg.getValueAsOperand(i.getOperands()[0]->get());
-        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr;
+        ir::Value* ptrVal = i.getOperands()[0]->get();
+        if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            std::string stackOp = formatStackOperand(-ciSlot->getValue());
+            bool is32 = is32BitType(i.getType());
+            std::string dest = (abi == X64ABI::Windows) ? (is32 ? "eax" : "rax") : (is32 ? "%eax" : "%rax");
+            if (i.getType() && i.getType()->isFloatingPoint()) {
+                dest = fpScratch;
+            }
+            if (i.hasPhysicalRegister()) {
+                dest = cg.getValueAsOperand(&i);
+            }
+            emitMov(cg, os, stackOp, dest, is32);
+            return;
+        }
+        ComplexAddress complexAddr = matchComplexAddress(cg, ptrVal);
+        if (complexAddr.isValid) {
+            std::string sibStr = complexAddr.format(abi);
+            std::string destOp = cg.getValueAsOperand(&i);
+            if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
+                const char* moveFP = i.getType()->isFloatTy() ? "movss" : "movsd";
+                if (abi == X64ABI::Windows)
+                    *os << "  " << moveFP << " " << destOp << ", " << sibStr << "\n";
+                else
+                    *os << "  " << moveFP << " " << sibStr << ", " << destOp << "\n";
+                return;
+            }
+            if (abi == X64ABI::SystemV) {
+                if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << sibStr << ", " << rax << "\n";
+                else if (size == 2) *os << (isSigned ? "  movswq " : "  movzwq ") << sibStr << ", " << rax << "\n";
+                else if (size == 4) *os << (isSigned ? "  movslq " : "  movl ") << sibStr << ", " << eax << "\n";
+                else *os << "  movq " << sibStr << ", " << rax << "\n";
+            } else {
+                if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr " : "  movzx rax, byte ptr ") << sibStr << "\n";
+                else if (size == 2) *os << (isSigned ? "  movsx rax, word ptr " : "  movzx rax, word ptr ") << sibStr << "\n";
+                else if (size == 4) *os << (isSigned ? "  movsxd rax, dword ptr " : "  mov eax, dword ptr ") << sibStr << "\n";
+                else *os << "  mov rax, " << sibStr << "\n";
+            }
+            bool is32 = is32BitType(i.getType());
+            emitMov(cg, os, is32 ? eax : rax, destOp, is32);
+            return;
+        }
+
+        std::string op = cg.getValueAsOperand(ptrVal);
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(ptrVal) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << op << ", " << rax << "\n";
@@ -1334,10 +2219,11 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
                 *os << "  movq " << op << ", " << rax << "\n";
             }
             if (abi == X64ABI::SystemV) {
-                if (size == 1) *os << (isSigned ? "  movsbq (%rax), %rax\n" : "  movzbq (%rax), %rax\n");
+                if (i.getType() && i.getType()->isFloatTy()) *os << "  movss (" << rax << "), " << fpScratch << "\n";
+                else if (i.getType() && i.getType()->isDoubleTy()) *os << "  movsd (" << rax << "), " << fpScratch << "\n";
+                else if (size == 1) *os << (isSigned ? "  movsbq (%rax), %rax\n" : "  movzbq (%rax), %rax\n");
                 else if (size == 2) *os << (isSigned ? "  movswq (%rax), %rax\n" : "  movzwq (%rax), %rax\n");
                 else if (size == 4) *os << (isSigned ? "  movslq (%rax), %rax\n" : "  movl (%rax), %eax\n");
-                else if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) *os << "  movsd (%rax), %xmm0\n";
                 else *os << "  movq (%rax), %rax\n";
             } else {
                 if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr [rax]\n" : "  movzx rax, byte ptr [rax]\n");
@@ -1348,14 +2234,17 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
         }
         // Store result
         if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
+            const char* moveFP = i.getType()->isFloatTy() ? "movss" : "movsd";
             if (abi == X64ABI::Windows)
-                *os << "  movsd " << cg.getValueAsOperand(&i) << ", xmm0\n";
+                *os << "  " << moveFP << " " << cg.getValueAsOperand(&i) << ", " << fpScratch << "\n";
             else
-                *os << "  movsd %xmm0, " << cg.getValueAsOperand(&i) << "\n";
+                *os << "  " << moveFP << " " << fpScratch << ", " << cg.getValueAsOperand(&i) << "\n";
         } else if (abi == X64ABI::Windows)
             *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
-        else
-            *os << "  movq " << rax << ", " << cg.getValueAsOperand(&i) << "\n";
+        else {
+            bool is32 = is32BitType(i.getType());
+            emitMov(cg, os, is32 ? eax : rax, cg.getValueAsOperand(&i), is32);
+        }
     } else {
         auto& as = cg.getAssembler(); emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
         if (size == 1) as.emitBytes({0x48, 0x0F, (uint8_t)(isSigned ? 0xBE : 0xB6), 0x00});
@@ -1388,17 +2277,175 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
     std::string ax = (abi == X64ABI::SystemV) ? "%ax" : "ax";
     std::string eax = (abi == X64ABI::SystemV) ? "%eax" : "eax";
     if (auto* os = cg.getTextStream()) {
+        ir::Value* ptrVal = i.getOperands()[1]->get();
+        ir::Type* storedType = i.getOperands()[0]->get()->getType();
+        if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            std::string stackOp = formatStackOperand(-ciSlot->getValue());
+            bool is32Val = (size <= 4);
+            emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), stackOp, is32Val);
+            return;
+        }
+
+        struct SIBAddress {
+            std::string base;
+            std::string index;
+            int scale = 1;
+            int64_t disp = 0;
+            bool isValid = false;
+
+            std::string format(X64ABI abi) const {
+                if (!isValid) return "";
+                std::string res;
+                if (disp != 0) res += std::to_string(disp);
+                if (abi == X64ABI::SystemV) {
+                    res += "(" + base;
+                    if (!index.empty()) res += ", " + index + ", " + std::to_string(scale);
+                    res += ")";
+                } else {
+                    res = "[" + base;
+                    if (!index.empty()) res += " + " + index + " * " + std::to_string(scale);
+                    if (disp > 0) res += " + " + std::to_string(disp);
+                    else if (disp < 0) res += " - " + std::to_string(-disp);
+                    res += "]";
+                }
+                return res;
+            }
+        };
+
+        auto tryMatchSIB = [&](ir::Value* val) -> std::optional<SIBAddress> {
+            if (!val) return std::nullopt;
+            auto* inst = dynamic_cast<ir::Instruction*>(val);
+            if (!inst) return std::nullopt;
+
+            int64_t disp = 0;
+            ir::Instruction* addrInst = inst;
+
+            if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
+                if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get())) {
+                    disp = c->getValue();
+                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[0]->get())) addrInst = inner;
+                } else if (auto* c = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[0]->get())) {
+                    disp = c->getValue();
+                    if (auto* inner = dynamic_cast<ir::Instruction*>(inst->getOperands()[1]->get())) addrInst = inner;
+                }
+            }
+
+            if (addrInst->getOpcode() == ir::Instruction::Add && addrInst->getOperands().size() == 2) {
+                ir::Value* baseVal = addrInst->getOperands()[0]->get();
+                ir::Value* scaledIndexVal = addrInst->getOperands()[1]->get();
+
+                auto* mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
+                if (!mulInst) {
+                    std::swap(baseVal, scaledIndexVal);
+                    mulInst = dynamic_cast<ir::Instruction*>(scaledIndexVal);
+                }
+
+                if (mulInst && mulInst->getOpcode() == ir::Instruction::Mul && mulInst->getOperands().size() == 2) {
+                    ir::Value* idxVal = mulInst->getOperands()[0]->get();
+                    auto* scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[1]->get());
+                    if (!scaleC) {
+                        idxVal = mulInst->getOperands()[1]->get();
+                        scaleC = dynamic_cast<ir::ConstantInt*>(mulInst->getOperands()[0]->get());
+                    }
+
+                    if (scaleC && (scaleC->getValue() == 1 || scaleC->getValue() == 2 || scaleC->getValue() == 4 || scaleC->getValue() == 8)) {
+                        if (auto* extInst = dynamic_cast<ir::Instruction*>(idxVal)) {
+                            if (extInst->getOpcode() == ir::Instruction::ExtSW || extInst->getOpcode() == ir::Instruction::ExtUW) {
+                                if (!extInst->getOperands().empty()) idxVal = extInst->getOperands()[0]->get();
+                            }
+                        }
+                        SIBAddress sib;
+                        sib.base = cg.getValueAsOperand(baseVal);
+                        sib.index = cg.getValueAsOperand(idxVal);
+                        sib.scale = static_cast<int>(scaleC->getValue());
+                        sib.disp = disp;
+                        sib.isValid = true;
+                        if (!sib.base.empty() && !sib.index.empty() &&
+                            (abi == X64ABI::Windows || (sib.base[0] == '%' && sib.index[0] == '%'))) {
+                            if (sib.index[0] == '%') sib.index = to64BitReg(sib.index);
+                            return sib;
+                        }
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+
+        const std::string fpScratch = getReservedScratchVectorReg();
+        ComplexAddress complexAddr = matchComplexAddress(cg, ptrVal);
+        if (complexAddr.isValid) {
+            std::string sibStr = complexAddr.format(abi);
+            std::string valOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+            if (storedType && storedType->isFloatingPoint()) {
+                std::string move = storedType->isFloatTy() ? "movss" : "movsd";
+                if (valOp.empty() || valOp[0] != '%') {
+                    *os << "  " << move << " " << valOp << ", " << fpScratch << "\n";
+                    valOp = fpScratch;
+                }
+                if (abi == X64ABI::SystemV) *os << "  " << move << " " << valOp << ", " << sibStr << "\n";
+                else *os << "  " << move << " " << sibStr << ", " << valOp << "\n";
+            } else {
+                bool is32Val = (size <= 4);
+                std::string scratch = "%r11";
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov " << rax << ", " << valOp << "\n";
+                    if (size == 1) *os << "  mov byte ptr " << sibStr << ", al\n";
+                    else if (size == 2) *os << "  mov word ptr " << sibStr << ", ax\n";
+                    else if (size == 4) *os << "  mov dword ptr " << sibStr << ", eax\n";
+                    else *os << "  mov " << sibStr << ", rax\n";
+                } else {
+                    if (complexAddr.base == "%rax" || complexAddr.index == "%rax") {
+                        emitMov(cg, os, valOp, scratch, is32Val);
+                        if (size == 1) *os << "  movb " << to8BitReg(scratch) << ", " << sibStr << "\n";
+                        else if (size == 2) *os << "  movw " << to16BitReg(scratch) << ", " << sibStr << "\n";
+                        else if (size == 4) *os << "  movl " << to32BitReg(scratch) << ", " << sibStr << "\n";
+                        else *os << "  movq " << scratch << ", " << sibStr << "\n";
+                    } else {
+                        emitMov(cg, os, valOp, rax, is32Val);
+                        if (size == 1) *os << "  movb " << al << ", " << sibStr << "\n";
+                        else if (size == 2) *os << "  movw " << ax << ", " << sibStr << "\n";
+                        else if (size == 4) *os << "  movl " << eax << ", " << sibStr << "\n";
+                        else *os << "  movq " << rax << ", " << sibStr << "\n";
+                    }
+                }
+            }
+            return;
+        }
+
+        if (storedType && storedType->isFloatingPoint()) {
+            std::string valueOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+            std::string ptrOp = cg.getValueAsOperand(ptrVal);
+            std::string move = storedType->isFloatTy() ? "movss" : "movsd";
+            if (abi == X64ABI::SystemV) {
+                if (isDirectGprRegister(ptrOp))
+                    *os << "  " << move << " " << valueOp << ", (" << ptrOp << ")\n";
+                else {
+                    *os << "  movq " << ptrOp << ", %r11\n";
+                    *os << "  " << move << " " << valueOp << ", (%r11)\n";
+                }
+            } else {
+                if (isDirectGprRegister(ptrOp))
+                    *os << "  " << move << " [" << ptrOp << "], " << valueOp << "\n";
+                else {
+                    *os << "  mov r11, " << ptrOp << "\n";
+                    *os << "  " << move << " [r11], " << valueOp << "\n";
+                }
+            }
+            return;
+        }
+
         // Load value-to-store into rax
         bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
                            (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
+        bool is32Val = (size <= 4);
         if (abi == X64ABI::Windows) {
             if (isGlobalVal) *os << "  lea " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
             else *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
         } else {
             if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            else *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            else emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), rax, is32Val);
         }
-        std::string op = cg.getValueAsOperand(i.getOperands()[1]->get());
+        std::string op = cg.getValueAsOperand(ptrVal);
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
@@ -1413,21 +2460,21 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov " << op << ", rax\n";
             }
         } else {
-            // op = stack operand holding the pointer address — load it into rdx
+            // op = stack operand holding the pointer address — load it into r11
             if (abi == X64ABI::Windows)
-                *os << "  mov " << rdx << ", " << op << "\n";
+                *os << "  mov r11, " << op << "\n";
             else
-                *os << "  movq " << op << ", " << rdx << "\n";
+                *os << "  movq " << op << ", %r11\n";
             if (abi == X64ABI::SystemV) {
-                if (size == 1) *os << "  movb " << al << ", (" << rdx << ")\n";
-                else if (size == 2) *os << "  movw " << ax << ", (" << rdx << ")\n";
-                else if (size == 4) *os << "  movl " << eax << ", (" << rdx << ")\n";
-                else *os << "  movq " << rax << ", (" << rdx << ")\n";
+                if (size == 1) *os << "  movb " << al << ", (%r11)\n";
+                else if (size == 2) *os << "  movw " << ax << ", (%r11)\n";
+                else if (size == 4) *os << "  movl " << eax << ", (%r11)\n";
+                else *os << "  movq " << rax << ", (%r11)\n";
             } else {
-                if (size == 1) *os << "  mov byte ptr [rdx], al\n";
-                else if (size == 2) *os << "  mov word ptr [rdx], ax\n";
-                else if (size == 4) *os << "  mov dword ptr [rdx], eax\n";
-                else *os << "  mov [rdx], rax\n";
+                if (size == 1) *os << "  mov byte ptr [r11], al\n";
+                else if (size == 2) *os << "  mov word ptr [r11], ax\n";
+                else if (size == 4) *os << "  mov dword ptr [r11], eax\n";
+                else *os << "  mov [r11], rax\n";
             }
         }
     } else {
@@ -1448,16 +2495,17 @@ void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
     else if (!i.getOperands().empty()) { if (auto* sizeConst = dynamic_cast<ir::ConstantInt*>(i.getOperands()[0]->get())) size = sizeConst->getValue(); }
     uint64_t alignedSize = (size + 7) & ~7;
     std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    std::string dstOp = cg.getValueAsOperand(&i);
     if (auto* os = cg.getTextStream()) {
         *os << "  # Bump Allocation: " << size << " bytes\n";
         if (abi == X64ABI::SystemV) {
             *os << "  movq heap_ptr(%rip), " << rax << "\n";
-            *os << "  movq " << rax << ", " << formatStackOperand(pointerOffset) << "\n";
+            *os << "  movq " << rax << ", " << dstOp << "\n";
             *os << "  addq $" << alignedSize << ", " << rax << "\n";
             *os << "  movq " << rax << ", heap_ptr(%rip)\n";
         } else {
             *os << "  mov rax, [rip + heap_ptr]\n";
-            *os << "  mov " << formatStackOperand(pointerOffset) << ", rax\n";
+            *os << "  mov " << dstOp << ", rax\n";
             *os << "  add rax, " << alignedSize << "\n";
             *os << "  mov [rip + heap_ptr], rax\n";
         }
@@ -1524,11 +2572,13 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             if (srcOp == destOp) continue;
 
             bool is32 = is32BitType(phi->getType());
+            auto* vecType = dynamic_cast<const ir::VectorType*>(phi->getType());
+            unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
             if (auto* os = cg.getTextStream()) {
                 if (abi == X64ABI::Windows) {
                     *os << "  mov " << destOp << ", " << srcOp << "\n";
                 } else {
-                    emitMov(cg, os, srcOp, destOp, is32);
+                    emitMov(cg, os, srcOp, destOp, is32, totalBits);
                 }
             } else {
                 auto& as = cg.getAssembler();
@@ -1543,14 +2593,28 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
         ir::Value* incomingVal = move.first;
         if (auto* os = cg.getTextStream()) {
             std::string srcOp = cg.getValueAsOperand(incomingVal);
-            bool is32 = is32BitType(incomingVal->getType());
-            std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-            if (abi == X64ABI::Windows) {
-                *os << "  mov " << rax << ", " << srcOp << "\n";
-                *os << "  push " << rax << "\n";
+            bool isVector = incomingVal->getType() && (incomingVal->getType()->isVectorTy() || incomingVal->getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(incomingVal->getType()) != nullptr);
+            if (isVector) {
+                auto* vecType = dynamic_cast<const ir::VectorType*>(incomingVal->getType());
+                unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+                if (totalBits == 256) {
+                    std::string ymmSrc = toYmmReg(srcOp);
+                    *os << "  subq $32, %rsp\n";
+                    *os << "  vmovdqu " << ymmSrc << ", (%rsp)\n";
+                } else {
+                    *os << "  subq $16, %rsp\n";
+                    *os << "  movdqu " << srcOp << ", (%rsp)\n";
+                }
             } else {
-                emitMov(cg, os, srcOp, rax, is32);
-                *os << "  pushq %rax\n";
+                bool is32 = is32BitType(incomingVal->getType());
+                std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov " << rax << ", " << srcOp << "\n";
+                    *os << "  push " << rax << "\n";
+                } else {
+                    emitMov(cg, os, srcOp, rax, is32);
+                    *os << "  pushq %rax\n";
+                }
             }
         } else {
             auto& as = cg.getAssembler();
@@ -1562,18 +2626,32 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
         ir::PhiNode* phi = it->second;
         if (auto* os = cg.getTextStream()) {
             std::string destOp = cg.getValueAsOperand(phi);
-            bool is32 = is32BitType(phi->getType());
-            std::string movOp = is32 ? "movl" : "movq";
-            std::string regRax = is32 ? "%eax" : "%rax";
-            std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
-            if (abi == X64ABI::Windows)
-                *os << "  pop " << rax << "\n";
-            else
-                *os << "  popq " << rax << "\n";
-            if (abi == X64ABI::Windows)
-                *os << "  mov " << destOp << ", " << rax << "\n";
-            else
-                *os << "  " << movOp << " " << regRax << ", " << destOp << "\n";
+            bool isVector = phi->getType() && (phi->getType()->isVectorTy() || phi->getType()->isSIMDType() || dynamic_cast<const ir::VectorType*>(phi->getType()) != nullptr);
+            if (isVector) {
+                auto* vecType = dynamic_cast<const ir::VectorType*>(phi->getType());
+                unsigned totalBits = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+                if (totalBits == 256) {
+                    std::string ymmDst = toYmmReg(destOp);
+                    *os << "  vmovdqu (%rsp), " << ymmDst << "\n";
+                    *os << "  addq $32, %rsp\n";
+                } else {
+                    *os << "  movdqu (%rsp), " << destOp << "\n";
+                    *os << "  addq $16, %rsp\n";
+                }
+            } else {
+                bool is32 = is32BitType(phi->getType());
+                std::string movOp = is32 ? "movl" : "movq";
+                std::string regRax = is32 ? "%eax" : "%rax";
+                std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+                if (abi == X64ABI::Windows)
+                    *os << "  pop " << rax << "\n";
+                else
+                    *os << "  popq " << rax << "\n";
+                if (abi == X64ABI::Windows)
+                    *os << "  mov " << destOp << ", " << rax << "\n";
+                else
+                    *os << "  " << movOp << " " << regRax << ", " << destOp << "\n";
+            }
         } else {
             auto& as = cg.getAssembler();
             as.emitByte(0x58);
@@ -1583,7 +2661,10 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
 }
 
 void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
-    std::string rax = (abi == X64ABI::SystemV) ? "%rax" : "rax";
+    bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
+    std::string movOp = is32 ? "movl" : "movq";
+    std::string testOp = is32 ? "testl" : "testq";
+    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
     auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
     auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
 
@@ -1592,8 +2673,8 @@ void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
             *os << "  mov " << rax << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
             *os << "  test " << rax << ", " << rax << "\n";
         } else {
-            *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
-            *os << "  testq " << rax << ", " << rax << "\n";
+            *os << "  " << movOp << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
+            *os << "  " << testOp << " " << rax << ", " << rax << "\n";
         }
 
         std::string trueLabel = cg.getTargetInfo()->getBBLabel(targetTrue);
@@ -1813,8 +2894,15 @@ bool X64Architecture::emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::In
                 addrStr = std::to_string(addConst);
             }
         }
-        *os << "  lea " << d << ", [" << addrStr << "]\n";
+        bool isStackDst = !isDirectGprRegister(d);
+        std::string targetReg = isStackDst ? (is32 ? "eax" : "rax") : d;
+        *os << "  lea " << targetReg << ", [" << addrStr << "]\n";
+        if (isStackDst) {
+            *os << "  mov " << d << ", " << targetReg << "\n";
+        }
     } else {
+        bool isStackDst = !isDirectGprRegister(d);
+        std::string targetReg = isStackDst ? (is32 ? "%eax" : "%rax") : d;
         std::string dispStr = (addConst != 0) ? std::to_string(addConst) : "";
         std::string indexStr = "";
         if (!indexReg.empty()) {
@@ -1825,7 +2913,10 @@ bool X64Architecture::emitMulAddFusion(CodeGen& cg, ir::Instruction& mul, ir::In
         if (!indexStr.empty()) {
             *os << "," << indexStr;
         }
-        *os << "), " << d << "\n";
+        *os << "), " << targetReg << "\n";
+        if (isStackDst) {
+            emitMov(cg, os, targetReg, d, is32);
+        }
     }
 
     cg.lastStoreOp = "";
@@ -1873,9 +2964,19 @@ bool X64Architecture::emitCmpAndBranchFusion(CodeGen& cg, ir::Instruction& cmp, 
 
             if (op0[0] == '$' || (op0[0] != '%' && op1[0] != '%')) {
                 emitMov(cg, os, cg.getValueAsOperand(cmp.getOperands()[0]->get()), regRax, is32);
-                *os << "  " << cmpOp << " " << op1 << ", " << regRax << "\n";
+                if (op1 == "$0" || op1 == "$0x0") {
+                    std::string testOp = is32 ? "testl" : "testq";
+                    *os << "  " << testOp << " " << regRax << ", " << regRax << "\n";
+                } else {
+                    *os << "  " << cmpOp << " " << op1 << ", " << regRax << "\n";
+                }
             } else {
-                *os << "  " << cmpOp << " " << op1 << ", " << op0 << "\n";
+                if (op1 == "$0" || op1 == "$0x0") {
+                    std::string testOp = is32 ? "testl" : "testq";
+                    *os << "  " << testOp << " " << op0 << ", " << op0 << "\n";
+                } else {
+                    *os << "  " << cmpOp << " " << op1 << ", " << op0 << "\n";
+                }
             }
         }
 
@@ -2072,6 +3173,1113 @@ bool X64Architecture::isCallerSaved(const std::string& reg) const { return calle
 bool X64Architecture::isCalleeSaved(const std::string& reg) const { return calleeSaved.count(reg) && calleeSaved.at(reg); }
 bool X64Architecture::isReserved(const std::string& reg) const {
     return reg == "rsp" || reg == "rbp" || reg == "%rsp" || reg == "%rbp";
+}
+
+std::string X64Architecture::getReservedScratchVectorReg() const {
+    if (abi == X64ABI::Windows) return "xmm5";
+    return "%xmm15";
+}
+
+unsigned X64Architecture::getReservedScratchVectorRegIndex() const {
+    if (abi == X64ABI::Windows) return 105;
+    return 115;
+}
+
+VectorCapabilities X64Architecture::getVectorCapabilities() const {
+    VectorCapabilities caps;
+    caps.supportsSSE = true;
+    caps.supportsSSSE3 = true;
+    caps.supportsAVX = true;
+    caps.supportsAVX2 = true;
+    caps.supportsAVX512 = false;
+    caps.maxVectorWidth = 256;
+    caps.supportedWidths = {128, 256};
+    caps.supportsFloatVectors = true;
+    caps.supportsIntegerVectors = true;
+    caps.supportsDoubleVectors = true;
+    caps.supportsMaskedOps = true;
+    caps.simdExtension = "SSE2/SSSE3/SSE4.1/AVX2";
+    return caps;
+}
+
+bool X64Architecture::supportsVectorWidth(unsigned width) const {
+    return width == 128 || width == 256;
+}
+
+bool X64Architecture::supportsVectorType(const ir::VectorType* type) const {
+    if (!type) return false;
+    auto* elemTy = type->getElementType();
+    if (!elemTy) return false;
+
+    unsigned numElem = type->getNumElements();
+
+    if (elemTy->isIntegerTy()) {
+        auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+        if (!intTy) return false;
+        unsigned bw = intTy->getBitwidth();
+        if (bw == 8 && (numElem == 16 || numElem == 32)) return true;
+        if (bw == 16 && (numElem == 8 || numElem == 16)) return true;
+        if (bw == 32 && (numElem == 4 || numElem == 8)) return true;
+        if (bw == 64 && (numElem == 2 || numElem == 4)) return true;
+    } else if (elemTy->isFloatTy()) {
+        if (numElem == 4 || numElem == 8) return true;
+    } else if (elemTy->isDoubleTy()) {
+        if (numElem == 2 || numElem == 4) return true;
+    }
+
+    return false;
+}
+
+bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const {
+    if (!type || !type->getElementType()) return false;
+    auto* elemTy = type->getElementType();
+    unsigned numElem = type->getNumElements();
+
+    bool validWidth = false;
+    if (elemTy->isIntegerTy()) {
+        auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+        if (!intTy) return false;
+        unsigned bw = intTy->getBitwidth();
+        if (bw == 8 && (numElem == 16 || numElem == 32)) validWidth = true;
+        if (bw == 16 && (numElem == 8 || numElem == 16)) validWidth = true;
+        if (bw == 32 && (numElem == 4 || numElem == 8)) validWidth = true;
+        if (bw == 64 && (numElem == 2 || numElem == 4)) validWidth = true;
+        if (bw == 64 && op == ir::Instruction::VMul) return false;
+    } else if (elemTy->isFloatTy()) {
+        if (numElem == 4 || numElem == 8) validWidth = true;
+    } else if (elemTy->isDoubleTy()) {
+        if (numElem == 2 || numElem == 4) validWidth = true;
+    }
+
+    if (!validWidth) return false;
+
+    switch (op) {
+        case ir::Instruction::VAdd:
+        case ir::Instruction::VSub:
+        case ir::Instruction::VMul:
+        case ir::Instruction::VFAdd:
+        case ir::Instruction::VFSub:
+        case ir::Instruction::VFMul:
+        case ir::Instruction::VFDiv:
+        case ir::Instruction::VLoad:
+        case ir::Instruction::VStore:
+        case ir::Instruction::VAnd:
+        case ir::Instruction::VOr:
+        case ir::Instruction::VXor:
+        case ir::Instruction::VBroadcast:
+        case ir::Instruction::VExtract:
+        case ir::Instruction::VInsert:
+        case ir::Instruction::VMin:
+        case ir::Instruction::VMax:
+        case ir::Instruction::VCmp:
+        case ir::Instruction::VSelect:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool X64Architecture::supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const {
+    if (!srcType || !dstType) return false;
+    auto* srcElemTy = dynamic_cast<const ir::IntegerType*>(srcType->getElementType());
+    auto* dstElemTy = dynamic_cast<const ir::IntegerType*>(dstType->getElementType());
+    if (!srcElemTy || !dstElemTy) return false;
+
+    unsigned srcBw = srcElemTy->getBitwidth();
+    unsigned dstBw = dstElemTy->getBitwidth();
+    unsigned srcNum = srcType->getNumElements();
+    unsigned dstNum = dstType->getNumElements();
+
+    if (op == ir::Instruction::VSExt || op == ir::Instruction::VZExt) {
+        // Support <4 x i32> -> <4 x i64> widening conversion
+        if (srcBw == 32 && dstBw == 64 && srcNum == 4 && dstNum == 4) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void X64Architecture::emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        std::string ptrOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+        std::string dstOp = cg.getValueAsOperand(&i);
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+        unsigned totalBitWidth = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+
+        bool isReg = isXmmRegisterName(dstOp) || isYmmRegisterName(dstOp);
+        bool isFloat = vecType && vecType->getElementType()->isFloatTy();
+        bool isDouble = vecType && vecType->getElementType()->isDoubleTy();
+        std::string movInst = isFloat ? (totalBitWidth == 256 ? "vmovups" : "movups")
+                            : isDouble ? (totalBitWidth == 256 ? "vmovupd" : "movupd")
+                            : (totalBitWidth == 256 ? "vmovdqu" : "movdqu");
+        std::string targetReg = isReg ? (totalBitWidth == 256 ? toYmmReg(dstOp) : dstOp) : (totalBitWidth == 256 ? "%ymm0" : "%xmm0");
+
+        if (abi == X64ABI::Windows) {
+            targetReg = isReg ? (totalBitWidth == 256 ? toYmmReg(dstOp) : dstOp) : (totalBitWidth == 256 ? "ymm0" : "xmm0");
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  " << movInst << " " << targetReg << ", [" << ptrOp << "]\n";
+            } else {
+                std::string rax = "rax";
+                *os << "  mov " << rax << ", " << ptrOp << "\n";
+                *os << "  " << movInst << " " << targetReg << ", [" << rax << "]\n";
+            }
+            if (!isReg) {
+                *os << "  " << movInst << " [" << dstOp << "], " << targetReg << "\n";
+            }
+        } else {
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  " << movInst << " (" << ptrOp << "), " << targetReg << "\n";
+            } else {
+                std::string rax = "%rax";
+                *os << "  movq " << ptrOp << ", " << rax << "\n";
+                *os << "  " << movInst << " (%rax), " << targetReg << "\n";
+            }
+            if (!isReg) {
+                *os << "  " << movInst << " " << targetReg << ", " << dstOp << "\n";
+            }
+        }
+    }
+}
+
+void X64Architecture::emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        std::string srcOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+        std::string ptrOp = cg.getValueAsOperand(i.getOperands()[1]->get());
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+        unsigned totalBitWidth = vecType ? vecType->getElementType()->getSize() * 8 * vecType->getNumElements() : 128;
+
+        bool isFloat = vecType && vecType->getElementType()->isFloatTy();
+        bool isDouble = vecType && vecType->getElementType()->isDoubleTy();
+        std::string movInst = isFloat ? "movups" : isDouble ? "movupd" : "movdqu";
+        if (totalBitWidth == 256) {
+            movInst = isFloat ? "vmovups" : isDouble ? "vmovupd" : "vmovdqu";
+            srcOp = toYmmReg(srcOp);
+        } else if (totalBitWidth == 512) {
+            movInst = "vmovdqu64";
+            srcOp = toZmmReg(srcOp);
+        }
+
+        if (abi == X64ABI::Windows) {
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  " << movInst << " [" << ptrOp << "], " << srcOp << "\n";
+            } else {
+                std::string rax = "rax";
+                *os << "  mov " << rax << ", " << ptrOp << "\n";
+                *os << "  " << movInst << " [" << rax << "], " << srcOp << "\n";
+            }
+        } else {
+            if (isDirectGprRegister(ptrOp)) {
+                *os << "  " << movInst << " " << srcOp << ", (" << ptrOp << ")\n";
+            } else {
+                std::string rax = "%rax";
+                *os << "  movq " << ptrOp << ", " << rax << "\n";
+                *os << "  " << movInst << " " << srcOp << ", (%rax)\n";
+            }
+        }
+    }
+}
+
+void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) {
+    if (auto* os = cg.getTextStream()) {
+        if (i.getOperands().empty() || !i.getOperands()[0] || !i.getOperands()[0]->get()) {
+            throw std::runtime_error("Vector instruction missing primary operand");
+        }
+
+        std::string op0 = cg.getValueAsOperand(i.getOperands()[0]->get());
+        std::string op1 = (i.getOperands().size() > 1 && i.getOperands()[1] && i.getOperands()[1]->get()) ?
+                           cg.getValueAsOperand(i.getOperands()[1]->get()) : "";
+        std::string dst = cg.getValueAsOperand(&i);
+
+        // VGather / VScatter Handling
+        if (i.getOpcode() == ir::Instruction::VGather) {
+            std::string basePtr = op0;
+            std::string indexVec = op1;
+            std::string maskVec = (i.getOperands().size() > 2 && i.getOperands()[2]) ? cg.getValueAsOperand(i.getOperands()[2]->get()) : "%xmm15";
+            if (abi == X64ABI::Windows) {
+                *os << "  vpgatherdd " << dst << ", [" << basePtr << " + " << indexVec << " * 4], " << maskVec << "\n";
+            } else {
+                *os << "  vpgatherdd " << maskVec << ", (" << basePtr << ", " << indexVec << ", 4), " << dst << "\n";
+            }
+            return;
+        }
+
+        if (i.getOpcode() == ir::Instruction::VScatter) {
+            std::string valVec = op0;
+            std::string basePtr = op1;
+            std::string indexVec = (i.getOperands().size() > 2 && i.getOperands()[2]) ? cg.getValueAsOperand(i.getOperands()[2]->get()) : "";
+            if (abi == X64ABI::Windows) {
+                *os << "  vpscatterdd [" << basePtr << " + " << indexVec << " * 4], " << valVec << "\n";
+            } else {
+                *os << "  vpscatterdd " << valVec << ", (" << basePtr << ", " << indexVec << ", 4)\n";
+            }
+            return;
+        }
+
+        // VInsert handling
+        if (i.getOpcode() == ir::Instruction::VInsert) {
+            if (i.getOperands().size() < 3 || !i.getOperands()[0] || !i.getOperands()[1] || !i.getOperands()[2]) {
+                throw std::runtime_error("VInsert requires vector, scalar, and lane index operands");
+            }
+
+            auto* vecVal = i.getOperands()[0]->get();
+            auto* valVal = i.getOperands()[1]->get();
+            auto* idxVal = i.getOperands()[2]->get();
+
+            auto* constIdx = dynamic_cast<const ir::ConstantInt*>(idxVal);
+            if (!constIdx) {
+                throw std::runtime_error("VInsert requires constant lane index");
+            }
+
+            auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+            if (!vecType || !vecType->getElementType()) {
+                throw std::runtime_error("Invalid vector type for VInsert");
+            }
+
+            int idx = static_cast<int>(constIdx->getValue());
+            int numElem = static_cast<int>(vecType->getNumElements());
+            if (idx < 0 || idx >= numElem) {
+                throw std::runtime_error("VInsert lane index out of bounds");
+            }
+
+            std::string opVal = cg.getValueAsOperand(valVal);
+            bool inPlace = canUseInPlace(cg, i, vecVal);
+            unsigned vectorBits = vecType->getBitWidth();
+            std::string fullDst = vectorBits == 256 ? toYmmReg(dst) : dst;
+            std::string fullSrc = vectorBits == 256 ? toYmmReg(op0) : op0;
+
+            if (!inPlace && dst != op0) {
+                if (abi == X64ABI::Windows) {
+                    *os << "  " << (vectorBits == 256 ? "vmovdqu " : "movdqu ") << fullDst << ", " << fullSrc << "\n";
+                } else {
+                    *os << "  " << (vectorBits == 256 ? "vmovdqu " : "movdqu ") << fullSrc << ", " << fullDst << "\n";
+                }
+            }
+
+            auto* elemTy = vecType->getElementType();
+            unsigned halfElements = 128 / (elemTy->getSize() * 8);
+            bool upperHalf = vectorBits == 256 && static_cast<unsigned>(idx) >= halfElements;
+            int laneIndex = upperHalf ? idx - static_cast<int>(halfElements) : idx;
+            std::string laneDst = dst;
+            if (upperHalf) {
+                laneDst = abi == X64ABI::Windows ? "xmm15" : "%xmm15";
+                if (abi == X64ABI::Windows) *os << "  vextracti128 " << laneDst << ", " << fullDst << ", 1\n";
+                else *os << "  vextracti128 $1, " << fullDst << ", " << laneDst << "\n";
+            }
+            if (elemTy->isIntegerTy()) {
+                auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+                unsigned bw = intTy ? intTy->getBitwidth() : 32;
+
+                bool isImm = (!opVal.empty() && opVal[0] == '$');
+                std::string reg32 = isImm ? "%eax" : to32BitReg(opVal);
+                std::string reg64 = isImm ? "%rax" : to64BitReg(opVal);
+
+                if (isImm) {
+                    if (bw == 64) {
+                        if (abi == X64ABI::Windows) {
+                            *os << "  mov rax, " << opVal.substr(1) << "\n";
+                        } else {
+                            *os << "  movabsq " << opVal << ", %rax\n";
+                        }
+                    } else {
+                        if (abi == X64ABI::Windows) {
+                            *os << "  mov eax, " << opVal.substr(1) << "\n";
+                        } else {
+                            *os << "  movl " << opVal << ", %eax\n";
+                        }
+                    }
+                }
+
+                if (abi == X64ABI::Windows) {
+                    if (bw == 8) *os << "  pinsrb " << laneDst << ", " << reg32 << ", " << laneIndex << "\n";
+                    else if (bw == 16) *os << "  pinsrw " << laneDst << ", " << reg32 << ", " << laneIndex << "\n";
+                    else if (bw == 32) *os << "  pinsrd " << laneDst << ", " << reg32 << ", " << laneIndex << "\n";
+                    else if (bw == 64) *os << "  pinsrq " << laneDst << ", " << reg64 << ", " << laneIndex << "\n";
+                    else throw std::runtime_error("Unsupported integer bitwidth for VInsert");
+                } else {
+                    if (bw == 8) *os << "  pinsrb $" << laneIndex << ", " << reg32 << ", " << laneDst << "\n";
+                    else if (bw == 16) *os << "  pinsrw $" << laneIndex << ", " << reg32 << ", " << laneDst << "\n";
+                    else if (bw == 32) *os << "  pinsrd $" << laneIndex << ", " << reg32 << ", " << laneDst << "\n";
+                    else if (bw == 64) *os << "  pinsrq $" << laneIndex << ", " << reg64 << ", " << laneDst << "\n";
+                    else throw std::runtime_error("Unsupported integer bitwidth for VInsert");
+                }
+            } else if (elemTy->isFloatTy()) {
+                std::string srcXmm = opVal;
+                if (!isXmmRegisterName(opVal)) {
+                    srcXmm = (abi == X64ABI::Windows) ? "xmm1" : "%xmm1";
+                    if (abi == X64ABI::Windows) {
+                        *os << "  movss xmm1, " << opVal << "\n";
+                    } else {
+                        if (isDirectGprRegister(opVal)) *os << "  movd " << to32BitReg(opVal) << ", %xmm1\n";
+                        else *os << "  movss " << opVal << ", %xmm1\n";
+                    }
+                }
+
+                if (abi == X64ABI::Windows) {
+                    if (laneIndex == 0) {
+                        *os << "  movss " << laneDst << ", " << srcXmm << "\n";
+                    } else {
+                        int imm = (laneIndex << 4);
+                        *os << "  insertps " << laneDst << ", " << srcXmm << ", " << imm << "\n";
+                    }
+                } else {
+                    if (laneIndex == 0) {
+                        *os << "  movss " << srcXmm << ", " << laneDst << "\n";
+                    } else {
+                        int imm = (laneIndex << 4);
+                        *os << "  insertps $" << imm << ", " << srcXmm << ", " << laneDst << "\n";
+                    }
+                }
+            } else if (elemTy->isDoubleTy()) {
+                std::string srcXmm = opVal;
+                if (!isXmmRegisterName(opVal)) {
+                    srcXmm = (abi == X64ABI::Windows) ? "xmm1" : "%xmm1";
+                    if (abi == X64ABI::Windows) {
+                        *os << "  movsd xmm1, " << opVal << "\n";
+                    } else {
+                        if (isDirectGprRegister(opVal)) *os << "  movq " << to64BitReg(opVal) << ", %xmm1\n";
+                        else *os << "  movsd " << opVal << ", %xmm1\n";
+                    }
+                }
+
+                if (abi == X64ABI::Windows) {
+                    if (laneIndex == 0) {
+                        *os << "  movsd " << laneDst << ", " << srcXmm << "\n";
+                    } else if (laneIndex == 1) {
+                        *os << "  movlhps " << laneDst << ", " << srcXmm << "\n";
+                    }
+                } else {
+                    if (laneIndex == 0) {
+                        *os << "  movsd " << srcXmm << ", " << laneDst << "\n";
+                    } else if (laneIndex == 1) {
+                        *os << "  movlhps " << srcXmm << ", " << laneDst << "\n";
+                    }
+                }
+            } else {
+                throw std::runtime_error("Unsupported element type for VInsert");
+            }
+            if (upperHalf) {
+                if (abi == X64ABI::Windows) *os << "  vinserti128 " << fullDst << ", " << fullDst << ", " << laneDst << ", 1\n";
+                else *os << "  vinserti128 $1, " << laneDst << ", " << fullDst << ", " << fullDst << "\n";
+            }
+            return;
+        }
+
+        // VExtract handling
+        if (i.getOpcode() == ir::Instruction::VExtract) {
+            auto* vecVal = i.getOperands()[0]->get();
+            auto* idxVal = (i.getOperands().size() > 1 && i.getOperands()[1]) ? i.getOperands()[1]->get() : nullptr;
+            auto* constIdx = dynamic_cast<const ir::ConstantInt*>(idxVal);
+            if (!constIdx) {
+                throw std::runtime_error("VExtract requires constant lane index");
+            }
+
+            auto* srcVecTy = dynamic_cast<const ir::VectorType*>(vecVal->getType());
+            if (!srcVecTy || !srcVecTy->getElementType()) {
+                throw std::runtime_error("Invalid source vector type for VExtract");
+            }
+
+            int idx = static_cast<int>(constIdx->getValue());
+            int numElem = static_cast<int>(srcVecTy->getNumElements());
+            if (idx < 0 || idx >= numElem) {
+                throw std::runtime_error("VExtract lane index out of bounds");
+            }
+
+            auto* elemTy = srcVecTy->getElementType();
+            unsigned extractHalfElements = 128 / (elemTy->getSize() * 8);
+            if (srcVecTy->getBitWidth() == 256 && static_cast<unsigned>(idx) >= extractHalfElements) {
+                std::string half = abi == X64ABI::Windows ? "xmm15" : "%xmm15";
+                std::string fullSource = toYmmReg(op0);
+                if (abi == X64ABI::Windows) *os << "  vextracti128 " << half << ", " << fullSource << ", 1\n";
+                else *os << "  vextracti128 $1, " << fullSource << ", " << half << "\n";
+                op0 = half;
+                idx -= static_cast<int>(extractHalfElements);
+            }
+            if (elemTy->isIntegerTy()) {
+                auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+                unsigned bw = intTy ? intTy->getBitwidth() : 32;
+
+                bool directGpr = isDirectGprRegister(dst);
+                std::string targetReg32 = directGpr ? to32BitReg(dst) : (abi == X64ABI::Windows ? "eax" : "%eax");
+                std::string targetReg64 = directGpr ? to64BitReg(dst) : (abi == X64ABI::Windows ? "rax" : "%rax");
+
+                if (abi == X64ABI::Windows) {
+                    if (bw == 8) {
+                        *os << "  pextrb " << targetReg32 << ", " << op0 << ", " << idx << "\n";
+                        if (!directGpr) *os << "  mov " << dst << ", al\n";
+                    } else if (bw == 16) {
+                        *os << "  pextrw " << targetReg32 << ", " << op0 << ", " << idx << "\n";
+                        if (!directGpr) *os << "  mov " << dst << ", ax\n";
+                    } else if (bw == 32) {
+                        if (idx == 0) {
+                            *os << "  movd " << targetReg32 << ", " << op0 << "\n";
+                        } else {
+                            *os << "  pextrd " << targetReg32 << ", " << op0 << ", " << idx << "\n";
+                        }
+                        if (!directGpr) *os << "  mov " << dst << ", eax\n";
+                    } else if (bw == 64) {
+                        *os << "  pextrq " << targetReg64 << ", " << op0 << ", " << idx << "\n";
+                        if (!directGpr) *os << "  mov " << dst << ", rax\n";
+                    } else {
+                        throw std::runtime_error("Unsupported bitwidth for integer VExtract");
+                    }
+                } else {
+                    if (bw == 8) {
+                        *os << "  pextrb $" << idx << ", " << op0 << ", " << targetReg32 << "\n";
+                        if (!directGpr) *os << "  movb %al, " << dst << "\n";
+                    } else if (bw == 16) {
+                        *os << "  pextrw $" << idx << ", " << op0 << ", " << targetReg32 << "\n";
+                        if (!directGpr) *os << "  movw %ax, " << dst << "\n";
+                    } else if (bw == 32) {
+                        if (idx == 0) {
+                            *os << "  movd " << op0 << ", " << targetReg32 << "\n";
+                        } else {
+                            *os << "  pextrd $" << idx << ", " << op0 << ", " << targetReg32 << "\n";
+                        }
+                        if (!directGpr) *os << "  movl %eax, " << dst << "\n";
+                    } else if (bw == 64) {
+                        *os << "  pextrq $" << idx << ", " << op0 << ", " << targetReg64 << "\n";
+                        if (!directGpr) *os << "  movq %rax, " << dst << "\n";
+                    } else {
+                        throw std::runtime_error("Unsupported bitwidth for integer VExtract");
+                    }
+                }
+            } else if (elemTy->isFloatTy()) {
+                bool directGpr = isDirectGprRegister(dst);
+                bool directXmm = isXmmRegisterName(dst);
+                std::string targetGpr32 = directGpr ? to32BitReg(dst) : (abi == X64ABI::Windows ? "eax" : "%eax");
+
+                if (abi == X64ABI::Windows) {
+                    if (directXmm) {
+                        if (dst != op0) *os << "  movdqu " << dst << ", " << op0 << "\n";
+                        if (idx > 0) *os << "  shufps " << dst << ", " << dst << ", " << idx << "\n";
+                    } else if (directGpr) {
+                        *os << "  movdqu xmm0, " << op0 << "\n";
+                        if (idx > 0) *os << "  shufps xmm0, xmm0, " << idx << "\n";
+                        *os << "  movd " << targetGpr32 << ", xmm0\n";
+                    } else {
+                        *os << "  movdqu xmm0, " << op0 << "\n";
+                        if (idx > 0) *os << "  shufps xmm0, xmm0, " << idx << "\n";
+                        *os << "  movss " << dst << ", xmm0\n";
+                    }
+                } else {
+                    if (directXmm) {
+                        if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                        if (idx > 0) *os << "  shufps $" << idx << ", " << dst << ", " << dst << "\n";
+                    } else if (directGpr) {
+                        *os << "  movdqu " << op0 << ", %xmm0\n";
+                        if (idx > 0) *os << "  shufps $" << idx << ", %xmm0, %xmm0\n";
+                        *os << "  movd %xmm0, " << targetGpr32 << "\n";
+                    } else {
+                        *os << "  movdqu " << op0 << ", %xmm0\n";
+                        if (idx > 0) *os << "  shufps $" << idx << ", %xmm0, %xmm0\n";
+                        *os << "  movss %xmm0, " << dst << "\n";
+                    }
+                }
+            } else if (elemTy->isDoubleTy()) {
+                bool directGpr = isDirectGprRegister(dst);
+                bool directXmm = isXmmRegisterName(dst);
+                std::string targetGpr64 = directGpr ? to64BitReg(dst) : (abi == X64ABI::Windows ? "rax" : "%rax");
+
+                if (abi == X64ABI::Windows) {
+                    if (directXmm) {
+                        if (idx == 0) {
+                            if (dst != op0) *os << "  movdqu " << dst << ", " << op0 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << dst << ", " << op0 << "\n";
+                        }
+                    } else if (directGpr) {
+                        if (idx == 0) {
+                            *os << "  movq " << targetGpr64 << ", " << op0 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps xmm0, " << op0 << "\n";
+                            *os << "  movq " << targetGpr64 << ", xmm0\n";
+                        }
+                    } else {
+                        if (idx == 0) {
+                            *os << "  movsd " << dst << ", " << op0 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps xmm0, " << op0 << "\n";
+                            *os << "  movsd " << dst << ", xmm0\n";
+                        }
+                    }
+                } else {
+                    if (directXmm) {
+                        if (idx == 0) {
+                            if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << op0 << ", " << dst << "\n";
+                        }
+                    } else if (directGpr) {
+                        if (idx == 0) {
+                            *os << "  movq " << op0 << ", " << targetGpr64 << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << op0 << ", %xmm0\n";
+                            *os << "  movq %xmm0, " << targetGpr64 << "\n";
+                        }
+                    } else {
+                        if (idx == 0) {
+                            *os << "  movsd " << op0 << ", " << dst << "\n";
+                        } else if (idx == 1) {
+                            *os << "  movhlps " << op0 << ", %xmm0\n";
+                            *os << "  movsd %xmm0, " << dst << "\n";
+                        }
+                    }
+                }
+            } else {
+                throw std::runtime_error("Unsupported element type for VExtract");
+            }
+            return;
+        }
+
+        auto* vecType = dynamic_cast<const ir::VectorType*>(i.getType());
+        if (!vecType || !vecType->getElementType()) {
+            throw std::runtime_error("Unsupported vector arithmetic type");
+        }
+
+        auto* elemTy = vecType->getElementType();
+        unsigned numElem = vecType->getNumElements();
+        std::string simdInst = "";
+
+        // VBroadcast handling
+        if (i.getOpcode() == ir::Instruction::VBroadcast) {
+            if (elemTy->isIntegerTy()) {
+                auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+                unsigned bw = intTy ? intTy->getBitwidth() : 32;
+                if (bw == 32) {
+                    unsigned bits = elemTy->getSize() * 8 * numElem;
+                    if (bits == 256) {
+                        std::string source = op0;
+                        std::string dstYmm = toYmmReg(dst);
+                        std::string scratchXmm = getReservedScratchVectorReg();
+                        if (isXmmRegisterName(source)) {
+                            *os << "  vpbroadcastd " << source << ", " << dstYmm << "\n";
+                        } else {
+                            if (!source.empty() && source[0] == '$') {
+                                *os << "  movl " << source << ", %eax\n";
+                                *os << "  vmovd %eax, " << scratchXmm << "\n";
+                            } else {
+                                std::string reg32 = to32BitReg(source);
+                                *os << "  vmovd " << reg32 << ", " << scratchXmm << "\n";
+                            }
+                            *os << "  vpbroadcastd " << scratchXmm << ", " << dstYmm << "\n";
+                        }
+                    } else {
+                        if (!op0.empty() && op0[0] == '$') {
+                            *os << "  movl " << op0 << ", %eax\n";
+                            *os << "  movd %eax, " << dst << "\n";
+                        } else {
+                            *os << "  movd " << op0 << ", " << dst << "\n";
+                        }
+                        *os << "  pshufd $0, " << dst << ", " << dst << "\n";
+                    }
+                } else if (bw == 64) {
+                    std::string dstYmm = toYmmReg(dst);
+                    if (!op0.empty() && op0[0] == '$') {
+                        uint64_t val = 0;
+                        if (op0.size() > 1) val = std::stoull(op0.substr(1));
+                        if (val == 0) {
+                            if (numElem == 4 || numElem == 8) {
+                                *os << "  vpxor " << dstYmm << ", " << dstYmm << ", " << dstYmm << "\n";
+                            } else {
+                                *os << "  pxor " << dst << ", " << dst << "\n";
+                            }
+                        } else {
+                            std::string scratchXmm = getReservedScratchVectorReg();
+                            *os << "  movq " << op0 << ", %rax\n";
+                            *os << "  movq %rax, " << scratchXmm << "\n";
+                            if (numElem == 4) {
+                                *os << "  vpbroadcastq " << scratchXmm << ", " << dstYmm << "\n";
+                            } else {
+                                *os << "  punpcklqdq " << scratchXmm << ", " << dst << "\n";
+                            }
+                        }
+                    } else if (isXmmRegisterName(op0)) {
+                        if (numElem == 4) {
+                            *os << "  vpbroadcastq " << op0 << ", " << dstYmm << "\n";
+                        } else {
+                            if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                            *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                        }
+                    } else {
+                        std::string reg64 = to64BitReg(op0);
+                        std::string scratchXmm = getReservedScratchVectorReg();
+                        *os << "  movq " << reg64 << ", " << scratchXmm << "\n";
+                        if (numElem == 4) {
+                            *os << "  vpbroadcastq " << scratchXmm << ", " << dstYmm << "\n";
+                        } else {
+                            if (dst != scratchXmm) *os << "  movdqu " << scratchXmm << ", " << dst << "\n";
+                            *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                        }
+                    }
+                } else if (bw == 16) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  pshuflw $0, " << dst << ", " << dst << "\n";
+                    *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                } else if (bw == 8) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  punpcklbw " << dst << ", " << dst << "\n";
+                    *os << "  pshuflw $0, " << dst << ", " << dst << "\n";
+                    *os << "  punpcklqdq " << dst << ", " << dst << "\n";
+                } else {
+                    throw std::runtime_error("Unsupported integer bitwidth for VBroadcast");
+                }
+            } else if (elemTy->isFloatTy()) {
+                if (isXmmRegisterName(op0)) {
+                    if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0, " << dst << ", " << dst << "\n";
+                } else if (isDirectGprRegister(op0)) {
+                    *os << "  movd " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0, " << dst << ", " << dst << "\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  shufps $0, " << dst << ", " << dst << "\n";
+                }
+            } else if (elemTy->isDoubleTy()) {
+                if (isXmmRegisterName(op0)) {
+                    *os << "  movddup " << op0 << ", " << dst << "\n";
+                } else if (isDirectGprRegister(op0)) {
+                    *os << "  movq " << op0 << ", " << dst << "\n";
+                    *os << "  movddup " << dst << ", " << dst << "\n";
+                } else {
+                    *os << "  movdqu " << op0 << ", " << dst << "\n";
+                    *os << "  movddup " << dst << ", " << dst << "\n";
+                }
+            } else {
+                throw std::runtime_error("Unsupported vector type for VBroadcast");
+            }
+            return;
+        }
+
+        // FMA 3-operand instructions (Native FMA3 AVX)
+        if (i.getOpcode() == ir::Instruction::FMA || i.getOpcode() == ir::Instruction::FMS ||
+            i.getOpcode() == ir::Instruction::FNMA || i.getOpcode() == ir::Instruction::FNMS) {
+            if (i.getOperands().size() < 3) throw std::runtime_error("FMA requires 3 operands");
+            std::string op2 = cg.getValueAsOperand(i.getOperands()[2]->get());
+            std::string fmaBase = "";
+            if (i.getOpcode() == ir::Instruction::FMA) fmaBase = "vfmadd213";
+            else if (i.getOpcode() == ir::Instruction::FMS) fmaBase = "vfmsub213";
+            else if (i.getOpcode() == ir::Instruction::FNMA) fmaBase = "vfnmadd213";
+            else if (i.getOpcode() == ir::Instruction::FNMS) fmaBase = "vfnmsub213";
+
+            std::string suffix = elemTy->isFloatTy() ? "ps" : "pd";
+            std::string fmaInst = fmaBase + suffix;
+
+            unsigned totalBitWidth = elemTy->getSize() * 8 * numElem;
+            std::string fullDst = totalBitWidth == 256 ? toYmmReg(dst) : dst;
+            std::string fullOp0 = totalBitWidth == 256 ? toYmmReg(op0) : op0;
+            std::string fullOp1 = totalBitWidth == 256 ? toYmmReg(op1) : op1;
+            std::string fullOp2 = totalBitWidth == 256 ? toYmmReg(op2) : op2;
+
+            if (fullDst != fullOp0) {
+                *os << "  " << (totalBitWidth == 256 ? "vmovaps " : "movaps ") << fullOp0 << ", " << fullDst << "\n";
+            }
+            if (abi == X64ABI::Windows) {
+                *os << "  " << fmaInst << " " << fullDst << ", " << fullOp1 << ", " << fullOp2 << "\n";
+            } else {
+                *os << "  " << fmaInst << " " << fullOp2 << ", " << fullOp1 << ", " << fullDst << "\n";
+            }
+            return;
+        }
+
+
+        // Vector Shuffle Handling
+        if (i.getOpcode() == ir::Instruction::VShuffle) {
+            auto* mask = i.getShuffleMask();
+            std::string src0 = toYmmReg(op0);
+            std::string dstYmm = toYmmReg(dst);
+            if (mask && mask->indices.size() == 8 && mask->indices[0] == 4 && mask->indices[1] == 5 && mask->indices[2] == 6 && mask->indices[3] == 7) {
+                *os << "  vperm2i128 $0x01, " << src0 << ", " << src0 << ", " << dstYmm << "\n";
+                return;
+            }
+        }
+
+        // Vector Conversion Handling
+        if (i.getOpcode() == ir::Instruction::VSExt || i.getOpcode() == ir::Instruction::VZExt || i.getOpcode() == ir::Instruction::VTrunc) {
+            auto* srcVecTy = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            auto* dstVecTy = dynamic_cast<const ir::VectorType*>(i.getType());
+            if (!srcVecTy || !dstVecTy) throw std::runtime_error("Invalid vector conversion types");
+            auto* srcElemTy = dynamic_cast<const ir::IntegerType*>(srcVecTy->getElementType());
+            auto* dstElemTy = dynamic_cast<const ir::IntegerType*>(dstVecTy->getElementType());
+            if (!srcElemTy || !dstElemTy) throw std::runtime_error("Invalid vector conversion integer element types");
+
+            unsigned srcBw = srcElemTy->getBitwidth();
+            unsigned dstBw = dstElemTy->getBitwidth();
+            std::string srcReg = isXmmRegisterName(op0) ? op0 : "%xmm0";
+            std::string dstYmm = toYmmReg(dst);
+
+            if (i.getOpcode() == ir::Instruction::VSExt && srcBw == 32 && dstBw == 64) {
+                if (!isXmmRegisterName(op0)) {
+                    *os << "  vmovdqu " << op0 << ", %xmm0\n";
+                }
+                *os << "  vpmovsxdq " << srcReg << ", " << dstYmm << "\n";
+            } else if (i.getOpcode() == ir::Instruction::VZExt && srcBw == 32 && dstBw == 64) {
+                if (!isXmmRegisterName(op0)) {
+                    *os << "  vmovdqu " << op0 << ", %xmm0\n";
+                }
+                *os << "  vpmovzxdq " << srcReg << ", " << dstYmm << "\n";
+            } else {
+                throw std::runtime_error("Unsupported vector conversion lowering");
+            }
+            return;
+        }
+
+        // Binary vector opcodes selection
+        if (i.getOpcode() == ir::Instruction::VAnd) {
+            simdInst = "pand";
+        } else if (i.getOpcode() == ir::Instruction::VOr) {
+            simdInst = "por";
+        } else if (i.getOpcode() == ir::Instruction::VXor) {
+            simdInst = "pxor";
+        } else if (i.getOpcode() == ir::Instruction::VShl && elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            unsigned bw = intTy ? intTy->getBitwidth() : 32;
+            simdInst = (bw == 16) ? "psllw" : "pslld";
+        } else if (i.getOpcode() == ir::Instruction::VShr && elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            unsigned bw = intTy ? intTy->getBitwidth() : 32;
+            simdInst = (bw == 16) ? "psrlw" : "psrld";
+        } else if (i.getOpcode() == ir::Instruction::VMin) {
+            simdInst = (elemTy->getSize() == 1) ? "pminub" : ((elemTy->getSize() == 2) ? "pminsw" : "pminsd");
+        } else if (i.getOpcode() == ir::Instruction::VMax) {
+            simdInst = (elemTy->getSize() == 1) ? "pmaxub" : ((elemTy->getSize() == 2) ? "pmaxsw" : "pmaxsd");
+        } else if (i.getOpcode() == ir::Instruction::VFMin) {
+            simdInst = (elemTy->isFloatTy()) ? "minps" : "minpd";
+        } else if (i.getOpcode() == ir::Instruction::VFMax) {
+            simdInst = (elemTy->isFloatTy()) ? "maxps" : "maxpd";
+        } else if (i.getOpcode() == ir::Instruction::VHAdd) {
+            simdInst = (elemTy->isFloatTy()) ? "haddps" : ((elemTy->isDoubleTy()) ? "haddpd" : "phaddd");
+        } else if (i.getOpcode() == ir::Instruction::VCmp) {
+            if (i.getOperands().size() != 3)
+                throw std::runtime_error("VCmp requires two vectors and a predicate");
+            auto* predicate = dynamic_cast<ir::ConstantInt*>(i.getOperands()[2]->get());
+            if (!predicate) throw std::runtime_error("VCmp predicate must be constant");
+            const auto pred = static_cast<ir::VectorCompareOp>(predicate->getValue());
+            auto* comparedType = dynamic_cast<const ir::VectorType*>(i.getOperands()[0]->get()->getType());
+            if (!comparedType) throw std::runtime_error("VCmp operands must be vectors");
+            const ir::Type* comparedElemTy = comparedType->getElementType();
+            const unsigned totalBits = comparedElemTy->getSize() * 8 * numElem;
+            std::string lhs = totalBits == 256 ? toYmmReg(op0) : op0;
+            std::string rhs = totalBits == 256 ? toYmmReg(op1) : op1;
+            std::string out = totalBits == 256 ? toYmmReg(dst) : dst;
+            if (comparedElemTy->isIntegerTy() && comparedElemTy->getSize() == 4) {
+                if (pred == ir::VectorCompareOp::EQ)
+                    *os << "  vpcmpeqd " << rhs << ", " << lhs << ", " << out << "\n";
+                else if (pred == ir::VectorCompareOp::GT)
+                    *os << "  vpcmpgtd " << rhs << ", " << lhs << ", " << out << "\n";
+                else if (pred == ir::VectorCompareOp::LT)
+                    *os << "  vpcmpgtd " << lhs << ", " << rhs << ", " << out << "\n";
+                else
+                    throw std::runtime_error("Unsupported signed i32 vector comparison predicate");
+            } else if (comparedElemTy->isFloatTy() || comparedElemTy->isDoubleTy()) {
+                unsigned immediate = 0;
+                bool swap = false;
+                switch (pred) {
+                    case ir::VectorCompareOp::EQ: immediate = 0; break;  // ordered, quiet
+                    case ir::VectorCompareOp::LT: immediate = 1; break;
+                    case ir::VectorCompareOp::LE: immediate = 2; break;
+                    case ir::VectorCompareOp::NE: immediate = 12; break; // ordered, quiet
+                    case ir::VectorCompareOp::GT: immediate = 1; swap = true; break;
+                    case ir::VectorCompareOp::GE: immediate = 2; swap = true; break;
+                    default: throw std::runtime_error("Unsupported floating vector comparison predicate");
+                }
+                const char* mnemonic = comparedElemTy->isFloatTy() ? "vcmpps" : "vcmppd";
+                *os << "  " << mnemonic << " $" << immediate << ", "
+                    << (swap ? lhs : rhs) << ", " << (swap ? rhs : lhs)
+                    << ", " << out << "\n";
+            } else {
+                throw std::runtime_error("Unsupported VCmp element type");
+            }
+            return;
+        } else if (i.getOpcode() == ir::Instruction::VSelect) {
+            if (i.getOperands().size() != 3)
+                throw std::runtime_error("VSelect requires mask, true, and false vectors");
+            std::string trueValue = cg.getValueAsOperand(i.getOperands()[1]->get());
+            std::string falseValue = cg.getValueAsOperand(i.getOperands()[2]->get());
+            const unsigned totalBits = elemTy->getSize() * 8 * numElem;
+            if (totalBits == 256) {
+                op0 = toYmmReg(op0); trueValue = toYmmReg(trueValue);
+                falseValue = toYmmReg(falseValue); dst = toYmmReg(dst);
+            }
+            // IR masks are lane-wise all-zero/all-one bit vectors.  AVX
+            // blendv observes each lane's sign bit, which is therefore an
+            // exact target-specific realization of VSelect's abstract mask.
+            const char* mnemonic = elemTy->isDoubleTy() ? "vblendvpd" :
+                                   (elemTy->isFloatTy() ? "vblendvps" : "vpblendvb");
+            if (abi == X64ABI::Windows) {
+                *os << "  " << mnemonic << " " << dst << ", " << falseValue << ", " << trueValue << ", " << op0 << "\n";
+            } else {
+                *os << "  " << mnemonic << " " << op0 << ", " << trueValue << ", " << falseValue << ", " << dst << "\n";
+            }
+            return;
+        } else if (elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            if (!intTy) throw std::runtime_error("Invalid integer vector element type");
+            unsigned bw = intTy->getBitwidth();
+
+            if (bw == 8 && (numElem == 16 || numElem == 32 || numElem == 64)) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddb";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubb";
+                else throw std::runtime_error("Unsupported vector instruction for i8");
+            } else if (bw == 16 && (numElem == 8 || numElem == 16 || numElem == 32)) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddw";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubw";
+                else if (i.getOpcode() == ir::Instruction::VMul) simdInst = "pmullw";
+                else throw std::runtime_error("Unsupported vector instruction for i16");
+            } else if (bw == 32 && (numElem == 4 || numElem == 8 || numElem == 16)) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddd";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubd";
+                else if (i.getOpcode() == ir::Instruction::VMul) simdInst = "pmulld";
+                else throw std::runtime_error("Unsupported vector instruction for i32");
+            } else if (bw == 64 && (numElem == 2 || numElem == 4 || numElem == 8)) {
+                if (i.getOpcode() == ir::Instruction::VAdd) simdInst = "paddq";
+                else if (i.getOpcode() == ir::Instruction::VSub) simdInst = "psubq";
+                else throw std::runtime_error("Unsupported vector instruction for i64");
+            } else {
+                throw std::runtime_error("Unsupported integer vector type for arithmetic emission");
+            }
+        } else if (elemTy->isFloatTy() && (numElem == 4 || numElem == 8 || numElem == 16)) {
+            if (i.getOpcode() == ir::Instruction::VFAdd) simdInst = "addps";
+            else if (i.getOpcode() == ir::Instruction::VFSub) simdInst = "subps";
+            else if (i.getOpcode() == ir::Instruction::VFMul) simdInst = "mulps";
+            else if (i.getOpcode() == ir::Instruction::VFDiv) simdInst = "divps";
+            else throw std::runtime_error("Unsupported floating-point vector instruction for f32");
+        } else if (elemTy->isDoubleTy() && (numElem == 2 || numElem == 4 || numElem == 8)) {
+            if (i.getOpcode() == ir::Instruction::VFAdd) simdInst = "addpd";
+            else if (i.getOpcode() == ir::Instruction::VFSub) simdInst = "subpd";
+            else if (i.getOpcode() == ir::Instruction::VFMul) simdInst = "mulpd";
+            else if (i.getOpcode() == ir::Instruction::VFDiv) simdInst = "divpd";
+            else throw std::runtime_error("Unsupported floating-point vector instruction for f64");
+        } else {
+            throw std::runtime_error("Unsupported vector type for arithmetic emission");
+        }
+
+        if (simdInst.empty()) throw std::runtime_error("Unrecognized SIMD instruction opcode");
+
+        bool isCommutative = (i.getOpcode() == ir::Instruction::VAdd || i.getOpcode() == ir::Instruction::VMul ||
+                              i.getOpcode() == ir::Instruction::VFAdd || i.getOpcode() == ir::Instruction::VFMul ||
+                              i.getOpcode() == ir::Instruction::VAnd || i.getOpcode() == ir::Instruction::VOr ||
+                              i.getOpcode() == ir::Instruction::VXor);
+
+        unsigned totalBitWidth = elemTy->getSize() * 8 * numElem;
+        bool op0IsMem = !isXmmRegisterName(op0) && !isYmmRegisterName(op0);
+        bool op1IsMem = !isXmmRegisterName(op1) && !isYmmRegisterName(op1);
+        bool dstIsMem = !isXmmRegisterName(dst) && !isYmmRegisterName(dst);
+
+        std::string scratchVec = (abi == X64ABI::Windows) ? "xmm5" : "%xmm15";
+        std::string scratchYmm = (abi == X64ABI::Windows) ? "ymm5" : "%ymm15";
+
+        if (totalBitWidth == 256) {
+            std::string realDst = dstIsMem ? scratchYmm : toYmmReg(dst);
+            std::string realOp0 = op0;
+            std::string realOp1 = op1;
+
+            if (op0IsMem && op1IsMem) {
+                *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
+                realOp0 = scratchYmm;
+            } else if (op0IsMem && isCommutative) {
+                std::swap(realOp0, realOp1);
+            } else if (op0IsMem) {
+                *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
+                realOp0 = scratchYmm;
+            }
+
+            realOp0 = toYmmReg(realOp0);
+            realOp1 = toYmmReg(realOp1);
+
+            if (!simdInst.empty() && simdInst[0] != 'v') simdInst = "v" + simdInst;
+            if (abi == X64ABI::Windows) {
+                *os << "  " << simdInst << " " << realDst << ", " << realOp0 << ", " << realOp1 << "\n";
+            } else {
+                *os << "  " << simdInst << " " << realOp1 << ", " << realOp0 << ", " << realDst << "\n";
+            }
+
+            if (dstIsMem) {
+                *os << "  vmovdqu " << scratchYmm << ", " << toYmmReg(dst) << "\n";
+            }
+        } else if (totalBitWidth == 512) {
+            dst = toZmmReg(dst);
+            op0 = toZmmReg(op0);
+            op1 = toZmmReg(op1);
+            if (!simdInst.empty() && simdInst[0] != 'v') simdInst = "v" + simdInst;
+            if (dst == op0) {
+                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+            } else if (dst == op1 && isCommutative) {
+                *os << "  " << simdInst << " " << op0 << ", " << dst << "\n";
+            } else {
+                *os << "  vmovdqu64 " << op0 << ", " << dst << "\n";
+                *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
+            }
+        } else {
+            std::string realDst = dstIsMem ? scratchVec : dst;
+            std::string realOp0 = op0;
+            std::string realOp1 = op1;
+
+            if (realDst != realOp0) {
+                if (isCommutative && realDst == realOp1) {
+                    std::swap(realOp0, realOp1);
+                } else {
+                    *os << "  movdqu " << realOp0 << ", " << realDst << "\n";
+                }
+            }
+            *os << "  " << simdInst << " " << realOp1 << ", " << realDst << "\n";
+            if (dstIsMem) {
+                *os << "  movdqu " << scratchVec << ", " << dst << "\n";
+            }
+        }
+    }
+}
+
+std::string ComplexAddress::format(X64ABI abi) const {
+    if (!isValid) return "";
+    std::string res;
+    if (abi == X64ABI::SystemV) {
+        if (disp != 0) res += std::to_string(disp);
+        res += "(";
+        if (!base.empty()) res += base;
+        if (!index.empty()) {
+            if (!base.empty()) res += ", ";
+            res += index;
+            if (scale > 1) res += ", " + std::to_string(scale);
+        }
+        res += ")";
+    } else {
+        res = "[";
+        bool hasBase = false;
+        if (!base.empty()) { res += base; hasBase = true; }
+        if (!index.empty()) {
+            if (hasBase) res += " + ";
+            res += index;
+            if (scale > 1) res += " * " + std::to_string(scale);
+            hasBase = true;
+        }
+        if (disp != 0 || !hasBase) {
+            if (disp > 0) {
+                if (hasBase) res += " + ";
+                res += std::to_string(disp);
+            } else if (disp < 0) {
+                if (hasBase) res += " - ";
+                res += std::to_string(-disp);
+            } else if (!hasBase) {
+                res += "0";
+            }
+        }
+        res += "]";
+    }
+    return res;
+}
+
+ComplexAddress X64Architecture::matchComplexAddress(CodeGen& cg, ir::Value* val) const {
+    ComplexAddress result;
+    if (!val) return result;
+
+    auto unwrapExt = [](ir::Value* v) -> ir::Value* {
+        if (!v) return v;
+        while (auto* inst = dynamic_cast<ir::Instruction*>(v)) {
+            if (inst->getOpcode() == ir::Instruction::ExtSW || inst->getOpcode() == ir::Instruction::ExtUW) {
+                if (!inst->getOperands().empty() && inst->getOperands()[0] && inst->getOperands()[0]->get()) {
+                    v = inst->getOperands()[0]->get();
+                } else break;
+            } else break;
+        }
+        return v;
+    };
+
+    auto* inst = dynamic_cast<ir::Instruction*>(val);
+    if (!inst) return result;
+
+    int64_t disp = 0;
+    ir::Value* coreAddr = val;
+
+    if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
+        ir::Value* op0 = inst->getOperands()[0]->get();
+        ir::Value* op1 = inst->getOperands()[1]->get();
+        if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) {
+            disp = static_cast<int64_t>(c1->getValue());
+            coreAddr = op0;
+        } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(op0)) {
+            disp = static_cast<int64_t>(c0->getValue());
+            coreAddr = op1;
+        }
+    }
+
+    ir::Value* baseVal = nullptr;
+    ir::Value* indexVal = nullptr;
+    int scale = 1;
+
+    auto* coreInst = dynamic_cast<ir::Instruction*>(coreAddr);
+    if (coreInst && coreInst->getOpcode() == ir::Instruction::Add && coreInst->getOperands().size() == 2) {
+        ir::Value* op0 = coreInst->getOperands()[0]->get();
+        ir::Value* op1 = coreInst->getOperands()[1]->get();
+
+        auto* mul0 = dynamic_cast<ir::Instruction*>(unwrapExt(op0));
+        auto* mul1 = dynamic_cast<ir::Instruction*>(unwrapExt(op1));
+
+        if (mul1 && mul1->getOpcode() == ir::Instruction::Mul && mul1->getOperands().size() == 2) {
+            baseVal = op0;
+            ir::Value* m0 = mul1->getOperands()[0]->get();
+            ir::Value* m1 = mul1->getOperands()[1]->get();
+            if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
+                indexVal = m0; scale = static_cast<int>(c1->getValue());
+            } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
+                indexVal = m1; scale = static_cast<int>(c0->getValue());
+            }
+        } else if (mul0 && mul0->getOpcode() == ir::Instruction::Mul && mul0->getOperands().size() == 2) {
+            baseVal = op1;
+            ir::Value* m0 = mul0->getOperands()[0]->get();
+            ir::Value* m1 = mul0->getOperands()[1]->get();
+            if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
+                indexVal = m0; scale = static_cast<int>(c1->getValue());
+            } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
+                indexVal = m1; scale = static_cast<int>(c0->getValue());
+            }
+        } else {
+            baseVal = op0;
+            indexVal = op1;
+            scale = 1;
+        }
+    } else if (coreInst && coreInst->getOpcode() == ir::Instruction::Mul && coreInst->getOperands().size() == 2) {
+        ir::Value* m0 = coreInst->getOperands()[0]->get();
+        ir::Value* m1 = coreInst->getOperands()[1]->get();
+        if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
+            indexVal = m0; scale = static_cast<int>(c1->getValue());
+        } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
+            indexVal = m1; scale = static_cast<int>(c0->getValue());
+        }
+    }
+
+    if (scale != 1 && scale != 2 && scale != 4 && scale != 8) return result;
+
+    indexVal = unwrapExt(indexVal);
+    baseVal = unwrapExt(baseVal);
+
+    std::string bStr = baseVal ? cg.getValueAsOperand(baseVal) : "";
+    std::string iStr = indexVal ? cg.getValueAsOperand(indexVal) : "";
+
+    auto isReg = [this](const std::string& s) {
+        if (s.empty()) return true;
+        if (abi == X64ABI::Windows) {
+            return s[0] != '[' && s[0] != '$' && s[0] != '-' && s[0] != '+';
+        }
+        return s[0] == '%';
+    };
+
+    if (!isReg(bStr) || !isReg(iStr)) return result;
+    if (bStr.empty() && iStr.empty()) return result;
+
+    if (abi == X64ABI::SystemV) {
+        if (!bStr.empty() && bStr[0] == '%') bStr = to64BitReg(bStr);
+        if (!iStr.empty() && iStr[0] == '%') iStr = to64BitReg(iStr);
+    } else {
+        if (!bStr.empty()) bStr = to64BitReg(bStr);
+        if (!iStr.empty()) iStr = to64BitReg(iStr);
+    }
+
+    result.base = bStr;
+    result.index = iStr;
+    result.scale = scale;
+    result.disp = disp;
+    result.isValid = true;
+    return result;
 }
 
 std::string X64Architecture::getRegisterName(const std::string& base, const ir::Type* type) const {

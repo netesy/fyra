@@ -2,6 +2,8 @@
 
 #include "ir/Function.h"
 
+namespace target { class TargetInfo; }
+
 namespace transforms {
 
 /**
@@ -12,6 +14,7 @@ namespace transforms {
 class RegAllocRewriter {
 public:
     bool run(ir::Function& func);
+    bool run(ir::Function& func, const ::target::TargetInfo* targetInfo);
 };
 
 } // namespace transforms

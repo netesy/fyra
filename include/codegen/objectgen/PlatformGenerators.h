@@ -38,7 +38,7 @@ public:
     // PlatformObjectGenerator interface
     ObjectGenResult generate(const std::string& asmPath, const std::string& objPath) override;
     ObjectValidationResult validateObject(const std::string& objPath) override;
-    
+
     std::string getPlatformName() const override { return "Windows x64"; }
     std::string getObjectFormat() const override { return "COFF"; }
     std::string getDefaultExtension() const override { return ".obj"; }

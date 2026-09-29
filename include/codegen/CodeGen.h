@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <array>
 #include <functional>
 #include <chrono>
 #include <filesystem>
@@ -109,6 +110,7 @@ public:
     // Enhanced assembly emission
     void emitTargetSpecificHeader();
     void emitDataSection();
+    void emitVectorConstantPool();
     void emitTextSection();
     void emitFunctionAlignment();
     
@@ -139,6 +141,9 @@ public:
     // Enhanced CodeGen configuration
     void setValidationLevel(validation::ValidationLevel level);
     void enableVerboseOutput(bool enable);
+
+    // Object file generator getter
+    objectgen::ObjectFileGenerator& getObjectGenerator() { return *objectGenerator_; }
 
     // Timing utilities
     class CompilationTimer {
@@ -191,6 +196,9 @@ public:
 
     // For floating point constants
     std::map<ir::ConstantFP*, std::string> floatConstantLabels;
+    using VectorConstant = std::array<uint8_t, 16>;
+    std::map<VectorConstant, std::string> vectorConstantLabels;
+    std::string getOrCreateVectorConstantLabel(const VectorConstant& bytes);
     
     // Enhanced code generation state
     bool emittedHeader = false;

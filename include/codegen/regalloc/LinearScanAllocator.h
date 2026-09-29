@@ -7,6 +7,8 @@
 
 #include <variant>
 
+namespace target { class TargetInfo; }
+
 namespace transforms {
 
 // Represents a physical machine register.
@@ -30,6 +32,7 @@ using RegLocation = std::variant<PhysicalReg, StackSlot>;
 class LinearScanAllocator {
 public:
     void run(ir::Function& func);
+    void run(ir::Function& func, const ::target::TargetInfo* targetInfo);
 
     const std::map<ir::Instruction*, RegLocation>& getRegisterMap() const {
         return vreg_to_location_map;
@@ -51,9 +54,10 @@ public:
     const RegAllocStats& getStats() const { return stats; }
 
 private:
-    void linearScan(ir::Function& func);
-    void expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
+    void linearScan(ir::Function& func, const ::target::TargetInfo* targetInfo = nullptr);
+    void expireOldIntervals(int current_start_point, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee, std::vector<PhysicalReg>& free_xmm);
     void spillAtInterval(const class LiveInterval& interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee);
+    StackSlot allocateStackSlot(ir::Instruction* vreg);
 
     unsigned int next_stack_slot = 0;
     std::vector<StackSlot> free_stack_slots;

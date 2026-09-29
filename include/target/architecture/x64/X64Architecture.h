@@ -11,10 +11,34 @@ using namespace codegen;
 
 enum class X64ABI { SystemV, Windows };
 
+struct X64FrameLayout {
+    bool makesCalls = false;
+    std::vector<std::string> usedCalleeRegs;
+    int stackAlloc = 0;
+    bool isZeroFrame = false;
+
+    bool permitsBareReturn() const {
+        return isZeroFrame;
+    }
+};
+
+struct ComplexAddress {
+    std::string base;
+    std::string index;
+    int scale = 1;
+    int64_t disp = 0;
+    bool isValid = false;
+
+    std::string format(X64ABI abi) const;
+};
+
 class X64Architecture : public ArchitectureInfo {
+public:
+    ComplexAddress matchComplexAddress(CodeGen& cg, ir::Value* val) const;
 public:
     X64Architecture(X64ABI abi);
 
+    Arch getArch() const override { return Arch::X64; }
     size_t getPointerSize() const override { return 8; }
     size_t getStackAlignment() const override { return 16; }
     TypeInfo getTypeInfo(const ir::Type* type) const override;
@@ -35,6 +59,8 @@ public:
 
     void emitRet(CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMin(CodeGen& cg, ir::Instruction& i) override;
+    void emitSMax(CodeGen& cg, ir::Instruction& i) override;
     void emitSub(CodeGen& cg, ir::Instruction& i) override;
     void emitMul(CodeGen& cg, ir::Instruction& i) override;
     void emitDiv(CodeGen& cg, ir::Instruction& i) override;
@@ -49,6 +75,7 @@ public:
     void emitNot(CodeGen& cg, ir::Instruction& i) override;
     void emitCopy(CodeGen& cg, ir::Instruction& i) override;
     void emitCall(CodeGen& cg, ir::Instruction& i) override;
+    bool emitTailCall(CodeGen& cg, ir::Instruction& callInst, ir::Instruction& retInst) override;
     void emitFAdd(CodeGen& cg, ir::Instruction& i) override;
     void emitFSub(CodeGen& cg, ir::Instruction& i) override;
     void emitFMul(CodeGen& cg, ir::Instruction& i) override;
@@ -78,7 +105,20 @@ public:
     bool isCallerSaved(const std::string& reg) const override;
     bool isCalleeSaved(const std::string& reg) const override;
     bool isReserved(const std::string& reg) const override;
+    std::string getReservedScratchVectorReg() const override;
+    unsigned getReservedScratchVectorRegIndex() const override;
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
+
+    VectorCapabilities getVectorCapabilities() const override;
+    bool supportsVectorWidth(unsigned width) const override;
+    bool supportsVectorType(const ir::VectorType* type) const override;
+    bool supportsVectorOperation(ir::Instruction::Opcode op, const ir::VectorType* type) const override;
+    bool supportsVectorConversion(ir::Instruction::Opcode op, const ir::VectorType* srcType, const ir::VectorType* dstType) const override;
+    void emitVectorLoad(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorStore(CodeGen& cg, ir::VectorInstruction& i) override;
+    void emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i) override;
+
+    X64FrameLayout computeFrameLayout(CodeGen& cg, ir::Function& func) const;
 
 private:
     X64ABI abi;
