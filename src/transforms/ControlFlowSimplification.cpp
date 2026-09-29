@@ -1,4 +1,5 @@
 #include "transforms/ControlFlowSimplification.h"
+#include "transforms/CFGBuilder.h"
 #include "ir/Use.h"
 #include "ir/Constant.h"
 #include "ir/Instruction.h"
@@ -17,16 +18,53 @@ bool ControlFlowSimplification::performTransformation(ir::Function& func) {
     
     if (simplifyConstantBranches(func)) {
         changed = true;
+        CFGBuilder::run(func);
+    }
+
+    if (simplifySingleIncomingPhis(func)) {
+        changed = true;
     }
     
     if (eliminateUnreachableBlocks(func)) {
+        changed = true;
+        CFGBuilder::run(func);
+    }
+
+    if (simplifySingleIncomingPhis(func)) {
         changed = true;
     }
 
     if (mergeBlocks(func)) {
         changed = true;
+        CFGBuilder::run(func);
     }
     
+    return changed;
+}
+
+bool ControlFlowSimplification::simplifySingleIncomingPhis(ir::Function& func) {
+    bool changed = false;
+    for (auto& bb_ptr : func.getBasicBlocks()) {
+        ir::BasicBlock* bb = bb_ptr.get();
+        if (!bb) continue;
+        if (bb->getPredecessors().size() == 1) {
+            ir::BasicBlock* pred = bb->getPredecessors().front();
+            auto& instrs = bb->getInstructions();
+            auto it = instrs.begin();
+            while (it != instrs.end()) {
+                if (auto* phi = dynamic_cast<ir::PhiNode*>(it->get())) {
+                    ir::Value* val = phi->getIncomingValueForBlock(pred);
+                    if (val) {
+                        phi->replaceAllUsesWith(val);
+                        it = instrs.erase(it);
+                        changed = true;
+                        continue;
+                    }
+                }
+                ++it;
+            }
+        }
+    }
     return changed;
 }
 
@@ -166,6 +204,7 @@ bool ControlFlowSimplification::mergeBlocks(ir::Function& func) {
             if (!canMergeBlocks(bb, succ, func)) continue;
 
             mergeBlocksImpl(bb, succ, func);
+            CFGBuilder::run(func);
             changed = true;
             block_changed = true;
             blocks_merged_++;
@@ -176,24 +215,15 @@ bool ControlFlowSimplification::mergeBlocks(ir::Function& func) {
 }
 
 bool ControlFlowSimplification::hasOnePredecessor(ir::BasicBlock* block, ir::Function& func) {
-    int count = 0;
-    for (auto& bb_ptr : func.getBasicBlocks()) {
-        ir::BasicBlock* bb = bb_ptr.get();
-        if (!bb || bb->getInstructions().empty()) continue;
-        ir::Instruction* term = bb->getInstructions().back().get();
-        for (auto& op : term->getOperands()) {
-            if (op && op->get() == block) {
-                count++;
-                break; 
-            }
-        }
-    }
-    return count == 1;
+    if (!block) return false;
+    return block->getPredecessors().size() == 1;
 }
 
 bool ControlFlowSimplification::canMergeBlocks(ir::BasicBlock* pred, ir::BasicBlock* succ, ir::Function& func) {
     if (!pred || !succ) return false;
     if (succ == func.getBasicBlocks().front().get()) return false;
+    if (pred->getInstructions().empty()) return false;
+    if (!isUnconditionalBranch(pred->getInstructions().back().get())) return false;
     if (!hasOnePredecessor(succ, func)) return false;
     for (auto& instr : succ->getInstructions()) {
         if (dynamic_cast<ir::PhiNode*>(instr.get())) return false;
@@ -205,7 +235,11 @@ void ControlFlowSimplification::mergeBlocksImpl(ir::BasicBlock* pred, ir::BasicB
     if (!pred || !succ) return;
     if (pred->getInstructions().empty()) return;
 
-    pred->getInstructions().pop_back();
+    succ->replaceAllUsesWith(pred);
+
+    if (!pred->getInstructions().empty() && isUnconditionalBranch(pred->getInstructions().back().get())) {
+        pred->getInstructions().pop_back();
+    }
 
     auto& succInstrs = succ->getInstructions();
     while (!succInstrs.empty()) {
@@ -234,38 +268,18 @@ void ControlFlowSimplification::mergeBlocksImpl(ir::BasicBlock* pred, ir::BasicB
 }
 
 bool ControlFlowSimplification::hasOneSuccessor(ir::BasicBlock* block) {
-    if (!block || block->getInstructions().empty()) return false;
-    ir::Instruction* term = block->getInstructions().back().get();
-    if (!isUnconditionalBranch(term)) return false;
-    return getSuccessor(block) != nullptr;
+    if (!block) return false;
+    return block->getSuccessors().size() == 1;
 }
 
 ir::BasicBlock* ControlFlowSimplification::getSuccessor(ir::BasicBlock* block) {
-    if (!block || block->getInstructions().empty()) return nullptr;
-    ir::Instruction* term = block->getInstructions().back().get();
-    if (!isUnconditionalBranch(term) || term->getOperands().empty() || !term->getOperands()[0]) {
-        return nullptr;
-    }
-    return dynamic_cast<ir::BasicBlock*>(term->getOperands()[0]->get());
+    if (!block || block->getSuccessors().empty()) return nullptr;
+    return block->getSuccessors().front();
 }
 
 std::vector<ir::BasicBlock*> ControlFlowSimplification::getPredecessors(ir::BasicBlock* block, ir::Function& func) {
-    std::vector<ir::BasicBlock*> preds;
-    if (!block) return preds;
-
-    for (auto& bb_ptr : func.getBasicBlocks()) {
-        ir::BasicBlock* bb = bb_ptr.get();
-        if (!bb || bb->getInstructions().empty()) continue;
-        ir::Instruction* term = bb->getInstructions().back().get();
-        for (auto& op : term->getOperands()) {
-            if (op && op->get() == block) {
-                preds.push_back(bb);
-                break;
-            }
-        }
-    }
-
-    return preds;
+    if (!block) return {};
+    return block->getPredecessors();
 }
 
 bool ControlFlowSimplification::isTerminator(ir::Instruction* instr) {

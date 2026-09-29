@@ -22,6 +22,7 @@ protected:
 
 private:
     bool simplifyConstantBranches(ir::Function& func);
+    bool simplifySingleIncomingPhis(ir::Function& func);
     bool eliminateUnreachableBlocks(ir::Function& func);
     
     bool mergeBlocks(ir::Function& func);

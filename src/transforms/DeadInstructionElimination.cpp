@@ -1,4 +1,5 @@
 #include "transforms/DeadInstructionElimination.h"
+#include "transforms/CFGBuilder.h"
 #include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
 #include "ir/Function.h"
@@ -105,6 +106,9 @@ bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) 
             ++it;
         }
     }
+    if (changed) {
+        CFGBuilder::run(func);
+    }
     return changed;
 }
 
@@ -196,6 +200,7 @@ void DeadInstructionElimination::findReachableBlocks(ir::Function& func, std::se
     
     std::vector<ir::BasicBlock*> worklist;
     ir::BasicBlock* entry = func.getBasicBlocks().front().get();
+    if (!entry) return;
     
     reachable.insert(entry);
     worklist.push_back(entry);
@@ -203,13 +208,16 @@ void DeadInstructionElimination::findReachableBlocks(ir::Function& func, std::se
     while (!worklist.empty()) {
         ir::BasicBlock* curr = worklist.back();
         worklist.pop_back();
+        if (!curr) continue;
         
         if (curr->getInstructions().empty()) continue;
         ir::Instruction* term = curr->getInstructions().back().get();
+        if (!term) continue;
         
         for (auto& op : term->getOperands()) {
+            if (!op) continue;
             if (auto* succ = dynamic_cast<ir::BasicBlock*>(op->get())) {
-                if (reachable.insert(succ).second) {
+                if (succ && reachable.insert(succ).second) {
                     worklist.push_back(succ);
                 }
             }
@@ -223,6 +231,7 @@ void DeadInstructionElimination::markLiveInstructions(ir::Function& func, std::s
     for (auto& bb_ptr : func.getBasicBlocks()) {
         for (auto& instr_ptr : bb_ptr->getInstructions()) {
             ir::Instruction* instr = instr_ptr.get();
+            if (!instr) continue;
             if (hasSideEffects(instr) || isTerminator(instr)) {
                 live.insert(instr);
                 worklist.insert(instr);
