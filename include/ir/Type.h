@@ -105,7 +105,7 @@ public:
     // Override Type methods
     size_t getSize() const override { return 4; }
     size_t getAlignment() const override { return 4; }
-    std::string toString() const override { return "float"; }
+    std::string toString() const override { return "f32"; }
 };
 
 class DoubleType : public Type {
@@ -117,7 +117,7 @@ public:
     // Override Type methods
     size_t getSize() const override { return 8; }
     size_t getAlignment() const override { return 8; }
-    std::string toString() const override { return "double"; }
+    std::string toString() const override { return "f64"; }
 };
 
 class VoidType : public Type {
@@ -331,7 +331,7 @@ public:
     }
     
     std::string toString() const override {
-        return "<" + std::to_string(numElements) + " x " + elementType->toString() + ">";
+        return "v" + std::to_string(numElements) + elementType->toString();
     }
 
 private:

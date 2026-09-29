@@ -1,11 +1,11 @@
-function $my_add(%a : w, %b : w) : w {
+function $my_add(%a : i32, %b : i32) : i32 {
 @start
-    %t0 = add %a, %b : w
-    ret %t0 : w
+    %t0 = add %a, %b : i32
+    ret %t0 : i32
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %t0 = call $my_add(w 10, w 20) : w
-    ret %t0 : w
+    %t0 = call $my_add(i32 10, i32 20) : i32
+    ret %t0 : i32
 }

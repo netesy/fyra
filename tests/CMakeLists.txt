@@ -103,6 +103,7 @@ target_link_libraries(test_comprehensive PRIVATE fyra)
 target_compile_definitions(test_comprehensive PRIVATE TEST_FILE="${CMAKE_CURRENT_SOURCE_DIR}/comprehensive.fyra")
 
 add_test(NAME ComprehensiveParserTest COMMAND test_comprehensive)
+set_tests_properties(ComprehensiveParserTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 if(FYRA_ENABLE_EXTENDED_TESTS)
     add_executable(test_copy_elimination test_copy_elimination.cpp)
@@ -133,6 +134,12 @@ target_link_libraries(simple_wasm_test PRIVATE fyra)
 add_test(NAME SimpleWasmTest COMMAND simple_wasm_test)
 set_tests_properties(SimpleWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_wasm_execution test_wasm_execution.cpp)
+target_link_libraries(test_wasm_execution PRIVATE fyra)
+
+add_test(NAME WasmExecutionTest COMMAND test_wasm_execution)
+set_tests_properties(WasmExecutionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # add_executable(test_linux_exec test_linux_exec.cpp)
 # target_link_libraries(test_linux_exec PRIVATE fyra)
 
@@ -151,29 +158,11 @@ set_tests_properties(SimpleWasmTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_
 # add_test(NAME RiscVInMemoryExecTest COMMAND test_inmemory_riscv_exec)
 # set_tests_properties(RiscVInMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-if(FYRA_ENABLE_EXTENDED_TESTS)
-    add_executable(test_inmemory_aarch64_exec test_inmemory_aarch64_exec.cpp)
-    target_link_libraries(test_inmemory_aarch64_exec PRIVATE fyra)
+add_executable(test_benchmark_suite test_benchmark_suite.cpp)
+target_link_libraries(test_benchmark_suite PRIVATE fyra)
 
-    add_test(NAME AArch64InMemoryExecTest COMMAND test_inmemory_aarch64_exec)
-    set_tests_properties(AArch64InMemoryExecTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-endif()
-
-if(FYRA_ENABLE_EXTENDED_TESTS)
-    add_executable(test_benchmark_suite test_benchmark_suite.cpp)
-    target_link_libraries(test_benchmark_suite PRIVATE fyra)
-
-    add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
-    set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-endif()
-
-if(FYRA_ENABLE_EXTENDED_TESTS)
-    add_executable(test_sqlite_clone test_sqlite_clone.cpp)
-    target_link_libraries(test_sqlite_clone PRIVATE fyra)
-
-    add_test(NAME SqliteCloneTest COMMAND test_sqlite_clone)
-    set_tests_properties(SqliteCloneTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-endif()
+add_test(NAME BenchmarkSuiteTest COMMAND test_benchmark_suite)
+set_tests_properties(BenchmarkSuiteTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_http_server test_http_server.cpp)
 target_link_libraries(test_http_server PRIVATE fyra)
@@ -181,9 +170,13 @@ target_link_libraries(test_http_server PRIVATE fyra)
 add_test(NAME HttpServerTest COMMAND test_http_server)
 set_tests_properties(HttpServerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 if(FYRA_ENABLE_EXTENDED_TESTS)
+    add_executable(test_sqlite_clone test_sqlite_clone.cpp)
+    target_link_libraries(test_sqlite_clone PRIVATE fyra)
+    add_test(NAME SqliteCloneTest COMMAND test_sqlite_clone)
+    set_tests_properties(SqliteCloneTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     add_executable(test_phpish_frontend test_phpish_frontend.cpp)
     target_link_libraries(test_phpish_frontend PRIVATE fyra)
-
     add_test(NAME PhpishFrontendTest COMMAND test_phpish_frontend)
     set_tests_properties(PhpishFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -194,11 +187,11 @@ if(FYRA_ENABLE_EXTENDED_TESTS)
     set_tests_properties(VoiletFrontendTest PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
 
-add_executable(test_pe_generator test_pe_generator.cpp)
-target_link_libraries(test_pe_generator PRIVATE fyra)
+add_executable(test_elf_image test_elf_image.cpp)
+target_link_libraries(test_elf_image PRIVATE fyra)
 
-add_test(NAME PEGeneratorTest COMMAND test_pe_generator)
-set_tests_properties(PEGeneratorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME ELFImageTest COMMAND test_elf_image)
+set_tests_properties(ELFImageTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_extern test_extern.cpp)
 target_link_libraries(test_extern PRIVATE fyra)
@@ -243,3 +236,201 @@ add_test(NAME SqliteEmulationTest COMMAND test_sqlite_emulation)
 add_executable(test_portable_capabilities test_portable_capabilities.cpp)
 target_link_libraries(test_portable_capabilities PRIVATE fyra)
 add_test(NAME PortableCapabilitiesTest COMMAND test_portable_capabilities)
+
+add_executable(test_licm test_licm.cpp)
+target_link_libraries(test_licm PRIVATE fyra)
+add_test(NAME LICMTest COMMAND test_licm)
+
+add_executable(test_macho_image test_macho_image.cpp)
+target_link_libraries(test_macho_image PRIVATE fyra)
+add_test(NAME MachOImageTest COMMAND test_macho_image)
+
+add_executable(test_pe_import test_pe_import.cpp)
+target_link_libraries(test_pe_import PRIVATE fyra)
+add_test(NAME PeImportTest COMMAND test_pe_import)
+
+add_executable(test_pe_reloc test_pe_reloc.cpp)
+target_link_libraries(test_pe_reloc PRIVATE fyra)
+add_test(NAME PeRelocTest COMMAND test_pe_reloc)
+
+add_executable(test_pe_import_complete test_pe_import_complete.cpp)
+target_link_libraries(test_pe_import_complete PRIVATE fyra)
+add_test(NAME PeImportCompleteTest COMMAND test_pe_import_complete)
+set_tests_properties(LICMTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_inliner test_inliner.cpp)
+target_link_libraries(test_inliner PRIVATE fyra)
+add_test(NAME InlinerTest COMMAND test_inliner)
+set_tests_properties(InlinerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_gvn test_gvn.cpp)
+target_link_libraries(test_gvn PRIVATE fyra)
+add_test(NAME GVNTest COMMAND test_gvn)
+set_tests_properties(GVNTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_composition test_composition.cpp)
+target_link_libraries(test_composition PRIVATE fyra)
+add_test(NAME CompositionTest COMMAND test_composition)
+set_tests_properties(CompositionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_scev test_scev.cpp)
+target_link_libraries(test_scev PRIVATE fyra)
+add_test(NAME SCEVTest COMMAND test_scev)
+set_tests_properties(SCEVTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_closed_form_reduction test_closed_form_reduction.cpp)
+target_link_libraries(test_closed_form_reduction PRIVATE fyra)
+add_test(NAME ClosedFormReductionTest COMMAND test_closed_form_reduction)
+set_tests_properties(ClosedFormReductionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_sccp_interprocedural test_sccp_interprocedural.cpp)
+target_link_libraries(test_sccp_interprocedural PRIVATE fyra)
+add_test(NAME SCCPInterproceduralTest COMMAND test_sccp_interprocedural)
+
+add_executable(test_div_strength_reduction test_div_strength_reduction.cpp)
+target_link_libraries(test_div_strength_reduction PRIVATE fyra)
+add_test(NAME DivisionStrengthReductionTest COMMAND test_div_strength_reduction)
+set_tests_properties(SCCPInterproceduralTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_x64_constant_shifts test_x64_constant_shifts.cpp)
+target_link_libraries(test_x64_constant_shifts PRIVATE fyra)
+add_test(NAME X64ConstantShiftsTest COMMAND test_x64_constant_shifts)
+
+add_executable(test_loop_unroll test_loop_unroll.cpp)
+target_link_libraries(test_loop_unroll PRIVATE fyra)
+add_test(NAME LoopUnrollTest COMMAND test_loop_unroll)
+set_tests_properties(LoopUnrollTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_simd_stubs test_simd_stubs.cpp)
+target_link_libraries(test_simd_stubs PRIVATE fyra)
+add_test(NAME SIMDStubsTest COMMAND test_simd_stubs)
+set_tests_properties(SIMDStubsTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_wasm_simd_proof test_wasm_simd_proof.cpp)
+target_link_libraries(test_wasm_simd_proof PRIVATE fyra)
+add_test(NAME WasmSIMDProofTest COMMAND test_wasm_simd_proof)
+set_tests_properties(WasmSIMDProofTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_simd_exec test_simd_exec.cpp)
+target_link_libraries(test_simd_exec PRIVATE fyra)
+add_test(NAME SIMDTest COMMAND test_simd_exec)
+set_tests_properties(SIMDTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_vshuffle_prerequisites test_vshuffle_prerequisites.cpp)
+target_link_libraries(test_vshuffle_prerequisites PRIVATE fyra)
+add_test(NAME VShufflePrerequisitesTest COMMAND test_vshuffle_prerequisites)
+
+add_executable(test_vector_folding_and_spill test_vector_folding_and_spill.cpp)
+target_link_libraries(test_vector_folding_and_spill PRIVATE fyra)
+add_test(NAME VectorFoldingAndSpillTest COMMAND test_vector_folding_and_spill)
+set_tests_properties(VectorFoldingAndSpillTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_fma_gather_egraph test_fma_gather_egraph.cpp)
+target_link_libraries(test_fma_gather_egraph PRIVATE fyra)
+add_test(NAME FMAGatherEGraphTest COMMAND test_fma_gather_egraph)
+set_tests_properties(FMAGatherEGraphTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_loop_vectorizer test_loop_vectorizer.cpp)
+target_link_libraries(test_loop_vectorizer PRIVATE fyra)
+add_test(NAME LoopVectorizerTest COMMAND test_loop_vectorizer)
+set_tests_properties(LoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_array test_auto_vec_array.cpp)
+target_link_libraries(test_auto_vec_array PRIVATE fyra)
+add_test(NAME AutoVecArrayTest COMMAND test_auto_vec_array)
+set_tests_properties(AutoVecArrayTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_widening test_auto_vec_widening.cpp)
+target_link_libraries(test_auto_vec_widening PRIVATE fyra)
+add_test(NAME AutoVecWideningTest COMMAND test_auto_vec_widening)
+set_tests_properties(AutoVecWideningTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_properties test_auto_vec_properties.cpp)
+target_link_libraries(test_auto_vec_properties PRIVATE fyra)
+add_test(NAME AutoVecPropertiesTest COMMAND test_auto_vec_properties)
+set_tests_properties(AutoVecPropertiesTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_predication test_auto_vec_predication.cpp)
+target_link_libraries(test_auto_vec_predication PRIVATE fyra)
+add_test(NAME AutoVecPredicationTest COMMAND test_auto_vec_predication)
+set_tests_properties(AutoVecPredicationTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_archive test_archive.cpp)
+target_link_libraries(test_archive PRIVATE fyra)
+add_test(NAME ArchiveTest COMMAND test_archive)
+set_tests_properties(ArchiveTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_object test_object.cpp)
+target_link_libraries(test_object PRIVATE fyra)
+add_test(NAME ObjectTest COMMAND test_object)
+set_tests_properties(ObjectTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_linker test_linker.cpp)
+target_link_libraries(test_linker PRIVATE fyra)
+add_test(NAME LinkerTest COMMAND test_linker)
+set_tests_properties(LinkerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_float test_auto_vec_float.cpp)
+target_link_libraries(test_auto_vec_float PRIVATE fyra)
+add_test(NAME AutoVecFloatTest COMMAND test_auto_vec_float)
+set_tests_properties(AutoVecFloatTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_reduction test_auto_vec_reduction.cpp)
+target_link_libraries(test_auto_vec_reduction PRIVATE fyra)
+add_test(NAME AutoVecReductionTest COMMAND test_auto_vec_reduction)
+set_tests_properties(AutoVecReductionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_alias test_auto_vec_alias.cpp)
+target_link_libraries(test_auto_vec_alias PRIVATE fyra)
+add_test(NAME AutoVecAliasTest COMMAND test_auto_vec_alias)
+set_tests_properties(AutoVecAliasTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_auto_vec_slp test_auto_vec_slp.cpp)
+target_link_libraries(test_auto_vec_slp PRIVATE fyra)
+add_test(NAME AutoVecSLPTest COMMAND test_auto_vec_slp)
+set_tests_properties(AutoVecSLPTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_lsr test_lsr.cpp)
+target_link_libraries(test_lsr PRIVATE fyra)
+add_test(NAME LSRTest COMMAND test_lsr)
+set_tests_properties(LSRTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_x64_complex_addressing test_x64_complex_addressing.cpp)
+target_link_libraries(test_x64_complex_addressing PRIVATE fyra)
+add_test(NAME X64ComplexAddressingTest COMMAND test_x64_complex_addressing)
+set_tests_properties(X64ComplexAddressingTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_advanced_loop_vectorizer test_advanced_loop_vectorizer.cpp)
+target_link_libraries(test_advanced_loop_vectorizer PRIVATE fyra)
+add_test(NAME AdvancedLoopVectorizerTest COMMAND test_advanced_loop_vectorizer)
+set_tests_properties(AdvancedLoopVectorizerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_advanced_slp test_advanced_slp.cpp)
+target_link_libraries(test_advanced_slp PRIVATE fyra)
+add_test(NAME AdvancedSLPTest COMMAND test_advanced_slp)
+set_tests_properties(AdvancedSLPTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_backend_builder test_backend_builder.cpp)
+target_link_libraries(test_backend_builder PRIVATE fyra)
+add_test(NAME BackendBuilderTest COMMAND test_backend_builder)
+set_tests_properties(BackendBuilderTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_baremetal test_baremetal.cpp)
+target_link_libraries(test_baremetal PRIVATE fyra)
+add_test(NAME BareMetalTest COMMAND test_baremetal)
+set_tests_properties(BareMetalTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_freebsd test_freebsd.cpp)
+target_link_libraries(test_freebsd PRIVATE fyra)
+add_test(NAME FreeBSDTest COMMAND test_freebsd)
+set_tests_properties(FreeBSDTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_ir_linker_lto test_ir_linker_lto.cpp)
+target_link_libraries(test_ir_linker_lto PRIVATE fyra)
+add_test(NAME IRLinkerLTOTest COMMAND test_ir_linker_lto)
+set_tests_properties(IRLinkerLTOTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_target_features_and_scheduler test_target_features_and_scheduler.cpp)
+target_link_libraries(test_target_features_and_scheduler PRIVATE fyra)
+add_test(NAME TargetFeaturesAndSchedulerTest COMMAND test_target_features_and_scheduler)
+set_tests_properties(TargetFeaturesAndSchedulerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

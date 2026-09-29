@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cctype>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -11,22 +12,12 @@
 #include <utility>
 #include <vector>
 
-#include "codegen/CodeGen.h"
-#include "target/core/TargetResolver.h"
-#include "target/core/TargetInfo.h"
-#include "target/core/TargetDescriptor.h"
-#include "target/core/TargetResolver.h"
-#include "target/core/TargetInfo.h"
-#include "target/core/TargetDescriptor.h"
-#include "target/core/TargetResolver.h"
-#include "target/core/TargetInfo.h"
-#include "target/core/TargetDescriptor.h"
+#include "fyra/BackendBuilder.h"
 #include "ir/Constant.h"
 #include "ir/IRBuilder.h"
 #include "ir/Module.h"
 #include "ir/Parameter.h"
 #include "ir/Type.h"
-#include "target/artifact/executable/elf.hh"
 
 namespace {
 
@@ -1096,20 +1087,11 @@ std::string targetSuffix(BackendTarget t) {
     throw std::runtime_error("Unknown backend target");
 }
 
-std::unique_ptr<target::TargetInfo> makeTarget(BackendTarget t) {
+std::string targetTriple(BackendTarget t) {
     switch (t) {
-        case BackendTarget::X64: return target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
-        case BackendTarget::AArch64: return target::TargetResolver::resolve({::target::Arch::AArch64, ::target::OS::Linux});
-        case BackendTarget::RiscV64: return target::TargetResolver::resolve({::target::Arch::RISCV64, ::target::OS::Linux});
-    }
-    throw std::runtime_error("Unknown backend target");
-}
-
-uint16_t machineForTarget(BackendTarget t) {
-    switch (t) {
-        case BackendTarget::X64: return 62;     // EM_X86_64
-        case BackendTarget::AArch64: return 183; // EM_AARCH64
-        case BackendTarget::RiscV64: return 243; // EM_RISCV
+        case BackendTarget::X64: return "x64-linux-bin";
+        case BackendTarget::AArch64: return "aarch64-linux-bin";
+        case BackendTarget::RiscV64: return "riscv64-linux-bin";
     }
     throw std::runtime_error("Unknown backend target");
 }
@@ -1121,39 +1103,27 @@ CompilerCtx buildFrontendModule(const std::string& source, const std::string& ta
 }
 
 std::string emitTextAsmFromModule(ir::Module& module, BackendTarget t) {
-    std::stringstream ss;
-    codegen::CodeGen cg(module, makeTarget(t), &ss);
-    cg.emit();
-    return ss.str();
+    const std::string path = "./phpish_frontend_" + targetSuffix(t) + ".s";
+    fyra::BackendBuilder backend(module);
+    fyra::BuildResult result = backend.target(targetTriple(t)).validate(false).emitAssembly(path);
+    if (!result.success) {
+        throw std::runtime_error(result.errors.empty() ? "assembly emission failed" : result.errors.front());
+    }
+    std::ifstream input(path);
+    std::stringstream text;
+    text << input.rdbuf();
+    std::remove(path.c_str());
+    return text.str();
 }
 
-void emitInMemoryElfFromModule(ir::Module& module, BackendTarget t, const std::string& outputPath) {
-    codegen::CodeGen cg(module, makeTarget(t), nullptr);
-    cg.emit(true);
-
-    std::map<std::string, std::vector<uint8_t>> sections;
-    sections[".text"] = cg.getAssembler().getCode();
-    sections[".data"] = cg.getRodataAssembler().getCode();
-
-    ElfGenerator elfGen("phpish_frontend_test");
-    elfGen.setMachine(machineForTarget(t));
-    if (t == BackendTarget::X64) {
-        elfGen.setBaseAddress(0x400000);
+void emitBackendExecutable(ir::Module& module, BackendTarget t, const std::string& outputPath) {
+    if (t != BackendTarget::X64) {
+        throw std::runtime_error("linked ELF execution is currently supported for x64 only");
     }
-
-    std::vector<ElfGenerator::Symbol> symbols;
-    for (const auto& sym : cg.getSymbols()) {
-        symbols.push_back({sym.name, sym.value, sym.size,
-                           static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
-    }
-
-    std::vector<ElfGenerator::Relocation> relocs;
-    for (const auto& reloc : cg.getRelocations()) {
-        relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-    }
-
-    if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-        throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
+    fyra::BackendBuilder backend(module);
+    fyra::BuildResult result = backend.target(targetTriple(t)).validate(false).emitExecutable(outputPath);
+    if (!result.success) {
+        throw std::runtime_error(result.errors.empty() ? "ELF generation failed" : result.errors.front());
     }
 }
 
@@ -1163,7 +1133,7 @@ int compileAndRun(const std::string& source, const std::string& tag) {
     CompilerCtx c = buildFrontendModule(source, tag);
 
     const std::string out = "./phpish_frontend_test_exec_" + tag;
-    emitInMemoryElfFromModule(c.module, BackendTarget::X64, out);
+    emitBackendExecutable(c.module, BackendTarget::X64, out);
 
     if (std::system(("chmod +x " + out).c_str()) != 0) {
         throw std::runtime_error("chmod failed");
@@ -1192,11 +1162,11 @@ void runBackendModeAndTargetMatrix(const std::string& name, const std::string& s
         std::string out = "./phpish_frontend_matrix_" + name + "_" + targetSuffix(t);
         CompilerCtx elfCtx = buildFrontendModule(source, name + "_elf_" + targetSuffix(t));
         try {
-            emitInMemoryElfFromModule(elfCtx.module, t, out);
+            emitBackendExecutable(elfCtx.module, t, out);
         } catch (const std::exception& ex) {
-            // Some backends may not yet support every relocation in the in-memory ELF path.
+            // Some backends may not yet support every executable relocation.
             // We still keep textual ASM parity checks for those targets.
-            std::cout << "in-memory-elf[" << targetSuffix(t) << "] skipped: " << ex.what() << "\n";
+            std::cout << "backend-executable[" << targetSuffix(t) << "] skipped: " << ex.what() << "\n";
         }
         std::remove(out.c_str());
     }

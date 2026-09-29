@@ -1,8 +1,8 @@
-export function $main(%a: s, %b: s) : s {
+export function $main(%a: f32, %b: f32) : f32 {
 @start
-    %t0 = fadd %a, %b : s
-    %t1 = fsub %t0, %a : s
-    %t2 = fmul %t1, %b : s
-    %t3 = fdiv %t2, %a : s
-    ret %t3 : s
+    %t0 = fadd %a, %b : f32
+    %t1 = fsub %t0, %a : f32
+    %t2 = fmul %t1, %b : f32
+    %t3 = fdiv %t2, %a : f32
+    ret %t3 : f32
 }

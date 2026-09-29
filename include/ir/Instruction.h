@@ -33,6 +33,8 @@ public:
         Shl,
         Shr,
         Sar,
+        SMin,
+        SMax,
         
         // Floating-point Binary Operators
         FAdd,
@@ -76,6 +78,9 @@ public:
         VMax,          // Vector maximum
         VFMin,         // Vector floating-point minimum
         VFMax,         // Vector floating-point maximum
+        VSExt,         // Vector sign-extend
+        VZExt,         // Vector zero-extend
+        VTrunc,        // Vector truncate
         
         // Fused Instructions
         FMA,           // Fused multiply-add (a * b + c)

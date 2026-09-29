@@ -30,6 +30,7 @@ public:
     int getStackSlotForVreg(const Value* vreg) const;
     bool hasStackSlot(const Value* vreg) const;
     void setStackSlotForVreg(const Value* vreg, int slot);
+    const std::map<const Value*, int>& getStackSlots() const { return stackSlots; }
 
     void print(std::ostream& os) const override;
 

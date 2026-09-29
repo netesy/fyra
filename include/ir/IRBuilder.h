@@ -12,6 +12,10 @@
 
 namespace ir {
 
+class VectorInstruction;
+struct ShuffleMask;
+enum class VectorCompareOp;
+
 class IRBuilder {
 public:
     void setContext(std::shared_ptr<IRContext> ctx) { context = ctx; }
@@ -55,6 +59,8 @@ public:
     Instruction* createFSub(Value* lhs, Value* rhs);
     Instruction* createFMul(Value* lhs, Value* rhs);
     Instruction* createFDiv(Value* lhs, Value* rhs);
+    Instruction* createSMin(Value* lhs, Value* rhs);
+    Instruction* createSMax(Value* lhs, Value* rhs);
     Instruction* createAnd(Value* lhs, Value* rhs);
     Instruction* createAnd(Value* lhs, Value* rhs, Type* resultType);
     Instruction* createOr(Value* lhs, Value* rhs);
@@ -137,6 +143,33 @@ public:
     Instruction* createCast(Value* val, Type* destTy);
     Instruction* createVAStart(Value* val);
     Instruction* createVAArg(Value* val, Type* destTy);
+
+    VectorInstruction* createVAdd(Value* lhs, Value* rhs);
+    VectorInstruction* createVSub(Value* lhs, Value* rhs);
+    VectorInstruction* createVMul(Value* lhs, Value* rhs);
+    VectorInstruction* createVFAdd(Value* lhs, Value* rhs);
+    VectorInstruction* createVFSub(Value* lhs, Value* rhs);
+    VectorInstruction* createVFMul(Value* lhs, Value* rhs);
+    VectorInstruction* createVFDiv(Value* lhs, Value* rhs);
+    VectorInstruction* createVMin(Value* lhs, Value* rhs);
+    VectorInstruction* createVMax(Value* lhs, Value* rhs);
+    VectorInstruction* createVLoad(VectorType* type, Value* ptr);
+    VectorInstruction* createVStore(Value* vec, Value* ptr);
+    VectorInstruction* createVBroadcast(VectorType* type, Value* val);
+    VectorInstruction* createVExtract(Value* vec, Value* idx);
+    VectorInstruction* createVInsert(Value* vec, Value* val, Value* idx);
+    VectorInstruction* createVShuffle(Value* lhs, Value* rhs, const ShuffleMask& mask);
+    VectorInstruction* createVCmp(Value* lhs, Value* rhs, VectorCompareOp op);
+    VectorInstruction* createVSelect(Value* mask, Value* trueVal, Value* falseVal);
+    VectorInstruction* createVSExt(Value* val, VectorType* destVecTy);
+    VectorInstruction* createVZExt(Value* val, VectorType* destVecTy);
+    VectorInstruction* createVTrunc(Value* val, VectorType* destVecTy);
+    VectorInstruction* createVGather(VectorType* resVecTy, Value* basePtr, Value* indexVec, Value* maskVec = nullptr);
+    VectorInstruction* createVScatter(Value* valueVec, Value* basePtr, Value* indexVec, Value* maskVec = nullptr);
+    Instruction* createFMA(Value* a, Value* b, Value* c);
+    Instruction* createFMS(Value* a, Value* b, Value* c);
+    Instruction* createFNMA(Value* a, Value* b, Value* c);
+    Instruction* createFNMS(Value* a, Value* b, Value* c);
     Instruction* createSyscall(const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createSyscall(SyscallId id, const std::vector<Value*>& args, Type* retType = nullptr);
     Instruction* createExternCall(const std::string& capability, const std::vector<Value*>& args, Type* retType = nullptr);

@@ -26,9 +26,9 @@ int main() {
     assert(bb != nullptr);
 
     // Instructions should be:
-    // 1. store %val, %ptr : w
-    // 2. %ptr = add %base, 8 : l
-    // 3. ret 0 : w
+    // 1. store %val, %ptr : i32
+    // 2. %ptr = add %base, 8 : i64
+    // 3. ret 0 : i32
     auto& instrs = bb->getInstructions();
     assert(instrs.size() == 3);
 

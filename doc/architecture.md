@@ -311,7 +311,7 @@ Input IR → CFG Builder → Dominator Tree → Dominance Frontier → Phi Inser
 
 #### Binary and Executable Generation
 
-**ElfGenerator** (`codegen/execgen/elf.h`)
+**ElfImageWriter** (`target/artifact/executable/ElfImage.h`)
 - Multi-pass ELF executable generation
 - Segment alignment to page boundaries (0x1000) for OS protection
 - Relocation support for x86_64, AArch64, and RISC-V 64
@@ -508,7 +508,7 @@ IRBuilder provides fluent interface:
 builder.createFunction("test", IntegerType::get(32))
        .createBasicBlock("entry")
        .setInsertPoint()
-       .createAdd(a, b)
+       .createAdd(a, i8)
        .createRet();
 ```
 

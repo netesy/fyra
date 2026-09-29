@@ -1,5 +1,4 @@
 #include <iostream>
-#include <map>
 #include <memory>
 #include <regex>
 #include <string>
@@ -11,13 +10,7 @@
 #include "ir/Module.h"
 #include "ir/Parameter.h"
 #include "ir/Type.h"
-#include "codegen/CodeGen.h"
-#include "target/core/TargetResolver.h"
-#include "target/core/TargetInfo.h"
-#include "target/core/TargetDescriptor.h"
-
-#include "target/artifact/executable/elf.hh"
-#include "target/artifact/executable/pe.hh"
+#include "fyra/BackendBuilder.h"
 
 namespace {
 
@@ -68,33 +61,28 @@ MiniProgram parseMiniPhpLike(const std::string& source) {
     return program;
 }
 
-int compileAndRun(const MiniProgram& program, bool isWindows = false) {
+int compileAndRun(const MiniProgram& program) {
     using namespace ir;
-    using namespace codegen;
-    using namespace target;
-
     auto ctx = std::make_shared<IRContext>();
     Module module("phpish_oop_inmemory", ctx);
     IRBuilder builder(ctx);
     builder.setModule(&module);
 
     auto* i32 = ctx->getIntegerType(32);
-    auto* i64 = ctx->getIntegerType(64);
 
-    // class method lowered to a standalone function: Counter_add(thisPtr, delta)
+    // Class method lowered to a standalone function: Counter_add(thisValue, delta).
+    // This toy frontend models the object's single field as an SSA value.
     const std::string loweredMethodName = program.className + "_" + program.methodName;
-    Function* methodFn = builder.createFunction(loweredMethodName, i32, {i64, i32});
+    Function* methodFn = builder.createFunction(loweredMethodName, i32, {i32, i32});
     BasicBlock* methodEntry = builder.createBasicBlock("entry", methodFn);
     builder.setInsertPoint(methodEntry);
 
     auto paramIt = methodFn->getParameters().begin();
-    Parameter* thisPtr = paramIt->get();
+    Parameter* thisValue = paramIt->get();
     ++paramIt;
     Parameter* delta = paramIt->get();
 
-    auto* curValue = builder.createLoad(thisPtr);
-    auto* newValue = builder.createAdd(curValue, delta);
-    builder.createStore(newValue, thisPtr);
+    auto* newValue = builder.createAdd(thisValue, delta);
     builder.createRet(newValue);
 
     // main: new Counter(init), call add(arg), return result.
@@ -106,82 +94,31 @@ int compileAndRun(const MiniProgram& program, bool isWindows = false) {
     Value* initVal = ConstantInt::get(i32, program.initValue);
     Value* argVal = ConstantInt::get(i32, program.methodArg);
 
-    auto* obj = builder.createAlloc(ConstantInt::get(i32, 4), i32);
-    builder.createStore(initVal, obj);
-
-    auto* methodResult = builder.createCall(methodFn, {obj, argVal}, i32);
+    auto* methodResult = builder.createCall(methodFn, {initVal, argVal}, i32);
     builder.createRet(methodResult);
 
-    std::unique_ptr<TargetInfo> target;
-    if (isWindows) {
-        target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Windows});
-    } else {
-        target = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+    const std::string outputPath = "./example_phpish";
+    fyra::BackendBuilder backend(module);
+    fyra::BuildResult build = backend.target("x64-linux-bin")
+                                  .optimize(fyra::OptimizationLevel::O0)
+                                  .emitExecutable(outputPath);
+    if (!build.success) {
+        const std::string detail = build.errors.empty() ? "unknown error" : build.errors.front();
+        throw std::runtime_error("ELF generation failed: " + detail);
     }
 
-    CodeGen cg(module, std::move(target), nullptr);
-    cg.emit(true);
-
-    std::map<std::string, std::vector<uint8_t>> sections;
-    sections[".text"] = cg.getAssembler().getCode();
-    sections[".data"] = cg.getRodataAssembler().getCode();
-
-    const std::string outputPath = isWindows ? "./example_phpish.exe" : "./example_phpish";
-
-    if (isWindows) {
-        PEGenerator peGen(true); // 64-bit
-        std::vector<PEGenerator::Symbol> symbols;
-        for (const auto& sym : cg.getSymbols()) {
-            symbols.push_back({sym.name, sym.value, sym.size, static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
-        }
-        std::vector<PEGenerator::Relocation> relocs;
-        for (const auto& reloc : cg.getRelocations()) {
-            relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-        }
-        if (!peGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-             throw std::runtime_error("PE generation failed: " + peGen.getLastError());
-        }
-    } else {
-        ElfGenerator elfGen("phpish_oop_inmemory");
-        elfGen.setMachine(62); // EM_X86_64
-        elfGen.setBaseAddress(0x400000);
-
-        std::vector<ElfGenerator::Symbol> symbols;
-        for (const auto& sym : cg.getSymbols()) {
-            symbols.push_back({sym.name, sym.value, sym.size,
-                               static_cast<uint8_t>(sym.type), static_cast<uint8_t>(sym.binding), sym.sectionName});
-        }
-
-        std::vector<ElfGenerator::Relocation> relocs;
-        for (const auto& reloc : cg.getRelocations()) {
-            relocs.push_back({reloc.offset, reloc.type, reloc.addend, reloc.symbolName, reloc.sectionName});
-        }
-
-        if (!elfGen.generateFromCode(sections, symbols, relocs, outputPath)) {
-            throw std::runtime_error("ELF generation failed: " + elfGen.getLastError());
-        }
-        std::string chmodCmd = "chmod +x " + outputPath;
-        if (std::system(chmodCmd.c_str()) != 0) {
-            throw std::runtime_error("chmod failed for generated executable.");
-        }
-    }
-
-    std::string runCmd = isWindows ? "wine " + outputPath : outputPath;
+    std::string runCmd = outputPath;
     int result = std::system(runCmd.c_str());
     if (result == -1) {
         throw std::runtime_error("Failed to run generated executable.");
     }
 
-    return isWindows ? (result & 0xFF) : WEXITSTATUS(result);
+    return WEXITSTATUS(result);
 }
 
 } // namespace
 
-int main(int argc, char** argv) {
-    bool testWindows = false;
-    if (argc > 1 && std::string(argv[1]) == "--windows") {
-        testWindows = true;
-    }
+int main() {
     const std::string source = R"(
 class Counter {
     var value;
@@ -200,9 +137,9 @@ main {
 
     try {
         MiniProgram program = parseMiniPhpLike(source);
-        int exitCode = compileAndRun(program, testWindows);
+        int exitCode = compileAndRun(program);
 
-        std::cout << (testWindows ? "Windows" : "Linux") << " program returned: " << exitCode << '\n';
+        std::cout << "Linux program returned: " << exitCode << '\n';
         std::cout << "Expected: " << (program.initValue + program.methodArg) << '\n';
 
         if (exitCode != program.initValue + program.methodArg) {
@@ -210,7 +147,7 @@ main {
             return 1;
         }
 
-        std::cout << "Success: tiny PHP-like OOP frontend passes in-memory codegen + execution.\n";
+        std::cout << "Success: tiny PHP-like OOP frontend passes BackendBuilder codegen + execution.\n";
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "Error: " << ex.what() << '\n';

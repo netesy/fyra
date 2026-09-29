@@ -8,20 +8,45 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/aarch64/AArch64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/riscv64/RiscV64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/Wasm32Architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/WasmModule.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/linux/LinuxOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/windows/WindowsOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/macos/MacOSOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/wasi/WASIOS.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/os/baremetal/BareMetalOS.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/os/freebsd/FreeBSDOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/capabilities/CapabilityRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/APKArtifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/APKPackager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/JavaStubGen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/ManifestGen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/binary_writer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/elf.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/macho.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/pe.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/FlatBinaryWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/ElfImage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/MachOImage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/PeImage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/executable/platform_utils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/ArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/UnixArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/CoffArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/BsdArchiveWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/archive/ArchiveReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ObjectArtifact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ElfObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/CoffObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/MachObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/WasmObjectWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/ElfObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/CoffObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/MachObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/object/WasmObjectReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/LinkedImage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/TargetRelocationEvaluator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/DynamicLinkPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/TargetDynamicImageBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/artifact/linker/InternalLinker.cpp
 )
 
 target_sources(fyra PRIVATE ${TARGET_SOURCES})

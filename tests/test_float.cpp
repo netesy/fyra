@@ -33,5 +33,29 @@ int main() {
     assert(generated_asm.find("mulss") != std::string::npos || generated_asm.find("ret") != std::string::npos);
     assert(generated_asm.find("divss") != std::string::npos || generated_asm.find("ret") != std::string::npos);
 
+    // Test UWtoF and Ultof codegen
+    {
+        std::string src = R"(
+function $test_ultof(%x : i64) : f64 {
+@start
+    %f = ultof %x : f64
+    ret %f : f64
+}
+)";
+        std::stringstream floatStream(src);
+        parser::Parser floatParser(floatStream, parser::FileFormat::FYRA);
+        auto floatModule = floatParser.parseModule();
+        assert(floatModule != nullptr);
+
+        auto floatTargetInfo = target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux});
+        std::stringstream floatSs;
+        codegen::CodeGen floatCodeGen(*floatModule, std::move(floatTargetInfo), &floatSs);
+        floatCodeGen.emit();
+
+        std::string floatAsm = floatSs.str();
+        assert(floatAsm.find("cvtsi2sd") != std::string::npos);
+        assert(floatAsm.find(".L_ultof_high_") != std::string::npos);
+    }
+
     return 0;
 }

@@ -1,43 +1,43 @@
-function $test_widths(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : l, %h : l) : l {
+function $test_widths(%a : i32, %b : i32, %c : i32, %d : i32, %e : i32, %f : i32, %g : i64, %h : i64) : i64 {
 @start
-    %a_ext = extsb %a : l
-    %b_ext = extub %b : l
-    %s1 = add %a_ext, %b_ext : l
+    %a_ext = extsb %a : i64
+    %b_ext = extub %b : i64
+    %s1 = add %a_ext, %b_ext : i64
 
-    %c_ext = extsh %c : l
-    %d_ext = extuh %d : l
-    %s2 = add %c_ext, %d_ext : l
+    %c_ext = extsh %c : i64
+    %d_ext = extuh %d : i64
+    %s2 = add %c_ext, %d_ext : i64
 
-    %e_ext = extsw %e : l
-    %f_ext = extuw %f : l
-    %s3 = add %e_ext, %f_ext : l
+    %e_ext = extsw %e : i64
+    %f_ext = extuw %f : i64
+    %s3 = add %e_ext, %f_ext : i64
 
-    %s4 = add %g, %h : l
+    %s4 = add %g, %h : i64
 
-    %sum1 = add %s1, %s2 : l
-    %sum2 = add %s3, %s4 : l
-    %res = add %sum1, %sum2 : l
-    ret %res : l
+    %sum1 = add %s1, %s2 : i64
+    %sum2 = add %s3, %s4 : i64
+    %res = add %sum1, %sum2 : i64
+    ret %res : i64
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry 1, @body %i_next : w
-    %sum = phi @entry 0, @body %sum_next : l
-    %cond = sle %i, 50000000 : w
+    %i = phi @entry 1, @body %i_next : i32
+    %sum = phi @entry 0, @body %sum_next : i64
+    %cond = sle %i, 50000000 : i32
     jnz %cond, @body, @exit
 
 @body
-    %i_l = extsw %i : l
-    %v = call $test_widths(%i, %i, %i, %i, %i, %i, %i_l, %i_l) : l
-    %sum_next = add %sum, %v : l
-    %i_next = add %i, 1 : w
+    %i_l = extsw %i : i64
+    %v = call $test_widths(%i, %i, %i, %i, %i, %i, %i_l, %i_l) : i64
+    %sum_next = add %sum, %v : i64
+    %i_next = add %i, 1 : i32
     jmp @loop
 
 @exit
-    call $print_checksum(l %sum)
-    ret 0 : w
+    call $print_checksum(i64 %sum)
+    ret 0 : i32
 }

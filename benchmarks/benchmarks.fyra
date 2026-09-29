@@ -1,91 +1,91 @@
-function $fibonacci(%n : w) : w {
+function $fibonacci(%n : i32) : i32 {
 @start
-    %t0 = sle %n, 1 : w
+    %t0 = sle %n, 1 : i32
     jnz %t0, @base_case, @recursive_case
 
 @base_case
-    ret %n : w
+    ret %n : i32
 
 @recursive_case
-    %t1 = sub %n, 1 : w
-    %t2 = call $fibonacci(%t1) : w
-    %t3 = sub %n, 2 : w
-    %t4 = call $fibonacci(%t3) : w
-    %t5 = add %t2, %t4 : w
-    ret %t5 : w
+    %t1 = sub %n, 1 : i32
+    %t2 = call $fibonacci(%t1) : i32
+    %t3 = sub %n, 2 : i32
+    %t4 = call $fibonacci(%t3) : i32
+    %t5 = add %t2, %t4 : i32
+    ret %t5 : i32
 }
 
-function $leaf_arithmetic(%a : w, %b : w, %c : w, %d : w) : w {
+function $leaf_arithmetic(%a : i32, %b : i32, %c : i32, %d : i32) : i32 {
 @start
-    %t1 = add %a, %b : w
-    %t2 = sub %c, %d : w
-    %res = mul %t1, %t2 : w
-    ret %res : w
+    %t1 = add %a, %b : i32
+    %t2 = sub %c, %d : i32
+    %res = mul %t1, %t2 : i32
+    ret %res : i32
 }
 
-function $compare_branch(%a : w, %b : w) : w {
+function $compare_branch(%a : i32, %b : i32) : i32 {
 @start
-    %c = sgt %a, %b : w
+    %c = sgt %a, %b : i32
     jnz %c, @then, @else
 
 @then
-    %res1 = sub %a, %b : w
-    ret %res1 : w
+    %res1 = sub %a, %b : i32
+    ret %res1 : i32
 
 @else
-    %res2 = sub %b, %a : w
-    ret %res2 : w
+    %res2 = sub %b, %a : i32
+    ret %res2 : i32
 }
 
-function $helper(%x : w) : w {
+function $helper(%x : i32) : i32 {
 @start
-    %r = add %x, 1 : w
-    ret %r : w
+    %r = add %x, 1 : i32
+    ret %r : i32
 }
 
-function $call_result(%x : w) : w {
+function $call_result(%x : i32) : i32 {
 @start
-    %a = call $helper(%x) : w
-    %b = call $helper(%a) : w
-    ret %b : w
+    %a = call $helper(%x) : i32
+    %b = call $helper(%a) : i32
+    ret %b : i32
 }
 
-function $live_across_calls(%x : w, %y : w) : w {
+function $live_across_calls(%x : i32, %y : i32) : i32 {
 @start
-    %a = call $helper(%x) : w
-    %b = call $helper(%y) : w
-    %res = add %a, %b : w
-    ret %res : w
+    %a = call $helper(%x) : i32
+    %b = call $helper(%y) : i32
+    %res = add %a, %b : i32
+    ret %res : i32
 }
 
-function $register_pressure(%a : w, %b : w, %c : w, %d : w, %e : w, %f : w, %g : w, %h : w) : w {
+function $register_pressure(%a : i32, %b : i32, %c : i32, %d : i32, %e : i32, %f : i32, %g : i32, %h : i32) : i32 {
 @start
-    %v1 = add %a, %b : w
-    %v2 = add %c, %d : w
-    %v3 = add %e, %f : w
-    %v4 = add %g, %h : w
-    %v5 = mul %v1, %v2 : w
-    %v6 = mul %v3, %v4 : w
-    %res = add %v5, %v6 : w
-    ret %res : w
+    %v1 = add %a, %b : i32
+    %v2 = add %c, %d : i32
+    %v3 = add %e, %f : i32
+    %v4 = add %g, %h : i32
+    %v5 = mul %v1, %v2 : i32
+    %v6 = mul %v3, %v4 : i32
+    %res = add %v5, %v6 : i32
+    ret %res : i32
 }
 
-function $loop_sum(%n : w) : w {
+function $loop_sum(%n : i32) : i32 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry 0, @body %i_next : w
-    %sum = phi @entry 0, @body %sum_next : w
-    %cond = slt %i, %n : w
+    %i = phi @entry 0, @body %i_next : i32
+    %sum = phi @entry 0, @body %sum_next : i32
+    %cond = slt %i, %n : i32
     jnz %cond, @body, @exit
 
 @body
-    %term = mul %i, 2 : w
-    %sum_next = add %sum, %term : w
-    %i_next = add %i, 1 : w
+    %term = mul %i, 2 : i32
+    %sum_next = add %sum, %term : i32
+    %i_next = add %i, 1 : i32
     jmp @loop
 
 @exit
-    ret %sum : w
+    ret %sum : i32
 }

@@ -10,83 +10,83 @@ extern <capability_name>(<args>) : <return_type>
 
 Example:
 ```fyra
-%res = extern io.write(1, %buf, 10) : w
+%res = extern io.write(1, %buf, 10) : i32
 ```
 
 ## Capability Categories
 
 ### 1. IO Capability (Stream + Resource Abstraction)
-- `io.write(res: l, buf: l, len: l) : l`
-- `io.read(res: l, buf: l, len: l) : l`
-- `io.flush(res: l)`
-- `io.open(path: l, flags: w, mode: w) : l`
-- `io.close(res: l)`
-- `io.seek(res: l, offset: l, whence: w) : l`
-- `io.stat(res: l, stat_ptr: l) : w`
+- `io.write(res: i64, buf: i64, len: i64) : i64`
+- `io.read(res: i64, buf: i64, len: i64) : i64`
+- `io.flush(res: i64)`
+- `io.open(path: i64, flags: i32, mode: i32) : i64`
+- `io.close(res: i64)`
+- `io.seek(res: i64, offset: i64, whence: i32) : i64`
+- `io.stat(res: i64, stat_ptr: i64) : i32`
 
 ### 2. Memory Capability (Heap + Virtual Memory Abstraction)
-- `memory.alloc(size: l) : l`
-- `memory.free(addr: l, size: l)`
-- `memory.resize(addr: l, old_size: l, new_size: l) : l`
-- `memory.map(addr: l, len: l, prot: w, flags: w, fd: l, off: l) : l`
-- `memory.unmap(addr: l, len: l)`
-- `memory.protect(addr: l, len: l, prot: w) : w`
+- `memory.alloc(size: i64) : i64`
+- `memory.free(addr: i64, size: i64)`
+- `memory.resize(addr: i64, old_size: i64, new_size: i64) : i64`
+- `memory.map(addr: i64, len: i64, prot: i32, flags: i32, fd: i64, off: i64) : i64`
+- `memory.unmap(addr: i64, len: i64)`
+- `memory.protect(addr: i64, len: i64, prot: i32) : i32`
 
 ### 3. Process Capability (Execution Lifecycle Abstraction)
-- `process.exit(code: w)`
+- `process.exit(code: i32)`
 - `process.abort()`
-- `process.spawn(exe: l, args: l) : l`
-- `process.sleep(ms: l)`
-- `process.info(info_ptr: l) : w`
+- `process.spawn(exe: i64, args: i64) : i64`
+- `process.sleep(ms: i64)`
+- `process.info(info_ptr: i64) : i32`
 
 ### 4. Threading & Concurrency Capability
-- `thread.spawn(func_ptr: l, arg: l) : l`
-- `thread.join(tid: l) : w`
-- `thread.exit(code: w)`
-- `sync.mutex.lock(mutex_ptr: l)`
-- `sync.mutex.unlock(mutex_ptr: l)`
-- `sync.atomic.load(ptr: l) : l`
-- `sync.atomic.store(ptr: l, val: l)`
-- `sync.atomic.add(ptr: l, val: l) : l`
+- `thread.spawn(func_ptr: i64, arg: i64) : i64`
+- `thread.join(tid: i64) : i32`
+- `thread.exit(code: i32)`
+- `sync.mutex.lock(mutex_ptr: i64)`
+- `sync.mutex.unlock(mutex_ptr: i64)`
+- `sync.atomic.load(ptr: i64) : i64`
+- `sync.atomic.store(ptr: i64, val: i64)`
+- `sync.atomic.add(ptr: i64, val: i64) : i64`
 - `sync.fence()`
-- `sync.condvar.wait(cv_ptr: l, mutex_ptr: l)`
-- `sync.condvar.signal(cv_ptr: l)`
+- `sync.condvar.wait(cv_ptr: i64, mutex_ptr: i64)`
+- `sync.condvar.signal(cv_ptr: i64)`
 
 ### 5. Time Capability
-- `time.now() : l` (Standard system time)
-- `time.monotonic() : l` (High-resolution monotonic time)
-- `time.sleep(ns: l)`
-- `time.utc_now(ts_ptr: l)`
-- `time.local_now(ts_ptr: l)`
+- `time.now() : i64` (Standard system time)
+- `time.monotonic() : i64` (High-resolution monotonic time)
+- `time.sleep(ns: i64)`
+- `time.utc_now(ts_ptr: i64)`
+- `time.local_now(ts_ptr: i64)`
 
 ### 6. Randomness Capability
-- `random.bytes(buf: l, len: l)`
-- `random.u64() : l`
-- `random.seed(val: l)`
+- `random.bytes(buf: i64, len: i64)`
+- `random.u64() : i64`
+- `random.seed(val: i64)`
 
 ### 7. Error Capability (Unified Failure Model)
-- `error.get() : w` (Get last capability error code)
+- `error.get() : i32` (Get last capability error code)
 - `error.clear()` (Clear last error)
-- `error.raise(msg: l)` (Raise a portable trap/exception)
+- `error.raise(msg: i64)` (Raise a portable trap/exception)
 
 ### 8. Networking Capability (Stream-based Network Abstraction)
-- `net.connect(addr: l, port: w) : l`
-- `net.send(res: l, buf: l, len: l) : l`
-- `net.recv(res: l, buf: l, len: l) : l`
+- `net.connect(addr: i64, port: i32) : i64`
+- `net.send(res: i64, buf: i64, len: i64) : i64`
+- `net.recv(res: i64, buf: i64, len: i64) : i64`
 
 ### 9. IPC & Shared Memory
-- `ipc.send(channel: l, buf: l, len: l) : l`
-- `ipc.recv(channel: l, buf: l, len: l) : l`
-- `memory.shared_create(name: l, size: l) : l`
-- `memory.shared_attach(name: l) : l`
+- `ipc.send(channel: i64, buf: i64, len: i64) : i64`
+- `ipc.recv(channel: i64, buf: i64, len: i64) : i64`
+- `memory.shared_create(name: i64, size: i64) : i64`
+- `memory.shared_attach(name: i64) : i64`
 
 ### 10. Diagnostics & Debugging (Runtime Observability)
-- `debug.log(msg: l)`
+- `debug.log(msg: i64)`
 - `debug.trace()`
-- `debug.assert(cond: w, msg: l)`
-- `debug.dump(addr: l, len: l)`
+- `debug.assert(cond: i32, msg: i64)`
+- `debug.dump(addr: i64, len: i64)`
 
 ### 11. Module & Dynamic Linking (Controlled Dynamic Runtime Extension)
-- `module.load(path: l) : l`
-- `module.unload(handle: l)`
-- `module.resolve(handle: l, name: l) : l`
+- `module.load(path: i64) : i64`
+- `module.unload(handle: i64)`
+- `module.resolve(handle: i64, name: i64) : i64`

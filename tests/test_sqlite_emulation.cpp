@@ -18,17 +18,17 @@ int main() {
     std::string source =
         "data $db_file = { b \"sqlite.db\", b 0 }\n"
         "data $msg = { b \"SQLITE EMULATION\", b 0 }\n"
-        "export function $main() : w {\n"
+        "export function $main() : i32 {\n"
         "@start\n"
         "    # fs.open(path, flags, mode)\n"
-        "    %fd = extern \"fs.open\"(l $db_file, l 66, l 420) : l\n"
+        "    %fd = extern \"fs.open\"(i64 $db_file, i64 66, i64 420) : i64\n"
         "    # io.write(fd, buffer, len)\n"
-        "    %w = extern \"io.write\"(l %fd, l $msg, l 16) : l\n"
+        "    %w_res = extern \"io.write\"(i64 %fd, i64 $msg, i64 16) : i64\n"
         "    # memory.alloc(size)\n"
-        "    %buf = extern \"memory.alloc\"(l 4096) : l\n"
+        "    %buf = extern \"memory.alloc\"(i64 4096) : i64\n"
         "    # io.close(fd)\n"
-        "    %c = extern \"io.close\"(l %fd) : l\n"
-        "    ret 0 : w\n"
+        "    %c = extern \"io.close\"(i64 %fd) : i64\n"
+        "    ret 0 : i32\n"
         "}";
 
     std::stringstream input(source);

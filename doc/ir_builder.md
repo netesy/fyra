@@ -340,6 +340,24 @@ ir::Value* byte_val = builder.createLoadub(ptr);    // Load unsigned byte
 
 // Memory copy
 builder.createBlit(dest_ptr, src_ptr, size);        // Copy memory
+
+#### Vector (SIMD) Instructions
+
+The `IRBuilder` supports SIMD vector construction and operations:
+
+```cpp
+// 1. Vector Types
+ir::Type* i32Ty = builder.getContext()->getIntegerType(32);
+ir::Type* f32Ty = builder.getContext()->getFloatType();
+
+ir::VectorType* v4i32Ty = builder.getContext()->getVectorType(i32Ty, 4);  // v4i32
+ir::VectorType* v4f32Ty = builder.getContext()->getVectorType(f32Ty, 4);  // v4f32
+
+// 2. Vector Memory & Operations
+ir::Instruction* vLoad = builder.createVLoad(v4f32Ty, ptr);
+ir::Instruction* vAdd  = builder.createVAdd(vLoad, vLoad);
+ir::Instruction* vSplat = builder.createVBroadcast(v4i32Ty, scalarVal);
+ir::Instruction* elem  = builder.createVExtract(vAdd, indexVal);
 ```
 
 #### Comparison Operations

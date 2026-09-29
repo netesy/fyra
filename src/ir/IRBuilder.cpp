@@ -1,10 +1,20 @@
 #include "ir/IRBuilder.h"
 #include "ir/PhiNode.h"
+#include "ir/SIMDInstruction.h"
 #include "ir/Constant.h"
 #include "ir/FunctionType.h"
 #include "ir/Parameter.h"
 
 namespace ir {
+
+static unsigned getVectorWidthBits(Type* t) {
+    if (auto* vecTy = dynamic_cast<VectorType*>(t)) {
+        if (vecTy->getElementType()) {
+            return vecTy->getElementType()->getSize() * 8 * vecTy->getNumElements();
+        }
+    }
+    return 128;
+}
 
 IRBuilder::IRBuilder() : context(std::make_shared<IRContext>()) {}
 
@@ -68,6 +78,132 @@ BasicBlock* IRBuilder::createBasicBlock(const std::string& name, Function* paren
 Instruction* IRBuilder::createRet(Value* val) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Ret, {val}, insertPoint));
     Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVShuffle(Value* lhs, Value* rhs, const ShuffleMask& mask) {
+    if (!lhs || !rhs) {
+        throw std::invalid_argument("VShuffle operands cannot be null");
+    }
+    auto* vtLhs = dynamic_cast<VectorType*>(lhs->getType());
+    auto* vtRhs = dynamic_cast<VectorType*>(rhs->getType());
+    if (!vtLhs || !vtRhs) {
+        throw std::invalid_argument("VShuffle operands must be vector types");
+    }
+    if (vtLhs->getElementType()->toString() != vtRhs->getElementType()->toString() ||
+        vtLhs->getNumElements() != vtRhs->getNumElements()) {
+        throw std::invalid_argument("VShuffle operands must have identical vector types");
+    }
+    unsigned numElements = vtLhs->getNumElements();
+    if (mask.resultElements != numElements || !mask.isValid()) {
+        throw std::invalid_argument("VShuffle mask length must match vector lane count");
+    }
+    int maxAllowedIdx = static_cast<int>(2 * numElements);
+    for (int idx : mask.indices) {
+        if (idx < 0 || idx >= maxAllowedIdx) {
+            throw std::out_of_range("VShuffle mask index out of bounds");
+        }
+    }
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vtLhs, Instruction::VShuffle, {lhs, rhs}, vtLhs->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setShuffleMask(mask);
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVCmp(Value* lhs, Value* rhs, VectorCompareOp op) {
+    if (!lhs || !rhs) {
+        throw std::invalid_argument("VCmp operands cannot be null");
+    }
+    auto* vtLhs = dynamic_cast<VectorType*>(lhs->getType());
+    auto* vtRhs = dynamic_cast<VectorType*>(rhs->getType());
+    if (!vtLhs || !vtRhs) {
+        throw std::invalid_argument("VCmp operands must be vector types");
+    }
+    if (vtLhs->getElementType()->toString() != vtRhs->getElementType()->toString() ||
+        vtLhs->getNumElements() != vtRhs->getNumElements()) {
+        throw std::invalid_argument("VCmp operands must have identical vector types");
+    }
+
+    bool isFloatElem = vtLhs->isFloatingPointVector();
+    if (isFloatElem) {
+        if (op != VectorCompareOp::EQ && op != VectorCompareOp::NE &&
+            op != VectorCompareOp::LT && op != VectorCompareOp::LE &&
+            op != VectorCompareOp::GT && op != VectorCompareOp::GE) {
+            throw std::invalid_argument("Invalid vector comparison predicate for floating-point vectors");
+        }
+    }
+
+    Type* elemIntTy = context->getIntegerType(vtLhs->getElementBitWidth());
+    VectorType* resVecTy = context->getVectorType(elemIntTy, vtLhs->getNumElements());
+
+    Value* opVal = context->getConstantInt(context->getIntegerType(32), static_cast<uint64_t>(op));
+
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(resVecTy, Instruction::VCmp, {lhs, rhs, opVal}, resVecTy->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVSelect(Value* mask, Value* trueVal, Value* falseVal) {
+    if (!mask || !trueVal || !falseVal) {
+        throw std::invalid_argument("VSelect operands cannot be null");
+    }
+    auto* vtMask = dynamic_cast<VectorType*>(mask->getType());
+    auto* vtTrue = dynamic_cast<VectorType*>(trueVal->getType());
+    auto* vtFalse = dynamic_cast<VectorType*>(falseVal->getType());
+    if (!vtMask || !vtTrue || !vtFalse) {
+        throw std::invalid_argument("VSelect operands must be vector types");
+    }
+    if (vtTrue->getElementType()->toString() != vtFalse->getElementType()->toString() ||
+        vtTrue->getNumElements() != vtFalse->getNumElements()) {
+        throw std::invalid_argument("VSelect true/false values must have identical vector types");
+    }
+    if (!vtMask->isIntegerVector()) {
+        throw std::invalid_argument("VSelect mask must be an integer vector type");
+    }
+    if (vtMask->getNumElements() != vtTrue->getNumElements() ||
+        vtMask->getElementBitWidth() != vtTrue->getElementBitWidth()) {
+        throw std::invalid_argument("VSelect mask element width and lane count must match value vectors");
+    }
+
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vtTrue, Instruction::VSelect, {mask, trueVal, falseVal}, vtTrue->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVInsert(Value* vec, Value* val, Value* idx) {
+    Type* vecType = vec->getType();
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vecType, Instruction::VInsert, {vec, val, idx}, 128, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVBroadcast(VectorType* type, Value* val) {
+    unsigned w = type ? type->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VBroadcast, {val}, w, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVExtract(Value* vec, Value* idx) {
+    Type* elemType = nullptr;
+    if (auto* vt = dynamic_cast<VectorType*>(vec->getType())) {
+        elemType = vt->getElementType();
+    }
+    if (!elemType) elemType = context->getIntegerType(32);
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(elemType, Instruction::VExtract, {vec, idx}, 128, insertPoint));
+    auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;
@@ -452,6 +588,18 @@ Instruction* IRBuilder::createFDiv(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
+Instruction* IRBuilder::createSMin(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<Instruction>(lhs->getType(), Instruction::SMin,
+                                               std::vector<Value*>{lhs, rhs}, insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
+Instruction* IRBuilder::createSMax(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<Instruction>(lhs->getType(), Instruction::SMax,
+                                               std::vector<Value*>{lhs, rhs}, insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
 Instruction* IRBuilder::createAnd(Value* lhs, Value* rhs) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(lhs->getType(), Instruction::And, {lhs, rhs}, insertPoint));
     Instruction* instrPtr = instr.get();
@@ -596,6 +744,41 @@ PhiNode* IRBuilder::createPhi(Type* type, unsigned numOperands, Instruction* all
     instrPtr->setSourceLine(currentLine);
     insertPoint->getInstructions().push_front(std::move(instr));
     return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVSExt(Value* val, VectorType* destVecTy) {
+    auto srcVecTy = dynamic_cast<VectorType*>(val->getType());
+    if (!srcVecTy || !destVecTy) {
+        throw std::invalid_argument("VSExt operands must be vector types");
+    }
+    unsigned w = destVecTy ? destVecTy->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VSExt, {val}, w, insertPoint));
+    auto rawPtr = instr.get();
+    if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
+    return rawPtr;
+}
+
+VectorInstruction* IRBuilder::createVZExt(Value* val, VectorType* destVecTy) {
+    auto srcVecTy = dynamic_cast<VectorType*>(val->getType());
+    if (!srcVecTy || !destVecTy) {
+        throw std::invalid_argument("VZExt operands must be vector types");
+    }
+    unsigned w = destVecTy ? destVecTy->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VZExt, {val}, w, insertPoint));
+    auto rawPtr = instr.get();
+    if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
+    return rawPtr;
+}
+
+VectorInstruction* IRBuilder::createVTrunc(Value* val, VectorType* destVecTy) {
+    auto srcVecTy = dynamic_cast<VectorType*>(val->getType());
+    if (!srcVecTy || !destVecTy) {
+        throw std::invalid_argument("VTrunc operands must be vector types");
+    }
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(destVecTy, Instruction::VTrunc, {val}, 128, insertPoint));
+    auto rawPtr = instr.get();
+    if (insertPoint) insertPoint->getInstructions().push_back(std::move(instr));
+    return rawPtr;
 }
 
 Instruction* IRBuilder::createCall(Value* callee, const std::vector<Value*>& args, Type* retType) {
@@ -878,6 +1061,152 @@ Instruction* IRBuilder::createLoadub(Value* ptr) {
 Instruction* IRBuilder::createVAArg(Value* val, Type* destTy) {
     auto instr = std::unique_ptr<Instruction>(new Instruction(destTy, Instruction::VAArg, {val}, insertPoint));
     Instruction* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+static unsigned getVecWidthBits(Value* val) {
+    if (!val || !val->getType()) return 128;
+    if (auto* vt = dynamic_cast<VectorType*>(val->getType())) return vt->getBitWidth();
+    return 128;
+}
+
+VectorInstruction* IRBuilder::createVAdd(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VAdd, {lhs, rhs}, getVecWidthBits(lhs), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVSub(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VSub, {lhs, rhs}, getVecWidthBits(lhs), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVMul(Value* lhs, Value* rhs) {
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(lhs->getType(), Instruction::VMul, {lhs, rhs}, getVecWidthBits(lhs), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVFAdd(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFAdd,
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVFSub(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFSub,
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVFMul(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFMul,
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVFDiv(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VFDiv,
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get();
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVMin(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VMin,
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
+VectorInstruction* IRBuilder::createVMax(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(lhs->getType(), Instruction::VMax,
+                                                     std::vector<Value*>{lhs, rhs}, getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get(); insertPoint->addInstruction(insertIterator, std::move(instr)); return result;
+}
+
+VectorInstruction* IRBuilder::createVLoad(VectorType* type, Value* ptr) {
+    unsigned w = type ? type->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(type, Instruction::VLoad, {ptr}, w, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVStore(Value* vec, Value* ptr) {
+    unsigned w = getVecWidthBits(vec);
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(vec->getType(), Instruction::VStore, {vec, ptr}, w, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVGather(VectorType* resVecTy, Value* basePtr, Value* indexVec, Value* maskVec) {
+    std::vector<Value*> ops = {basePtr, indexVec};
+    if (maskVec) ops.push_back(maskVec);
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(resVecTy, Instruction::VGather, ops, resVecTy->getBitWidth(), insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+VectorInstruction* IRBuilder::createVScatter(Value* valueVec, Value* basePtr, Value* indexVec, Value* maskVec) {
+    std::vector<Value*> ops = {valueVec, basePtr, indexVec};
+    if (maskVec) ops.push_back(maskVec);
+    auto* vt = dynamic_cast<VectorType*>(valueVec->getType());
+    unsigned width = vt ? vt->getBitWidth() : 128;
+    auto instr = std::unique_ptr<VectorInstruction>(new VectorInstruction(context->getVoidType(), Instruction::VScatter, ops, width, insertPoint));
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFMA(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FMA, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFMS(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FMS, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFNMA(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FNMA, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
+    instrPtr->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return instrPtr;
+}
+
+Instruction* IRBuilder::createFNMS(Value* a, Value* b, Value* c) {
+    auto instr = std::make_unique<Instruction>(a->getType(), Instruction::FNMS, std::vector<Value*>{a, b, c}, insertPoint);
+    auto* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));
     return instrPtr;

@@ -1,7 +1,7 @@
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %a = copy 10 : w
-    %b = copy %a : w
-    %c = add %b, 5 : w
-    ret %c : w
+    %a = copy 10 : i32
+    %b = copy %a : i32
+    %c = add %b, 5 : i32
+    ret %c : i32
 }

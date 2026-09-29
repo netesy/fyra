@@ -1,41 +1,41 @@
-function $test_loop_sum(%n : w) : l {
+function $test_loop_sum(%n : i32) : i64 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry 0, @body %i_next : w
-    %sum = phi @entry 0, @body %sum_next : l
-    %cond = slt %i, %n : w
+    %i = phi @entry 0, @body %i_next : i32
+    %sum = phi @entry 0, @body %sum_next : i64
+    %cond = slt %i, %n : i32
     jnz %cond, @body, @exit
 
 @body
-    %term = mul %i, 2 : w
-    %term_l = extsw %term : l
-    %sum_next = add %sum, %term_l : l
-    %i_next = add %i, 1 : w
+    %term = mul %i, 2 : i32
+    %term_l = extsw %term : i64
+    %sum_next = add %sum, %term_l : i64
+    %i_next = add %i, 1 : i32
     jmp @loop
 
 @exit
-    ret %sum : l
+    ret %sum : i64
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
     jmp @loop
 
 @loop
-    %k = phi @entry 1, @body %k_next : w
-    %total = phi @entry 0, @body %total_next : l
-    %cond = sle %k, 50 : w
+    %k = phi @entry 1, @body %k_next : i32
+    %total = phi @entry 0, @body %total_next : i64
+    %cond = sle %k, 50 : i32
     jnz %cond, @body, @exit
 
 @body
-    %v = call $test_loop_sum(w 2000000) : l
-    %total_next = add %total, %v : l
-    %k_next = add %k, 1 : w
+    %v = call $test_loop_sum(i32 2000000) : i64
+    %total_next = add %total, %v : i64
+    %k_next = add %k, 1 : i32
     jmp @loop
 
 @exit
-    call $print_checksum(l %total)
-    ret 0 : w
+    call $print_checksum(i64 %total)
+    ret 0 : i32
 }

@@ -9,7 +9,7 @@
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "target/core/TargetDescriptor.h"
-#include "target/artifact/executable/elf.hh"
+#include "LinkedElfTestUtils.h"
 
 using namespace ir;
 using namespace codegen;
@@ -34,29 +34,10 @@ int main() {
     CodeGen cg(*module, std::move(target), nullptr);
     cg.emit(true);
 
-    std::map<std::string, std::vector<uint8_t>> sections;
-    sections[".text"] = cg.getAssembler().getCode();
-    sections[".data"] = cg.getRodataAssembler().getCode();
-
-    ElfGenerator elfGen(inputFile);
-    elfGen.setMachine(62); // EM_X86_64
-    elfGen.setBaseAddress(0x400000);
-
-    std::vector<ElfGenerator::Symbol> symbols;
-    for (const auto& sym_info : cg.getSymbols()) {
-        symbols.push_back({sym_info.name, sym_info.value, sym_info.size,
-                           (uint8_t)sym_info.type, (uint8_t)sym_info.binding, sym_info.sectionName});
-    }
-
-    std::vector<ElfGenerator::Relocation> relocations;
-    for (const auto& reloc_info : cg.getRelocations()) {
-        relocations.push_back({reloc_info.offset, reloc_info.type, reloc_info.addend,
-                               reloc_info.symbolName, reloc_info.sectionName});
-    }
-
     std::string outputPath = "./sqlite_clone_exec";
-    if (!elfGen.generateFromCode(sections, symbols, relocations, outputPath)) {
-        std::cerr << "Error generating ELF: " << elfGen.getLastError() << std::endl;
+    std::string error;
+    if (!writeLinkedX64Elf(cg, outputPath, error)) {
+        std::cerr << "Error generating ELF: " << error << std::endl;
         return 1;
     }
 

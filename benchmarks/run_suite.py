@@ -8,6 +8,8 @@ import statistics
 import json
 import csv
 import re
+import shutil
+import argparse
 
 BENCHMARKS_DIR = os.path.dirname(os.path.abspath(__file__))
 CORPUS_C_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "c")
@@ -23,7 +25,11 @@ def geomean(iterable):
 
 def analyze_assembly(asm_file):
     if not os.path.exists(asm_file):
-        return {"total": 0, "loads": 0, "stores": 0, "moves": 0, "branches": 0, "calls": 0, "frame_size": 0}
+        return {
+            "total": 0, "loads": 0, "stores": 0, "moves": 0,
+            "branches": 0, "calls": 0, "frame_size": 0,
+            "vector_instrs": 0, "spills": 0, "reloads": 0, "max_vector_width": 0
+        }
 
     total = 0
     loads = 0
@@ -32,12 +38,22 @@ def analyze_assembly(asm_file):
     branches = 0
     calls = 0
     frame_size = 0
+    vector_instrs = 0
+    spills = 0
+    reloads = 0
+    max_vector_width = 0
+
+    vector_op_prefixes = (
+        'v', 'padd', 'psub', 'pmul', 'pand', 'por', 'pxor', 'psll', 'psrl', 'psra',
+        'pinsr', 'pextr', 'movdqu', 'movaps', 'movups', 'movdqa', 'movd', 'movq',
+        'addps', 'subps', 'mulps', 'divps', 'addpd', 'subpd', 'mulpd', 'divpd'
+    )
 
     with open(asm_file, 'r') as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith('.') or line.startswith('#') or line.endswith(':'):
-                if 'subq' in line and '%rsp' in line or 'sub' in line and 'rsp' in line:
+                if ('subq' in line and '%rsp' in line) or ('sub' in line and 'rsp' in line):
                     m = re.search(r'\$(\d+)', line) or re.search(r', (\d+)', line)
                     if m:
                         frame_size = int(m.group(1))
@@ -47,22 +63,37 @@ def analyze_assembly(asm_file):
             parts = line.split()
             op = parts[0].lower() if parts else ""
 
-            if 'subq' in op and '%rsp' in line and ('$' in line or ',' in line):
+            if ('subq' in op or 'sub' in op) and ('rsp' in line or '%rsp' in line) and ('$' in line or ',' in line):
                 m = re.search(r'\$(\d+)', line) or re.search(r', (\d+)', line)
                 if m:
                     frame_size = int(m.group(1))
 
-            if op == 'call' or op == 'callq':
+            if 'zmm' in line:
+                max_vector_width = max(max_vector_width, 512)
+            elif 'ymm' in line:
+                max_vector_width = max(max_vector_width, 256)
+            elif 'xmm' in line:
+                max_vector_width = max(max_vector_width, 128)
+
+            if op.startswith(vector_op_prefixes) and op not in ('var', 'val'):
+                vector_instrs += 1
+
+            if op in ('call', 'callq'):
                 calls += 1
-            elif op.startswith('j') or op == 'ret' or op == 'retq':
+            elif op.startswith('j') or op in ('ret', 'retq'):
                 branches += 1
             elif 'mov' in op or 'push' in op or 'pop' in op:
                 if '(' in line or ')' in line or 'ptr' in line:
-                    if 'push' in op or ('mov' in op and ('%rbp)' in line or '[rbp' in line or '->' in line)):
-                        if op.startswith('mov') and ('(%rbp)' in line.split(',')[-1] or '[rbp' in line.split(',')[-1]):
+                    is_stack_ref = ('%rbp)' in line or '[rbp' in line or '%rsp)' in line or '[rsp' in line)
+                    if 'push' in op or ('mov' in op and is_stack_ref):
+                        if op.startswith('mov') and ('(%rbp)' in line.split(',')[-1] or '[rbp' in line.split(',')[-1] or '(%rsp)' in line.split(',')[-1] or '[rsp' in line.split(',')[-1]):
                             stores += 1
+                            if is_stack_ref:
+                                spills += 1
                         else:
                             loads += 1
+                            if is_stack_ref:
+                                reloads += 1
                     else:
                         loads += 1
                 elif 'mov' in op:
@@ -75,25 +106,39 @@ def analyze_assembly(asm_file):
         "moves": moves,
         "branches": branches,
         "calls": calls,
-        "frame_size": frame_size
+        "frame_size": frame_size,
+        "vector_instrs": vector_instrs,
+        "spills": spills,
+        "reloads": reloads,
+        "max_vector_width": max_vector_width
     }
 
-def run_cmd(cmd):
-    p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return p.returncode, p.stdout, p.stderr
+def run_cmd(cmd, timeout=30.0):
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout after {timeout}s"
 
-def measure_execution(exec_path, samples=10, warmup=2):
+def run_exec(exec_path, timeout=30.0):
+    try:
+        p = subprocess.run([exec_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout after {timeout}s"
+
+def measure_execution(exec_path, samples=15, warmup=2, timeout=30.0):
     if not os.path.exists(exec_path):
         return {"median": 0.0, "min": 0.0, "stddev": 0.0, "output": ""}
 
     for _ in range(warmup):
-        run_cmd(exec_path)
+        run_exec(exec_path, timeout=timeout)
 
     runtimes = []
     output = ""
     for _ in range(samples):
         t0 = time.perf_counter()
-        rc, out, err = run_cmd(exec_path)
+        rc, out, err = run_exec(exec_path, timeout=timeout)
         t1 = time.perf_counter()
         if rc == 0:
             runtimes.append(t1 - t0)
@@ -115,9 +160,23 @@ def verify_static(exec_path):
     rc, out, err = run_cmd(f"readelf -d {exec_path}")
     return "There is no dynamic section in this file" in out or "no dynamic section" in out
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Fyra Backend — Multi-Category Benchmark Harness")
+    parser.add_argument("--filter", type=str, default=os.environ.get("FYRA_BENCH_FILTER", ""), help="Comma-separated list of benchmarks to run")
+    parser.add_argument("--targets", type=str, default=os.environ.get("FYRA_BENCH_TARGETS", "x64-linux,aarch64-linux,riscv64-linux,wasm32-wasi"), help="Comma-separated list of target architectures (x64-linux, aarch64-linux, riscv64-linux, wasm32-wasi)")
+    parser.add_argument("--samples", type=int, default=int(os.environ.get("FYRA_BENCH_SAMPLES", "15")), help="Number of timing samples per benchmark")
+    parser.add_argument("--warmup", type=int, default=int(os.environ.get("FYRA_BENCH_WARMUP", "2")), help="Number of warmup executions per benchmark")
+    parser.add_argument("--timeout", type=float, default=float(os.environ.get("FYRA_BENCH_TIMEOUT", "30")), help="Execution timeout in seconds")
+    parser.add_argument("--verbose", action="store_true", help="Print verbose assembly analysis details")
+    parser.add_argument("--json", type=str, default="", help="Custom JSON output file path")
+    parser.add_argument("--csv", type=str, default="", help="Custom CSV output file path")
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
+
     print("==========================================================================")
-    print(" Fyra Backend — Multi-Category Benchmark Harness (Static Linking)")
+    print(" Fyra Backend — Multi-Category Benchmark Harness (Granular Vector Metrics)")
     print("==========================================================================")
 
     if not os.path.exists(FYRA_BIN):
@@ -126,6 +185,10 @@ def main():
 
     bench_names = [f[:-2] for f in os.listdir(CORPUS_C_DIR) if f.endswith(".c")]
     bench_names.sort()
+
+    requested = {name.strip() for name in args.filter.split(",") if name.strip()}
+    if requested:
+        bench_names = [name for name in bench_names if name in requested]
 
     results = []
 
@@ -138,44 +201,93 @@ def main():
             continue
 
         out_dir = os.path.join(BENCHMARKS_DIR, "output", bname)
+        shutil.rmtree(out_dir, ignore_errors=True)
         os.makedirs(out_dir, exist_ok=True)
+        print(f"Benchmarking {bname}...", flush=True)
 
-        # 1. Compile GCC -O2 -static
         gcc_s = os.path.join(out_dir, "gcc.s")
         gcc_exec = os.path.join(out_dir, "gcc_exec")
-        run_cmd(f"gcc -static -O2 {c_src} -S -o {gcc_s}")
-        run_cmd(f"gcc -static -O2 {c_src} -o {gcc_exec}")
-
-        # 2. Compile Clang -O2 -static
         clang_s = os.path.join(out_dir, "clang.s")
         clang_exec = os.path.join(out_dir, "clang_exec")
-        run_cmd(f"clang -static -O2 {c_src} -S -o {clang_s}")
-        run_cmd(f"clang -static -O2 {c_src} -o {clang_exec}")
 
-        # 3. Compile Fyra -O1 & -O2 static
+        commands = [
+            f"gcc -static -O2 {c_src} -S -o {gcc_s}",
+            f"gcc -static -O2 {c_src} -o {gcc_exec}",
+            f"clang -static -O2 {c_src} -S -o {clang_s}",
+            f"clang -static -O2 {c_src} -o {clang_exec}",
+        ]
+
+        target_list = [t.strip() for t in args.targets.split(",") if t.strip()]
+
+        for target_triple in target_list:
+            t_sanitized = target_triple.replace("-", "_")
+            t_o2_s = os.path.join(out_dir, f"fyra_{t_sanitized}_o2.s")
+            t_scalar_s = os.path.join(out_dir, f"fyra_{t_sanitized}_scalar.s")
+
+            cmd_o2 = f"{FYRA_BIN} {fyra_src} --target {target_triple} -o {t_o2_s} -O2"
+            cmd_scalar = f"{FYRA_BIN} {fyra_src} --target {target_triple} -o {t_scalar_s} -O2 --disable-slp"
+
+            rc1, stdout1, stderr1 = run_cmd(cmd_o2, timeout=args.timeout)
+            if rc1 != 0:
+                print(f"[FAILED] {bname} ({target_triple}): command failed ({rc1}): {cmd_o2}\n{stderr1}")
+                return 1
+
+            rc2, stdout2, stderr2 = run_cmd(cmd_scalar, timeout=args.timeout)
+            if rc2 != 0:
+                print(f"[FAILED] {bname} ({target_triple}): command failed ({rc2}): {cmd_scalar}\n{stderr2}")
+                return 1
+
+            t_o2_s_real = t_o2_s + ".s" if os.path.exists(t_o2_s + ".s") else (t_o2_s + ".wat" if os.path.exists(t_o2_s + ".wat") else t_o2_s)
+            asm_data = analyze_assembly(t_o2_s_real)
+            print(f"  [{target_triple:<15}] Output verified | Instrs: {asm_data['total']:<4} | Loads: {asm_data['loads']:<3} | Stores: {asm_data['stores']:<3} | VecInstrs: {asm_data['vector_instrs']}")
+
         fyra_o1_s = os.path.join(out_dir, "fyra_o1.s")
         fyra_o2_s = os.path.join(out_dir, "fyra_o2.s")
+        fyra_scalar_s = os.path.join(out_dir, "fyra_scalar.s")
         fyra_exec = os.path.join(out_dir, "fyra_exec")
+        fyra_scalar_exec = os.path.join(out_dir, "fyra_scalar_exec")
 
-        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o1_s} -O1")
-        run_cmd(f"{FYRA_BIN} {fyra_src} -o {fyra_o2_s} -O2")
+        commands += [
+            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_o1_s} -O1",
+            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_o2_s} -O2",
+            f"{FYRA_BIN} {fyra_src} --target x64-linux -o {fyra_scalar_s} -O2 --disable-slp",
+        ]
+        for command in commands:
+            t0 = time.time()
+            rc, stdout, stderr = run_cmd(command, timeout=args.timeout)
+            t1 = time.time()
+            if args.verbose:
+                print(f"  Command '{command}' took {t1 - t0:.3f}s", flush=True)
+            if rc != 0:
+                print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
+                return 1
+
+        fyra_o1_s = fyra_o1_s + ".s" if os.path.exists(fyra_o1_s + ".s") else fyra_o1_s
+        fyra_o2_s = fyra_o2_s + ".s" if os.path.exists(fyra_o2_s + ".s") else fyra_o2_s
+        fyra_scalar_s = fyra_scalar_s + ".s" if os.path.exists(fyra_scalar_s + ".s") else fyra_scalar_s
+
         harness_c = os.path.join(BENCHMARKS_DIR, "harness.c")
-        run_cmd(f"gcc -static -no-pie {fyra_o2_s} {harness_c} -o {fyra_exec}")
+        for command in [f"gcc -static -no-pie {fyra_o2_s} {harness_c} -o {fyra_exec}",
+                        f"gcc -static -no-pie {fyra_scalar_s} {harness_c} -o {fyra_scalar_exec}"]:
+            rc, stdout, stderr = run_cmd(command, timeout=args.timeout)
+            if rc != 0:
+                print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
+                return 1
 
         # Assembly Analysis
         gcc_asm = analyze_assembly(gcc_s)
         clang_asm = analyze_assembly(clang_s)
         fyra_asm = analyze_assembly(fyra_o2_s)
+        fyra_scalar_asm = analyze_assembly(fyra_scalar_s)
 
         # Measure Execution Runtimes
-        gcc_perf = measure_execution(gcc_exec)
-        clang_perf = measure_execution(clang_exec)
-        fyra_perf = measure_execution(fyra_exec)
+        gcc_perf = measure_execution(gcc_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
+        clang_perf = measure_execution(clang_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
+        fyra_perf = measure_execution(fyra_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
+        fyra_scalar_perf = measure_execution(fyra_scalar_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
 
         # Correctness Verification
-        correct = (fyra_perf["output"] == clang_perf["output"] and len(fyra_perf["output"]) > 0)
-
-        # Verify Static Linkage
+        correct = (fyra_perf["output"] == clang_perf["output"] == fyra_scalar_perf["output"] and len(fyra_perf["output"]) > 0)
         fyra_static = verify_static(fyra_exec)
 
         entry = {
@@ -185,23 +297,42 @@ def main():
             "gcc_time": gcc_perf["median"],
             "clang_time": clang_perf["median"],
             "fyra_time": fyra_perf["median"],
+            "fyra_scalar_time": fyra_scalar_perf["median"],
+            "fyra_speedup": (fyra_scalar_perf["median"] / fyra_perf["median"] if fyra_perf["median"] > 0 else 0.0),
             "gcc_instrs": gcc_asm["total"],
             "clang_instrs": clang_asm["total"],
             "fyra_instrs": fyra_asm["total"],
+            "fyra_scalar_instrs": fyra_scalar_asm["total"],
             "gcc_mem": gcc_asm["loads"] + gcc_asm["stores"],
             "clang_mem": clang_asm["loads"] + clang_asm["stores"],
             "fyra_mem": fyra_asm["loads"] + fyra_asm["stores"],
+            "fyra_scalar_mem": fyra_scalar_asm["loads"] + fyra_scalar_asm["stores"],
             "fyra_frame_size": fyra_asm["frame_size"],
-            "clang_frame_size": clang_asm["frame_size"]
+            "clang_frame_size": clang_asm["frame_size"],
+            "fyra_vector_instrs": fyra_asm["vector_instrs"],
+            "fyra_spills": fyra_asm["spills"],
+            "fyra_reloads": fyra_asm["reloads"],
+            "max_vector_width": fyra_asm["max_vector_width"]
         }
         results.append(entry)
 
         status = "PASSED" if correct else "FAILED"
-        print(f"[{status}] {bname:<24} | Fyra: {fyra_perf['median']:.3f}s | Clang: {clang_perf['median']:.3f}s | GCC: {gcc_perf['median']:.3f}s")
+        print(f"[{status}] {bname:<24} | Scalar: {fyra_scalar_perf['median']:.6f}s | SLP: {fyra_perf['median']:.6f}s | Speedup: {entry['fyra_speedup']:.3f}x | VecInstrs: {fyra_asm['vector_instrs']} | FrameAlignWidth: {fyra_asm['max_vector_width']}b")
 
-    # Output CSV and JSON
-    json_path = os.path.join(BENCHMARKS_DIR, "benchmark_results.json")
-    csv_path = os.path.join(BENCHMARKS_DIR, "benchmark_results.csv")
+        if args.verbose:
+            print(f"   Assembly detail: instrs={fyra_asm['total']}, loads={fyra_asm['loads']}, stores={fyra_asm['stores']}, spills={fyra_asm['spills']}, reloads={fyra_asm['reloads']}, frame_size={fyra_asm['frame_size']}")
+
+    failed = [r["name"] for r in results if not r["correct"]]
+    if failed:
+        print(f"Refusing to update result files; failed benchmarks: {', '.join(failed)}")
+        return 1
+
+    if requested:
+        print("Filtered run complete; canonical CSV/JSON results were not updated.")
+        return 0
+
+    json_path = args.json if args.json else os.path.join(BENCHMARKS_DIR, "benchmark_results.json")
+    csv_path = args.csv if args.csv else os.path.join(BENCHMARKS_DIR, "benchmark_results.csv")
 
     with open(json_path, "w") as f:
         json.dump(results, f, indent=2)
@@ -227,6 +358,7 @@ def main():
     print(f" Geometric Mean Instruction Ratio    (Fyra / Clang -O2) : {geo_instr:.2f}x")
     print(f" Geometric Mean Memory Operations     (Fyra / Clang -O2) : {geo_mem:.2f}x")
     print("==========================================================================")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

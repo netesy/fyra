@@ -51,6 +51,11 @@ void Instruction::print(std::ostream& os) const {
         case Shl: os << "shl"; break;
         case Shr: os << "shr"; break;
         case Sar: os << "sar"; break;
+        case SMin: os << "smin"; break;
+        case SMax: os << "smax"; break;
+        case VSExt: os << "vsext"; break;
+        case VZExt: os << "vzext"; break;
+        case VTrunc: os << "vtrunc"; break;
         case FAdd: os << "fadd"; break;
         case FSub: os << "fsub"; break;
         case FMul: os << "fmul"; break;

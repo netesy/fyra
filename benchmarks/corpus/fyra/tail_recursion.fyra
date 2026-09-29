@@ -1,35 +1,35 @@
-function $tail_factorial(%n : l, %acc : l) : l {
+function $tail_factorial(%n : i64, %acc : i64) : i64 {
 @start
-    %cond = sle %n, 1 : l
+    %cond = sle %n, 1 : i64
     jnz %cond, @base, @recur
 
 @base
-    ret %acc : l
+    ret %acc : i64
 
 @recur
-    %n_next = sub %n, 1 : l
-    %acc_next = mul %acc, %n : l
-    %res = call $tail_factorial(%n_next, %acc_next) : l
-    ret %res : l
+    %n_next = sub %n, 1 : i64
+    %acc_next = mul %acc, %n : i64
+    %res = call $tail_factorial(%n_next, %acc_next) : i64
+    ret %res : i64
 }
 
-export function $main() : w {
+export function $main() : i32 {
 @entry
     jmp @loop
 
 @loop
-    %i = phi @entry 0, @body %i_next : w
-    %sum = phi @entry 0, @body %sum_next : l
-    %cond = slt %i, 5000000 : w
+    %i = phi @entry 0, @body %i_next : i32
+    %sum = phi @entry 0, @body %sum_next : i64
+    %cond = slt %i, 5000000 : i32
     jnz %cond, @body, @exit
 
 @body
-    %v = call $tail_factorial(l 15, l 1) : l
-    %sum_next = add %sum, %v : l
-    %i_next = add %i, 1 : w
+    %v = call $tail_factorial(i64 15, i64 1) : i64
+    %sum_next = add %sum, %v : i64
+    %i_next = add %i, 1 : i32
     jmp @loop
 
 @exit
-    call $print_checksum(l %sum)
-    ret 0 : w
+    call $print_checksum(i64 %sum)
+    ret 0 : i32
 }

@@ -1,14 +1,14 @@
-export function $main() : w {
+export function $main() : i32 {
 @start
-    %a = copy 10 : w
-    %b = copy 20 : w
-    %c = add %a, %b : w
-    %d = mul %c, 2 : w
-    %e = sar %d, 1 : w
-    %cond = csle %e, 25 : w
+    %a = copy 10 : i32
+    %b = copy 20 : i32
+    %c = add %a, %b : i32
+    %d = mul %c, 2 : i32
+    %e = sar %d, 1 : i32
+    %cond = csle %e, 25 : i32
     jnz %cond, @then, @else
 @then
-    ret %e : w
+    ret %e : i32
 @else
-    ret 0 : w
+    ret 0 : i32
 }

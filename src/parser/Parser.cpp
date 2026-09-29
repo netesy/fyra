@@ -84,8 +84,12 @@ void Parser::parseFunction() {
                 std::string pName = currentToken.value;
                 paramNames.push_back(pName);
                 getNextToken();
-                if (currentToken.type == TokenType::Colon) getNextToken();
-                paramTypes.push_back(parseIRType());
+                if (currentToken.type == TokenType::Colon) {
+                    getNextToken();
+                    paramTypes.push_back(parseIRType());
+                } else {
+                    paramTypes.push_back(context->getIntegerType(32));
+                }
             } else {
                 paramNames.push_back(std::to_string(paramIndex));
                 paramTypes.push_back(parseIRType());
@@ -377,8 +381,10 @@ ir::Value* Parser::parseValue() {
     }
     if (currentToken.type == TokenType::Keyword || currentToken.type == TokenType::Identifier) {
         std::string k = currentToken.value;
-        if (k == "w" || k == "l" || k == "s" || k == "d" ||
-            k == "i64" || k == "i32" || k == "i16" || k == "i8" || k == "i1" || k == "void") {
+        if (k == "i8" || k == "i16" || k == "i32" || k == "i64" ||
+            k == "u8" || k == "u16" || k == "u32" || k == "u64" ||
+            k == "f32" || k == "f64" || k == "bool" || k == "void" ||
+            (k.length() > 1 && k[0] == 'v' && std::isdigit(k[1]))) {
             ir::Type* ty = parseIRType();
             ir::Value* val = parseValue();
             if (!val) return nullptr;
@@ -424,8 +430,9 @@ ir::Value* Parser::parseValue() {
     }
     if (currentToken.type == TokenType::FloatLiteral) {
         std::string val = currentToken.value;
-        ir::Type* ty = (val[0] == 's') ? (ir::Type*)context->getFloatType() : (ir::Type*)context->getDoubleType();
-        double d = std::stod(val.substr(2));
+        ir::Type* ty = (val.find("f32_") == 0 || val[0] == 's') ? (ir::Type*)context->getFloatType() : (ir::Type*)context->getDoubleType();
+        size_t pos = val.find('_');
+        double d = (pos != std::string::npos) ? std::stod(val.substr(pos + 1)) : std::stod(val);
         getNextToken();
         return context->getConstantFP(ty, d);
     }
@@ -446,16 +453,52 @@ ir::Type* Parser::parseIRType() {
     if (currentToken.type == TokenType::Keyword || currentToken.type == TokenType::Identifier) {
         std::string v = currentToken.value;
         ir::Type* baseType = nullptr;
-        if (v == "w") { baseType = context->getIntegerType(32); getNextToken(); }
-        else if (v == "l") { baseType = context->getIntegerType(64); getNextToken(); }
-        else if (v == "s") { baseType = context->getFloatType(); getNextToken(); }
-        else if (v == "d") { baseType = context->getDoubleType(); getNextToken(); }
-        else if (v.rfind("i64", 0) == 0) { baseType = context->getIntegerType(64); getNextToken(); }
-        else if (v.rfind("i32", 0) == 0) { baseType = context->getIntegerType(32); getNextToken(); }
-        else if (v.rfind("i16", 0) == 0) { baseType = context->getIntegerType(16); getNextToken(); }
-        else if (v.rfind("i8", 0) == 0) { baseType = context->getIntegerType(8); getNextToken(); }
-        else if (v.rfind("i1", 0) == 0) { baseType = context->getIntegerType(1); getNextToken(); }
-        else if (v == "void") { baseType = context->getVoidType(); getNextToken(); }
+
+        if (v == "i8" || v == "u8") baseType = context->getIntegerType(8);
+        else if (v == "i16" || v == "u16") baseType = context->getIntegerType(16);
+        else if (v == "i32" || v == "u32") baseType = context->getIntegerType(32);
+        else if (v == "i64" || v == "u64") baseType = context->getIntegerType(64);
+        else if (v == "bool") baseType = context->getIntegerType(1);
+        else if (v == "f32") baseType = context->getFloatType();
+        else if (v == "f64") baseType = context->getDoubleType();
+        else if (v == "void") baseType = context->getVoidType();
+        else if (module && module->getType(v)) {
+            baseType = module->getType(v);
+        }
+        else if (v.length() > 0 && v[0] == 'v') {
+            size_t idx = 1;
+            while (idx < v.length() && std::isdigit(v[idx])) idx++;
+            if (idx == 1 || idx == v.length()) {
+                throw std::runtime_error("invalid vector type: expected v<lanes><scalar-type>");
+            }
+            unsigned lanes = 0;
+            try {
+                lanes = std::stoul(v.substr(1, idx - 1));
+            } catch (...) {
+                throw std::runtime_error("invalid vector type: expected v<lanes><scalar-type>");
+            }
+            if (lanes == 0) {
+                throw std::runtime_error("invalid vector type: expected v<lanes><scalar-type>");
+            }
+            std::string scalarStr = v.substr(idx);
+            ir::Type* elemType = nullptr;
+            if (scalarStr == "i8" || scalarStr == "u8") elemType = context->getIntegerType(8);
+            else if (scalarStr == "i16" || scalarStr == "u16") elemType = context->getIntegerType(16);
+            else if (scalarStr == "i32" || scalarStr == "u32") elemType = context->getIntegerType(32);
+            else if (scalarStr == "i64" || scalarStr == "u64") elemType = context->getIntegerType(64);
+            else if (scalarStr == "f32") elemType = context->getFloatType();
+            else if (scalarStr == "f64") elemType = context->getDoubleType();
+            else {
+                throw std::runtime_error("invalid vector type: expected v<lanes><scalar-type>");
+            }
+            baseType = context->getVectorType(elemType, lanes);
+        } else if (v.length() > 0 && (v[0] == 'i' || v[0] == 'u' || v[0] == 'f')) {
+            throw std::runtime_error("invalid scalar type: " + v);
+        } else {
+            throw std::runtime_error("unknown type: " + v);
+        }
+
+        getNextToken();
 
         if (baseType) {
             while (currentToken.value == "*") {
@@ -465,7 +508,7 @@ ir::Type* Parser::parseIRType() {
             return baseType;
         }
     }
-    return context->getVoidType();
+    throw std::runtime_error("expected type");
 }
 
 void Parser::parseData() {
@@ -474,11 +517,12 @@ void Parser::parseData() {
     consume(TokenType::LCurly, "Expected {");
     std::vector<ir::Constant*> constants;
     while (currentToken.type != TokenType::RCurly && currentToken.type != TokenType::Eof) {
-        if (currentToken.type == TokenType::Keyword) {
+        if (currentToken.type == TokenType::Keyword || currentToken.type == TokenType::Identifier) {
             std::string typeStr = currentToken.value; getNextToken();
-            if (typeStr == "b") { if (currentToken.type == TokenType::StringLiteral) { constants.push_back(context->getConstantString(currentToken.value)); getNextToken(); } else if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(8), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
-            else if (typeStr == "w") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(32), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
-                else if (typeStr == "l") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(64), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
+            if (typeStr == "i8" || typeStr == "u8") { if (currentToken.type == TokenType::StringLiteral) { constants.push_back(context->getConstantString(currentToken.value)); getNextToken(); } else if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(8), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
+            else if (typeStr == "i16" || typeStr == "u16") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(16), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
+            else if (typeStr == "i32" || typeStr == "u32") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(32), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
+            else if (typeStr == "i64" || typeStr == "u64") { if (currentToken.type == TokenType::Number) { constants.push_back(context->getConstantInt(context->getIntegerType(64), std::stoll(currentToken.value, nullptr, 0))); getNextToken(); } }
             if (currentToken.type == TokenType::Comma) getNextToken();
         } else getNextToken();
     }

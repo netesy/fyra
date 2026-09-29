@@ -1,0 +1,87 @@
+ParserTest 0 0
+TypeParserTest 0 0
+AddTest 0 0
+CFGTest 0 0
+DomTreeTest 0 0
+DFTest 0 0
+PhiTest 0 0
+DIETest 0 0
+DIEChainTest 0 0
+WindowsTest 0 0
+RenameTest 0 0
+RenameLoadTest 0 0
+Mem2RegTest 0 0
+CopyElimTest 0 0
+GVNTest 0 0
+RegAllocTest 0 0
+RegAllocSpillTest 0 0
+LivenessTest 0 0
+SCCPTest 0 0
+WindowsStackTest 0 0
+CopyTest 0 0
+MulDivTest 0 0
+BitwiseTest 0 0
+NegTest 0 0
+ComparisonParserTest 0 0
+EnhancedSCCPTest 0 0
+EnhancedDCETest 0 0
+LICMTest 0 0
+IntegrationTest 0 0
+ASMValidationTest 0 0
+ObjectGenerationTest 0 0
+EnhancedCodeGenTest 0 0
+EnhancedTargetsTest 0 0
+MemoryOperationsTest 0 0
+ComparisonControlFlowTest 0 0
+ProfilingTest 0 0
+SIMDTest 0 0
+FusionTest 0 0
+DebugInfoTest 0 0
+EnhancedIntegrationTest 0 0
+BenchmarkTest 0 0
+WindowsRiscVEnhancedTest 0 0
+RiscV64EnhancedTest 0 0
+---
+ParserTest
+TypeParserTest
+AddTest
+CFGTest
+DomTreeTest
+DFTest
+PhiTest
+DIETest
+DIEChainTest
+WindowsTest
+RenameTest
+RenameLoadTest
+Mem2RegTest
+CopyElimTest
+GVNTest
+RegAllocTest
+RegAllocSpillTest
+LivenessTest
+SCCPTest
+WindowsStackTest
+CopyTest
+MulDivTest
+BitwiseTest
+NegTest
+ComparisonParserTest
+EnhancedSCCPTest
+EnhancedDCETest
+LICMTest
+IntegrationTest
+ASMValidationTest
+ObjectGenerationTest
+EnhancedCodeGenTest
+EnhancedTargetsTest
+MemoryOperationsTest
+ComparisonControlFlowTest
+ProfilingTest
+SIMDTest
+FusionTest
+DebugInfoTest
+EnhancedIntegrationTest
+BenchmarkTest
+WindowsRiscVEnhancedTest
+RiscV64EnhancedTest

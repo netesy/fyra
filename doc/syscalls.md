@@ -43,10 +43,10 @@ To use a named syscall in Fyra IR, use the `syscall` instruction with the syscal
 
 ```fyra
 # Example: sys_write(fd=1, buf=$msg, count=13)
-%res = syscall(sys_write, l 1, l $msg, l 13) : l
+%res = syscall(sys_write, i64 1, i64 $msg, i64 13) : i64
 
 # Example: sys_exit(status=0)
-syscall(sys_exit, l 0)
+syscall(sys_exit, i64 0)
 ```
 
 The compiler will automatically:

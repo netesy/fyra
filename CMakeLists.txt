@@ -16,6 +16,7 @@ add_subdirectory(src/parser)
 add_subdirectory(src/transforms)
 add_subdirectory(src/codegen)
 add_subdirectory(src/target)
+add_subdirectory(src/fyra)
 
 # --- Compiler Executable ---
 add_executable(fyra_compiler main.cpp)

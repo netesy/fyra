@@ -24,6 +24,7 @@ class Constant;
 class ConstantInt;
 class ConstantFP;
 class ConstantString;
+class ConstantVector;
 class Module;
 
 class IRContext : public std::enable_shared_from_this<IRContext> {
@@ -51,6 +52,7 @@ public:
     ConstantFP* getConstantFP(Type* ty, double value);
     ConstantString* getConstantString(const std::string& value);
     Constant* getConstantArray(ArrayType* ty, const std::vector<Constant*>& elements);
+    ConstantVector* getConstantVector(VectorType* ty, const std::vector<Constant*>& elements);
 
     // Module management
     std::unique_ptr<Module> createModule(const std::string& name);
@@ -134,6 +136,20 @@ private:
         }
     };
     std::unordered_map<ConstantArrayKey, Constant*, ConstantArrayHash> constantArrays;
+
+    struct ConstantVectorKey {
+        VectorType* ty;
+        std::vector<Constant*> elements;
+        bool operator==(const ConstantVectorKey& o) const { return ty == o.ty && elements == o.elements; }
+    };
+    struct ConstantVectorHash {
+        size_t operator()(const ConstantVectorKey& k) const {
+            size_t h = std::hash<void*>{}(k.ty);
+            for (auto* e : k.elements) h ^= std::hash<void*>{}(e);
+            return h;
+        }
+    };
+    std::unordered_map<ConstantVectorKey, ConstantVector*, ConstantVectorHash> constantVectors;
 };
 
 } // namespace ir
