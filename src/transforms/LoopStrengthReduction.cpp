@@ -1,6 +1,7 @@
 #include "transforms/LoopStrengthReduction.h"
 #include "transforms/LoopInvariantCodeMotion.h"
 #include "transforms/CFGBuilder.h"
+#include "transforms/AffineAnalysis.h"
 #include "ir/IRBuilder.h"
 #include "ir/IRContext.h"
 #include "ir/Constant.h"
@@ -45,90 +46,33 @@ static bool isLoopInvariant(ir::Value* val, const Loop& loop) {
     return false;
 }
 
-static ir::Value* stripExt(ir::Value* val) {
-    while (auto* inst = dynamic_cast<ir::Instruction*>(val)) {
-        if (inst->getOpcode() == ir::Instruction::ExtSW || inst->getOpcode() == ir::Instruction::ExtUW) {
-            if (!inst->getOperands().empty() && inst->getOperands()[0] && inst->getOperands()[0]->get()) {
-                val = inst->getOperands()[0]->get();
-            } else break;
-        } else break;
-    }
-    return val;
-}
-
 static bool parseAffine(ir::Value* val, ir::PhiNode* indPhi, const Loop& loop,
                         ir::Value*& base, int64_t& scale, int64_t& displacement) {
-    val = stripExt(val);
-    if (!val) return false;
-
-    if (val == indPhi) {
-        scale = 1;
-        return true;
-    }
-
-    if (auto* c = dynamic_cast<ir::ConstantInt*>(val)) {
-        displacement += static_cast<int64_t>(c->getValue());
-        return true;
-    }
-
-    auto* inst = dynamic_cast<ir::Instruction*>(val);
-    if (!inst) {
-        if (isLoopInvariant(val, loop)) {
-            if (!base) { base = val; return true; }
-        }
-        return false;
-    }
-
-    const auto op = inst->getOpcode();
-    if (op == ir::Instruction::Mul && inst->getOperands().size() == 2) {
-        ir::Value* op0 = stripExt(inst->getOperands()[0]->get());
-        ir::Value* op1 = stripExt(inst->getOperands()[1]->get());
-        auto* c0 = dynamic_cast<ir::ConstantInt*>(op0);
-        auto* c1 = dynamic_cast<ir::ConstantInt*>(op1);
-
-        if (op0 == indPhi && c1) {
-            scale = static_cast<int64_t>(c1->getValue());
-            return true;
-        }
-        if (op1 == indPhi && c0) {
-            scale = static_cast<int64_t>(c0->getValue());
-            return true;
-        }
-    } else if (op == ir::Instruction::Add && inst->getOperands().size() == 2) {
-        ir::Value* op0 = inst->getOperands()[0]->get();
-        ir::Value* op1 = inst->getOperands()[1]->get();
-
-        int64_t scale0 = 0, scale1 = 0;
-        int64_t disp0 = 0, disp1 = 0;
-        ir::Value* base0 = nullptr;
-        ir::Value* base1 = nullptr;
-
-        bool p0 = parseAffine(op0, indPhi, loop, base0, scale0, disp0);
-        bool p1 = parseAffine(op1, indPhi, loop, base1, scale1, disp1);
-
-        if (p0 && p1) {
-            if (base0 && base1) return false; // Cannot handle two dynamic bases
-            base = base0 ? base0 : base1;
-            scale = scale0 + scale1;
-            displacement = disp0 + disp1;
-            return true;
-        }
-    } else if (op == ir::Instruction::Sub && inst->getOperands().size() == 2) {
-        ir::Value* op0 = inst->getOperands()[0]->get();
-        ir::Value* op1 = inst->getOperands()[1]->get();
-        auto* c1 = dynamic_cast<ir::ConstantInt*>(stripExt(op1));
-
-        int64_t scale0 = 0;
-        int64_t disp0 = 0;
-        ir::Value* base0 = nullptr;
-        if (c1 && parseAffine(op0, indPhi, loop, base0, scale0, disp0)) {
-            base = base0;
-            scale = scale0;
-            displacement = disp0 - static_cast<int64_t>(c1->getValue());
+    // Use shared AffineAnalysis for coefficient extraction
+    // This handles shift forms, multiplication, addition, etc.
+    AffineAnalysis affine;
+    auto result = affine.analyze(val);
+    
+    if (result.isValid) {
+        auto indVarCoeff = result.getCoefficient(indPhi);
+        if (indVarCoeff.has_value()) {
+            scale = indVarCoeff.value();
+            displacement = result.constant;
+            
+            // Find the base term (non-induction, loop-invariant term)
+            for (const auto& term : result.terms) {
+                ir::Value* candidate = term.rawValue ? term.rawValue : term.value;
+                if (term.value != indPhi && term.rawValue != indPhi && isLoopInvariant(candidate, loop)) {
+                    base = candidate;
+                    break;
+                }
+            }
+            
             return true;
         }
     }
 
+    // LSR-specific loop invariance handling for non-affine values
     if (isLoopInvariant(val, loop)) {
         if (!base) { base = val; return true; }
     }
@@ -146,6 +90,7 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
     licm.findLoops(func, loops);
 
     bool changed = false;
+    AffineAnalysis affine;
 
     for (auto& loopPtr : loops) {
         Loop& loop = *loopPtr;
@@ -174,25 +119,16 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
             ir::Value* stepNextVal = phi->getIncomingValueForBlock(latch);
             if (!initVal || !stepNextVal) continue;
 
-            auto* stepInst = dynamic_cast<ir::Instruction*>(stripExt(stepNextVal));
-            if (!stepInst || stepInst->getOperands().size() < 2) continue;
+            auto stepResult = affine.analyze(stepNextVal);
+            if (!stepResult.isValid || stepResult.terms.size() != 1) continue;
+            auto phiCoeff = stepResult.getCoefficient(phi);
+            if (!phiCoeff.has_value() || phiCoeff.value() != 1) continue;
 
-            int64_t stepConst = 0;
-            if (stepInst->getOpcode() == ir::Instruction::Add) {
-                ir::Value* op0 = stripExt(stepInst->getOperands()[0]->get());
-                ir::Value* op1 = stripExt(stepInst->getOperands()[1]->get());
-                if (op0 == phi) {
-                    if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) stepConst = c1->getValue();
-                } else if (op1 == phi) {
-                    if (auto* c0 = dynamic_cast<ir::ConstantInt*>(op0)) stepConst = c0->getValue();
-                }
-            } else if (stepInst->getOpcode() == ir::Instruction::Sub) {
-                ir::Value* op0 = stripExt(stepInst->getOperands()[0]->get());
-                ir::Value* op1 = stripExt(stepInst->getOperands()[1]->get());
-                if (op0 == phi) {
-                    if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) stepConst = -static_cast<int64_t>(c1->getValue());
-                }
-            }
+            int64_t stepConst = stepResult.constant;
+            if (stepConst == 0) continue;
+
+            auto* stepInst = dynamic_cast<ir::Instruction*>(stepNextVal);
+            if (!stepInst) continue;
 
             if (stepConst != 0) {
                 PrimaryIndVar iv;

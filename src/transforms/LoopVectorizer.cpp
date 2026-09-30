@@ -10,6 +10,7 @@
 #include "target/core/TargetInfo.h"
 #include "transforms/CFGBuilder.h"
 #include "transforms/ScalarEvolution.h"
+#include "transforms/AffineAnalysis.h"
 #include <iostream>
 #include <vector>
 #include <map>
@@ -235,40 +236,36 @@ std::optional<ir::VectorCompareOp> vectorPredicate(ir::Instruction::Opcode opcod
 // Flatten the deliberately small address language accepted by the loop
 // vectorizer.  It recognizes additions in either order, integer constants,
 // and induction*constant in either order.  Anything else remains conservative.
+// Now uses shared AffineAnalysis to also recognize shift forms (e.g., i << 2)
 bool collectAddressTerms(ir::Value* value, ir::PhiNode* induction,
                          ir::Value*& base, int64_t& stride,
                          int64_t& constantOffset) {
-    if (isInductionIndex(value, induction)) {
-        stride += 1;
-        return true;
-    }
-    if (auto* constant = dynamic_cast<ir::ConstantInt*>(value)) {
-        constantOffset += static_cast<int64_t>(constant->getValue());
-        return true;
-    }
-    auto* inst = dynamic_cast<ir::Instruction*>(value);
-    if (inst && inst->getOpcode() == ir::Instruction::Add &&
-        inst->getOperands().size() == 2) {
-        return collectAddressTerms(inst->getOperands()[0]->get(), induction,
-                                   base, stride, constantOffset) &&
-               collectAddressTerms(inst->getOperands()[1]->get(), induction,
-                                   base, stride, constantOffset);
-    }
-    if (inst && inst->getOpcode() == ir::Instruction::Mul &&
-        inst->getOperands().size() == 2) {
-        for (unsigned indexOperand = 0; indexOperand != 2; ++indexOperand) {
-            auto* scale = dynamic_cast<ir::ConstantInt*>(
-                inst->getOperands()[1 - indexOperand]->get());
-            if (scale && isInductionIndex(inst->getOperands()[indexOperand]->get(), induction)) {
-                stride += static_cast<int64_t>(scale->getValue());
-                return true;
+    // Use shared AffineAnalysis for affine decomposition
+    // This allows recognition of both multiply and shift forms
+    AffineAnalysis affine;
+    auto result = affine.analyze(value);
+    
+    if (result.isValid) {
+        auto indVarCoeff = result.getCoefficient(induction);
+        if (indVarCoeff.has_value()) {
+            stride = indVarCoeff.value();
+            constantOffset = result.constant;
+            
+            // Find the base term (non-induction term)
+            for (const auto& term : result.terms) {
+                if (term.value != induction && term.rawValue != induction) {
+                    base = term.rawValue ? term.rawValue : term.value;
+                    break;
+                }
             }
+            
+            // If no other symbolic term, base is null (will be set to pointer value later)
+            if (result.terms.size() == 1 && (result.terms[0].value == induction || result.terms[0].rawValue == induction)) {
+                base = nullptr;
+            }
+            
+            return true;
         }
-        return false;
-    }
-    if (!base) {
-        base = value;
-        return true;
     }
     return false;
 }

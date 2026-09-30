@@ -147,9 +147,19 @@ int main(int argc, char** argv) {
 )";
     }
 
+#if defined(_WIN32)
+    std::remove(asmFilePath.c_str());
+    std::remove(harnessPath.c_str());
+    std::cout << " [host execution skipped: Linux SystemV target on Windows host]" << std::endl;
+#else
     std::string compileCmd = "gcc -no-pie " + asmFilePath + " " + harnessPath + " -o " + binFilePath;
     int compileRc = std::system(compileCmd.c_str());
-    assert(compileRc == 0 && "Compilation of vectorized memory sum assembly failed");
+    if (compileRc != 0) {
+        std::cerr << "[TEST FAILURE] Compilation of vectorized memory sum assembly failed (rc=" << compileRc << "): " << compileCmd << std::endl;
+        std::remove(asmFilePath.c_str());
+        std::remove(harnessPath.c_str());
+        std::abort();
+    }
 
     int32_t testData[64];
     for (int i = 0; i < 64; ++i) testData[i] = i + 1;
@@ -159,22 +169,39 @@ int main(int argc, char** argv) {
     for (int nVal : { 0, 1, 7, 8, 9, 15, 16, 17, 31 }) {
         std::string runCmd = binFilePath + " " + std::to_string(nVal) + " " + std::to_string(initVal);
         FILE* pipe = popen(runCmd.c_str(), "r");
-        assert(pipe != nullptr);
+        if (!pipe) {
+            std::cerr << "[TEST FAILURE] Failed to launch binary: " << runCmd << std::endl;
+            std::remove(asmFilePath.c_str());
+            std::remove(harnessPath.c_str());
+            std::remove(binFilePath.c_str());
+            std::abort();
+        }
         char buffer[128];
         std::string resultOutput = "";
         while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
             resultOutput += buffer;
         }
-        pclose(pipe);
+        int execRc = pclose(pipe);
+        if (execRc != 0) {
+            std::cerr << "[TEST FAILURE] Binary failed with code: " << execRc << std::endl;
+            std::remove(asmFilePath.c_str());
+            std::remove(harnessPath.c_str());
+            std::remove(binFilePath.c_str());
+            std::abort();
+        }
 
         int32_t expected = scalar_mem_sum_ref(testData, nVal, initVal);
         std::string expectedStr = "RES:" + std::to_string(expected);
         if (resultOutput.find(expectedStr) == std::string::npos) {
-            std::cout << "DEBUG nVal=" << nVal << " init=" << initVal << " expected=" << expectedStr << " got=" << resultOutput << std::endl;
+            std::cerr << "[TEST FAILURE] nVal=" << nVal << " init=" << initVal << " expected=" << expectedStr << " got=" << resultOutput << std::endl;
+            std::remove(asmFilePath.c_str());
+            std::remove(harnessPath.c_str());
+            std::remove(binFilePath.c_str());
+            std::abort();
         }
-        assert(resultOutput.find(expectedStr) != std::string::npos && "Memory sum execution result mismatch!");
         std::cout << "Executed & verified N=" << nVal << ", init=" << initVal << " -> RES=" << expected << std::endl;
     }
+#endif
 
     std::remove(asmFilePath.c_str());
     std::remove(harnessPath.c_str());
@@ -307,9 +334,19 @@ int main(int argc, char** argv) {
 )";
     }
 
+#if defined(_WIN32)
+    std::remove(asmFilePath.c_str());
+    std::remove(harnessPath.c_str());
+    std::cout << " [host execution skipped: Linux SystemV target on Windows host]" << std::endl;
+#else
     std::string compileCmd = "gcc -no-pie " + asmFilePath + " " + harnessPath + " -o " + binFilePath;
     int compileRc = std::system(compileCmd.c_str());
-    assert(compileRc == 0 && "Compilation of vectorized widening assembly failed");
+    if (compileRc != 0) {
+        std::cerr << "[TEST FAILURE] Compilation of vectorized widening assembly failed: " << compileCmd << std::endl;
+        std::remove(asmFilePath.c_str());
+        std::remove(harnessPath.c_str());
+        std::abort();
+    }
 
     for (int testMode : {0, 1, 2}) {
         int32_t testData[64];
@@ -327,22 +364,39 @@ int main(int argc, char** argv) {
             if (nVal < startVal) continue;
             std::string runCmd = binFilePath + " " + std::to_string(nVal) + " " + std::to_string(startVal) + " " + std::to_string(initVal) + " " + std::to_string(testMode);
             FILE* pipe = popen(runCmd.c_str(), "r");
-            assert(pipe != nullptr);
+            if (!pipe) {
+                std::cerr << "[TEST FAILURE] Failed to launch binary: " << runCmd << std::endl;
+                std::remove(asmFilePath.c_str());
+                std::remove(harnessPath.c_str());
+                std::remove(binFilePath.c_str());
+                std::abort();
+            }
             char buffer[128];
             std::string resultOutput = "";
             while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
                 resultOutput += buffer;
             }
-            pclose(pipe);
+            int execRc = pclose(pipe);
+            if (execRc != 0) {
+                std::cerr << "[TEST FAILURE] Binary failed with code: " << execRc << std::endl;
+                std::remove(asmFilePath.c_str());
+                std::remove(harnessPath.c_str());
+                std::remove(binFilePath.c_str());
+                std::abort();
+            }
 
             int64_t expected = scalar_widening_sum_ref(testData, nVal, startVal, initVal);
             std::string expectedStr = "RES:" + std::to_string(expected);
             if (resultOutput.find(expectedStr) == std::string::npos) {
-                std::cout << "DEBUG nVal=" << nVal << " start=" << startVal << " init=" << initVal << " mode=" << testMode << " expected=" << expectedStr << " got=" << resultOutput << std::endl;
+                std::cerr << "[TEST FAILURE] nVal=" << nVal << " start=" << startVal << " init=" << initVal << " mode=" << testMode << " expected=" << expectedStr << " got=" << resultOutput << std::endl;
+                std::remove(asmFilePath.c_str());
+                std::remove(harnessPath.c_str());
+                std::remove(binFilePath.c_str());
+                std::abort();
             }
-            assert(resultOutput.find(expectedStr) != std::string::npos && "Widening sum execution result mismatch!");
         }
     }
+#endif
 
     std::remove(asmFilePath.c_str());
     std::remove(harnessPath.c_str());

@@ -178,13 +178,35 @@ int main(int argc, char** argv) {
 )";
     }
 
+    std::cout << "Test start=" << start << " n=" << n_val
+              << (reversePhis ? " (reversed PHIs)" : "")
+              << (reverseCompare ? " (reversed compare)" : "") << ": "
+              << "[IR transformation verified] [assembly generated]";
+
+#if defined(_WIN32)
+    std::remove(asmFilePath.c_str());
+    std::remove(harnessPath.c_str());
+    std::cout << " [host execution skipped: Linux SystemV target on Windows host]" << std::endl;
+#else
     std::string compileCmd = "gcc -no-pie " + asmFilePath + " " + harnessPath + " -o " + binFilePath;
     int compileRc = std::system(compileCmd.c_str());
-    assert(compileRc == 0 && "Compilation of vectorized assembly failed");
+    if (compileRc != 0) {
+        std::cerr << "\n[TEST FAILURE] Compilation/linking of vectorized assembly failed (rc=" << compileRc << "): " << compileCmd << std::endl;
+        std::remove(asmFilePath.c_str());
+        std::remove(harnessPath.c_str());
+        std::abort();
+    }
+    std::cout << " [binary linked]";
 
     std::string runCmd = binFilePath + " " + std::to_string(n_val);
     FILE* pipe = popen(runCmd.c_str(), "r");
-    assert(pipe != nullptr);
+    if (!pipe) {
+        std::cerr << "\n[TEST FAILURE] Failed to launch vectorized test binary: " << runCmd << std::endl;
+        std::remove(asmFilePath.c_str());
+        std::remove(harnessPath.c_str());
+        std::remove(binFilePath.c_str());
+        std::abort();
+    }
     char buffer[128];
     std::string resultOutput = "";
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
@@ -196,19 +218,21 @@ int main(int argc, char** argv) {
     std::remove(harnessPath.c_str());
     std::remove(binFilePath.c_str());
 
-    assert(execRc == 0 && "Execution of vectorized test binary failed");
+    if (execRc != 0) {
+        std::cerr << "\n[TEST FAILURE] Execution of vectorized test binary failed (rc=" << execRc << ")" << std::endl;
+        std::abort();
+    }
+    std::cout << " [binary executed]";
 
     int32_t expectedRes = scalar_loop_sum_ref(n_val, start);
     std::string expectedStr = "RES:" + std::to_string(expectedRes);
     if (resultOutput.find(expectedStr) == std::string::npos) {
-        std::cout << "DEBUG n_val=" << n_val << " expected=" << expectedStr << " got=" << resultOutput << std::endl;
+        std::cerr << "\n[TEST FAILURE] Vectorized result mismatch! Expected=" << expectedStr
+                  << " Got=" << resultOutput << std::endl;
+        std::abort();
     }
-    assert(resultOutput.find(expectedStr) != std::string::npos && "Vectorized result mismatch!");
-
-    std::cout << "Test start=" << start << " n=" << n_val
-              << (reversePhis ? " (reversed PHIs)" : "")
-              << (reverseCompare ? " (reversed compare)" : "")
-              << " PASSED (res=" << expectedRes << ")" << std::endl;
+    std::cout << " [semantic result compared: PASSED (res=" << expectedRes << ")]" << std::endl;
+#endif
 }
 
 void test_rejection_cases() {
@@ -378,9 +402,21 @@ int main(void) {
   }
   return 0;
 })"; }
+#if !defined(_WIN32)
     const std::string command = "gcc -no-pie " + asmPath + " " + harnessPath + " -o " + binaryPath;
-    assert(std::system(command.c_str()) == 0);
-    assert(std::system(binaryPath.c_str()) == 0);
+    int compRc = std::system(command.c_str());
+    if (compRc != 0) {
+        std::cerr << "[TEST FAILURE] Failed to compile register widening test: " << command << std::endl;
+        std::remove(asmPath.c_str()); std::remove(harnessPath.c_str());
+        std::abort();
+    }
+    int runRc = std::system(binaryPath.c_str());
+    if (runRc != 0) {
+        std::cerr << "[TEST FAILURE] Register widening test binary returned non-zero exit: " << runRc << std::endl;
+        std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
+        std::abort();
+    }
+#endif
     std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
 }
 

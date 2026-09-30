@@ -22,6 +22,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/EGraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EGraphPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstructionScheduler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/AffineAnalysis.cpp
 )
 
 target_sources(fyra PRIVATE ${TRANSFORMS_SOURCES})
