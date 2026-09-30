@@ -66,6 +66,18 @@ target_link_libraries(test_riscv64 PRIVATE fyra)
 add_test(NAME RiscV64Test COMMAND test_riscv64)
 set_tests_properties(RiscV64Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_riscv32 test_riscv32.cpp)
+target_link_libraries(test_riscv32 PRIVATE fyra)
+
+add_test(NAME RiscV32Test COMMAND test_riscv32)
+set_tests_properties(RiscV32Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_uefi test_uefi.cpp)
+target_link_libraries(test_uefi PRIVATE fyra)
+
+add_test(NAME UEFITest COMMAND test_uefi)
+set_tests_properties(UEFITest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 if(FYRA_ENABLE_EXTENDED_TESTS)
     add_executable(test_wasm32 test_wasm32.cpp)
     target_link_libraries(test_wasm32 PRIVATE fyra)

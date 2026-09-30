@@ -297,10 +297,33 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                     // Patch JAL instruction for RISC-V (signed 20-bit immediate in J-type format)
                     int64_t offset = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 12);
                     uint32_t imm = static_cast<uint32_t>(offset);
-                    uint32_t j_imm = ((imm & 0x100000) << 11) | ((imm & 0x7FE) << 20) | 
+                    uint32_t j_imm = ((imm & 0x100000) << 11) | ((imm & 0x7FE) << 20) |
                                     ((imm & 0x800) << 9) | (imm & 0xFF000);
                     uint32_t jalInstr = 0x0000006F | j_imm;
                     std::memcpy(startBytes.data() + 12, &jalInstr, 4);
+
+                } else if (outImage.arch == target::Arch::LoongArch64) {
+                    // LoongArch64 _start stub (LoongArch64 Linux ABI)
+                    // move $r4, $r3         (argc at [$r3])
+                    // addi.d $r5, $r3, 8   (argv at [$r3+8])
+                    // andi $r3, $r3, -16   (align stack to 16 bytes)
+                    // bl main
+                    // li.w $r11, 93        (sys_exit)
+                    // syscall 0
+                    startBytes = {
+                        0x00, 0x00, 0x00, 0x01,  // move $r4, $r3
+                        0x0C, 0x40, 0x02, 0x02,  // addi.d $r5, $r3, 8
+                        0x00, 0x00, 0xF0, 0x03,  // andi $r3, $r3, -16
+                        0x00, 0x00, 0x00, 0x48,  // bl main (patched below)
+                        0x5C, 0x00, 0x00, 0x14,  // li.w $r11, 93 (sys_exit)
+                        0x00, 0x00, 0x00, 0x00   // syscall 0
+                    };
+
+                    // Patch BL instruction for LoongArch64 (signed 26-bit immediate)
+                    int64_t offset = static_cast<int64_t>(mainAddr) - static_cast<int64_t>(startVma + 12);
+                    uint32_t imm = static_cast<uint32_t>(offset >> 2);
+                    uint32_t blInstr = 0x48000000 | (imm & 0x03FFFFFF);
+                    std::memcpy(startBytes.data() + 12, &blInstr, 4);
                 }
 
                 if (!startBytes.empty()) {

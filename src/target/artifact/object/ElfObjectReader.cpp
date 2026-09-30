@@ -14,6 +14,7 @@ constexpr uint16_t ET_REL = 1;
 constexpr uint16_t EM_X86_64 = 62;
 constexpr uint16_t EM_AARCH64 = 183;
 constexpr uint16_t EM_RISCV = 243;
+constexpr uint16_t EM_LOONGARCH = 258;
 constexpr uint32_t SHT_SYMTAB = 2;
 constexpr uint32_t SHT_STRTAB = 3;
 constexpr uint32_t SHT_RELA = 4;
@@ -38,6 +39,11 @@ constexpr uint32_t R_RISCV_BRANCH = 16;
 constexpr uint32_t R_RISCV_JAL = 17;
 constexpr uint32_t R_RISCV_CALL = 18;
 constexpr uint32_t R_RISCV_CALL_PLT = 19;
+constexpr uint32_t R_LARCH_B16 = 56;
+constexpr uint32_t R_LARCH_B21 = 57;
+constexpr uint32_t R_LARCH_B26 = 58;
+constexpr uint32_t R_LARCH_64 = 102;
+constexpr uint32_t R_LARCH_CALL = 103;
 
 #pragma pack(push, 1)
 struct ElfHeader64 {
@@ -119,6 +125,9 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
         validMachine = true;
     } else if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::RISCV64)) {
         outArtifact.arch = target::Arch::RISCV64;
+        validMachine = true;
+    } else if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::LoongArch64)) {
+        outArtifact.arch = target::Arch::LoongArch64;
         validMachine = true;
     }
     
@@ -277,6 +286,13 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
                     else if (typeCode == R_RISCV_JAL) orel.type = "R_RISCV_JAL";
                     else if (typeCode == R_RISCV_BRANCH) orel.type = "R_RISCV_BRANCH";
                     else if (typeCode == R_RISCV_64) orel.type = "R_RISCV_64";
+                    else orel.type = "R_TYPE_" + std::to_string(typeCode);
+                } else if (outArtifact.arch == target::Arch::LoongArch64) {
+                    if (typeCode == R_LARCH_CALL) orel.type = "R_LARCH_CALL";
+                    else if (typeCode == R_LARCH_B16) orel.type = "R_LARCH_B16";
+                    else if (typeCode == R_LARCH_B21) orel.type = "R_LARCH_B21";
+                    else if (typeCode == R_LARCH_B26) orel.type = "R_LARCH_B26";
+                    else if (typeCode == R_LARCH_64) orel.type = "R_LARCH_64";
                     else orel.type = "R_TYPE_" + std::to_string(typeCode);
                 } else {
                     if (typeCode == R_X86_64_64) orel.type = "R_X86_64_64";

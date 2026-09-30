@@ -8,6 +8,8 @@ enum class Arch {
     X64,
     AArch64,
     RISCV64,
+    RISCV32,
+    LoongArch64,
     WASM32
 };
 
@@ -18,7 +20,8 @@ enum class OS {
     Android,
     FreeBSD,
     WASI,
-    BareMetal
+    BareMetal,
+    UEFI
 };
 
 enum class Artifact {

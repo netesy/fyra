@@ -37,6 +37,10 @@ constexpr uint16_t IMAGE_REL_RISCV_ADDR64 = 0x0002;
 constexpr uint16_t IMAGE_REL_RISCV_BRANCH = 0x0007;
 constexpr uint16_t IMAGE_REL_RISCV_CALL = 0x000A;
 
+constexpr uint16_t IMAGE_REL_LOONGARCH_ADDR64 = 0x0002;
+constexpr uint16_t IMAGE_REL_LOONGARCH_BRANCH16 = 0x0004;
+constexpr uint16_t IMAGE_REL_LOONGARCH_CALL = 0x000A;
+
 #pragma pack(push, 1)
 struct CoffHeader {
     uint16_t Machine;
@@ -175,6 +179,16 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
                         relType = IMAGE_REL_RISCV_ADDR64;
                     } else {
                         try { relType = static_cast<uint16_t>(std::stoul(r.type)); } catch(...) { relType = IMAGE_REL_RISCV_CALL; }
+                    }
+                } else if (artifact.arch == target::Arch::LoongArch64) {
+                    if (r.type == "R_LARCH_CALL" || r.type == "R_LARCH_B26" || r.type == "IMAGE_REL_LOONGARCH_CALL") {
+                        relType = IMAGE_REL_LOONGARCH_CALL;
+                    } else if (r.type == "R_LARCH_B16" || r.type == "IMAGE_REL_LOONGARCH_BRANCH16") {
+                        relType = IMAGE_REL_LOONGARCH_BRANCH16;
+                    } else if (r.type == "R_LARCH_64" || r.type == "IMAGE_REL_LOONGARCH_ADDR64") {
+                        relType = IMAGE_REL_LOONGARCH_ADDR64;
+                    } else {
+                        try { relType = static_cast<uint16_t>(std::stoul(r.type)); } catch(...) { relType = IMAGE_REL_LOONGARCH_CALL; }
                     }
                 } else {
                     // x86-64 (default)

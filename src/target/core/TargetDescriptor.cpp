@@ -11,6 +11,8 @@ std::string TargetDescriptor::toString() const {
         case Arch::X64: s += "x64"; break;
         case Arch::AArch64: s += "aarch64"; break;
         case Arch::RISCV64: s += "riscv64"; break;
+        case Arch::RISCV32: s += "riscv32"; break;
+        case Arch::LoongArch64: s += "loongarch64"; break;
         case Arch::WASM32: s += "wasm32"; break;
     }
     s += "-";
@@ -22,6 +24,7 @@ std::string TargetDescriptor::toString() const {
         case OS::FreeBSD: s += "freebsd"; break;
         case OS::WASI: s += "wasi"; break;
         case OS::BareMetal: s += "baremetal"; break;
+        case OS::UEFI: s += "uefi"; break;
     }
     if (artifact) {
         s += "-";
@@ -45,11 +48,21 @@ std::string TargetDescriptor::normalizeTriple(const std::string& triple) {
     if (triple == "aarch64") return "aarch64-linux-bin";
     if (triple == "wasm32" || triple == "wasm") return "wasm32-wasi-wasm";
     if (triple == "riscv64") return "riscv64-linux-bin";
+    if (triple == "riscv32") return "riscv32-linux-bin";
+    if (triple == "loongarch64") return "loongarch64-linux-bin";
     if (triple == "freebsd" || triple == "x64-freebsd") return "x64-freebsd-bin";
     if (triple == "aarch64-freebsd") return "aarch64-freebsd-bin";
     if (triple == "riscv64-freebsd") return "riscv64-freebsd-bin";
+    if (triple == "riscv32-freebsd") return "riscv32-freebsd-bin";
+    if (triple == "loongarch64-freebsd") return "loongarch64-freebsd-bin";
     if (triple == "baremetal" || triple == "riscv64-baremetal") return "riscv64-baremetal-bin";
+    if (triple == "riscv32-baremetal") return "riscv32-baremetal-bin";
     if (triple == "aarch64-baremetal") return "aarch64-baremetal-bin";
+    if (triple == "loongarch64-baremetal") return "loongarch64-baremetal-bin";
+    if (triple == "uefi") return "x64-uefi-bin";
+    if (triple == "x64-uefi") return "x64-uefi-bin";
+    if (triple == "aarch64-uefi") return "aarch64-uefi-bin";
+    if (triple == "loongarch64-uefi") return "loongarch64-uefi-bin";
 
     if (triple.find('-') == std::string::npos) {
         return triple + "-linux-bin";
@@ -79,6 +92,8 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
     if (parts[0] == "x64" || parts[0] == "x86_64") desc.arch = Arch::X64;
     else if (parts[0] == "aarch64" || parts[0] == "arm64") desc.arch = Arch::AArch64;
     else if (parts[0] == "riscv64") desc.arch = Arch::RISCV64;
+    else if (parts[0] == "riscv32") desc.arch = Arch::RISCV32;
+    else if (parts[0] == "loongarch64") desc.arch = Arch::LoongArch64;
     else if (parts[0] == "wasm32") desc.arch = Arch::WASM32;
     else return std::nullopt;
 
@@ -89,6 +104,7 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
     else if (parts[1] == "freebsd") desc.os = OS::FreeBSD;
     else if (parts[1] == "baremetal" || parts[1] == "none" || parts[1] == "elf") desc.os = OS::BareMetal;
     else if (parts[1] == "wasi" || parts[1] == "unknown") desc.os = OS::WASI;
+    else if (parts[1] == "uefi") desc.os = OS::UEFI;
     else return std::nullopt;
 
     if (parts.size() > 2) {

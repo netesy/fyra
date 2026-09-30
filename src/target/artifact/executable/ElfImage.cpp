@@ -621,6 +621,7 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
     if (interpPath.empty()) {
         if (image.arch == target::Arch::AArch64) interpPath = "/lib/ld-linux-aarch64.so.1";
         else if (image.arch == target::Arch::RISCV64) interpPath = "/lib/ld-linux-riscv64-lp64d.so.1";
+        else if (image.arch == target::Arch::LoongArch64) interpPath = "/lib64/ld-linux-loongarch64-lp64.so.1";
         else interpPath = "/lib64/ld-linux-x86-64.so.2";
     }
     std::string interpStr = interpPath + '\0';
@@ -858,6 +859,25 @@ bool ElfImageWriter::writeExecutable(const LinkedImage& image, const std::string
                     std::memcpy(textBytes.data() + thunkTextOffset, &auipc, 4);
                     std::memcpy(textBytes.data() + thunkTextOffset + 4, &ld, 4);
                     std::memcpy(textBytes.data() + thunkTextOffset + 8, &jr, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 12, &nop, 4);
+                }
+            } else if (image.arch == target::Arch::LoongArch64) {
+                // LoongArch64 indirect branch through GOT:
+                // PCADDU12I $r12, %pcrel_hi(GOT)
+                // LD.D    $r12, %pcrel_lo(GOT)($r12)
+                // JIRL    $r0, $r12, 0
+                // NOP
+                int64_t diff = static_cast<int64_t>(imports[i].gotSlotVma) - static_cast<int64_t>(realThunkVma);
+                int32_t hi20 = static_cast<int32_t>((diff + 0x800) >> 12);
+                int32_t lo12 = static_cast<int32_t>(diff - (static_cast<int64_t>(hi20) << 12));
+                uint32_t pcaddu12i = 0x1400005C | ((hi20 & 0xFFFFF) << 10);
+                uint32_t ld = 0x28C0005C | ((lo12 & 0xFFF) << 10);
+                uint32_t jirl = 0x4C00005C;
+                uint32_t nop = 0x00000000;
+                if (thunkTextOffset + 16 <= textBytes.size()) {
+                    std::memcpy(textBytes.data() + thunkTextOffset, &pcaddu12i, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 4, &ld, 4);
+                    std::memcpy(textBytes.data() + thunkTextOffset + 8, &jirl, 4);
                     std::memcpy(textBytes.data() + thunkTextOffset + 12, &nop, 4);
                 }
             } else {

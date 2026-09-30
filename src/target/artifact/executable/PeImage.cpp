@@ -101,6 +101,26 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
         return false;
     }
     
+    // Set UEFI-specific subsystem if needed
+    if (image.os == target::OS::UEFI) {
+        // UEFI applications use subsystem 10 (EFI_APPLICATION)
+        // Boot service drivers use 11, runtime drivers use 12
+        switch (image.kind) {
+            case PeImageKind::EfiApplication:
+                image.subsystem = 10;
+                break;
+            case PeImageKind::EfiBootServiceDriver:
+                image.subsystem = 11;
+                break;
+            case PeImageKind::EfiRuntimeDriver:
+                image.subsystem = 12;
+                break;
+            default:
+                image.subsystem = 10; // Default UEFI to application
+                break;
+        }
+    }
+    
     if (!image.sectionAlignment || !image.fileAlignment) {
         lastError_ = "PE alignment values must be non-zero";
         return false;

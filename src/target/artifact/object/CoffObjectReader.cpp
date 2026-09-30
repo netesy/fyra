@@ -86,6 +86,9 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
     } else if (ch->Machine == target::TargetInfo::getCoffMachine(target::Arch::RISCV64)) {
         outArtifact.arch = target::Arch::RISCV64;
         validMachine = true;
+    } else if (ch->Machine == target::TargetInfo::getCoffMachine(target::Arch::LoongArch64)) {
+        outArtifact.arch = target::Arch::LoongArch64;
+        validMachine = true;
     }
     
     if (!validMachine) {
@@ -192,6 +195,11 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                     if (rel.Type == 0x000A) orel.type = "R_RISCV_CALL";
                     else if (rel.Type == 0x0007) orel.type = "R_RISCV_BRANCH";
                     else if (rel.Type == 0x0002) orel.type = "R_RISCV_64";
+                    else orel.type = "R_TYPE_" + std::to_string(rel.Type);
+                } else if (outArtifact.arch == target::Arch::LoongArch64) {
+                    if (rel.Type == 0x000A) orel.type = "R_LARCH_CALL";
+                    else if (rel.Type == 0x0004) orel.type = "R_LARCH_B16";
+                    else if (rel.Type == 0x0002) orel.type = "R_LARCH_64";
                     else orel.type = "R_TYPE_" + std::to_string(rel.Type);
                 } else {
                     if (rel.Type == 0x0004) {

@@ -7,6 +7,8 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/x64/X64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/aarch64/AArch64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/riscv64/RiscV64Architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/riscv32/RiscV32Architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/loongarch64/LoongArch64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/Wasm32Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/WasmModule.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/linux/LinuxOS.cpp
@@ -15,6 +17,7 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/os/wasi/WASIOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/baremetal/BareMetalOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/os/freebsd/FreeBSDOS.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/os/uefi/UEFIOS.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/capabilities/CapabilityRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/APKArtifact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/artifact/apk/APKPackager.cpp

@@ -13,6 +13,7 @@ constexpr uint16_t ET_REL = 1;
 constexpr uint16_t EM_X86_64 = 62;
 constexpr uint16_t EM_AARCH64 = 183;
 constexpr uint16_t EM_RISCV = 243;
+constexpr uint16_t EM_LOONGARCH = 258;
 constexpr uint32_t SHT_NULL = 0;
 constexpr uint32_t SHT_PROGBITS = 1;
 constexpr uint32_t SHT_SYMTAB = 2;
@@ -41,6 +42,11 @@ constexpr uint32_t R_RISCV_BRANCH = 16;
 constexpr uint32_t R_RISCV_JAL = 17;
 constexpr uint32_t R_RISCV_CALL = 18;
 constexpr uint32_t R_RISCV_CALL_PLT = 19;
+constexpr uint32_t R_LARCH_B16 = 56;
+constexpr uint32_t R_LARCH_B21 = 57;
+constexpr uint32_t R_LARCH_B26 = 58;
+constexpr uint32_t R_LARCH_64 = 102;
+constexpr uint32_t R_LARCH_CALL = 103;
 
 #pragma pack(push, 1)
 struct ElfHeader64 {
@@ -242,6 +248,15 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
             else {
                 try { typeCode = std::stoul(reloc.type); } catch(...) {}
             }
+        } else if (artCopy.arch == target::Arch::LoongArch64) {
+            typeCode = R_LARCH_CALL;
+            if (reloc.type == "R_LARCH_B16") typeCode = R_LARCH_B16;
+            else if (reloc.type == "R_LARCH_B21") typeCode = R_LARCH_B21;
+            else if (reloc.type == "R_LARCH_B26") typeCode = R_LARCH_B26;
+            else if (reloc.type == "R_LARCH_64") typeCode = R_LARCH_64;
+            else {
+                try { typeCode = std::stoul(reloc.type); } catch(...) {}
+            }
         } else {
             typeCode = R_X86_64_PC32;
             if (reloc.type == "R_X86_64_64") typeCode = R_X86_64_64;
@@ -311,7 +326,7 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
     std::memcpy(h.e_ident, "\x7f""ELF", 4);
     h.e_ident[4] = 2; h.e_ident[5] = 1; h.e_ident[6] = 1; // 64-bit, LSB, v1
     h.e_type = ET_REL;
-    h.e_machine = (artCopy.arch == target::Arch::AArch64) ? EM_AARCH64 : ((artCopy.arch == target::Arch::RISCV64) ? EM_RISCV : EM_X86_64);
+    h.e_machine = (artCopy.arch == target::Arch::AArch64) ? EM_AARCH64 : ((artCopy.arch == target::Arch::RISCV64) ? EM_RISCV : ((artCopy.arch == target::Arch::LoongArch64) ? EM_LOONGARCH : EM_X86_64));
     h.e_version = 1;
     h.e_entry = 0;
     h.e_phoff = 0;

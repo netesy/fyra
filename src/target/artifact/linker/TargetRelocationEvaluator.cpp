@@ -180,6 +180,19 @@ std::vector<uint8_t> TargetRelocationEvaluator::getImportThunkBytes(target::Arch
             0x13, 0x00, 0x00, 0x00
         };
     }
+    if (arch == target::Arch::LoongArch64) {
+        // LoongArch64 indirect branch:
+        // pcaddu12i $r12, 0  -> 0x1400005C
+        // ld.d    $r12, $r12, 0 -> 0x28C0005C
+        // jirl    $r0, $r12, 0 -> 0x4C000000
+        // nop               -> 0x00000000
+        return {
+            0x5C, 0x00, 0x00, 0x14,
+            0x5C, 0x00, 0xC0, 0x28,
+            0x00, 0x00, 0x00, 0x4C,
+            0x00, 0x00, 0x00, 0x00
+        };
+    }
     return {};
 }
 

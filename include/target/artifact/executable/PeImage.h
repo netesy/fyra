@@ -11,7 +11,7 @@
 
 namespace target::artifact::executable {
 
-enum class PeImageKind { Executable, Dll };
+enum class PeImageKind { Executable, Dll, EfiApplication, EfiBootServiceDriver, EfiRuntimeDriver };
 
 struct PeSection {
     std::string name;
@@ -48,12 +48,13 @@ struct PeDataDirectory {
 struct PeImage {
     PeImageKind kind = PeImageKind::Executable;
     target::Arch arch = target::Arch::X64;
+    target::OS os = target::OS::Windows; // Distinguish Windows vs UEFI
     uint16_t machine = 0x8664;
     uint64_t imageBase = 0x140000000ULL;
     uint32_t sectionAlignment = 0x1000;
     uint32_t fileAlignment = 0x200;
     uint32_t entryRva = 0;
-    uint16_t subsystem = 3;
+    uint16_t subsystem = 3; // Windows GUI = 3, EFI Application = 10
     uint16_t dllCharacteristics = 0;
     std::string imageName;
     std::vector<PeSection> sections;

@@ -1,10 +1,490 @@
-Start testing: Sep 29 16:18 W. Central Africa Standard Time
+Start testing: Sep 30 10:06 W. Central Africa Standard Time
 ----------------------------------------------------------
-Unable to find executable: C:/Projects/Quick/Debug/test_object_generation.exe
+Test not available without configuration.  (Missing "-C <config>"?)
+1/43 Testing: ParserTest
+1/43 Test: ParserTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"ParserTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ParserTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"ParserTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+2/43 Testing: TypeParserTest
+2/43 Test: TypeParserTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"TypeParserTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"TypeParserTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"TypeParserTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+3/43 Testing: AddTest
+3/43 Test: AddTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"AddTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"AddTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"AddTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+4/43 Testing: CFGTest
+4/43 Test: CFGTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"CFGTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"CFGTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"CFGTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+5/43 Testing: DomTreeTest
+5/43 Test: DomTreeTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"DomTreeTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"DomTreeTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"DomTreeTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+6/43 Testing: DFTest
+6/43 Test: DFTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"DFTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"DFTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"DFTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+7/43 Testing: PhiTest
+7/43 Test: PhiTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"PhiTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"PhiTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"PhiTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+8/43 Testing: DIETest
+8/43 Test: DIETest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"DIETest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"DIETest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"DIETest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+9/43 Testing: DIEChainTest
+9/43 Test: DIEChainTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"DIEChainTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"DIEChainTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"DIEChainTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+10/43 Testing: WindowsTest
+10/43 Test: WindowsTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"WindowsTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"WindowsTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"WindowsTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+11/43 Testing: RenameTest
+11/43 Test: RenameTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"RenameTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"RenameTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"RenameTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+12/43 Testing: RenameLoadTest
+12/43 Test: RenameLoadTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"RenameLoadTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"RenameLoadTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"RenameLoadTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+13/43 Testing: Mem2RegTest
+13/43 Test: Mem2RegTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"Mem2RegTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"Mem2RegTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"Mem2RegTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+14/43 Testing: CopyElimTest
+14/43 Test: CopyElimTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"CopyElimTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"CopyElimTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"CopyElimTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+15/43 Testing: GVNTest
+15/43 Test: GVNTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"GVNTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"GVNTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"GVNTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+16/43 Testing: RegAllocTest
+16/43 Test: RegAllocTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"RegAllocTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"RegAllocTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"RegAllocTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+17/43 Testing: RegAllocSpillTest
+17/43 Test: RegAllocSpillTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"RegAllocSpillTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"RegAllocSpillTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"RegAllocSpillTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+18/43 Testing: LivenessTest
+18/43 Test: LivenessTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"LivenessTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"LivenessTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"LivenessTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+19/43 Testing: SCCPTest
+19/43 Test: SCCPTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"SCCPTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"SCCPTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"SCCPTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+20/43 Testing: WindowsStackTest
+20/43 Test: WindowsStackTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"WindowsStackTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"WindowsStackTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"WindowsStackTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+21/43 Testing: CopyTest
+21/43 Test: CopyTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"CopyTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"CopyTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"CopyTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+22/43 Testing: MulDivTest
+22/43 Test: MulDivTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"MulDivTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"MulDivTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"MulDivTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+23/43 Testing: BitwiseTest
+23/43 Test: BitwiseTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"BitwiseTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"BitwiseTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"BitwiseTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+24/43 Testing: NegTest
+24/43 Test: NegTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"NegTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"NegTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"NegTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+25/43 Testing: ComparisonParserTest
+25/43 Test: ComparisonParserTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"ComparisonParserTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ComparisonParserTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"ComparisonParserTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+26/43 Testing: EnhancedSCCPTest
+26/43 Test: EnhancedSCCPTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"EnhancedSCCPTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"EnhancedSCCPTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"EnhancedSCCPTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+27/43 Testing: EnhancedDCETest
+27/43 Test: EnhancedDCETest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"EnhancedDCETest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"EnhancedDCETest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"EnhancedDCETest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+28/43 Testing: LICMTest
+28/43 Test: LICMTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"LICMTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"LICMTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"LICMTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+29/43 Testing: IntegrationTest
+29/43 Test: IntegrationTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"IntegrationTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"IntegrationTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"IntegrationTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+30/43 Testing: ASMValidationTest
+30/43 Test: ASMValidationTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"ASMValidationTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ASMValidationTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"ASMValidationTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
 31/43 Testing: ObjectGenerationTest
 31/43 Test: ObjectGenerationTest
-Command: ""
-Directory: C:/Projects/Quick
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
 "ObjectGenerationTest" start time: 
 Output:
 ----------------------------------------------------------
@@ -12,8 +492,200 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"ObjectGenerationTest" end time: Sep 29 16:18 W. Central Africa Standard Time
+"ObjectGenerationTest" end time: Sep 30 10:06 W. Central Africa Standard Time
 "ObjectGenerationTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Sep 29 16:18 W. Central Africa Standard Time
+Test not available without configuration.  (Missing "-C <config>"?)
+32/43 Testing: EnhancedCodeGenTest
+32/43 Test: EnhancedCodeGenTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"EnhancedCodeGenTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"EnhancedCodeGenTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"EnhancedCodeGenTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+33/43 Testing: EnhancedTargetsTest
+33/43 Test: EnhancedTargetsTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"EnhancedTargetsTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"EnhancedTargetsTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"EnhancedTargetsTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+34/43 Testing: MemoryOperationsTest
+34/43 Test: MemoryOperationsTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"MemoryOperationsTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"MemoryOperationsTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"MemoryOperationsTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+35/43 Testing: ComparisonControlFlowTest
+35/43 Test: ComparisonControlFlowTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"ComparisonControlFlowTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ComparisonControlFlowTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"ComparisonControlFlowTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+36/43 Testing: ProfilingTest
+36/43 Test: ProfilingTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"ProfilingTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ProfilingTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"ProfilingTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+37/43 Testing: SIMDTest
+37/43 Test: SIMDTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"SIMDTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"SIMDTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"SIMDTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+38/43 Testing: FusionTest
+38/43 Test: FusionTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"FusionTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"FusionTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"FusionTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+39/43 Testing: DebugInfoTest
+39/43 Test: DebugInfoTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"DebugInfoTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"DebugInfoTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"DebugInfoTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+40/43 Testing: EnhancedIntegrationTest
+40/43 Test: EnhancedIntegrationTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"EnhancedIntegrationTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"EnhancedIntegrationTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"EnhancedIntegrationTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+41/43 Testing: BenchmarkTest
+41/43 Test: BenchmarkTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"BenchmarkTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"BenchmarkTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"BenchmarkTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+42/43 Testing: WindowsRiscVEnhancedTest
+42/43 Test: WindowsRiscVEnhancedTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"WindowsRiscVEnhancedTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"WindowsRiscVEnhancedTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"WindowsRiscVEnhancedTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Test not available without configuration.  (Missing "-C <config>"?)
+43/43 Testing: RiscV64EnhancedTest
+43/43 Test: RiscV64EnhancedTest
+Command: "NOT_AVAILABLE"
+Directory: C:/Projects/limitly/vendor/fyra
+"RiscV64EnhancedTest" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"RiscV64EnhancedTest" end time: Sep 30 10:06 W. Central Africa Standard Time
+"RiscV64EnhancedTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 30 10:06 W. Central Africa Standard Time
