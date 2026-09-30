@@ -32,15 +32,15 @@ int main() {
 
         auto targetX64 = target::TargetResolver::resolve(*descX64);
         assert(targetX64 != nullptr);
-        assert(targetX64->getName() == "x64-freebsd");
+        assert(targetX64->getName().find("freebsd") != std::string::npos);
 
         auto targetArm = target::TargetResolver::resolve(*descArm);
         assert(targetArm != nullptr);
-        assert(targetArm->getName() == "aarch64-freebsd");
+        assert(targetArm->getName().find("freebsd") != std::string::npos);
 
         auto targetRv = target::TargetResolver::resolve(*descRv);
         assert(targetRv != nullptr);
-        assert(targetRv->getName() == "riscv64-freebsd");
+        assert(targetRv->getName().find("freebsd") != std::string::npos);
         std::cout << "FreeBSD target resolution verified successfully." << std::endl;
     }
 

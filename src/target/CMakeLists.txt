@@ -9,7 +9,8 @@ set(TARGET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/riscv64/RiscV64Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/riscv32/RiscV32Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/loongarch64/LoongArch64Architecture.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/ebpf/EBPFArchitecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/bpf/BPFArchitecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/architecture/spirv/SPIRVModule.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/spirv/SPIRVArchitecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/Wasm32Architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/architecture/wasm32/WasmModule.cpp

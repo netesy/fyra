@@ -11,7 +11,7 @@ enum class Arch {
     RISCV32,
     LoongArch64,
     WASM32,
-    EBPF,
+    BPF,
     SPIRV
 };
 

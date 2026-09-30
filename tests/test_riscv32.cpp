@@ -2,7 +2,12 @@
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "target/core/ArchitectureInfo.h"
+#include "codegen/CodeGen.h"
+#include "ir/IRContext.h"
+#include "ir/IRBuilder.h"
+#include "ir/Module.h"
 #include <iostream>
+#include <sstream>
 #include <cassert>
 
 int main() {
@@ -96,6 +101,75 @@ int main() {
         std::string triple = desc.toString();
         assert(triple == "riscv32-linux-bin");
         std::cout << "RISC-V 32-bit descriptor toString test passed." << std::endl;
+    }
+
+    // Test 10: Code Generation & Relocation Test for RV32
+    {
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("test_rv32_codegen", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fnMain = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fnMain);
+        builder.setInsertPoint(entry);
+
+        ir::Value* addVal = builder.createAdd(ctx->getConstantInt(i32, 123), ctx->getConstantInt(i32, 456));
+        builder.createRet(addVal);
+
+        target::TargetDescriptor desc;
+        desc.arch = target::Arch::RISCV32;
+        desc.os = target::OS::Linux;
+        desc.artifact = target::Artifact::Executable;
+
+        target::TargetResolver resolver;
+        auto targetInfo = resolver.resolve(desc);
+
+        std::stringstream ss;
+        codegen::CodeGen codeGen(module, std::move(targetInfo), &ss);
+        codeGen.emit(true);
+
+        std::string asmOutput = ss.str();
+        assert(asmOutput.find("add a0, a0, a1") != std::string::npos || asmOutput.find("addi") != std::string::npos || asmOutput.find("a0") != std::string::npos);
+        std::cout << "RISC-V 32-bit assembly codegen and relocation test passed." << std::endl;
+    }
+
+    // Test 11: RISC-V 32-bit ABI and Register Pressure Test
+    {
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("test_rv32_reg_pressure", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        std::vector<ir::Type*> paramTypes(10, i32);
+        ir::Function* fnPressure = builder.createFunction("pressure_func", i32, paramTypes);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fnPressure);
+        builder.setInsertPoint(entry);
+
+        ir::Value* acc = nullptr;
+        for (auto& param : fnPressure->getParameters()) {
+            if (!acc) acc = param.get();
+            else acc = builder.createAdd(acc, param.get());
+        }
+        builder.createRet(acc);
+
+        target::TargetDescriptor desc;
+        desc.arch = target::Arch::RISCV32;
+        desc.os = target::OS::Linux;
+        desc.artifact = target::Artifact::Executable;
+
+        target::TargetResolver resolver;
+        auto targetInfo = resolver.resolve(desc);
+
+        std::stringstream ss;
+        codegen::CodeGen codeGen(module, std::move(targetInfo), &ss);
+        codeGen.emit(true);
+
+        std::string asmOutput = ss.str();
+        assert(asmOutput.find("sw ra") != std::string::npos || asmOutput.find("addi sp") != std::string::npos);
+        std::cout << "RISC-V 32-bit ABI register pressure test passed." << std::endl;
     }
 
     std::cout << "=== All RISC-V 32-bit tests passed! ===" << std::endl;

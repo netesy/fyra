@@ -1246,11 +1246,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             // Scalar Add is lowered destructively, so recover the base from the
             // final running pointer instead of keeping the original SSA value
             // live across all address updates.
-            ir::Value* loadBase = lanePtr;
-            if (plan.vectorFactor > 1)
-                loadBase = builder.createSub(lanePtr,
-                    ctx->getConstantInt(i64Ty, (plan.vectorFactor - 1) * 4));
-            return builder.createVLoad(vecTy, loadBase);
+            return builder.createVLoad(vecTy, buf);
         };
 
         std::map<ir::Value*, ir::Value*> predicationConstants;
@@ -1415,11 +1411,13 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         rawPhiICnt->addIncoming(postGuardInit, vPreheaderBB);
 
         std::map<ir::Value*, ir::Value*> vectorBaseMap;
+        auto vInsertIt = vLoopHeaderBB->getInstructions().begin();
         for (const auto& copiedBase : baseCopyMap) {
             auto owner = std::make_unique<ir::PhiNode>(copiedBase.second->getType(), 0,
                                                        nullptr, vLoopHeaderBB);
             ir::PhiNode* phi = owner.get();
-            vLoopHeaderBB->getInstructions().push_front(std::move(owner));
+            vInsertIt = vLoopHeaderBB->getInstructions().insert(vInsertIt, std::move(owner));
+            ++vInsertIt;
             phi->addIncoming(copiedBase.second, vPreheaderBB);
             phi->addIncoming(phi, vLoopBodyBB);
             vectorBaseMap[copiedBase.first] = phi;
@@ -1490,10 +1488,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             builder.createVStore(vectorExpression, registerLaneBuffer);
             ir::Value* next = rawPhiRegisterSum;
             for (unsigned lane = 0; lane < 4; ++lane) {
-                ir::Value* address = lane == 0 ? static_cast<ir::Value*>(registerLaneBuffer)
-                    : static_cast<ir::Value*>(builder.createAdd(registerLaneBuffer,
+                ir::Value* bufCopy = builder.createCopy(registerLaneBuffer);
+                ir::Value* address = lane == 0 ? bufCopy
+                    : static_cast<ir::Value*>(builder.createAdd(bufCopy,
                         ctx->getConstantInt(i64Ty, lane * 4)));
-                ir::Instruction* lane32 = builder.createLoaduw(address);
+                ir::Instruction* lane32 = builder.createLoads(address);
                 ir::Instruction* lane64 = builder.createExtSW(lane32, i64Ty);
                 next = builder.createAdd(next, lane64);
             }
@@ -2082,11 +2081,13 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             auto aliasTerminator = aliasCheckBB->getInstructions().end();
             --aliasTerminator;
             builder.setInsertPoint(aliasCheckBB, aliasTerminator);
+            auto hInsertIt = headerBB->getInstructions().begin();
             for (const auto& copiedBase : baseCopyMap) {
                 auto owner = std::make_unique<ir::PhiNode>(copiedBase.second->getType(), 0,
                                                            nullptr, headerBB);
                 ir::PhiNode* phi = owner.get();
-                headerBB->getInstructions().push_front(std::move(owner));
+                hInsertIt = headerBB->getInstructions().insert(hInsertIt, std::move(owner));
+                ++hInsertIt;
                 phi->addIncoming(copiedBase.second, aliasCheckBB);
                 phi->addIncoming(phi, latchBB);
                 for (auto& access : plan.memoryAccesses) {

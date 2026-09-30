@@ -114,14 +114,32 @@ bool InstructionScheduler::scheduleBasicBlock(ir::BasicBlock& bb) {
         }
 
         // Memory barriers / order
-        bool isMem = (inst->getOpcode() == ir::Instruction::Opcode::Load ||
-                      inst->getOpcode() == ir::Instruction::Opcode::Store ||
-                      inst->getOpcode() == ir::Instruction::Opcode::Call ||
-                      inst->getOpcode() == ir::Instruction::Opcode::Syscall ||
-                      inst->getOpcode() == ir::Instruction::Opcode::ExternCall ||
-                      inst->getOpcode() == ir::Instruction::Opcode::Alloc ||
-                      inst->getOpcode() == ir::Instruction::Opcode::VLoad ||
-                      inst->getOpcode() == ir::Instruction::Opcode::VStore);
+        auto opc = inst->getOpcode();
+        bool isMem = (opc == ir::Instruction::Opcode::Load ||
+                      opc == ir::Instruction::Opcode::Loadub ||
+                      opc == ir::Instruction::Opcode::Loadsb ||
+                      opc == ir::Instruction::Opcode::Loaduh ||
+                      opc == ir::Instruction::Opcode::Loadsh ||
+                      opc == ir::Instruction::Opcode::Loaduw ||
+                      opc == ir::Instruction::Opcode::Loadl ||
+                      opc == ir::Instruction::Opcode::Loads ||
+                      opc == ir::Instruction::Opcode::Loadd ||
+                      opc == ir::Instruction::Opcode::Store ||
+                      opc == ir::Instruction::Opcode::Storeb ||
+                      opc == ir::Instruction::Opcode::Storeh ||
+                      opc == ir::Instruction::Opcode::Storel ||
+                      opc == ir::Instruction::Opcode::Stores ||
+                      opc == ir::Instruction::Opcode::Stored ||
+                      opc == ir::Instruction::Opcode::Call ||
+                      opc == ir::Instruction::Opcode::Syscall ||
+                      opc == ir::Instruction::Opcode::ExternCall ||
+                      opc == ir::Instruction::Opcode::Alloc ||
+                      opc == ir::Instruction::Opcode::Alloc4 ||
+                      opc == ir::Instruction::Opcode::Alloc16 ||
+                      opc == ir::Instruction::Opcode::VLoad ||
+                      opc == ir::Instruction::Opcode::VStore ||
+                      opc == ir::Instruction::Opcode::VGather ||
+                      opc == ir::Instruction::Opcode::VScatter);
         if (isMem) {
             for (auto* prevMem : memoryOps) {
                 bool alreadyDep = false;

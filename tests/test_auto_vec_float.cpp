@@ -147,7 +147,7 @@ int main(){
 #endif
     for (bool reduction : {false, true}) {
         Function* rejected = buildRejectedFPLoop(module, builder, reduction);
-        transforms::LoopVectorizer vectorizer;
+        transforms::LoopVectorizer vectorizer(nullptr, {target::Arch::X64, target::OS::Linux}, false);
         assert(!vectorizer.performTransformation(*rejected));
     }
     return 0;

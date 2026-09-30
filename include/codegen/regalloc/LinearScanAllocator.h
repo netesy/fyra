@@ -20,6 +20,7 @@ struct PhysicalReg {
 // Represents a stack slot.
 struct StackSlot {
     unsigned int index;
+    unsigned int byteOffset = 0;
     bool operator==(const StackSlot& other) const { return index == other.index; }
 };
 
@@ -60,6 +61,7 @@ private:
     StackSlot allocateStackSlot(ir::Instruction* vreg);
 
     unsigned int next_stack_slot = 0;
+    size_t current_frame_bytes = 0;
     std::vector<StackSlot> free_stack_slots;
     std::vector<const class LiveInterval*> active_intervals;
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;

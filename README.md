@@ -1,6 +1,6 @@
 # Fyra Compiler Backend
 
-Fyra is a compiler backend written in C++17 that processes a QBE-like textual Intermediate Representation (IR) and compiles it into assembly code for multiple architectures. It is designed as a modular, extensible framework for building optimizing compiler backends.
+Fyra is a self-contained optimizing compiler backend and binary toolchain built around its own SSA IR, written in C++17. It processes Fyra IL and compiles it into optimized assembly, native object files, static/shared libraries, executables, flat binaries, WebAssembly modules, eBPF bytecode, and structured SPIR-V binary modules across multiple target architectures.
 
 ## Features
 
@@ -31,14 +31,16 @@ Fyra is a compiler backend written in C++17 that processes a QBE-like textual In
 *   **Loop Invariant Code Motion (LICM):** Move loop-invariant computations outside loops
 *   **Control Flow Simplification:** Optimize control flow patterns
 
-### Multi-Target Code Generation
-*   **Enhanced CodeGen Framework:** Pattern-based instruction selection with validation
-*   **Multiple Target Support:**
-    *   Linux System V x64 ABI
-    *   Windows x64 ABI
-    *   AArch64 (ARM64)
-    *   WebAssembly (Wasm32)
-    *   RISC-V 64-bit (RiscV64)
+### Multi-Target Code Generation & Binary Toolchain
+*   **Enhanced CodeGen Framework:** Pattern-based instruction selection with ASM validation and direct object emission
+*   **Comprehensive Target Matrix:**
+    *   x86-64 (Linux System V, Windows ABI, FreeBSD, UEFI)
+    *   AArch64 (ARM64 Linux, macOS, Windows, Android APK, FreeBSD, UEFI)
+    *   RISC-V 64-bit & RISC-V 32-bit (Linux, FreeBSD, BareMetal)
+    *   LoongArch 64-bit (Linux, FreeBSD, BareMetal)
+    *   WebAssembly (WASM32 / WASI, WAT text & WASM binary)
+    *   eBPF (Linux / BareMetal ELF object binary with BPF instructions)
+    *   SPIR-V (Structured compute shader binary modules with standard magic headers)
 *   **ASM Validation:** Built-in assembly validation with target-specific ABI compliance
 *   **Object File Generation:** Direct object file generation for supported platforms
 

@@ -13,6 +13,7 @@ int main() {
         assert(target::TargetInfo::getElfMachine(target::Arch::X64) == 62);        // EM_X86_64
         assert(target::TargetInfo::getElfMachine(target::Arch::AArch64) == 183);   // EM_AARCH64
         assert(target::TargetInfo::getElfMachine(target::Arch::RISCV64) == 243);   // EM_RISCV
+        assert(target::TargetInfo::getElfMachine(target::Arch::LoongArch64) == 258); // EM_LOONGARCH
         std::cout << "TargetInfo ELF machine type mapping test passed." << std::endl;
     }
 
@@ -21,6 +22,7 @@ int main() {
         assert(target::TargetInfo::getCoffMachine(target::Arch::X64) == 0x8664);     // IMAGE_FILE_MACHINE_AMD64
         assert(target::TargetInfo::getCoffMachine(target::Arch::AArch64) == 0xAA64); // IMAGE_FILE_MACHINE_ARM64
         assert(target::TargetInfo::getCoffMachine(target::Arch::RISCV64) == 0x5064); // IMAGE_FILE_MACHINE_RISCV64
+        assert(target::TargetInfo::getCoffMachine(target::Arch::LoongArch64) == 0x6264); // IMAGE_FILE_MACHINE_LOONGARCH64
         std::cout << "TargetInfo COFF machine type mapping test passed." << std::endl;
     }
 

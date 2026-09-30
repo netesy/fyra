@@ -454,6 +454,89 @@ int main() {
         std::cout << "Multi-Architecture emitObject (AArch64 & RISC-V 64) test passed successfully!" << std::endl;
     }
 
+    // Test 10: eBPF Binary & ELF Instruction Generation Test
+    {
+        ir::Module module("test_ebpf_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("bpf_prog", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        ir::Value* addVal = builder.createAdd(ctx->getConstantInt(i32, 10), ctx->getConstantInt(i32, 20));
+        builder.createRet(addVal);
+
+        fyra::BackendBuilder backend(module);
+        backend.target("bpf-baremetal-bin");
+
+        fyra::BuildResult resObj = backend.emitObject("/tmp/test_ebpf.o");
+        assert(resObj.success);
+
+        std::ifstream f("/tmp/test_ebpf.o", std::ios::binary);
+        assert(f.is_open());
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        assert(bytes.size() > 52);
+        // ELF header e_machine at offset 0x12 is 247 (EM_BPF)
+        uint16_t e_machine = bytes[0x12] | (bytes[0x13] << 8);
+        assert(e_machine == 247 && "ELF e_machine must be EM_BPF (247)");
+
+        // Test rejection of floating point in eBPF
+        ir::Module fpMod("test_ebpf_fp", ctx);
+        ir::IRBuilder fpBuilder(ctx);
+        fpBuilder.setModule(&fpMod);
+        auto* f32 = ctx->getFloatType();
+        ir::Function* fpFn = fpBuilder.createFunction("fp_prog", f32);
+        ir::BasicBlock* fpEntry = fpBuilder.createBasicBlock("entry", fpFn);
+        fpBuilder.setInsertPoint(fpEntry);
+        ir::Value* fadd = fpBuilder.createFAdd(ctx->getConstantFP(f32, 1.0f), ctx->getConstantFP(f32, 2.0f));
+        fpBuilder.createRet(fadd);
+
+        fyra::BackendBuilder fpBackend(fpMod);
+        fpBackend.target("bpf-baremetal-bin");
+        bool th = false;
+        try {
+            fyra::BuildResult fpRes = fpBackend.emitObject("/tmp/test_ebpf_fp.o");
+            if (!fpRes.success) th = true;
+        } catch (...) {
+            th = true;
+        }
+        assert(th && "eBPF backend must reject floating-point operations");
+
+        std::cout << "eBPF binary ELF instruction generation and rejection tests passed!" << std::endl;
+    }
+
+    // Test 11: Structured SPIR-V Binary Module Generation Test
+    {
+        ir::Module module("test_spirv_mod", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fn = builder.createFunction("compute_kernel", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
+        builder.setInsertPoint(entry);
+        ir::Value* addVal = builder.createAdd(ctx->getConstantInt(i32, 100), ctx->getConstantInt(i32, 200));
+        builder.createRet(addVal);
+
+        fyra::BackendBuilder backend(module);
+        backend.target("spirv-baremetal-bin");
+
+        fyra::BuildResult resSpirv = backend.emitObject("/tmp/test_compute.spv");
+        assert(resSpirv.success);
+
+        std::ifstream f("/tmp/test_compute.spv", std::ios::binary);
+        assert(f.is_open());
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        assert(bytes.size() >= 20 && "SPIR-V binary file must contain at least 20-byte header");
+
+        // Verify SPIR-V magic number 0x07230203 (little-endian bytes: 0x03, 0x02, 0x23, 0x07)
+        uint32_t magic = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+        assert(magic == 0x07230203 && "SPIR-V binary header magic number must be 0x07230203");
+
+        std::cout << "Structured SPIR-V binary module generation test passed!" << std::endl;
+    }
+
     std::cout << "=== All BackendBuilder API direct C++ tests passed successfully! ===" << std::endl;
     return 0;
 }

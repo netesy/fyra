@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring>
+#include <algorithm>
 
 namespace transforms {
 
@@ -522,9 +523,7 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
             if (inst->getType() && !inst->getType()->isVoidTy()) {
                 auto* ity = dynamic_cast<ir::IntegerType*>(inst->getType());
                 if (!ity) ity = ir::IntegerType::get(ei.bw);
-                auto cObj = std::unique_ptr<ir::ConstantInt>(new ir::ConstantInt(ity, 0));
-                ei.cObj = cObj.get();
-                frameValObjects.push_back(std::move(cObj));
+                ei.cObj = ir::ConstantInt::get(ity, 0);
             }
 
             size_t numOps = std::min(inst->getOperands().size(), (size_t)4);
@@ -627,14 +626,8 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
                 }
 
                 if (!constVal) return nullptr;
-                if (ei.cObj && dynamic_cast<ir::ConstantInt*>(constVal)) {
-                    ei.cObj->value = static_cast<ir::ConstantInt*>(constVal)->getValue();
-                    frame[instr] = ei.cObj;
-                    frameValArray[instIdx] = ei.cObj;
-                } else {
-                    frame[instr] = constVal;
-                    frameValArray[instIdx] = constVal;
-                }
+                frame[instr] = constVal;
+                frameValArray[instIdx] = constVal;
                 continue;
             }
 
@@ -739,17 +732,11 @@ ir::Constant* SCCP::evaluatePureFunctionCall(
 
             uint64_t resU = 0;
             if (computeScalarOpValueFast(op, ei.bw, fastOpConsts, resU)) {
-                if (ei.cObj) {
-                    ei.cObj->value = resU;
-                    frame[instr] = ei.cObj;
-                    frameValArray[instIdx] = ei.cObj;
-                } else {
-                    auto* ity = dynamic_cast<ir::IntegerType*>(instr->getType());
-                    if (!ity) ity = ir::IntegerType::get(ei.bw);
-                    auto* cRes = ir::ConstantInt::get(ity, resU);
-                    frame[instr] = cRes;
-                    frameValArray[instIdx] = cRes;
-                }
+                auto* ity = dynamic_cast<ir::IntegerType*>(instr->getType());
+                if (!ity) ity = ir::IntegerType::get(ei.bw);
+                auto* cRes = ir::ConstantInt::get(ity, resU);
+                frame[instr] = cRes;
+                frameValArray[instIdx] = cRes;
                 continue;
             }
 
@@ -821,26 +808,32 @@ bool SCCP::performTransformation(ir::Function& func) {
         if (!bb || !executableBlocks.count(bb)) continue;
 
         auto& instrs = bb->getInstructions();
-        auto it = instrs.begin();
-        while (it != instrs.end()) {
-            ir::Instruction* instr = it->get();
-
+        std::vector<ir::Instruction*> toReplace;
+        for (auto& inst_ptr : instrs) {
+            ir::Instruction* instr = inst_ptr.get();
+            if (!instr) continue;
             ir::Instruction::Opcode op = instr->getOpcode();
             if (op == ir::Instruction::Ret || op == ir::Instruction::Br ||
                 op == ir::Instruction::Jmp || op == ir::Instruction::Jnz ||
                 op == ir::Instruction::Jz || op == ir::Instruction::Phi) {
-                ++it;
                 continue;
             }
+            auto entry = getLatticeValue(instr);
+            if (entry.type == Constant && entry.constant) {
+                toReplace.push_back(instr);
+            }
+        }
 
+        for (auto* instr : toReplace) {
             auto entry = getLatticeValue(instr);
             if (entry.type == Constant && entry.constant) {
                 instr->replaceAllUsesWith(entry.constant);
-                it = instrs.erase(it);
-                changed = true;
-                continue;
+                auto it = std::find_if(instrs.begin(), instrs.end(), [&](const auto& p) { return p.get() == instr; });
+                if (it != instrs.end()) {
+                    instrs.erase(it);
+                    changed = true;
+                }
             }
-            ++it;
         }
     }
     return changed;
@@ -922,9 +915,6 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
             } else {
                 all_preds_executable = false;
             }
-        }
-        if (!all_preds_executable) {
-            result = {Bottom, nullptr};
         }
         setLatticeValue(phi, result, inInstructionWorklist);
         return;

@@ -227,6 +227,7 @@ uint16_t TargetInfo::getElfMachine(Arch arch) {
         case Arch::RISCV64: return 243;   // EM_RISCV
         case Arch::RISCV32: return 243;   // EM_RISCV (same for RV32/RV64)
         case Arch::LoongArch64: return 258; // EM_LOONGARCH
+        case Arch::BPF: return 247;       // EM_BPF
         case Arch::WASM32: return 0;      // Not applicable for ELF
         default: return 0;
     }
@@ -280,7 +281,7 @@ bool TargetInfo::supportsOutputKind(OS os, Arch arch, Artifact artifact) {
     // ELF formats support Linux, Android, FreeBSD, BareMetal, and UEFI
     if (os == OS::Linux || os == OS::Android || os == OS::FreeBSD || os == OS::BareMetal || os == OS::UEFI) {
         if (artifact == Artifact::Executable || artifact == Artifact::SharedLibrary) {
-            return arch == Arch::X64 || arch == Arch::AArch64 || arch == Arch::RISCV64 || arch == Arch::RISCV32 || arch == Arch::LoongArch64;
+            return arch == Arch::X64 || arch == Arch::AArch64 || arch == Arch::RISCV64 || arch == Arch::RISCV32 || arch == Arch::LoongArch64 || arch == Arch::BPF;
         }
         if (artifact == Artifact::StaticLibrary) {
             return true;

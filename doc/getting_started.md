@@ -40,11 +40,14 @@ const auto& code = cg.getAssembler().getCode();
 
 | Target | Architecture | ABI | Format |
 |--------|--------------|-----|--------|
-| `SystemV_x64` | x86_64 | System V (Linux/macOS) | Text/ELF |
-| `Windows_x64` | x86_64 | Windows | Text/PE (partial) |
-| `AArch64` | ARM64 | AAPCS64 | Text/ELF |
-| `RiscV64` | RISC-V 64 | LP64D | Text/ELF |
-| `Wasm32` | WebAssembly | Wasm | Text/Binary |
+| `x64` | x86_64 | System V (Linux/FreeBSD/UEFI), Windows x64 | Text/ELF/PE/Flat |
+| `aarch64` | ARM64 | AAPCS64 (Linux/macOS/Windows/Android/UEFI) | Text/ELF/Mach-O/PE/APK |
+| `riscv64` | RISC-V 64 | LP64D (Linux/FreeBSD/BareMetal) | Text/ELF/Flat |
+| `riscv32` | RISC-V 32 | ILP32 (Linux/FreeBSD/BareMetal) | Text/ELF/Flat |
+| `loongarch64` | LoongArch 64 | LP64D (Linux/FreeBSD/BareMetal) | Text/ELF/Flat |
+| `wasm32` | WebAssembly | WASI | WAT / WASM Binary |
+| `bpf` | eBPF / BPF | eBPF 64-bit | Text / ELF Object Binary |
+| `spirv` | SPIR-V | Compute GLSL450 | Text / SPIR-V Binary Module |
 
 ## Extending the Backend
 

@@ -311,10 +311,11 @@ public:
     }
     
     size_t getAlignment() const override {
-        // Vector alignment is typically the size of the vector, up to a maximum
         size_t vectorSize = getSize();
-        if (vectorSize <= 16) return vectorSize;
-        return 16; // Max alignment for most architectures
+        if (vectorSize >= 64) return 64;
+        if (vectorSize >= 32) return 32;
+        if (vectorSize >= 16) return 16;
+        return vectorSize;
     }
     
     // Override classification methods

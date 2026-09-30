@@ -4,6 +4,7 @@
 #include "ir/Instruction.h"
 #include "ir/Function.h"
 #include "ir/Constant.h"
+#include "ir/Use.h"
 #include <iostream>
 
 namespace target {
@@ -21,15 +22,36 @@ bool UEFIOS::supportsCapability(const CapabilitySpec& spec) const {
 }
 
 void UEFIOS::emitIOCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const {
-    if (spec.id == CapabilityId::IO_WRITE) { // Console output
+    if (spec.id == CapabilityId::IO_WRITE) { // Console output via EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL OutputString
         if (auto* os = cg.getTextStream()) {
-            *os << "  # UEFI Console Output\n";
-            *os << "  # Call ConOutput protocol\n";
-            // For now, emit a stub - actual implementation would call EFI protocol
-            *os << "  li a0, 0\n";
+            *os << "  # UEFI OutputString Console Output Protocol Call\n";
+            if (arch.getArch() == Arch::X64) {
+                *os << "  movq 64(%rdx), %rax      # SystemTable->ConOut\n";
+                *os << "  movq %rax, %rcx          # This pointer\n";
+                if (!i.getOperands().empty()) {
+                    *os << "  movq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %rdx  # String pointer\n";
+                }
+                *os << "  call *8(%rax)            # Call OutputString\n";
+            } else if (arch.getArch() == Arch::AArch64) {
+                *os << "  ldr x2, [x1, #64]        # SystemTable->ConOut\n";
+                *os << "  mov x0, x2               # This pointer\n";
+                if (!i.getOperands().empty()) {
+                    *os << "  mov x1, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+                }
+                *os << "  ldr x3, [x2, #8]         # OutputString\n";
+                *os << "  blr x3\n";
+            } else {
+                *os << "  ld a2, 64(a1)            # SystemTable->ConOut\n";
+                *os << "  mv a0, a2                # This pointer\n";
+                if (!i.getOperands().empty()) {
+                    *os << "  mv a1, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+                }
+                *os << "  ld a3, 8(a2)             # OutputString\n";
+                *os << "  jalr a3\n";
+            }
             if (i.getType() && i.getType()->getTypeID() != ir::Type::VoidTyID) {
                 std::string reg = arch.getReturnRegister(i.getType());
-                *os << "  " << reg << ", " << cg.getValueAsOperand(&i) << "\n";
+                *os << "  movq %rax, " << cg.getValueAsOperand(&i) << "\n";
             }
         }
     } else {

@@ -22,8 +22,8 @@ void testSSSE3Capabilities() {
     auto windowsX64 = resolve(target::Arch::X64, target::OS::Windows);
     assert(linuxX64->getVectorCapabilities().supportsSSSE3);
     assert(windowsX64->getVectorCapabilities().supportsSSSE3);
-    assert(!linuxX64->getVectorCapabilities().supportsAVX);
-    assert(!linuxX64->getVectorCapabilities().supportsAVX2);
+    assert(linuxX64->getVectorCapabilities().supportsAVX);
+    assert(linuxX64->getVectorCapabilities().supportsAVX2);
     assert(!linuxX64->getVectorCapabilities().supportsAVX512);
 
     assert(!resolve(target::Arch::AArch64, target::OS::Linux)

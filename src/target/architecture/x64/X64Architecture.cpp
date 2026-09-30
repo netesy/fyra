@@ -268,6 +268,9 @@ void X64Architecture::emitHeader(CodeGen& cg) {
 }
 
 X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& func) const {
+    auto it = frameLayoutCache_.find(&func);
+    if (it != frameLayoutCache_.end()) return it->second;
+
     X64FrameLayout layout;
     if (abi == X64ABI::SystemV) {
         for (auto& bb : func.getBasicBlocks()) {
@@ -333,6 +336,24 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
                     if (func.hasStackSlot(instr.get())) {
                         cg.getStackOffsets()[instr.get()] = -func.getStackSlotForVreg(instr.get());
+                    } else if (!instr->hasPhysicalRegister()) {
+                        size_t align = 8;
+                        size_t slotBytes = 8;
+                        if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                            slotBytes = vt->getSize();
+                            size_t bits = slotBytes * 8;
+                            if (bits >= 512) align = 64;
+                            else if (bits >= 256) align = 32;
+                            else if (bits >= 128) align = 16;
+                        }
+                        int curFrame = func.getStackFrameSize();
+                        if (curFrame == 0) curFrame = 64;
+                        if (curFrame % align != 0) {
+                            curFrame += (align - (curFrame % align));
+                        }
+                        func.setStackSlotForVreg(instr.get(), curFrame);
+                        func.setStackFrameSize(curFrame + slotBytes);
+                        cg.getStackOffsets()[instr.get()] = -curFrame;
                     }
                 }
             }
@@ -369,6 +390,7 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
         if ((layout.stackAlloc + 64 + 8) % 16 != 0) layout.stackAlloc += 16 - ((layout.stackAlloc + 64 + 8) % 16);
         layout.isZeroFrame = false;
     }
+    frameLayoutCache_[&func] = layout;
     return layout;
 }
 
@@ -1007,7 +1029,7 @@ void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
         if (!isGlobal0 && canUseInPlace(cg, i, val0)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal1) {
-                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  and " : ", %rdx\n  andl %rdx, ") << d << "\n";
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  and " : ", %rdx\n  " + andOp + " %rdx, ") << d << "\n";
             } else {
                 std::string s1 = op1;
                 if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
@@ -1021,7 +1043,7 @@ void X64Architecture::emitAnd(CodeGen& cg, ir::Instruction& i) {
         if (!isGlobal1 && canUseInPlace(cg, i, val1)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal0) {
-                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  and " : ", %rdx\n  andl %rdx, ") << d << "\n";
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  and " : ", %rdx\n  " + andOp + " %rdx, ") << d << "\n";
             } else {
                 std::string s0 = op0;
                 if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
@@ -1089,7 +1111,7 @@ void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
         if (!isGlobal0 && canUseInPlace(cg, i, val0)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal1) {
-                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  or " : ", %rdx\n  orl %rdx, ") << d << "\n";
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  or " : ", %rdx\n  " + orOp + " %rdx, ") << d << "\n";
             } else {
                 std::string s1 = op1;
                 if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
@@ -1103,7 +1125,7 @@ void X64Architecture::emitOr(CodeGen& cg, ir::Instruction& i) {
         if (!isGlobal1 && canUseInPlace(cg, i, val1)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal0) {
-                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  or " : ", %rdx\n  orl %rdx, ") << d << "\n";
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  or " : ", %rdx\n  " + orOp + " %rdx, ") << d << "\n";
             } else {
                 std::string s0 = op0;
                 if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
@@ -1171,7 +1193,7 @@ void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
         if (!isGlobal0 && canUseInPlace(cg, i, val0)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal1) {
-                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  xor " : ", %rdx\n  xorl %rdx, ") << d << "\n";
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op1 << (abi == X64ABI::Windows ? "\n  xor " : ", %rdx\n  " + xorOp + " %rdx, ") << d << "\n";
             } else {
                 std::string s1 = op1;
                 if (!s1.empty() && s1[0] == '%') s1 = is32 ? to32BitReg(s1) : to64BitReg(s1);
@@ -1185,7 +1207,7 @@ void X64Architecture::emitXor(CodeGen& cg, ir::Instruction& i) {
         if (!isGlobal1 && canUseInPlace(cg, i, val1)) {
             std::string d = is32 ? to32BitReg(dst) : to64BitReg(dst);
             if (isGlobal0) {
-                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  xor " : ", %rdx\n  xorl %rdx, ") << d << "\n";
+                *os << (abi == X64ABI::Windows ? "  lea rdx, " : "  leaq ") << op0 << (abi == X64ABI::Windows ? "\n  xor " : ", %rdx\n  " + xorOp + " %rdx, ") << d << "\n";
             } else {
                 std::string s0 = op0;
                 if (!s0.empty() && s0[0] == '%') s0 = is32 ? to32BitReg(s0) : to64BitReg(s0);
@@ -2080,7 +2102,15 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
         } else if (op == ir::Instruction::ExtSW) {
             std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
             std::string d64 = (destOp[0] == '%') ? to64BitReg(destOp) : destOp;
-            if (d64[0] == '%') {
+            if (isXmmRegisterName(srcOp)) {
+                std::string targetGpr = (d64[0] == '%') ? d64 : rax;
+                std::string targetGpr32 = to32BitReg(targetGpr);
+                *os << "  movd " << srcOp << ", " << targetGpr32 << "\n";
+                *os << "  movslq " << targetGpr32 << ", " << targetGpr << "\n";
+                if (d64[0] != '%') {
+                    *os << "  movq " << rax << ", " << destOp << "\n";
+                }
+            } else if (d64[0] == '%') {
                 *os << "  movslq " << s32 << ", " << d64 << "\n";
             } else {
                 *os << "  movslq " << s32 << ", " << rax << "\n";
@@ -2129,6 +2159,24 @@ void X64Architecture::emitVAStart(CodeGen& cg, ir::Instruction& i) {}
 void X64Architecture::emitVAArg(CodeGen& cg, ir::Instruction& i) {}
 
 void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
+    if (i.getType() && (i.getType()->isVectorTy() || dynamic_cast<const ir::VectorType*>(i.getType()) != nullptr)) {
+        std::string vScratch = getReservedScratchVectorReg();
+        std::string destOp = cg.getValueAsOperand(&i);
+        ir::Value* ptrVal = i.getOperands()[0]->get();
+        std::string srcPtr = cg.getValueAsOperand(ptrVal);
+        if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            srcPtr = formatStackOperand(-ciSlot->getValue());
+        }
+        if (auto* os = cg.getTextStream()) {
+            if (isXmmRegisterName(destOp)) {
+                *os << "  movdqu " << srcPtr << ", " << destOp << "\n";
+            } else {
+                *os << "  movdqu " << srcPtr << ", " << vScratch << "\n";
+                *os << "  movdqu " << vScratch << ", " << destOp << "\n";
+            }
+        }
+        return;
+    }
     uint8_t size = 8; bool isSigned = true;
     switch(i.getOpcode()) {
         case ir::Instruction::Loadub: size = 1; isSigned = false; break;
@@ -2182,7 +2230,7 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << sibStr << ", " << rax << "\n";
                 else if (size == 2) *os << (isSigned ? "  movswq " : "  movzwq ") << sibStr << ", " << rax << "\n";
-                else if (size == 4) *os << (isSigned ? "  movslq " : "  movl ") << sibStr << ", " << eax << "\n";
+                else if (size == 4) *os << (isSigned ? "  movslq " + sibStr + ", " + rax : "  movl " + sibStr + ", " + eax) << "\n";
                 else *os << "  movq " << sibStr << ", " << rax << "\n";
             } else {
                 if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr " : "  movzx rax, byte ptr ") << sibStr << "\n";
@@ -2201,7 +2249,7 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << (isSigned ? "  movsbq " : "  movzbq ") << op << ", " << rax << "\n";
                 else if (size == 2) *os << (isSigned ? "  movswq " : "  movzwq ") << op << ", " << rax << "\n";
-                else if (size == 4) *os << (isSigned ? "  movslq " : "  movl ") << op << ", " << eax << "\n";
+                else if (size == 4) *os << (isSigned ? "  movslq " + op + ", " + rax : "  movl " + op + ", " + eax) << "\n";
                 else *os << "  movq " << op << ", " << rax << "\n";
             } else {
                 if (size == 1) *os << (isSigned ? "  movsx rax, byte ptr " : "  movzx rax, byte ptr ") << op << "\n";
@@ -2233,10 +2281,17 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
         // Store result
         if (i.getType() && (i.getType()->isFloatTy() || i.getType()->isDoubleTy())) {
             const char* moveFP = i.getType()->isFloatTy() ? "movss" : "movsd";
-            if (abi == X64ABI::Windows)
-                *os << "  " << moveFP << " " << cg.getValueAsOperand(&i) << ", " << fpScratch << "\n";
+            std::string destVal = cg.getValueAsOperand(&i);
+            if (isDirectGprRegister(destVal)) {
+                if (i.getType()->isFloatTy()) {
+                    *os << (abi == X64ABI::Windows ? "  movd " + to32BitReg(destVal) + ", " + fpScratch : "  movd " + fpScratch + ", " + to32BitReg(destVal)) << "\n";
+                } else {
+                    *os << (abi == X64ABI::Windows ? "  movq " + to64BitReg(destVal) + ", " + fpScratch : "  movq " + fpScratch + ", " + to64BitReg(destVal)) << "\n";
+                }
+            } else if (abi == X64ABI::Windows)
+                *os << "  " << moveFP << " " << destVal << ", " << fpScratch << "\n";
             else
-                *os << "  " << moveFP << " " << fpScratch << ", " << cg.getValueAsOperand(&i) << "\n";
+                *os << "  " << moveFP << " " << fpScratch << ", " << destVal << "\n";
         } else if (abi == X64ABI::Windows)
             *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
         else {
@@ -2254,6 +2309,25 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
+    ir::Value* storedVal = i.getOperands()[0]->get();
+    if (storedVal && storedVal->getType() && (storedVal->getType()->isVectorTy() || dynamic_cast<const ir::VectorType*>(storedVal->getType()) != nullptr)) {
+        std::string vScratch = getReservedScratchVectorReg();
+        std::string valOp = cg.getValueAsOperand(storedVal);
+        ir::Value* ptrVal = i.getOperands()[1]->get();
+        std::string ptrOp = cg.getValueAsOperand(ptrVal);
+        if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
+            ptrOp = formatStackOperand(-ciSlot->getValue());
+        }
+        if (auto* os = cg.getTextStream()) {
+            if (isXmmRegisterName(valOp)) {
+                *os << "  movdqu " << valOp << ", " << ptrOp << "\n";
+            } else {
+                *os << "  movdqu " << valOp << ", " << vScratch << "\n";
+                *os << "  movdqu " << vScratch << ", " << ptrOp << "\n";
+            }
+        }
+        return;
+    }
     uint8_t size = 8;
     switch(i.getOpcode()) {
         case ir::Instruction::Storeb: size = 1; break;
@@ -2646,9 +2720,9 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
                 else
                     *os << "  popq " << rax << "\n";
                 if (abi == X64ABI::Windows)
-                    *os << "  mov " << destOp << ", " << rax << "\n";
+                    *os << "  mov " << (is32 ? to32BitReg(destOp) : destOp) << ", " << rax << "\n";
                 else
-                    *os << "  " << movOp << " " << regRax << ", " << destOp << "\n";
+                    *os << "  " << movOp << " " << regRax << ", " << (is32 ? to32BitReg(destOp) : destOp) << "\n";
             }
         } else {
             auto& as = cg.getAssembler();
@@ -3765,6 +3839,8 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                         if (!op0.empty() && op0[0] == '$') {
                             *os << "  movl " << op0 << ", %eax\n";
                             *os << "  movd %eax, " << dst << "\n";
+                        } else if (isDirectGprRegister(op0)) {
+                            *os << "  movd " << to32BitReg(op0) << ", " << dst << "\n";
                         } else {
                             *os << "  movd " << op0 << ", " << dst << "\n";
                         }

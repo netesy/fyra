@@ -126,6 +126,7 @@ private:
     std::vector<std::string> integerArgRegs, floatArgRegs;
     std::string intReturnReg, floatReturnReg, framePtrReg, stackPtrReg;
     std::map<std::string, bool> callerSaved, calleeSaved;
+    mutable std::map<const ir::Function*, X64FrameLayout> frameLayoutCache_;
     void initRegisters();
 
     void emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::BasicBlock* target);

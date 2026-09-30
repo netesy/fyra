@@ -6,6 +6,8 @@
 #include "target/architecture/riscv32/RiscV32Architecture.h"
 #include "target/architecture/loongarch64/LoongArch64Architecture.h"
 #include "target/architecture/wasm32/Wasm32Architecture.h"
+#include "target/architecture/bpf/BPFArchitecture.h"
+#include "target/architecture/spirv/SPIRVArchitecture.h"
 #include "target/os/linux/LinuxOS.h"
 #include "target/os/windows/WindowsOS.h"
 #include "target/os/macos/MacOSOS.h"
@@ -35,6 +37,8 @@ std::unique_ptr<TargetInfo> TargetResolver::resolve(const ::target::TargetDescri
         case ::target::Arch::RISCV32: arch = std::make_unique<RiscV32Architecture>(); break;
         case ::target::Arch::LoongArch64: arch = std::make_unique<LoongArch64Architecture>(); break;
         case ::target::Arch::WASM32: arch = std::make_unique<Wasm32Architecture>(); break;
+        case ::target::Arch::BPF: arch = std::make_unique<BPFArchitecture>(); break;
+        case ::target::Arch::SPIRV: arch = std::make_unique<SPIRVArchitecture>(); break;
     }
 
     std::unique_ptr<OperatingSystemInfo> os;

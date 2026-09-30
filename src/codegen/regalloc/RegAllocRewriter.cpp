@@ -26,13 +26,15 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     // 2. Update the function's stack frame information
     int numRegParams = std::max(1, std::min(static_cast<int>(func.getParameters().size()), 6));
     int paramOffsetBytes = numRegParams * 8;
-    int stack_frame_size = paramOffsetBytes;
+    int baseSpillOffset = (paramOffsetBytes + 63) & ~63;
+    if (baseSpillOffset == 0) baseSpillOffset = 64;
+
+    int stack_frame_size = baseSpillOffset;
     for (const auto& [vreg, location] : location_map) {
         if (dynamic_cast<const ir::Parameter*>(vreg)) continue;
         if (std::holds_alternative<StackSlot>(location)) {
             StackSlot slot = std::get<StackSlot>(location);
-            int slotByteOffset = paramOffsetBytes + (slot.index + 1) * 8;
-            if (slotByteOffset <= paramOffsetBytes) slotByteOffset = paramOffsetBytes + 8;
+            int slotByteOffset = baseSpillOffset + slot.byteOffset;
             func.setStackSlotForVreg(vreg, slotByteOffset);
             int slotSize = 8;
             if (vreg && vreg->getType()) {
@@ -54,9 +56,26 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
             if (!instr->getType() || instr->getType()->isVoidTy()) continue;
             if (dynamic_cast<ir::Parameter*>(instr.get())) continue;
             if (!func.hasStackSlot(instr.get()) && !instr->hasPhysicalRegister()) {
-                int nextSlotIdx = func.getStackSlots().size();
-                int slotByteOffset = paramOffsetBytes + (nextSlotIdx + 1) * 8;
-                func.setStackSlotForVreg(instr.get(), slotByteOffset);
+                size_t align = 8;
+                if (instr->getType()) {
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                        size_t bits = vt->getSize() * 8;
+                        if (bits >= 512) align = 64;
+                        else if (bits >= 256) align = 32;
+                        else if (bits >= 128) align = 16;
+                    }
+                }
+                if (stack_frame_size % align != 0) {
+                    stack_frame_size += (align - (stack_frame_size % align));
+                }
+                func.setStackSlotForVreg(instr.get(), stack_frame_size);
+                size_t slotBytes = 8;
+                if (instr->getType()) {
+                    if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
+                        slotBytes = vt->getSize();
+                    }
+                }
+                stack_frame_size += slotBytes;
             }
         }
     }
@@ -67,11 +86,11 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     builder.setModule(func.getParent());
 
     for (auto& bb : func.getBasicBlocks()) {
-        for (auto it = bb->getInstructions().begin(); it != bb->getInstructions().end(); ) {
+        auto& instrs = bb->getInstructions();
+        for (auto it = instrs.begin(); it != instrs.end(); ) {
             ir::Instruction* instr = it->get();
 
             // Rewrite operands (handle uses)
-            // We need a copy of the operands because we might be modifying the use list
             std::vector<ir::Use*> uses;
             for (auto& use : instr->getOperands()) {
                 uses.push_back(use.get());

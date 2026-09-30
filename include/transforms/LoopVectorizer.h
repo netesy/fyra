@@ -12,7 +12,7 @@ class LoopVectorizer : public TransformPass {
 public:
     LoopVectorizer(std::shared_ptr<ErrorReporter> reporter = nullptr,
                    target::TargetDescriptor target = {target::Arch::X64, target::OS::Linux},
-                   bool allowFPReassociation = false)
+                   bool allowFPReassociation = true)
         : TransformPass("LoopVectorizer", reporter), errorReporter(reporter), target_(std::move(target)), allowFPReassociation_(allowFPReassociation) {}
 
     bool performTransformation(ir::Function& func) override;

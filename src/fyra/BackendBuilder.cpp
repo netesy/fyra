@@ -13,6 +13,8 @@
 #include "target/artifact/executable/MachOImage.h"
 #include "target/artifact/executable/PeImage.h"
 #include "target/architecture/wasm32/WasmModule.h"
+#include "target/architecture/spirv/SPIRVArchitecture.h"
+#include "target/core/CompositeTargetInfo.h"
 #include "target/artifact/apk/APKArtifact.h"
 #include "target/artifact/executable/FlatBinaryWriter.h"
 #include "ir/IRLinker.h"
@@ -47,11 +49,7 @@ std::string BackendBuilder::resolveTargetTriple(const std::string& triple) {
     else if (triple == "flat" || triple == "raw" || triple == "img") canonical = "riscv64-baremetal-flat";
     else if (triple == "wasm32" || triple == "wasm") canonical = "wasm32-wasi-wasm";
     else if (triple == "riscv64") canonical = "riscv64-linux-bin";
-    else if (triple == "riscv32") canonical = "riscv32-linux-bin";
     else if (triple == "loongarch64") canonical = "loongarch64-linux-bin";
-    else if (triple == "ebpf") canonical = "ebpf-baremetal-bin";
-    else if (triple == "spirv") canonical = "spirv-baremetal-bin";
-    else if (triple == "uefi" || triple == "uefi-x64") canonical = "x64-uefi-bin";
     else {
         canonical += "-bin";
     }
@@ -394,6 +392,31 @@ BuildResult BackendBuilder::emitObject(const std::string& path) {
     auto targetInfo = target::TargetResolver::resolve(*desc);
     if (!targetInfo) {
         result.errors.push_back("Failed to resolve target info for: " + config_.targetTriple);
+        return result;
+    }
+
+    if (desc->arch == target::Arch::SPIRV) {
+        auto* compTarget = dynamic_cast<target::CompositeTargetInfo*>(targetInfo.get());
+        auto* spirvArch = compTarget ? dynamic_cast<target::SPIRVArchitecture*>(compTarget->getArchitecture()) : nullptr;
+        codegen::CodeGen codeGen(*preparedModule_, std::move(targetInfo));
+        codeGen.emit(false);
+
+        std::vector<uint8_t> bytes;
+        if (spirvArch) {
+            bytes = target::spirv::SPIRVBinaryWriter::write(spirvArch->getModule());
+        }
+        if (bytes.empty()) {
+            result.errors.push_back("SPIR-V binary generation failed for target");
+            return result;
+        }
+        std::ofstream outFile(path, std::ios::binary);
+        if (!outFile.is_open()) {
+            result.errors.push_back("Could not open output path: " + path);
+            return result;
+        }
+        outFile.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        outFile.close();
+        result.success = true;
         return result;
     }
 

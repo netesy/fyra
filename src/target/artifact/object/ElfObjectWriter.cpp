@@ -1,4 +1,5 @@
 #include "target/artifact/object/ElfObjectWriter.h"
+#include "target/core/TargetInfo.h"
 #include <fstream>
 #include <cstring>
 #include <algorithm>
@@ -14,7 +15,6 @@ constexpr uint16_t EM_X86_64 = 62;
 constexpr uint16_t EM_AARCH64 = 183;
 constexpr uint16_t EM_RISCV = 243;
 constexpr uint16_t EM_LOONGARCH = 258;
-constexpr uint16_t EM_BPF = 247;
 constexpr uint32_t SHT_NULL = 0;
 constexpr uint32_t SHT_PROGBITS = 1;
 constexpr uint32_t SHT_SYMTAB = 2;
@@ -327,7 +327,7 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
     std::memcpy(h.e_ident, "\x7f""ELF", 4);
     h.e_ident[4] = 2; h.e_ident[5] = 1; h.e_ident[6] = 1; // 64-bit, LSB, v1
     h.e_type = ET_REL;
-    h.e_machine = (artCopy.arch == target::Arch::AArch64) ? EM_AARCH64 : ((artCopy.arch == target::Arch::RISCV64) ? EM_RISCV : ((artCopy.arch == target::Arch::LoongArch64) ? EM_LOONGARCH : ((artCopy.arch == target::Arch::EBPF) ? EM_BPF : EM_X86_64)));
+    h.e_machine = target::TargetInfo::getElfMachine(artCopy.arch);
     h.e_version = 1;
     h.e_entry = 0;
     h.e_phoff = 0;

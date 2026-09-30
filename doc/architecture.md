@@ -17,7 +17,7 @@ This document provides a comprehensive overview of the Fyra compiler architectur
 
 ## System Overview
 
-Fyra is a modular compiler backend designed for flexibility, performance, and extensibility. It transforms high-level intermediate representations into optimized machine code for multiple target architectures.
+Fyra is a self-contained optimizing compiler backend and binary toolchain built around its own SSA IR. It transforms high-level intermediate representations into optimized machine code, native object files, libraries, executables, WASM, eBPF, and SPIR-V binaries for multiple target architectures.
 
 ### High-Level Architecture
 
@@ -37,7 +37,7 @@ Fyra is a modular compiler backend designed for flexibility, performance, and ex
 
 - **Modular Design**: Clear separation between frontend, analysis, and backend
 - **SSA-Based**: Static Single Assignment form for optimization
-- **Multi-Target**: Support for x86-64, AArch64, WebAssembly, RISC-V
+- **Multi-Target**: Support for x86-64, AArch64, RISC-V (64-bit & 32-bit), LoongArch64, WebAssembly, eBPF, SPIR-V, and UEFI
 - **Extensible**: Plugin architecture for new targets and passes
 - **Performance-Oriented**: Efficient algorithms and data structures
 

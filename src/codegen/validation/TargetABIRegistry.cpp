@@ -93,6 +93,10 @@ const ABISpecification* TargetABIRegistry::getABISpec(const std::string& targetN
         normalized = "wasm32";
     } else if (normalized.find("riscv") != std::string::npos) {
         normalized = "riscv64";
+    } else if (normalized.find("bpf") != std::string::npos) {
+        normalized = "linux";
+    } else if (normalized.find("baremetal") != std::string::npos || normalized.find("uefi") != std::string::npos || normalized.find("freebsd") != std::string::npos || normalized.find("loongarch") != std::string::npos) {
+        normalized = "linux";
     }
     auto it = abiSpecs_.find(normalized);
     if (it != abiSpecs_.end()) {

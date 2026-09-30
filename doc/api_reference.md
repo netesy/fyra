@@ -1,6 +1,6 @@
 # Fyra Compiler API Reference
 
-This document provides comprehensive API documentation for the Fyra compiler library, covering all major classes and interfaces for programmatic IR construction and manipulation.
+This document provides comprehensive API documentation for the Fyra self-contained optimizing compiler backend and binary toolchain, covering all major classes and interfaces for programmatic IR construction, optimization, multi-architecture code generation, and binary linking.
 
 ## Table of Contents
 
@@ -311,7 +311,45 @@ public:
 
 ---
 
-## Code Generation
+## Code Generation & BackendBuilder
+
+### BackendBuilder API
+
+`fyra::BackendBuilder` is the primary entry point for multi-architecture code generation, object creation, static/shared library generation, binary linking, WASM/WAT output, eBPF ELF binary emission, and SPIR-V compute module generation.
+
+```cpp
+namespace fyra {
+
+class BackendBuilder {
+public:
+    explicit BackendBuilder(ir::Module& module);
+
+    BackendBuilder& target(const std::string& triple);
+    BackendBuilder& optimize(OptimizationLevel level);
+    BackendBuilder& validate(bool enabled);
+    BackendBuilder& enableSLP(bool enabled);
+    BackendBuilder& enableLoopVectorization(bool enabled);
+    BackendBuilder& enableLoopUnroll(bool enabled);
+    BackendBuilder& enableLTO(bool enabled);
+
+    BackendBuilder& addModule(std::unique_ptr<ir::Module> module);
+    BackendBuilder& addObject(const std::string& path);
+    BackendBuilder& addStaticLibrary(const std::string& path);
+    BackendBuilder& importSymbol(const std::string& symbol, const std::string& dependencyLibrary);
+
+    BuildResult emitAssembly(const std::string& path);
+    BuildResult emitObject(const std::string& path);
+    BuildResult emitStaticLibrary(const std::string& path);
+    BuildResult emitExecutable(const std::string& path);
+    BuildResult emitSharedLibrary(const std::string& path);
+    BuildResult emitFlatBinary(const std::string& path);
+    BuildResult emitAPK(const std::string& path);
+    BuildResult emitWAT(const std::string& path);
+    BuildResult emitWasm(const std::string& path);
+};
+
+} // namespace fyra
+```
 
 ### Enhanced CodeGen
 

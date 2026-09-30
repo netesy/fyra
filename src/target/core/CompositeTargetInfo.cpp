@@ -14,7 +14,7 @@ std::string CompositeTargetInfo::getName() const {
         case Arch::RISCV32: archStr = "riscv32"; break;
         case Arch::LoongArch64: archStr = "loongarch64"; break;
         case Arch::WASM32: archStr = "wasm32"; break;
-        case Arch::EBPF: archStr = "ebpf"; break;
+        case Arch::BPF: archStr = "bpf"; break;
         case Arch::SPIRV: archStr = "spirv"; break;
     }
     return archStr + "-" + os->getName();

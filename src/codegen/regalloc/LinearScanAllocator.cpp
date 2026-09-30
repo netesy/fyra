@@ -161,16 +161,12 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                 assigned = false;
             }
         } else {
-            if (!free_caller_regs.empty()) {
-                auto prefIt = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
-                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
-                if (prefIt != free_caller_regs.end()) {
-                    reg = *prefIt;
-                    free_caller_regs.erase(prefIt);
-                } else {
-                    reg = free_caller_regs.back();
-                    free_caller_regs.pop_back();
-                }
+            // First try pure scratch (r10, index 0)
+            auto r10It = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
+                [](const PhysicalReg& pr) { return pr.index == 0; });
+            if (r10It != free_caller_regs.end()) {
+                reg = *r10It;
+                free_caller_regs.erase(r10It);
                 assigned = true;
                 stats.callerSavedUsed++;
             } else if (!free_callee_regs.empty()) {
@@ -184,6 +180,18 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                     free_callee_regs.pop_back();
                 }
                 assigned = true;
+            } else if (!free_caller_regs.empty()) {
+                auto prefIt = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
+                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
+                if (prefIt != free_caller_regs.end()) {
+                    reg = *prefIt;
+                    free_caller_regs.erase(prefIt);
+                } else {
+                    reg = free_caller_regs.back();
+                    free_caller_regs.pop_back();
+                }
+                assigned = true;
+                stats.callerSavedUsed++;
             }
         }
 
@@ -237,21 +245,18 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
 
 StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
     size_t requiredAlign = 8;
-    size_t slotCount = 1;
+    size_t slotBytes = 8;
     if (vreg && vreg->getType()) {
-        if (auto* vt = dynamic_cast<const ir::VectorType*>(vreg->getType())) {
-            size_t bits = vt->getSize() * 8;
-            if (bits >= 512) { requiredAlign = 64; slotCount = 8; }
-            else if (bits >= 256) { requiredAlign = 32; slotCount = 4; }
-            else if (bits >= 128) { requiredAlign = 16; slotCount = 2; }
-        }
+        requiredAlign = std::max<size_t>(8, vreg->getType()->getAlignment());
+        slotBytes = std::max<size_t>(8, vreg->getType()->getSize());
     }
-    size_t slotsPerAlign = requiredAlign / 8;
-    if (slotsPerAlign > 1 && (next_stack_slot % slotsPerAlign != 0)) {
-        next_stack_slot = (next_stack_slot + slotsPerAlign - 1) & ~(slotsPerAlign - 1);
+
+    if (current_frame_bytes % requiredAlign != 0) {
+        current_frame_bytes += (requiredAlign - (current_frame_bytes % requiredAlign));
     }
-    StackSlot slot{next_stack_slot};
-    next_stack_slot += slotCount;
+
+    StackSlot slot{next_stack_slot++, static_cast<unsigned int>(current_frame_bytes)};
+    current_frame_bytes += slotBytes;
     return slot;
 }
 

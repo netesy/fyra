@@ -2,7 +2,12 @@
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "target/core/ArchitectureInfo.h"
+#include "codegen/CodeGen.h"
+#include "ir/IRContext.h"
+#include "ir/IRBuilder.h"
+#include "ir/Module.h"
 #include <iostream>
+#include <sstream>
 #include <cassert>
 
 int main() {
@@ -124,6 +129,34 @@ int main() {
         assert(uefiDesc->os == target::OS::UEFI);
         assert(baremetalDesc->os != uefiDesc->os);
         std::cout << "UEFI vs BareMetal OS distinction test passed." << std::endl;
+    }
+
+    // Test 12: UEFI OutputString Firmware Protocol Emission Test
+    {
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("test_uefi_output", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        auto* i32 = ctx->getIntegerType(32);
+        ir::Function* fnMain = builder.createFunction("main", i32);
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", fnMain);
+        builder.setInsertPoint(entry);
+
+        builder.createExternCall("io.write", {ctx->getConstantInt(i32, 1), ctx->getConstantInt(i32, 65), ctx->getConstantInt(i32, 1)}, i32);
+        builder.createRet(ctx->getConstantInt(i32, 0));
+
+        auto descX64 = target::TargetDescriptor::fromString("x64-uefi-bin");
+        auto targetX64 = target::TargetResolver::resolve(*descX64);
+
+        std::stringstream ss;
+        codegen::CodeGen codeGen(module, std::move(targetX64), &ss);
+        codeGen.emit(true);
+
+        std::string asmOutput = ss.str();
+        assert(asmOutput.find("UEFI OutputString Console Output Protocol Call") != std::string::npos);
+        assert(asmOutput.find("64(%rdx)") != std::string::npos);
+        std::cout << "UEFI OutputString firmware protocol emission test passed." << std::endl;
     }
 
     std::cout << "=== All UEFI tests passed! ===" << std::endl;

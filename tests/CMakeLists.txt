@@ -72,6 +72,12 @@ target_link_libraries(test_riscv32 PRIVATE fyra)
 add_test(NAME RiscV32Test COMMAND test_riscv32)
 set_tests_properties(RiscV32Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_loongarch64 test_loongarch64.cpp)
+target_link_libraries(test_loongarch64 PRIVATE fyra)
+
+add_test(NAME LoongArch64Test COMMAND test_loongarch64)
+set_tests_properties(LoongArch64Test PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_uefi test_uefi.cpp)
 target_link_libraries(test_uefi PRIVATE fyra)
 

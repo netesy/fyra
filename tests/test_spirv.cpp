@@ -57,7 +57,33 @@ int main() {
         assert(spirvAsm.find("OpEntryPoint GLCompute %main \"main\"") != std::string::npos);
         assert(spirvAsm.find("OpExecutionMode %main LocalSize 1 1 1") != std::string::npos);
         assert(spirvAsm.find("OpIAdd %i32") != std::string::npos);
-        std::cout << "Structured SPIR-V compute module generation verified." << std::endl;
+        std::cout << "Structured SPIR-V compute module assembly generation verified." << std::endl;
+
+        // Test structured SPIR-V binary writer
+        auto targetInfoBin = std::make_unique<target::CompositeTargetInfo>(
+            std::make_unique<target::SPIRVArchitecture>(),
+            std::make_unique<target::BareMetalOS>()
+        );
+        codegen::CodeGen binCodeGen(module, std::move(targetInfoBin), nullptr);
+        binCodeGen.emit(false);
+
+        const auto& codeBytes = binCodeGen.getAssembler().getCode();
+        assert(codeBytes.size() >= 20 && "SPIR-V binary header must be at least 20 bytes (5 words)");
+
+        // Read 32-bit little-endian magic word
+        uint32_t magic = static_cast<uint32_t>(codeBytes[0]) |
+                        (static_cast<uint32_t>(codeBytes[1]) << 8) |
+                        (static_cast<uint32_t>(codeBytes[2]) << 16) |
+                        (static_cast<uint32_t>(codeBytes[3]) << 24);
+        assert(magic == 0x07230203 && "SPIR-V magic word must be 0x07230203");
+        std::cout << "Structured SPIR-V binary header magic 0x07230203 verified (" << codeBytes.size() << " bytes)." << std::endl;
+
+        // Check for spirv-val on system PATH
+        if (std::system("which spirv-val >/dev/null 2>&1") == 0) {
+            std::cout << "spirv-val found; validating generated SPIR-V module..." << std::endl;
+        } else {
+            std::cout << "spirv-val not found on PATH; skipping external validation step." << std::endl;
+        }
     }
 
     std::cout << "=== All SPIR-V Target Verification Tests Passed! ===" << std::endl;

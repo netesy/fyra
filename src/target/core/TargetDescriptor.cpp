@@ -14,6 +14,8 @@ std::string TargetDescriptor::toString() const {
         case Arch::RISCV32: s += "riscv32"; break;
         case Arch::LoongArch64: s += "loongarch64"; break;
         case Arch::WASM32: s += "wasm32"; break;
+        case Arch::BPF: s += "bpf"; break;
+        case Arch::SPIRV: s += "spirv"; break;
     }
     s += "-";
     switch(os) {
@@ -47,6 +49,8 @@ std::string TargetDescriptor::normalizeTriple(const std::string& triple) {
     if (triple == "windows-arm64") return "aarch64-windows-bin";
     if (triple == "aarch64") return "aarch64-linux-bin";
     if (triple == "wasm32" || triple == "wasm") return "wasm32-wasi-wasm";
+    if (triple == "bpf" || triple == "ebpf") return "bpf-baremetal-bin";
+    if (triple == "spirv" || triple == "spirv64") return "spirv-baremetal-bin";
     if (triple == "riscv64") return "riscv64-linux-bin";
     if (triple == "riscv32") return "riscv32-linux-bin";
     if (triple == "loongarch64") return "loongarch64-linux-bin";
@@ -95,6 +99,8 @@ std::optional<TargetDescriptor> TargetDescriptor::fromString(const std::string& 
     else if (parts[0] == "riscv32") desc.arch = Arch::RISCV32;
     else if (parts[0] == "loongarch64") desc.arch = Arch::LoongArch64;
     else if (parts[0] == "wasm32") desc.arch = Arch::WASM32;
+    else if (parts[0] == "bpf" || parts[0] == "ebpf") desc.arch = Arch::BPF;
+    else if (parts[0] == "spirv" || parts[0] == "spirv64") desc.arch = Arch::SPIRV;
     else return std::nullopt;
 
     if (parts[1] == "linux") desc.os = OS::Linux;

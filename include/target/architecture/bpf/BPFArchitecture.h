@@ -1,21 +1,18 @@
 #pragma once
 #include "target/core/ArchitectureInfo.h"
-#include "target/architecture/spirv/SPIRVModule.h"
 #include <map>
 #include <string>
 
 namespace target {
 
-class SPIRVArchitecture : public ArchitectureInfo {
+class BPFArchitecture : public ArchitectureInfo {
 public:
-    SPIRVArchitecture();
-    ~SPIRVArchitecture() override = default;
+    BPFArchitecture();
+    ~BPFArchitecture() override = default;
 
-    Arch getArch() const override { return Arch::SPIRV; }
-    size_t getPointerSize() const override { return 4; }
-    size_t getStackAlignment() const override { return 4; }
-    std::string getAssemblyFileExtension() const override { return ".spvasm"; }
-    std::string getObjectFileExtension() const override { return ".spv"; }
+    Arch getArch() const override { return Arch::BPF; }
+    size_t getPointerSize() const override { return 8; }
+    size_t getStackAlignment() const override { return 8; }
 
     TypeInfo getTypeInfo(const ir::Type* type) const override;
     const std::vector<std::string>& getRegisters(RegisterClass regClass) const override;
@@ -24,15 +21,15 @@ public:
     const std::vector<std::string>& getFloatArgumentRegisters() const override { return floatArgRegs; }
     const std::string& getIntegerReturnRegister() const override { return intReturnReg; }
     const std::string& getFloatReturnRegister() const override { return floatReturnReg; }
-    size_t getMaxRegistersForArgs() const override { return 0; }
+    size_t getMaxRegistersForArgs() const override { return 5; }
 
     void emitHeader(codegen::CodeGen& cg) override;
-    void emitFooter(codegen::CodeGen& cg) override;
+    void emitFooter(codegen::CodeGen& cg) override {}
     void emitFunctionPrologue(codegen::CodeGen& cg, ir::Function& func) override;
     void emitFunctionEpilogue(codegen::CodeGen& cg, ir::Function& func) override;
 
-    void emitPassArgument(codegen::CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) override {}
-    void emitGetArgument(codegen::CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) override {}
+    void emitPassArgument(codegen::CodeGen& cg, size_t argIndex, const std::string& value, const ir::Type* type) override;
+    void emitGetArgument(codegen::CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) override;
 
     void emitRet(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(codegen::CodeGen& cg, ir::Instruction& i) override;
@@ -69,13 +66,12 @@ public:
     void emitNativeSyscall(codegen::CodeGen& cg, uint64_t syscallNum, const std::vector<ir::Value*>& args) override {}
     void emitNativeLibraryCall(codegen::CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) override {}
 
-    std::string formatStackOperand(int offset) const override { return ""; }
-    std::string formatGlobalOperand(const std::string& name) const override { return name; }
-    bool isCallerSaved(const std::string& reg) const override { return false; }
-    bool isCalleeSaved(const std::string& reg) const override { return false; }
+    std::string formatStackOperand(int offset) const override;
+    std::string formatGlobalOperand(const std::string& name) const override;
+    bool isCallerSaved(const std::string& reg) const override;
+    bool isCalleeSaved(const std::string& reg) const override;
 
-    spirv::SPIRVModule& getModule() { return module_; }
-    const spirv::SPIRVModule& getModule() const { return module_; }
+    bool validateLegality(ir::Function& func, std::string& errorMsg) const;
 
 private:
     std::vector<std::string> integerRegs;
@@ -83,15 +79,10 @@ private:
     std::vector<std::string> floatArgRegs;
     std::string intReturnReg;
     std::string floatReturnReg;
-    spirv::SPIRVModule module_;
-    std::map<const ir::Value*, uint32_t> valueIdMap_;
-    uint32_t voidTypeId_ = 0;
-    uint32_t i32TypeId_ = 0;
-    uint32_t f32TypeId_ = 0;
 
     void initRegisters();
-    uint32_t getOrCreateValueId(codegen::CodeGen& cg, ir::Value* val);
-    uint32_t getTypeId(const ir::Type* type);
+    uint8_t getBpfRegIndex(const std::string& regName) const;
+    void emitBpfInst(codegen::CodeGen& cg, uint8_t opcode, uint8_t dst, uint8_t src, int16_t off, int32_t imm);
 };
 
 } // namespace target

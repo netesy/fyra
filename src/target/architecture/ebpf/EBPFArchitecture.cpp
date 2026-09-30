@@ -12,6 +12,34 @@
 
 namespace target {
 
+static void emitBPFInsn(asm_::Assembler& as, uint8_t code, uint8_t dst, uint8_t src, int16_t off, int32_t imm) {
+    as.emitByte(code);
+    as.emitByte(static_cast<uint8_t>(((src & 0x0f) << 4) | (dst & 0x0f)));
+    as.emitByte(static_cast<uint8_t>(off & 0xff));
+    as.emitByte(static_cast<uint8_t>((off >> 8) & 0xff));
+    as.emitDWord(static_cast<uint32_t>(imm));
+}
+
+static void emitLoadOperandToReg(CodeGen& cg, ir::Value* val, uint8_t dstReg) {
+    auto& as = cg.getAssembler();
+    if (!val) {
+        emitBPFInsn(as, 0xb7, dstReg, 0, 0, 0); // r[dstReg] = 0
+        return;
+    }
+    if (auto* ci = dynamic_cast<ir::ConstantInt*>(val)) {
+        emitBPFInsn(as, 0xb7, dstReg, 0, 0, static_cast<int32_t>(ci->getValue()));
+    } else {
+        int off = cg.getStackOffset(val);
+        emitBPFInsn(as, 0x79, dstReg, 10, static_cast<int16_t>(off), 0); // r[dstReg] = *(u64*)(r10 + off)
+    }
+}
+
+static void emitStoreRegToStack(CodeGen& cg, ir::Instruction& instr, uint8_t srcReg) {
+    auto& as = cg.getAssembler();
+    int off = cg.getStackOffset(&instr);
+    emitBPFInsn(as, 0x7b, 10, srcReg, static_cast<int16_t>(off), 0); // *(u64*)(r10 + off) = r[srcReg]
+}
+
 EBPFArchitecture::EBPFArchitecture() {}
 
 TypeInfo EBPFArchitecture::getTypeInfo(const ir::Type* type) const {
@@ -45,6 +73,16 @@ const std::string& EBPFArchitecture::getFloatReturnRegister() const {
 }
 
 bool EBPFArchitecture::validateLegality(ir::Function& func, std::string& errorMsg) const {
+    if (func.getType() && func.getType()->isFloatingPoint()) {
+        errorMsg = "eBPF target does not support floating-point return type";
+        return false;
+    }
+    for (auto& param : func.getParameters()) {
+        if (param->getType() && param->getType()->isFloatingPoint()) {
+            errorMsg = "eBPF target does not support floating-point parameter type";
+            return false;
+        }
+    }
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
             if (instr->getType() && instr->getType()->isFloatingPoint()) {
@@ -106,10 +144,14 @@ void EBPFArchitecture::emitRet(CodeGen& cg, ir::Instruction& i) {
         ir::Value* rv = i.getOperands()[0]->get();
         if (auto* os = cg.getTextStream()) {
             *os << "  r0 = " << cg.getValueAsOperand(rv) << "\n";
+        } else {
+            emitLoadOperandToReg(cg, rv, 0);
         }
     }
     if (auto* os = cg.getTextStream()) {
         *os << "  exit\n";
+    } else {
+        emitBPFInsn(cg.getAssembler(), 0x95, 0, 0, 0, 0); // BPF_EXIT
     }
 }
 
@@ -119,6 +161,11 @@ void EBPFArchitecture::emitAdd(CodeGen& cg, ir::Instruction& i) {
         *os << "  r2 = " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
         *os << "  r1 += r2\n";
         *os << "  *(u64*)(r10" << formatStackOperand(cg.getStackOffset(&i)) << ") = r1\n";
+    } else {
+        emitLoadOperandToReg(cg, i.getOperands()[0]->get(), 1);
+        emitLoadOperandToReg(cg, i.getOperands()[1]->get(), 2);
+        emitBPFInsn(cg.getAssembler(), 0x0f, 1, 2, 0, 0); // r1 += r2
+        emitStoreRegToStack(cg, i, 1);
     }
 }
 
@@ -131,6 +178,11 @@ void EBPFArchitecture::emitSub(CodeGen& cg, ir::Instruction& i) {
         *os << "  r2 = " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
         *os << "  r1 -= r2\n";
         *os << "  *(u64*)(r10" << formatStackOperand(cg.getStackOffset(&i)) << ") = r1\n";
+    } else {
+        emitLoadOperandToReg(cg, i.getOperands()[0]->get(), 1);
+        emitLoadOperandToReg(cg, i.getOperands()[1]->get(), 2);
+        emitBPFInsn(cg.getAssembler(), 0x1f, 1, 2, 0, 0); // r1 -= r2
+        emitStoreRegToStack(cg, i, 1);
     }
 }
 
@@ -140,6 +192,11 @@ void EBPFArchitecture::emitMul(CodeGen& cg, ir::Instruction& i) {
         *os << "  r2 = " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
         *os << "  r1 *= r2\n";
         *os << "  *(u64*)(r10" << formatStackOperand(cg.getStackOffset(&i)) << ") = r1\n";
+    } else {
+        emitLoadOperandToReg(cg, i.getOperands()[0]->get(), 1);
+        emitLoadOperandToReg(cg, i.getOperands()[1]->get(), 2);
+        emitBPFInsn(cg.getAssembler(), 0x2f, 1, 2, 0, 0); // r1 *= r2
+        emitStoreRegToStack(cg, i, 1);
     }
 }
 
@@ -149,6 +206,11 @@ void EBPFArchitecture::emitDiv(CodeGen& cg, ir::Instruction& i) {
         *os << "  r2 = " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
         *os << "  r1 /= r2\n";
         *os << "  *(u64*)(r10" << formatStackOperand(cg.getStackOffset(&i)) << ") = r1\n";
+    } else {
+        emitLoadOperandToReg(cg, i.getOperands()[0]->get(), 1);
+        emitLoadOperandToReg(cg, i.getOperands()[1]->get(), 2);
+        emitBPFInsn(cg.getAssembler(), 0x3f, 1, 2, 0, 0); // r1 /= r2
+        emitStoreRegToStack(cg, i, 1);
     }
 }
 
@@ -229,6 +291,9 @@ void EBPFArchitecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
         *os << "  r1 = " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
         *os << "  *(u64*)(r10" << formatStackOperand(cg.getStackOffset(&i)) << ") = r1\n";
+    } else {
+        emitLoadOperandToReg(cg, i.getOperands()[0]->get(), 1);
+        emitStoreRegToStack(cg, i, 1);
     }
 }
 

@@ -444,8 +444,8 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
 
 bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std::string& outputPath) {
     lastError_.clear();
-    if (image.os != target::OS::Windows || image.outputKind != linker::LinkOutputKind::Executable) {
-        lastError_ = "PE executable builder requires a Windows executable LinkedImage";
+    if ((image.os != target::OS::Windows && image.os != target::OS::UEFI) || image.outputKind != linker::LinkOutputKind::Executable) {
+        lastError_ = "PE executable builder requires a Windows or UEFI executable LinkedImage";
         return false;
     }
     
@@ -472,8 +472,8 @@ bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std
 
 bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan, const std::string& outputPath) {
     lastError_.clear();
-    if (plan.os != target::OS::Windows) {
-        lastError_ = "PE executable builder requires a Windows plan";
+    if (plan.os != target::OS::Windows && plan.os != target::OS::UEFI) {
+        lastError_ = "PE executable builder requires a Windows or UEFI plan";
         return false;
     }
     
