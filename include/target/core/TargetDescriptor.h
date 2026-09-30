@@ -10,7 +10,9 @@ enum class Arch {
     RISCV64,
     RISCV32,
     LoongArch64,
-    WASM32
+    WASM32,
+    EBPF,
+    SPIRV
 };
 
 enum class OS {

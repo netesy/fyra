@@ -47,7 +47,11 @@ std::string BackendBuilder::resolveTargetTriple(const std::string& triple) {
     else if (triple == "flat" || triple == "raw" || triple == "img") canonical = "riscv64-baremetal-flat";
     else if (triple == "wasm32" || triple == "wasm") canonical = "wasm32-wasi-wasm";
     else if (triple == "riscv64") canonical = "riscv64-linux-bin";
+    else if (triple == "riscv32") canonical = "riscv32-linux-bin";
     else if (triple == "loongarch64") canonical = "loongarch64-linux-bin";
+    else if (triple == "ebpf") canonical = "ebpf-baremetal-bin";
+    else if (triple == "spirv") canonical = "spirv-baremetal-bin";
+    else if (triple == "uefi" || triple == "uefi-x64") canonical = "x64-uefi-bin";
     else {
         canonical += "-bin";
     }

@@ -436,6 +436,16 @@ target_link_libraries(test_multiarch_object_writer PRIVATE fyra)
 add_test(NAME MultiArchObjectWriterTest COMMAND test_multiarch_object_writer)
 set_tests_properties(BareMetalTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_ebpf test_ebpf.cpp)
+target_link_libraries(test_ebpf PRIVATE fyra)
+add_test(NAME EBPFTest COMMAND test_ebpf)
+set_tests_properties(EBPFTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_spirv test_spirv.cpp)
+target_link_libraries(test_spirv PRIVATE fyra)
+add_test(NAME SPIRVTest COMMAND test_spirv)
+set_tests_properties(SPIRVTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_freebsd test_freebsd.cpp)
 target_link_libraries(test_freebsd PRIVATE fyra)
 add_test(NAME FreeBSDTest COMMAND test_freebsd)
