@@ -466,3 +466,8 @@ add_executable(test_target_features_and_scheduler test_target_features_and_sched
 target_link_libraries(test_target_features_and_scheduler PRIVATE fyra)
 add_test(NAME TargetFeaturesAndSchedulerTest COMMAND test_target_features_and_scheduler)
 set_tests_properties(TargetFeaturesAndSchedulerTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_cross_target_vector test_cross_target_vector.cpp)
+target_link_libraries(test_cross_target_vector PRIVATE fyra)
+add_test(NAME CrossTargetVectorTest COMMAND test_cross_target_vector)
+set_tests_properties(CrossTargetVectorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

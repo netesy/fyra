@@ -76,7 +76,9 @@ BasicBlock* IRBuilder::createBasicBlock(const std::string& name, Function* paren
 }
 
 Instruction* IRBuilder::createRet(Value* val) {
-    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Ret, {val}, insertPoint));
+    std::vector<Value*> ops;
+    if (val) ops.push_back(val);
+    auto instr = std::unique_ptr<Instruction>(new Instruction(context->getVoidType(), Instruction::Ret, ops, insertPoint));
     Instruction* instrPtr = instr.get();
     instrPtr->setSourceLine(currentLine);
     insertPoint->addInstruction(insertIterator, std::move(instr));

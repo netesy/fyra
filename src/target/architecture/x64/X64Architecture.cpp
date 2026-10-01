@@ -582,6 +582,7 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
 }
 
 static bool canUseInPlace(CodeGen& cg, ir::Instruction& i, ir::Value* val0) {
+    if (dynamic_cast<ir::Parameter*>(val0)) return false;
     if (!i.hasPhysicalRegister() || !val0 || !val0->hasPhysicalRegister()) {
         return false;
     }
@@ -2247,7 +2248,14 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
-        std::string op = cg.getValueAsOperand(ptrVal);
+        std::string op;
+        if (dynamic_cast<ir::Instruction*>(ptrVal) && !ptrVal->hasPhysicalRegister() && (!cg.currentFunction || !cg.currentFunction->hasStackSlot(ptrVal))) {
+            auto* ptrInst = dynamic_cast<ir::Instruction*>(ptrVal);
+            cg.emitInstruction(*ptrInst);
+            op = cg.getValueAsOperand(ptrInst);
+        } else {
+            op = cg.getValueAsOperand(ptrVal);
+        }
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(ptrVal) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
@@ -2358,7 +2366,15 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
         if (auto* ciSlot = dynamic_cast<ir::ConstantInt*>(ptrVal)) {
             std::string stackOp = formatStackOperand(-ciSlot->getValue());
             bool is32Val = (size <= 4);
-            emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), stackOp, is32Val);
+            std::string valOp = cg.getValueAsOperand(i.getOperands()[0]->get());
+            if (valOp == stackOp) {
+                bool isFloat = storedType && storedType->isFloatingPoint();
+                bool isVec = storedType && (storedType->isVectorTy() || dynamic_cast<const ir::VectorType*>(storedType) != nullptr);
+                if (isVec) valOp = "%xmm0";
+                else if (isFloat) valOp = "%xmm0";
+                else valOp = is32Val ? "%eax" : "%rax";
+            }
+            emitMov(cg, os, valOp, stackOp, is32Val);
             return;
         }
 
@@ -2436,8 +2452,16 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                         sib.scale = static_cast<int>(scaleC->getValue());
                         sib.disp = disp;
                         sib.isValid = true;
-                        if (!sib.base.empty() && !sib.index.empty() &&
-                            (abi == X64ABI::Windows || (sib.base[0] == '%' && sib.index[0] == '%'))) {
+                        if (!sib.base.empty() && !sib.index.empty()) {
+                            std::string valReg = cg.getValueAsOperand(val);
+                            if (sib.base == valReg || sib.index == valReg) {
+                                return std::nullopt;
+                            }
+                            if (sib.index[0] != '%') {
+                                std::string rcx = (abi == X64ABI::SystemV) ? "%rcx" : "rcx";
+                                emitMov(cg, os, sib.index, rcx, false);
+                                sib.index = rcx;
+                            }
                             if (sib.index[0] == '%') sib.index = to64BitReg(sib.index);
                             return sib;
                         }
@@ -2521,7 +2545,14 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
             if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
             else emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), rax, is32Val);
         }
-        std::string op = cg.getValueAsOperand(ptrVal);
+        std::string op;
+        if (dynamic_cast<ir::Instruction*>(ptrVal) && !ptrVal->hasPhysicalRegister() && (!cg.currentFunction || !cg.currentFunction->hasStackSlot(ptrVal))) {
+            auto* ptrInst = dynamic_cast<ir::Instruction*>(ptrVal);
+            cg.emitInstruction(*ptrInst);
+            op = cg.getValueAsOperand(ptrInst);
+        } else {
+            op = cg.getValueAsOperand(ptrVal);
+        }
         bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
@@ -4250,6 +4281,12 @@ ComplexAddress X64Architecture::matchComplexAddress(CodeGen& cg, ir::Value* val)
     ComplexAddress result;
     if (!val) return result;
 
+    if (auto* instVal = dynamic_cast<ir::Instruction*>(val)) {
+        if (instVal->hasPhysicalRegister() || (cg.currentFunction && cg.currentFunction->hasStackSlot(instVal))) {
+            return result;
+        }
+    }
+
     auto unwrapExt = [](ir::Value* v) -> ir::Value* {
         if (!v) return v;
         while (auto* inst = dynamic_cast<ir::Instruction*>(v)) {
@@ -4310,6 +4347,10 @@ ComplexAddress X64Architecture::matchComplexAddress(CodeGen& cg, ir::Value* val)
             } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
                 indexVal = m1; scale = static_cast<int>(c0->getValue());
             }
+        } else if (disp != 0) {
+            baseVal = coreAddr;
+            indexVal = nullptr;
+            scale = 1;
         } else {
             baseVal = op0;
             indexVal = op1;
@@ -4329,6 +4370,16 @@ ComplexAddress X64Architecture::matchComplexAddress(CodeGen& cg, ir::Value* val)
 
     indexVal = unwrapExt(indexVal);
     baseVal = unwrapExt(baseVal);
+
+    auto isAllocated = [&](ir::Value* v) -> bool {
+        if (!v) return true;
+        if (dynamic_cast<ir::Constant*>(v) || dynamic_cast<ir::Parameter*>(v) || dynamic_cast<ir::GlobalValue*>(v)) return true;
+        if (v->hasPhysicalRegister()) return true;
+        if (cg.currentFunction && cg.currentFunction->hasStackSlot(v)) return true;
+        return false;
+    };
+
+    if (!isAllocated(baseVal) || !isAllocated(indexVal)) return result;
 
     std::string bStr = baseVal ? cg.getValueAsOperand(baseVal) : "";
     std::string iStr = indexVal ? cg.getValueAsOperand(indexVal) : "";

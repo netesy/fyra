@@ -467,6 +467,14 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
         }
     }
 
+    std::set<ir::BasicBlock*> allUnrolledBlocks = loop.blocks;
+    allUnrolledBlocks.insert(uHeaderPtr);
+    allUnrolledBlocks.insert(b0Ptr);
+    allUnrolledBlocks.insert(b1Ptr);
+    allUnrolledBlocks.insert(epiHeaderPtr);
+    allUnrolledBlocks.insert(epiBodyPtr);
+    allUnrolledBlocks.insert(finalExitPtr);
+
     for (ir::Value* val : definedInLoop) {
         // Check if val is used outside loop
         bool usedOutside = false;
@@ -474,7 +482,7 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
             if (!u || !u->getUser()) continue;
             auto* userInst = dynamic_cast<ir::Instruction*>(u->getUser());
             if (userInst && userInst->getParent()) {
-                if (loop.blocks.find(userInst->getParent()) == loop.blocks.end()) {
+                if (allUnrolledBlocks.find(userInst->getParent()) == allUnrolledBlocks.end()) {
                     usedOutside = true;
                     break;
                 }
@@ -497,10 +505,16 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
             }
 
             ir::Value* valEpiBody = nullptr;
-            if (mapEpi.count(val)) {
+            if (auto* phiVal = dynamic_cast<ir::PhiNode*>(val)) {
+                if (phiLatchMap.count(phiVal) && mapEpi.count(phiLatchMap[phiVal])) {
+                    valEpiBody = mapEpi[phiLatchMap[phiVal]];
+                } else if (phiLatchMap.count(phiVal) && map1.count(phiLatchMap[phiVal])) {
+                    valEpiBody = map1[phiLatchMap[phiVal]];
+                } else {
+                    valEpiBody = epiPhiMap[phiVal];
+                }
+            } else if (mapEpi.count(val)) {
                 valEpiBody = mapEpi[val];
-            } else if (auto* phiVal = dynamic_cast<ir::PhiNode*>(val)) {
-                valEpiBody = epiPhiMap[phiVal];
             } else {
                 valEpiBody = valEpiHeader;
             }

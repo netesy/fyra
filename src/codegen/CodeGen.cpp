@@ -369,6 +369,20 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (stackOffsets.count(const_cast<ir::Value*>(value)))
         return targetInfo->formatStackOperand(stackOffsets.at(const_cast<ir::Value*>(value)));
 
+    if (auto* inst = dynamic_cast<const ir::Instruction*>(value)) {
+        auto* mutableInst = const_cast<ir::Instruction*>(inst);
+        if (!mutableInst->hasPhysicalRegister() && (!currentFunction || !currentFunction->hasStackSlot(mutableInst))) {
+            emitInstruction(*mutableInst);
+            if (mutableInst->hasPhysicalRegister()) {
+                return getValueAsOperand(mutableInst);
+            }
+            if (currentFunction && currentFunction->hasStackSlot(mutableInst)) {
+                int off = currentFunction->getStackSlotForVreg(mutableInst);
+                return targetInfo->formatStackOperand(-off);
+            }
+        }
+    }
+
     if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
         if (currentFunction) {
             const auto& params = currentFunction->getParameters();

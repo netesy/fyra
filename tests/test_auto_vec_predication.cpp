@@ -165,5 +165,5 @@ int main(void) {
 })";
     std::string command = "cc -mavx2 -no-pie " + base + ".s " + base + ".c -o " + base + " && " + base;
     assert(std::system(command.c_str()) == 0);
-    std::remove((base + ".s").c_str()); std::remove((base + ".c").c_str()); std::remove(base.c_str());
+    // std::remove((base + ".s").c_str()); std::remove((base + ".c").c_str()); std::remove(base.c_str());
 }

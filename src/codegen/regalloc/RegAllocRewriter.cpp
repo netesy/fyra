@@ -4,6 +4,7 @@
 #include "ir/Function.h"
 #include "ir/BasicBlock.h"
 #include "ir/Instruction.h"
+#include "ir/PhiNode.h"
 #include "ir/IRBuilder.h"
 #include "ir/Use.h"
 #include "ir/Constant.h"
@@ -90,6 +91,11 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
         for (auto it = instrs.begin(); it != instrs.end(); ) {
             ir::Instruction* instr = it->get();
 
+            if (dynamic_cast<ir::PhiNode*>(instr)) {
+                ++it;
+                continue;
+            }
+
             // Rewrite operands (handle uses)
             std::vector<ir::Use*> uses;
             for (auto& use : instr->getOperands()) {
@@ -121,7 +127,7 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
             }
 
             // Rewrite definitions
-            if (!dynamic_cast<ir::Parameter*>(instr) && location_map.count(instr) && std::holds_alternative<StackSlot>(location_map.at(instr))) {
+            if (!dynamic_cast<ir::Parameter*>(instr) && func.hasStackSlot(instr) && !instr->hasPhysicalRegister()) {
                 int slot = func.getStackSlotForVreg(instr);
                 if (slot > 0) {
                     auto next_it = std::next(it);

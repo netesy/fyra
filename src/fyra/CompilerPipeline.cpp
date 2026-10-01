@@ -258,25 +258,25 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         int iteration = 1;
         const int maxIterations = (optLevel >= 2) ? 5 : 2;
 
+        while (optimization_changed && iteration <= maxIterations) {
+            optimization_changed = false;
+            if (inst_combine.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && config.enableEGraph && egraph.run(*func)) optimization_changed = true;
+            if (div_sr.run(*func)) optimization_changed = true;
+            if (enhanced_sccp.run(*func)) optimization_changed = true;
+            if (copy_elim.run(*func)) optimization_changed = true;
+            if (gvn.run(*func)) optimization_changed = true;
+            if (cfg_simplifier.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && lsr.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && config.enableLoopVectorization && loop_vectorizer.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && config.enableSLP && slp_vectorizer.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && config.enableLoopUnroll && loop_unroll.run(*func)) optimization_changed = true;
+            if (enhanced_dce.run(*func)) optimization_changed = true;
+            iteration++;
+        }
         if (!isWasm) {
-            while (optimization_changed && iteration <= maxIterations) {
-                optimization_changed = false;
-                if (inst_combine.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && config.enableEGraph && egraph.run(*func)) optimization_changed = true;
-                if (div_sr.run(*func)) optimization_changed = true;
-                if (enhanced_sccp.run(*func)) optimization_changed = true;
-                if (copy_elim.run(*func)) optimization_changed = true;
-                if (gvn.run(*func)) optimization_changed = true;
-                if (cfg_simplifier.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && lsr.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && config.enableLoopVectorization && loop_vectorizer.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && config.enableSLP && slp_vectorizer.run(*func)) optimization_changed = true;
-                if (optLevel >= 2 && config.enableLoopUnroll && loop_unroll.run(*func)) optimization_changed = true;
-                if (enhanced_dce.run(*func)) optimization_changed = true;
-                iteration++;
-            }
             transforms::InstructionScheduler::run(*func);
         }
     }
