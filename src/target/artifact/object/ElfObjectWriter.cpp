@@ -110,8 +110,11 @@ uint32_t addToStringTable(std::string& table, const std::string& str) {
 std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) {
     std::vector<uint8_t> buffer;
 
-    std::string shStringTable = "\0";
-    std::string stringTable = "\0";
+    // A string constructed from the C string "\0" is empty.  ELF string
+    // tables must instead contain an actual byte zero at index 0 so sh_name
+    // and st_name value zero retain their reserved "no name" meaning.
+    std::string shStringTable(1, '\0');
+    std::string stringTable(1, '\0');
 
     std::vector<SectionHeader64> finalSectionHeaders;
     std::map<std::string, uint16_t> sectionIndexMap;

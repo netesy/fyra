@@ -105,6 +105,15 @@ void BPFArchitecture::emitRet(codegen::CodeGen& cg, ir::Instruction& i) {
 
 void BPFArchitecture::emitAdd(codegen::CodeGen& cg, ir::Instruction& i) {
     uint8_t dst = getBpfRegIndex(cg.getValueAsOperand(&i));
+    // eBPF ALU instructions are two-address operations.  Materialize the left
+    // operand first; register allocation naming the result register does not
+    // imply that the register already contains operand zero.
+    if (auto* lhs = dynamic_cast<ir::ConstantInt*>(i.getOperands()[0]->get())) {
+        emitBpfInst(cg, 0xb7, dst, 0, 0, static_cast<int32_t>(lhs->getValue()));
+    } else {
+        const uint8_t src = getBpfRegIndex(cg.getValueAsOperand(i.getOperands()[0]->get()));
+        if (src != dst) emitBpfInst(cg, 0xbf, dst, src, 0, 0);
+    }
     if (auto* ci = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get())) {
         emitBpfInst(cg, 0x07, dst, 0, 0, static_cast<int32_t>(ci->getValue()));
     } else {

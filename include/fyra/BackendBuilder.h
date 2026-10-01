@@ -40,6 +40,7 @@ public:
     BackendBuilder& enableSLP(bool enabled = true);
     BackendBuilder& enableLoopVectorization(bool enabled = true);
     BackendBuilder& enableLoopUnroll(bool enabled = true);
+    BackendBuilder& enableEGraph(bool enabled = true);
     BackendBuilder& enableLTO(bool enabled = true);
 
     BackendBuilder& addModule(std::unique_ptr<ir::Module> module);

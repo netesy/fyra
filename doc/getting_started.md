@@ -1,6 +1,7 @@
 # Getting Started with the Fyra Backend
 
-This guide will teach you how to use and extend the Fyra compiler's backend.
+This guide explains how to use and extend Fyra, a self-contained optimizing compiler
+backend and binary toolchain built around its own SSA IR.
 
 ## Overview
 
@@ -46,8 +47,19 @@ const auto& code = cg.getAssembler().getCode();
 | `riscv32` | RISC-V 32 | ILP32 (Linux/FreeBSD/BareMetal) | Text/ELF/Flat |
 | `loongarch64` | LoongArch 64 | LP64D (Linux/FreeBSD/BareMetal) | Text/ELF/Flat |
 | `wasm32` | WebAssembly | WASI | WAT / WASM Binary |
-| `bpf` | eBPF / BPF | eBPF 64-bit | Text / ELF Object Binary |
-| `spirv` | SPIR-V | Compute GLSL450 | Text / SPIR-V Binary Module |
+| `bpf` | eBPF (ELF `EM_BPF`) | eBPF 64-bit | Text / ELF relocatable object with encoded `.text` |
+| `spirv` | SPIR-V | Compute GLSL450 | Text / structured SPIR-V binary module |
+
+`bpf` is the canonical target-triple and implementation name because the ELF ABI
+calls the machine `EM_BPF`; it emits modern eBPF instructions. `EBPFArchitecture`
+is retained only as a source-compatibility alias for `BPFArchitecture`, not as a
+second backend. Kernel-loadable BPF programs are relocatable ELF objects—not
+standalone ELF executables—because a loader supplies the program type, maps, and
+kernel attachment point.
+
+The table describes generated artifacts. Runtime validation for RISC-V 32,
+LoongArch64, and UEFI additionally requires matching emulators/firmware and cross
+toolchains; the tests report those missing tools as skips rather than execution passes.
 
 ## Extending the Backend
 

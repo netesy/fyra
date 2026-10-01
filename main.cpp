@@ -109,6 +109,7 @@ int main(int argc, char** argv) {
         std::cerr << "  -O1                                              Enable conservative optimizations" << std::endl;
         std::cerr << "  -O2                                              Enable full optimization pipeline (default)" << std::endl;
         std::cerr << "  --disable-slp                                     Disable SLP vectorization" << std::endl;
+        std::cerr << "  --disable-egraph                                  Disable e-graph optimization" << std::endl;
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
         std::cerr << "  --object                                         Generate object file" << std::endl;
@@ -148,6 +149,7 @@ int main(int argc, char** argv) {
     bool enableLTO = false;
     bool enableUnroll = true;
     bool enableSLP = true;
+    bool enableEGraph = true;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -155,6 +157,8 @@ int main(int argc, char** argv) {
             enableUnroll = false;
         } else if (arg == "--disable-slp") {
             enableSLP = false;
+        } else if (arg == "--disable-egraph") {
+            enableEGraph = false;
         } else if (arg == "--no-validate") {
             enableValidation = false;
         } else if (arg == "--validate") {
@@ -215,6 +219,7 @@ int main(int argc, char** argv) {
            .optimize(optLevel)
            .validate(enableValidation)
            .enableSLP(enableSLP)
+           .enableEGraph(enableEGraph)
            .enableLoopUnroll(enableUnroll);
 
     if (enableLTO || inputFiles.size() > 1) {

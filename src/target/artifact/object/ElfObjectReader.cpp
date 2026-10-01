@@ -129,6 +129,9 @@ bool ElfObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& o
     } else if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::LoongArch64)) {
         outArtifact.arch = target::Arch::LoongArch64;
         validMachine = true;
+    } else if (ehdr->e_machine == target::TargetInfo::getElfMachine(target::Arch::BPF)) {
+        outArtifact.arch = target::Arch::BPF;
+        validMachine = true;
     }
     
     if (!validMachine) {

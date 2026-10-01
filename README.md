@@ -33,14 +33,19 @@ Fyra is a self-contained optimizing compiler backend and binary toolchain built 
 
 ### Multi-Target Code Generation & Binary Toolchain
 *   **Enhanced CodeGen Framework:** Pattern-based instruction selection with ASM validation and direct object emission
-*   **Comprehensive Target Matrix:**
+*   **Target Matrix:**
     *   x86-64 (Linux System V, Windows ABI, FreeBSD, UEFI)
     *   AArch64 (ARM64 Linux, macOS, Windows, Android APK, FreeBSD, UEFI)
     *   RISC-V 64-bit & RISC-V 32-bit (Linux, FreeBSD, BareMetal)
     *   LoongArch 64-bit (Linux, FreeBSD, BareMetal)
     *   WebAssembly (WASM32 / WASI, WAT text & WASM binary)
-    *   eBPF (Linux / BareMetal ELF object binary with BPF instructions)
-    *   SPIR-V (Structured compute shader binary modules with standard magic headers)
+    *   eBPF (the `bpf` target emits Linux-loadable ELF relocatable objects whose `.text` contains encoded eBPF instructions; unsupported floating-point IR is rejected)
+    *   SPIR-V (structured GLSL450 compute modules with declarations, entry points, execution modes, and encoded function bodies)
+
+Cross-target generation tests validate object headers, instruction bytes, ABI register
+use, and relocation identifiers. Executing UEFI images or non-host native targets still
+requires the corresponding firmware emulator, cross toolchain, and runtime; generation
+support must not be read as a claim that those tools are installed on the build host.
 *   **ASM Validation:** Built-in assembly validation with target-specific ABI compliance
 *   **Object File Generation:** Direct object file generation for supported platforms
 

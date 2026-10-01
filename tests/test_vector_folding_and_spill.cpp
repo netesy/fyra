@@ -139,20 +139,32 @@ void test_vector_spill_alignment() {
     assert(rewrote);
 
     // Verify stack slot alignment for spilled vector instructions
+    // System V establishes rbp after pushing the incoming (8 mod 16) stack
+    // pointer, so rbp is the aligned frame base.  Slots are addressed as
+    // [rbp - slotOffset]; verify the actual address convention, not merely a
+    // positive allocator index.
+    constexpr uintptr_t simulatedFrameBase = 0x100000;
+    size_t aligned16 = 0, aligned32 = 0, aligned64 = 0;
     for (const auto& [vreg, slotOffset] : func->getStackSlots()) {
         if (vreg && vreg->getType()) {
             if (auto* vt = dynamic_cast<const ir::VectorType*>(vreg->getType())) {
                 size_t bits = vt->getSize() * 8;
+                const uintptr_t address = simulatedFrameBase - static_cast<uintptr_t>(slotOffset);
                 if (bits >= 512) {
-                    assert(slotOffset % 64 == 0 && "512-bit vector stack slot must be 64-byte aligned!");
+                    assert(address % 64 == 0 && "512-bit vector stack address must be 64-byte aligned!");
+                    ++aligned64;
                 } else if (bits >= 256) {
-                    assert(slotOffset % 32 == 0 && "256-bit vector stack slot must be 32-byte aligned!");
+                    assert(address % 32 == 0 && "256-bit vector stack address must be 32-byte aligned!");
+                    ++aligned32;
                 } else if (bits >= 128) {
-                    assert(slotOffset % 16 == 0 && "128-bit vector stack slot must be 16-byte aligned!");
+                    assert(address % 16 == 0 && "128-bit vector stack address must be 16-byte aligned!");
+                    ++aligned16;
                 }
             }
         }
     }
+    assert(aligned16 > 0 && aligned32 > 0 && aligned64 > 0 &&
+           "test must exercise spills at every promised vector alignment");
 
     std::cout << "--- Test 2 Passed: Spilled Vector Stack Slots Correctly Aligned (16, 32, 64 bytes) ---" << std::endl;
 }

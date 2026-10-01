@@ -40,6 +40,7 @@ public:
     void addCapability(uint32_t capability);
     void setMemoryModel(uint32_t addressingModel, uint32_t memoryModel);
     void addEntryPoint(uint32_t executionModel, uint32_t entryPointId, const std::string& name, const std::vector<uint32_t>& interfaces);
+    void addExecutionMode(uint32_t entryPointId, uint32_t mode, const std::vector<uint32_t>& literals);
     void addInstruction(uint16_t opcode, const std::vector<uint32_t>& operands);
 
     const std::vector<SPIRVInstruction>& getInstructions() const {
@@ -54,6 +55,7 @@ private:
     uint32_t memoryModel_ = 1;
     std::vector<SPIRVInstruction> capabilities_;
     std::vector<SPIRVInstruction> entryPoints_;
+    std::vector<SPIRVInstruction> executionModes_;
     std::vector<SPIRVInstruction> memoryModelInsts_;
     std::vector<SPIRVInstruction> instructions_;
 };

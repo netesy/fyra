@@ -37,9 +37,16 @@ Fyra is a self-contained optimizing compiler backend and binary toolchain built 
 
 - **Modular Design**: Clear separation between frontend, analysis, and backend
 - **SSA-Based**: Static Single Assignment form for optimization
-- **Multi-Target**: Support for x86-64, AArch64, RISC-V (64-bit & 32-bit), LoongArch64, WebAssembly, eBPF, SPIR-V, and UEFI
+- **Multi-Target**: Native lowering for x86-64, AArch64, RISC-V (64-bit and 32-bit), and LoongArch64; dedicated binary lowering for WebAssembly, eBPF, and SPIR-V; and PE/COFF plus firmware-call lowering for UEFI
 - **Extensible**: Plugin architecture for new targets and passes
 - **Performance-Oriented**: Efficient algorithms and data structures
+
+Target-independent compilation ends at `CodeGen`, whose target implementation emits
+text or bytes into an assembler. `BackendBuilder` then packages those bytes and symbols
+as the requested artifact. In particular, eBPF follows the same IR/pipeline/CodeGen path
+before its instruction stream is placed in an `EM_BPF` ELF `.text` section; SPIR-V uses
+a structured module with separately serialized capabilities, entry points, execution
+modes, global declarations, and function instructions.
 
 ---
 

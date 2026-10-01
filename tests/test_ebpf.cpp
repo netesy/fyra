@@ -1,5 +1,5 @@
 #include "target/core/TargetResolver.h"
-#include "target/architecture/ebpf/EBPFArchitecture.h"
+#include "target/architecture/bpf/BPFArchitecture.h"
 #include "target/os/baremetal/BareMetalOS.h"
 #include "target/core/CompositeTargetInfo.h"
 #include "codegen/CodeGen.h"
@@ -7,6 +7,7 @@
 #include "ir/IRBuilder.h"
 #include "ir/Module.h"
 #include <cassert>
+#include <array>
 #include <iostream>
 #include <sstream>
 
@@ -17,7 +18,7 @@ int main() {
 
     // Test 1: Architecture creation and register model verification
     {
-        target::EBPFArchitecture ebpfArch;
+        target::BPFArchitecture ebpfArch;
         assert(ebpfArch.getArch() == target::Arch::BPF);
         assert(ebpfArch.getPointerSize() == 8); // 8 bytes (64 bits)
 
@@ -44,7 +45,7 @@ int main() {
         auto* addInst = builder.createAdd(c10, c20);
         builder.createRet(addInst);
 
-        auto ebpfArch = std::make_unique<target::EBPFArchitecture>();
+        auto ebpfArch = std::make_unique<target::BPFArchitecture>();
         std::string err;
         assert(ebpfArch->validateLegality(*fnMain, err) == true);
 
@@ -62,7 +63,7 @@ int main() {
         assert(asmOutput.find("bpf_inst") != std::string::npos);
 
         // Test 64-bit eBPF binary instruction encoding into Assembler
-        auto ebpfArchBin = std::make_unique<target::EBPFArchitecture>();
+        auto ebpfArchBin = std::make_unique<target::BPFArchitecture>();
         auto targetInfoBin = std::make_unique<target::CompositeTargetInfo>(std::move(ebpfArchBin), std::make_unique<target::BareMetalOS>());
         codegen::CodeGen binCodeGen(module, std::move(targetInfoBin), nullptr);
         binCodeGen.emit(false);
@@ -70,6 +71,24 @@ int main() {
         const auto& codeBytes = binCodeGen.getAssembler().getCode();
         assert(!codeBytes.empty());
         assert(codeBytes.size() % 8 == 0 && "eBPF instructions must be 8-byte aligned");
+
+        // Independently interpret the straight-line subset emitted here.  This
+        // checks semantics (r0 == 30), rather than accepting any non-empty,
+        // instruction-aligned byte stream.
+        std::array<uint64_t, 11> regs{};
+        for (size_t pc = 0; pc < codeBytes.size(); pc += 8) {
+            const uint8_t op = codeBytes[pc];
+            const uint8_t dst = codeBytes[pc + 1] & 0xf;
+            int32_t imm = static_cast<int32_t>(
+                static_cast<uint32_t>(codeBytes[pc + 4]) |
+                (static_cast<uint32_t>(codeBytes[pc + 5]) << 8) |
+                (static_cast<uint32_t>(codeBytes[pc + 6]) << 16) |
+                (static_cast<uint32_t>(codeBytes[pc + 7]) << 24));
+            if (op == 0xb7) regs[dst] = static_cast<int64_t>(imm);
+            else if (op == 0x07) regs[dst] += static_cast<int64_t>(imm);
+            else assert(op == 0x95 && "unexpected opcode in arithmetic smoke program");
+        }
+        assert(regs[0] == 30 && "encoded eBPF program must return 10 + 20");
 
         // Verify eBPF exit instruction (0x95) encoded at end
         assert(codeBytes[codeBytes.size() - 8] == 0x95 && "Final instruction must be BPF_EXIT (0x95)");
@@ -91,7 +110,7 @@ int main() {
         builder.createFAdd(c1, c1);
         builder.createRet(nullptr);
 
-        target::EBPFArchitecture ebpfArch;
+        target::BPFArchitecture ebpfArch;
         std::string errMsg;
         bool legal = ebpfArch.validateLegality(*fnReject, errMsg);
         assert(!legal && "Floating-point eBPF programs must be rejected!");

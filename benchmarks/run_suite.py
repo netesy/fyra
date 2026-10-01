@@ -81,7 +81,17 @@ def analyze_assembly(asm_file):
             elif 'xmm' in line:
                 max_vector_width = max(max_vector_width, 128)
 
-            if op.startswith(vector_op_prefixes) and op not in ('var', 'val'):
+            # Non-x86 vector spellings: AArch64 NEON, RISC-V V, and WASM SIMD.
+            non_x86_vector = bool(
+                re.search(r'\bv(?:mm)?\d+\.(?:16b|8b|8h|4h|4s|2s|2d)\b', line) or
+                re.search(r'\bv(?:setvli|le\d+|se\d+|add|sub|mul|div|and|or|xor)\.', op) or
+                re.search(r'\b(?:i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\.', line)
+            )
+            if non_x86_vector:
+                vector_instrs += 1
+                max_vector_width = max(max_vector_width, 128)
+
+            if not non_x86_vector and op.startswith(vector_op_prefixes) and op not in ('var', 'val'):
                 vector_instrs += 1
 
             if op in ('call', 'callq'):
@@ -239,6 +249,7 @@ def main():
         ]
 
         target_list = [t.strip() for t in args.targets.split(",") if t.strip()]
+        target_metrics = {}
 
         for target_triple in target_list:
             t_sanitized = target_triple.replace("-", "_")
@@ -247,8 +258,10 @@ def main():
             t_o2_s_f = t_o2_s.replace('\\', '/')
             t_scalar_s_f = t_scalar_s.replace('\\', '/')
 
-            cmd_o2 = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_o2_s_f} -O2"
-            cmd_scalar = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_scalar_s_f} -O2 --disable-slp"
+            # Hold loop unrolling constant so this harness isolates SLP and
+            # e-graph effects; unrolling has dedicated semantic tests.
+            cmd_o2 = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_o2_s_f} -O2 --no-unroll"
+            cmd_scalar = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_scalar_s_f} -O2 --no-unroll --disable-slp"
 
             rc1, stdout1, stderr1 = run_cmd(cmd_o2, timeout=args.timeout)
             if rc1 != 0:
@@ -262,22 +275,26 @@ def main():
 
             t_o2_s_real = t_o2_s + ".s" if os.path.exists(t_o2_s + ".s") else (t_o2_s + ".wat" if os.path.exists(t_o2_s + ".wat") else t_o2_s)
             asm_data = analyze_assembly(t_o2_s_real)
+            target_metrics[target_triple] = asm_data
             print(f"  [{target_triple:<15}] Output verified | Instrs: {asm_data['total']:<4} | Loads: {asm_data['loads']:<3} | Stores: {asm_data['stores']:<3} | VecInstrs: {asm_data['vector_instrs']}")
 
         fyra_o1_s = os.path.join(out_dir, "fyra_o1.s")
         fyra_o2_s = os.path.join(out_dir, "fyra_o2.s")
         fyra_scalar_s = os.path.join(out_dir, "fyra_scalar.s")
+        fyra_no_egraph_s = os.path.join(out_dir, "fyra_no_egraph.s")
         fyra_exec = os.path.join(out_dir, "fyra_exec")
         fyra_scalar_exec = os.path.join(out_dir, "fyra_scalar_exec")
 
         fyra_o1_s_f = fyra_o1_s.replace('\\', '/')
         fyra_o2_s_f = fyra_o2_s.replace('\\', '/')
         fyra_scalar_s_f = fyra_scalar_s.replace('\\', '/')
+        fyra_no_egraph_s_f = fyra_no_egraph_s.replace('\\', '/')
 
         commands += [
-            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o1_s_f} -O1",
-            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o2_s_f} -O2",
-            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_scalar_s_f} -O2 --disable-slp",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o1_s_f} -O1 --no-unroll",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o2_s_f} -O2 --no-unroll",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_scalar_s_f} -O2 --no-unroll --disable-slp",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_no_egraph_s_f} -O2 --no-unroll --disable-egraph",
         ]
         for command in commands:
             t0 = time.time()
@@ -292,6 +309,7 @@ def main():
         fyra_o1_s = fyra_o1_s + ".s" if os.path.exists(fyra_o1_s + ".s") else fyra_o1_s
         fyra_o2_s = fyra_o2_s + ".s" if os.path.exists(fyra_o2_s + ".s") else fyra_o2_s
         fyra_scalar_s = fyra_scalar_s + ".s" if os.path.exists(fyra_scalar_s + ".s") else fyra_scalar_s
+        fyra_no_egraph_s = fyra_no_egraph_s + ".s" if os.path.exists(fyra_no_egraph_s + ".s") else fyra_no_egraph_s
 
         harness_c = os.path.join(BENCHMARKS_DIR, "harness.c")
         harness_c_f = harness_c.replace('\\', '/')
@@ -320,6 +338,7 @@ def main():
         clang_asm = analyze_assembly(clang_s)
         fyra_asm = analyze_assembly(fyra_o2_s)
         fyra_scalar_asm = analyze_assembly(fyra_scalar_s)
+        fyra_no_egraph_asm = analyze_assembly(fyra_no_egraph_s)
 
         # Measure Execution Runtimes
         gcc_perf = measure_execution(gcc_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
@@ -355,6 +374,14 @@ def main():
             "fyra_reloads": fyra_asm["reloads"],
             "max_vector_width": fyra_asm["max_vector_width"]
         }
+        entry["egraph_enabled"] = True
+        entry["no_egraph_instrs"] = fyra_no_egraph_asm["total"]
+        entry["egraph_instr_reduction"] = fyra_no_egraph_asm["total"] - fyra_asm["total"]
+        for target_triple in target_list:
+            prefix = target_triple.replace("-", "_")
+            metrics = target_metrics[target_triple]
+            entry[f"{prefix}_vector_instrs"] = metrics["vector_instrs"]
+            entry[f"{prefix}_max_vector_width"] = metrics["max_vector_width"]
         results.append(entry)
 
         status = "PASSED" if correct else "FAILED"
@@ -398,6 +425,16 @@ def main():
     print(f" Geometric Mean Relative Performance (Fyra / Clang -O2) : {geo_perf:.1f}%")
     print(f" Geometric Mean Instruction Ratio    (Fyra / Clang -O2) : {geo_instr:.2f}x")
     print(f" Geometric Mean Memory Operations     (Fyra / Clang -O2) : {geo_mem:.2f}x")
+    no_egraph_total = sum(r["no_egraph_instrs"] for r in results)
+    egraph_total = sum(r["fyra_instrs"] for r in results)
+    egraph_reduction = no_egraph_total - egraph_total
+    egraph_percent = (100.0 * egraph_reduction / no_egraph_total) if no_egraph_total else 0.0
+    print(f" E-graph O2 Instruction Reduction                     : {egraph_reduction} ({egraph_percent:.1f}%)")
+    for target_triple in [t.strip() for t in args.targets.split(",") if t.strip()]:
+        prefix = target_triple.replace("-", "_")
+        vector_total = sum(r[f"{prefix}_vector_instrs"] for r in results)
+        max_width = max(r[f"{prefix}_max_vector_width"] for r in results)
+        print(f" Vector Evidence {target_triple:<28}: {vector_total} instructions, {max_width}b max")
     print("==========================================================================")
     return 0
 

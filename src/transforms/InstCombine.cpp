@@ -34,6 +34,16 @@ bool InstCombinePass::performTransformation(ir::Function& func) {
             if (!inst) { ++it; continue; }
 
             auto opc = inst->getOpcode();
+            // Control-flow operands include BasicBlock values, not arithmetic
+            // expressions.  Never run scalar identity matching over terminators:
+            // apart from being pointless, an erased/reordered CFG value can be
+            // mistaken for a foldable data operand and invalidate the edge.
+            if (opc == ir::Instruction::Ret || opc == ir::Instruction::Br ||
+                opc == ir::Instruction::Jmp || opc == ir::Instruction::Jnz ||
+                opc == ir::Instruction::Jz) {
+                ++it;
+                continue;
+            }
             size_t numOps = inst->getOperands().size();
             ir::Value* lhs = numOps > 0 && inst->getOperands()[0] ? inst->getOperands()[0]->get() : nullptr;
             ir::Value* rhs = numOps > 1 && inst->getOperands()[1] ? inst->getOperands()[1]->get() : nullptr;

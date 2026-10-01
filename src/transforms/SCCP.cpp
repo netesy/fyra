@@ -921,8 +921,13 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
     }
 
     if (op == ir::Instruction::Jmp) {
-        ir::BasicBlock* target = static_cast<ir::BasicBlock*>(instr->getOperands()[0]->get());
-        if (executableEdges.insert({instr->getParent(), target}).second) {
+        ir::BasicBlock* target = instr->getOperands().empty()
+            ? nullptr
+            : dynamic_cast<ir::BasicBlock*>(instr->getOperands()[0]->get());
+        // A malformed/unresolved CFG edge must never enter the block worklist.
+        // Validation reports it to the caller; SCCP simply cannot propagate
+        // reachability through it.
+        if (target && executableEdges.insert({instr->getParent(), target}).second) {
             blockWorklist.push_back(target);
         }
         return;

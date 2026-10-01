@@ -45,6 +45,12 @@ void SPIRVModule::addEntryPoint(uint32_t executionModel, uint32_t entryPointId, 
     entryPoints_.push_back(inst);
 }
 
+void SPIRVModule::addExecutionMode(uint32_t entryPointId, uint32_t mode, const std::vector<uint32_t>& literals) {
+    SPIRVInstruction inst{16, {entryPointId, mode}}; // OpExecutionMode
+    inst.operands.insert(inst.operands.end(), literals.begin(), literals.end());
+    executionModes_.push_back(std::move(inst));
+}
+
 void SPIRVModule::addInstruction(uint16_t opcode, const std::vector<uint32_t>& operands) {
     SPIRVInstruction inst;
     inst.opcode = opcode;
@@ -68,11 +74,25 @@ std::vector<uint32_t> SPIRVModule::encodeBinary() const {
         auto enc = inst.encode();
         words.insert(words.end(), enc.begin(), enc.end());
     }
+    for (const auto& inst : executionModes_) {
+        auto enc = inst.encode();
+        words.insert(words.end(), enc.begin(), enc.end());
+    }
     for (const auto& inst : memoryModelInsts_) {
         auto enc = inst.encode();
         words.insert(words.end(), enc.begin(), enc.end());
     }
+    // SPIR-V requires types and constants in the module's global declaration
+    // section, even when their ids are first requested while lowering a
+    // function.  Keep the lowering API simple, but serialize those declarations
+    // before every OpFunction.
     for (const auto& inst : instructions_) {
+        if (!((inst.opcode >= 19 && inst.opcode <= 52))) continue;
+        auto enc = inst.encode();
+        words.insert(words.end(), enc.begin(), enc.end());
+    }
+    for (const auto& inst : instructions_) {
+        if (inst.opcode >= 19 && inst.opcode <= 52) continue;
         auto enc = inst.encode();
         words.insert(words.end(), enc.begin(), enc.end());
     }

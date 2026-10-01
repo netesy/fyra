@@ -2213,6 +2213,10 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
                 dest = cg.getValueAsOperand(&i);
             }
             emitMov(cg, os, stackOp, dest, is32);
+            if (!i.hasPhysicalRegister()) {
+                const std::string result = cg.getValueAsOperand(&i);
+                if (result != dest) emitMov(cg, os, dest, result, is32);
+            }
             return;
         }
         ComplexAddress complexAddr = matchComplexAddress(cg, ptrVal);

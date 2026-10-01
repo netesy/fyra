@@ -315,7 +315,7 @@ public:
 
 ### BackendBuilder API
 
-`fyra::BackendBuilder` is the primary entry point for multi-architecture code generation, object creation, static/shared library generation, binary linking, WASM/WAT output, eBPF ELF binary emission, and SPIR-V compute module generation.
+`fyra::BackendBuilder` is the primary entry point for multi-architecture code generation, object creation, static/shared library generation, binary linking, WASM/WAT output, eBPF ELF emission with an encoded BPF `.text` section, and structured SPIR-V compute-module generation. Target legality failures (including floating-point eBPF instructions) are returned in `BuildResult::errors` before an artifact is written.
 
 ```cpp
 namespace fyra {

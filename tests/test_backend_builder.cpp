@@ -480,6 +480,13 @@ int main() {
         // ELF header e_machine at offset 0x12 is 247 (EM_BPF)
         uint16_t e_machine = bytes[0x12] | (bytes[0x13] << 8);
         assert(e_machine == 247 && "ELF e_machine must be EM_BPF (247)");
+        target::artifact::object::ObjectArtifact bpfObject;
+        auto bpfReader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+        assert(bpfReader && bpfReader->parse(bytes, bpfObject));
+        const auto* bpfText = bpfObject.findSection(".text");
+        assert(bpfText && bpfText->data.size() >= 16 && bpfText->data.size() % 8 == 0);
+        assert(bpfText->data[bpfText->data.size() - 8] == 0x95 &&
+               "normal BackendBuilder path must encode a BPF_EXIT instruction");
 
         // Test rejection of floating point in eBPF
         ir::Module fpMod("test_ebpf_fp", ctx);
@@ -512,17 +519,17 @@ int main() {
         ir::IRBuilder builder(ctx);
         builder.setModule(&module);
 
-        auto* i32 = ctx->getIntegerType(32);
-        ir::Function* fn = builder.createFunction("compute_kernel", i32);
+        ir::Function* fn = builder.createFunction("compute_kernel", ctx->getVoidType());
         ir::BasicBlock* entry = builder.createBasicBlock("entry", fn);
         builder.setInsertPoint(entry);
-        ir::Value* addVal = builder.createAdd(ctx->getConstantInt(i32, 100), ctx->getConstantInt(i32, 200));
-        builder.createRet(addVal);
+        builder.createRet(nullptr);
 
         fyra::BackendBuilder backend(module);
         backend.target("spirv-baremetal-bin");
+        backend.validate(false);
 
         fyra::BuildResult resSpirv = backend.emitObject("/tmp/test_compute.spv");
+        for (const auto& error : resSpirv.errors) std::cerr << "SPIR-V error: " << error << '\n';
         assert(resSpirv.success);
 
         std::ifstream f("/tmp/test_compute.spv", std::ios::binary);
@@ -533,6 +540,22 @@ int main() {
         // Verify SPIR-V magic number 0x07230203 (little-endian bytes: 0x03, 0x02, 0x23, 0x07)
         uint32_t magic = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
         assert(magic == 0x07230203 && "SPIR-V binary header magic number must be 0x07230203");
+        // Decode every structured instruction and require an exact end at EOF.
+        size_t word = 5;
+        bool sawEntryPoint = false, sawExecutionMode = false, sawFunction = false;
+        while (word < bytes.size() / 4) {
+            uint32_t first = static_cast<uint32_t>(bytes[word * 4]) |
+                (static_cast<uint32_t>(bytes[word * 4 + 1]) << 8) |
+                (static_cast<uint32_t>(bytes[word * 4 + 2]) << 16) |
+                (static_cast<uint32_t>(bytes[word * 4 + 3]) << 24);
+            const uint16_t count = first >> 16, opcode = first & 0xffff;
+            assert(count > 0 && word + count <= bytes.size() / 4);
+            sawEntryPoint |= opcode == 15;
+            sawExecutionMode |= opcode == 16;
+            sawFunction |= opcode == 54;
+            word += count;
+        }
+        assert(word == bytes.size() / 4 && sawEntryPoint && sawExecutionMode && sawFunction);
 
         std::cout << "Structured SPIR-V binary module generation test passed!" << std::endl;
     }

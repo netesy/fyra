@@ -105,6 +105,7 @@ void SPIRVArchitecture::emitFunctionPrologue(codegen::CodeGen& cg, ir::Function&
 
     module_.addInstruction(33, {fnTypeId, retType}); // OpTypeFunction
     module_.addEntryPoint(5, fnId, func.getName(), {}); // OpEntryPoint 5 = GLCompute
+    module_.addExecutionMode(fnId, 17, {1, 1, 1}); // LocalSize 1 1 1
 
     module_.addInstruction(54, {retType, fnId, 0, fnTypeId}); // OpFunction
 

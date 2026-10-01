@@ -13,6 +13,20 @@
 
 namespace transforms {
 
+namespace {
+ir::Instruction* findTerminator(ir::BasicBlock* block) {
+    if (!block) return nullptr;
+    for (auto it = block->getInstructions().rbegin(); it != block->getInstructions().rend(); ++it) {
+        if (!*it) continue;
+        const auto op = (*it)->getOpcode();
+        if (op == ir::Instruction::Ret || op == ir::Instruction::Jmp ||
+            op == ir::Instruction::Jnz || op == ir::Instruction::Jz ||
+            op == ir::Instruction::Br) return it->get();
+    }
+    return nullptr;
+}
+} // namespace
+
 bool DeadInstructionElimination::performTransformation(ir::Function& func) {
     bool changed = false;
     bool iteration_changed = true;
@@ -75,8 +89,7 @@ bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) 
         ir::BasicBlock* bb = it->get();
         if (reachable.find(bb) == reachable.end()) {
             // Before removing, update PHI nodes in successors
-            if (!bb->getInstructions().empty()) {
-                ir::Instruction* term = bb->getInstructions().back().get();
+            if (ir::Instruction* term = findTerminator(bb)) {
                 for (auto& op : term->getOperands()) {
                     if (auto* succ = dynamic_cast<ir::BasicBlock*>(op->get())) {
                         for (auto& instr : succ->getInstructions()) {
@@ -210,8 +223,7 @@ void DeadInstructionElimination::findReachableBlocks(ir::Function& func, std::se
         worklist.pop_back();
         if (!curr) continue;
         
-        if (curr->getInstructions().empty()) continue;
-        ir::Instruction* term = curr->getInstructions().back().get();
+        ir::Instruction* term = findTerminator(curr);
         if (!term) continue;
         
         for (auto& op : term->getOperands()) {

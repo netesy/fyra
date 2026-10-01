@@ -14,6 +14,7 @@
 #include "target/artifact/executable/PeImage.h"
 #include "target/architecture/wasm32/WasmModule.h"
 #include "target/architecture/spirv/SPIRVArchitecture.h"
+#include "target/architecture/bpf/BPFArchitecture.h"
 #include "target/core/CompositeTargetInfo.h"
 #include "target/artifact/apk/APKArtifact.h"
 #include "target/artifact/executable/FlatBinaryWriter.h"
@@ -110,6 +111,14 @@ BackendBuilder& BackendBuilder::enableLoopVectorization(bool enabled) {
 BackendBuilder& BackendBuilder::enableLoopUnroll(bool enabled) {
     if (config_.enableLoopUnroll != enabled) {
         config_.enableLoopUnroll = enabled;
+        invalidatePrepared();
+    }
+    return *this;
+}
+
+BackendBuilder& BackendBuilder::enableEGraph(bool enabled) {
+    if (config_.enableEGraph != enabled) {
+        config_.enableEGraph = enabled;
         invalidatePrepared();
     }
     return *this;
@@ -212,6 +221,17 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
 
     for (const auto& feat : targetFeatures_) {
         targetInfo->parseTargetFeatures(feat);
+    }
+    if (auto* composite = dynamic_cast<target::CompositeTargetInfo*>(targetInfo.get())) {
+        if (auto* bpf = dynamic_cast<target::BPFArchitecture*>(composite->getArchitecture())) {
+            for (auto& function : preparedModule_->getFunctions()) {
+                std::string error;
+                if (!bpf->validateLegality(*function, error)) {
+                    result.errors.push_back("eBPF legality error in '" + function->getName() + "': " + error);
+                    return artifact;
+                }
+            }
+        }
     }
     codegen::CodeGen codeGenerator(*preparedModule_, std::move(targetInfo), nullptr);
     codeGenerator.emit(false);
