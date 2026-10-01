@@ -4199,23 +4199,36 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         std::string scratchVec = (abi == X64ABI::Windows) ? "xmm5" : "%xmm15";
         std::string scratchYmm = (abi == X64ABI::Windows) ? "ymm5" : "%ymm15";
 
-        if (totalBitWidth == 256) {
-            std::string realDst = dstIsMem ? scratchYmm : toYmmReg(dst);
+        if (totalBitWidth <= 256) {
+            std::string realDst = dstIsMem ? (totalBitWidth == 256 ? scratchYmm : scratchVec)
+                                          : (totalBitWidth == 256 ? toYmmReg(dst) : dst);
             std::string realOp0 = op0;
             std::string realOp1 = op1;
 
             if (op0IsMem && op1IsMem) {
-                *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
-                realOp0 = scratchYmm;
+                if (totalBitWidth == 256) {
+                    *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
+                    realOp0 = scratchYmm;
+                } else {
+                    *os << "  movdqu " << realOp0 << ", " << scratchVec << "\n";
+                    realOp0 = scratchVec;
+                }
             } else if (op0IsMem && isCommutative) {
                 std::swap(realOp0, realOp1);
             } else if (op0IsMem) {
-                *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
-                realOp0 = scratchYmm;
+                if (totalBitWidth == 256) {
+                    *os << "  vmovdqu " << toYmmReg(realOp0) << ", " << scratchYmm << "\n";
+                    realOp0 = scratchYmm;
+                } else {
+                    *os << "  movdqu " << realOp0 << ", " << scratchVec << "\n";
+                    realOp0 = scratchVec;
+                }
             }
 
-            realOp0 = toYmmReg(realOp0);
-            realOp1 = toYmmReg(realOp1);
+            if (totalBitWidth == 256) {
+                realOp0 = toYmmReg(realOp0);
+                realOp1 = toYmmReg(realOp1);
+            }
 
             if (!simdInst.empty() && simdInst[0] != 'v') simdInst = "v" + simdInst;
             if (abi == X64ABI::Windows) {
@@ -4225,7 +4238,11 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             }
 
             if (dstIsMem) {
-                *os << "  vmovdqu " << scratchYmm << ", " << toYmmReg(dst) << "\n";
+                if (totalBitWidth == 256) {
+                    *os << "  vmovdqu " << scratchYmm << ", " << toYmmReg(dst) << "\n";
+                } else {
+                    *os << "  movdqu " << scratchVec << ", " << dst << "\n";
+                }
             }
         } else if (totalBitWidth == 512) {
             dst = toZmmReg(dst);
@@ -4239,22 +4256,6 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             } else {
                 *os << "  vmovdqu64 " << op0 << ", " << dst << "\n";
                 *os << "  " << simdInst << " " << op1 << ", " << dst << "\n";
-            }
-        } else {
-            std::string realDst = dstIsMem ? scratchVec : dst;
-            std::string realOp0 = op0;
-            std::string realOp1 = op1;
-
-            if (realDst != realOp0) {
-                if (isCommutative && realDst == realOp1) {
-                    std::swap(realOp0, realOp1);
-                } else {
-                    *os << "  movdqu " << realOp0 << ", " << realDst << "\n";
-                }
-            }
-            *os << "  " << simdInst << " " << realOp1 << ", " << realDst << "\n";
-            if (dstIsMem) {
-                *os << "  movdqu " << scratchVec << ", " << dst << "\n";
             }
         }
     }

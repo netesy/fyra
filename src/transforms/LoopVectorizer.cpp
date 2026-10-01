@@ -1234,17 +1234,15 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
 
         auto buildVectorConst = [&](uint32_t val0, uint32_t valStep) -> ir::VectorInstruction* {
-            ir::Instruction* buf = builder.createAlloc(ctx->getConstantInt(i64Ty, plan.vectorWidthBits / 8), i64Ty);
-            ir::Value* lanePtr = buf;
-            for (unsigned k = 0; k < plan.vectorFactor; ++k) {
-                builder.createStore(ctx->getConstantInt(i32Ty, val0 + k * valStep), lanePtr);
-                if (k + 1 < plan.vectorFactor)
-                    lanePtr = builder.createAdd(lanePtr, ctx->getConstantInt(i64Ty, 4));
+            if (valStep == 0) {
+                return builder.createVBroadcast(vecTy, ctx->getConstantInt(i32Ty, val0));
             }
-            // Scalar Add is lowered destructively, so recover the base from the
-            // final running pointer instead of keeping the original SSA value
-            // live across all address updates.
-            return builder.createVLoad(vecTy, buf);
+            ir::Value* vec = builder.createVBroadcast(vecTy, ctx->getConstantInt(i32Ty, val0));
+            for (unsigned k = 1; k < plan.vectorFactor; ++k) {
+                vec = builder.createVInsert(vec, ctx->getConstantInt(i32Ty, val0 + k * valStep),
+                                            ctx->getConstantInt(i32Ty, k));
+            }
+            return dynamic_cast<ir::VectorInstruction*>(vec);
         };
 
         std::map<ir::Value*, ir::Value*> predicationConstants;
@@ -1287,8 +1285,6 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             vStep = buildVectorConst(plan.vectorFactor * plan.stepConst, 0);
             if (!plan.isRegisterWideningReduction)
                 vScale = buildVectorConst((uint32_t)mulFactor, 0);
-            if (plan.isRegisterWideningReduction)
-                registerLaneBuffer = builder.createAlloc(ctx->getConstantInt(i64Ty, 16), i64Ty);
         }
         if (plan.isRegisterWideningReduction) {
             auto* extension = dynamic_cast<ir::Instruction*>(plan.reductions[0].scalarTerm);
@@ -1298,8 +1294,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 if (auto* constant = dynamic_cast<ir::ConstantInt*>(value)) {
                     ir::VectorInstruction* loaded = buildVectorConst(
                         static_cast<uint32_t>(constant->getValue()), 0);
-                    registerConstants[value] = loaded->getOperands()[0]->get();
-                    loaded->getParent()->getInstructions().pop_back();
+                    registerConstants[value] = loaded;
                     return;
                 }
                 if (auto* inst = dynamic_cast<ir::Instruction*>(value))
@@ -1445,7 +1440,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             ir::Value* vectorOne = nullptr;
             auto affineInduction = [&](uint32_t offset) -> ir::Value* {
                 if (!oneAddress || offset > 32) return nullptr;
-                if (!vectorOne) vectorOne = builder.createVLoad(vecTy, oneAddress);
+                if (!vectorOne) vectorOne = oneAddress;
                 for (uint32_t laneOffset = 1; laneOffset <= offset; ++laneOffset) {
                     if (!affineInductions.count(laneOffset))
                         affineInductions[laneOffset] = builder.createVAdd(
@@ -1456,7 +1451,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             std::function<ir::Value*(ir::Value*)> vectorize = [&](ir::Value* value) -> ir::Value* {
                 if (values.count(value)) return values[value];
                 if (registerConstants.count(value))
-                    return builder.createVLoad(vecTy, registerConstants[value]);
+                    return registerConstants[value];
                 auto* inst = dynamic_cast<ir::Instruction*>(value);
                 if (!inst || inst->getOperands().size() != 2) return nullptr;
                 if (inst->getOpcode() == ir::Instruction::Add) {
@@ -1483,14 +1478,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             auto* extension = dynamic_cast<ir::Instruction*>(plan.reductions[0].scalarTerm);
             ir::Value* expression = extension ? extension->getOperands()[0]->get() : nullptr;
             ir::Value* vectorExpression = vectorize(expression);
-            builder.createVStore(vectorExpression, registerLaneBuffer);
             ir::Value* next = rawPhiRegisterSum;
             for (unsigned lane = 0; lane < 4; ++lane) {
-                ir::Value* bufCopy = builder.createCopy(registerLaneBuffer);
-                ir::Value* address = lane == 0 ? bufCopy
-                    : static_cast<ir::Value*>(builder.createAdd(bufCopy,
-                        ctx->getConstantInt(i64Ty, lane * 4)));
-                ir::Instruction* lane32 = builder.createLoads(address);
+                ir::Value* lane32 = builder.createVExtract(vectorExpression, ctx->getConstantInt(i32Ty, lane));
                 ir::Instruction* lane64 = builder.createExtSW(lane32, i64Ty);
                 next = builder.createAdd(next, lane64);
             }
@@ -1772,13 +1762,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             vectorPathSum = rawPhiRegisterSum;
         } else if (plan.isWideningReduction && rawPhiVSum0 && rawPhiVSum1) {
             ir::VectorInstruction* vCombined = builder.createVAdd(rawPhiVSum0, rawPhiVSum1);
-            ir::Instruction* redBuf = builder.createAlloc(ctx->getConstantInt(i64Ty, 32), i64Ty);
-            builder.createVStore(vCombined, redBuf);
-
-            ir::Instruction* l0 = builder.createLoadl(redBuf);
-            ir::Instruction* l1 = builder.createLoadl(builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 8)));
-            ir::Instruction* l2 = builder.createLoadl(builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 16)));
-            ir::Instruction* l3 = builder.createLoadl(builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, 24)));
+            ir::Instruction* l0 = builder.createVExtract(vCombined, ctx->getConstantInt(i32Ty, 0));
+            ir::Instruction* l1 = builder.createVExtract(vCombined, ctx->getConstantInt(i32Ty, 1));
+            ir::Instruction* l2 = builder.createVExtract(vCombined, ctx->getConstantInt(i32Ty, 2));
+            ir::Instruction* l3 = builder.createVExtract(vCombined, ctx->getConstantInt(i32Ty, 3));
 
             ir::Instruction* s01 = builder.createAdd(l0, l1);
             ir::Instruction* s23 = builder.createAdd(l2, l3);
@@ -1786,24 +1773,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
             vectorPathSum = builder.createAdd(reductionInit, sumRed64);
         } else if (!plan.reductions.empty() && rawPhiVSum) {
-            ir::Instruction* redBuf = builder.createAlloc(ctx->getConstantInt(i64Ty, plan.vectorWidthBits / 8), i64Ty);
-            builder.createVStore(rawPhiVSum, redBuf);
-
-            const bool isFP = plan.reductions[0].isFloatingPoint;
-            const bool isFloat = plan.reductions[0].scalarType && plan.reductions[0].scalarType->isFloatTy();
-
-            auto loadLane = [&](ir::Value* ptr) -> ir::Instruction* {
-                if (isFP) {
-                    return isFloat ? builder.createLoads(ptr) : builder.createLoadd(ptr);
-                }
-                return builder.createLoaduw(ptr);
-            };
-
-            const size_t elemByteSize = isFP ? (isFloat ? 4 : 8) : 4;
-            sumReduced = loadLane(redBuf);
+            sumReduced = builder.createVExtract(rawPhiVSum, ctx->getConstantInt(i32Ty, 0));
             for (unsigned lane = 1; lane < plan.vectorFactor; ++lane) {
-                ir::Instruction* pOff = builder.createAdd(redBuf, ctx->getConstantInt(i64Ty, lane * elemByteSize));
-                ir::Instruction* laneVal = loadLane(pOff);
+                ir::Instruction* laneVal = builder.createVExtract(
+                    rawPhiVSum, ctx->getConstantInt(i32Ty, lane));
                 sumReduced = createScalarReduction(sumReduced, laneVal,
                                                    plan.reductions[0].kind);
             }
