@@ -14,8 +14,13 @@ import argparse
 BENCHMARKS_DIR = os.path.dirname(os.path.abspath(__file__))
 CORPUS_C_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "c")
 CORPUS_FYRA_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "fyra")
-BUILD_DIR = os.path.join(BENCHMARKS_DIR, "..", "build")
-FYRA_BIN = os.path.join(BUILD_DIR, "fyra_compiler.exe" if os.path.exists(os.path.join(BUILD_DIR, "fyra_compiler.exe")) else "fyra_compiler")
+BUILD_DIR = os.path.abspath(os.path.join(BENCHMARKS_DIR, "..", "build"))
+# Choose binary name based on OS
+if sys.platform.startswith("win"):
+    binary_name = "fyra_compiler.exe"
+else:
+    binary_name = "fyra_compiler"
+FYRA_BIN = os.path.join(BUILD_DIR, binary_name)
 
 import tempfile
 msys_tmp = "C:/msys64/tmp" if os.path.exists("C:/msys64/tmp") else tempfile.gettempdir()
@@ -183,7 +188,12 @@ def verify_static(exec_path):
 def parse_args():
     parser = argparse.ArgumentParser(description="Fyra Backend — Multi-Category Benchmark Harness")
     parser.add_argument("--filter", type=str, default=os.environ.get("FYRA_BENCH_FILTER", ""), help="Comma-separated list of benchmarks to run")
-    parser.add_argument("--targets", type=str, default=os.environ.get("FYRA_BENCH_TARGETS", "x64-linux,aarch64-linux,riscv64-linux,wasm32-wasi"), help="Comma-separated list of target architectures (x64-linux, aarch64-linux, riscv64-linux, wasm32-wasi)")
+    # Determine a sensible default target based on the host OS
+    if sys.platform.startswith("win"):
+        default_target = "x64-windows"
+    else:
+        default_target = "x64-linux"
+    parser.add_argument("--targets", type=str, default=os.environ.get("FYRA_BENCH_TARGETS", default_target), help="Comma-separated list of target architectures (x64-windows, x64-linux, aarch64-linux, riscv64-linux, wasm32-wasi …)")
     parser.add_argument("--samples", type=int, default=int(os.environ.get("FYRA_BENCH_SAMPLES", "15")), help="Number of timing samples per benchmark")
     parser.add_argument("--warmup", type=int, default=int(os.environ.get("FYRA_BENCH_WARMUP", "2")), help="Number of warmup executions per benchmark")
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("FYRA_BENCH_TIMEOUT", "30")), help="Execution timeout in seconds")
