@@ -269,13 +269,24 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
             if (cfg_simplifier.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
-            if (optLevel >= 2 && lsr.run(*func)) optimization_changed = true;
-            if (optLevel >= 2 && config.enableLoopVectorization && loop_vectorizer.run(*func)) optimization_changed = true;
-            if (optLevel >= 2 && config.enableSLP && slp_vectorizer.run(*func)) optimization_changed = true;
-            if (optLevel >= 2 && config.enableLoopUnroll && loop_unroll.run(*func)) optimization_changed = true;
             if (enhanced_dce.run(*func)) optimization_changed = true;
             iteration++;
         }
+
+        // Structural loop transforms deliberately run once, after scalar
+        // canonicalization reaches a fixed point.  Re-running the vectorizer
+        // over its own vector loop, scalar epilogue, and versioned fallback can
+        // duplicate preheaders and runtime checks.  Vectorize canonical affine
+        // addresses first; LSR then optimizes only the loops left scalar.
+        if (optLevel >= 2 && config.enableLoopVectorization)
+            loop_vectorizer.run(*func);
+        if (optLevel >= 2)
+            lsr.run(*func);
+        if (optLevel >= 2 && config.enableSLP)
+            slp_vectorizer.run(*func);
+        if (optLevel >= 2 && config.enableLoopUnroll)
+            loop_unroll.run(*func);
+        enhanced_dce.run(*func);
         if (!isWasm) {
             transforms::InstructionScheduler::run(*func);
         }

@@ -8,6 +8,7 @@
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
 #include "ir/PhiNode.h"
+#include "transforms/AffineAnalysis.h"
 #include <iostream>
 #include <ostream>
 #include <cstring>
@@ -1482,17 +1483,11 @@ void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
     }
 
     bool is32 = is32BitType(i.getType());
-    std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-    std::string movOp = is32 ? "movl" : "movq";
-
     if (auto* os = cg.getTextStream()) {
-        if (abi == X64ABI::Windows) {
-            *os << "  mov " << rax << ", " << srcOp << "\n";
-            *os << "  mov " << destOp << ", " << rax << "\n";
-        } else {
-            emitMov(cg, os, srcOp, rax, is32);
-            emitMov(cg, os, rax, destOp, is32);
-        }
+        // emitMov already handles register, stack, immediate, and the
+        // memory-to-memory scratch case.  Routing every copy through RAX added
+        // two dependency-forming moves and could clobber a live allocated RAX.
+        emitMov(cg, os, srcOp, destOp, is32);
     } else {
         emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
         emitStoreResult(cg, i, 0);
@@ -4170,6 +4165,33 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                               i.getOpcode() == ir::Instruction::VXor);
 
         unsigned totalBitWidth = elemTy->getSize() * 8 * numElem;
+
+        // Packed shifts by a scalar constant use the immediate form.  Treating
+        // the amount like a second vector register produces invalid operands
+        // (and used to let a scalar value reach VStore when loop vectorization
+        // was enabled in the production pipeline).
+        if (i.getOpcode() == ir::Instruction::VShl) {
+            auto* amount = dynamic_cast<ir::ConstantInt*>(
+                i.getOperands().size() > 1 ? i.getOperands()[1]->get() : nullptr);
+            if (!amount) throw std::runtime_error("VShl requires a constant shift amount");
+            const uint64_t shift = amount->getValue();
+            if (totalBitWidth == 256) {
+                std::string source = toYmmReg(op0);
+                std::string target = toYmmReg(dst);
+                if (abi == X64ABI::Windows)
+                    *os << "  vpslld " << target << ", " << source << ", " << shift << "\n";
+                else
+                    *os << "  vpslld $" << shift << ", " << source << ", " << target << "\n";
+            } else {
+                if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
+                if (abi == X64ABI::Windows)
+                    *os << "  pslld " << dst << ", " << shift << "\n";
+                else
+                    *os << "  pslld $" << shift << ", " << dst << "\n";
+            }
+            return;
+        }
+
         bool op0IsMem = !isXmmRegisterName(op0) && !isYmmRegisterName(op0);
         bool op1IsMem = !isXmmRegisterName(op1) && !isYmmRegisterName(op1);
         bool dstIsMem = !isXmmRegisterName(dst) && !isYmmRegisterName(dst);
@@ -4299,71 +4321,21 @@ ComplexAddress X64Architecture::matchComplexAddress(CodeGen& cg, ir::Value* val)
         return v;
     };
 
-    auto* inst = dynamic_cast<ir::Instruction*>(val);
-    if (!inst) return result;
-
-    int64_t disp = 0;
-    ir::Value* coreAddr = val;
-
-    if (inst->getOpcode() == ir::Instruction::Add && inst->getOperands().size() == 2) {
-        ir::Value* op0 = inst->getOperands()[0]->get();
-        ir::Value* op1 = inst->getOperands()[1]->get();
-        if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) {
-            disp = static_cast<int64_t>(c1->getValue());
-            coreAddr = op0;
-        } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(op0)) {
-            disp = static_cast<int64_t>(c0->getValue());
-            coreAddr = op1;
-        }
-    }
-
+    transforms::AffineAnalysis affine;
+    const auto expression = affine.analyze(val);
+    if (!expression.isValid || expression.terms.empty() || expression.terms.size() > 2)
+        return result;
+    const int64_t disp = expression.constant;
     ir::Value* baseVal = nullptr;
     ir::Value* indexVal = nullptr;
     int scale = 1;
-
-    auto* coreInst = dynamic_cast<ir::Instruction*>(coreAddr);
-    if (coreInst && coreInst->getOpcode() == ir::Instruction::Add && coreInst->getOperands().size() == 2) {
-        ir::Value* op0 = coreInst->getOperands()[0]->get();
-        ir::Value* op1 = coreInst->getOperands()[1]->get();
-
-        auto* mul0 = dynamic_cast<ir::Instruction*>(unwrapExt(op0));
-        auto* mul1 = dynamic_cast<ir::Instruction*>(unwrapExt(op1));
-
-        if (mul1 && mul1->getOpcode() == ir::Instruction::Mul && mul1->getOperands().size() == 2) {
-            baseVal = op0;
-            ir::Value* m0 = mul1->getOperands()[0]->get();
-            ir::Value* m1 = mul1->getOperands()[1]->get();
-            if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
-                indexVal = m0; scale = static_cast<int>(c1->getValue());
-            } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
-                indexVal = m1; scale = static_cast<int>(c0->getValue());
-            }
-        } else if (mul0 && mul0->getOpcode() == ir::Instruction::Mul && mul0->getOperands().size() == 2) {
-            baseVal = op1;
-            ir::Value* m0 = mul0->getOperands()[0]->get();
-            ir::Value* m1 = mul0->getOperands()[1]->get();
-            if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
-                indexVal = m0; scale = static_cast<int>(c1->getValue());
-            } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
-                indexVal = m1; scale = static_cast<int>(c0->getValue());
-            }
-        } else if (disp != 0) {
-            baseVal = coreAddr;
-            indexVal = nullptr;
-            scale = 1;
-        } else {
-            baseVal = op0;
-            indexVal = op1;
-            scale = 1;
-        }
-    } else if (coreInst && coreInst->getOpcode() == ir::Instruction::Mul && coreInst->getOperands().size() == 2) {
-        ir::Value* m0 = coreInst->getOperands()[0]->get();
-        ir::Value* m1 = coreInst->getOperands()[1]->get();
-        if (auto* c1 = dynamic_cast<ir::ConstantInt*>(m1)) {
-            indexVal = m0; scale = static_cast<int>(c1->getValue());
-        } else if (auto* c0 = dynamic_cast<ir::ConstantInt*>(m0)) {
-            indexVal = m1; scale = static_cast<int>(c0->getValue());
-        }
+    for (const auto& term : expression.terms) {
+        ir::Value* termValue = term.rawValue ? term.rawValue : term.value;
+        if (term.coefficient == 1 && !baseVal) baseVal = termValue;
+        else if (!indexVal && term.coefficient > 0 && term.coefficient <= 8) {
+            indexVal = termValue;
+            scale = static_cast<int>(term.coefficient);
+        } else return result;
     }
 
     if (scale != 1 && scale != 2 && scale != 4 && scale != 8) return result;

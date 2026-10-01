@@ -296,6 +296,11 @@ target_link_libraries(test_scev PRIVATE fyra)
 add_test(NAME SCEVTest COMMAND test_scev)
 set_tests_properties(SCEVTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(test_affine_analysis test_affine_analysis.cpp)
+target_link_libraries(test_affine_analysis PRIVATE fyra)
+add_test(NAME AffineAnalysisTest COMMAND test_affine_analysis)
+set_tests_properties(AffineAnalysisTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_closed_form_reduction test_closed_form_reduction.cpp)
 target_link_libraries(test_closed_form_reduction PRIVATE fyra)
 add_test(NAME ClosedFormReductionTest COMMAND test_closed_form_reduction)

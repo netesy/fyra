@@ -1,6 +1,7 @@
 #include "transforms/ScalarEvolution.h"
 #include "transforms/CFGBuilder.h"
 #include "transforms/DominatorTree.h"
+#include "transforms/AffineAnalysis.h"
 #include "ir/IRBuilder.h"
 #include "ir/Constant.h"
 #include "ir/Instruction.h"
@@ -40,67 +41,52 @@ static ir::Value* stripExtensions(ir::Value* val, ir::Instruction::Opcode* detec
     return val;
 }
 
-static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff, int64_t& constAdd,
-                            ir::Instruction::Opcode& detectedExt, uint32_t& srcBits) {
-    val = stripExtensions(val, &detectedExt, &srcBits);
-    if (!val) return false;
+static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff,
+                            int64_t& constAdd, ir::Instruction::Opcode& detectedExt,
+                            uint32_t& srcBits) {
+    if (!val || !indVarPhi) return false;
 
-    if (val == indVarPhi) {
-        coeff += 1;
-        return true;
-    }
+    AffineAnalysis affine;
+    const auto expression = affine.analyze(val);
+    if (!expression.isValid) return false;
 
-    if (auto* ci = dynamic_cast<ir::ConstantInt*>(val)) {
-        constAdd += ci->getValue();
-        return true;
-    }
-
-    if (auto* inst = dynamic_cast<ir::Instruction*>(val)) {
-        ir::Instruction::Opcode op = inst->getOpcode();
-        if (op == ir::Instruction::Mul) {
-            if (inst->getOperands().size() >= 2 && inst->getOperands()[0] && inst->getOperands()[1]) {
-                ir::Value* op0 = stripExtensions(inst->getOperands()[0]->get(), &detectedExt, &srcBits);
-                ir::Value* op1 = stripExtensions(inst->getOperands()[1]->get(), &detectedExt, &srcBits);
-
-                if (op0 == indVarPhi) {
-                    if (auto* c1 = dynamic_cast<ir::ConstantInt*>(op1)) {
-                        coeff += c1->getValue();
-                        return true;
-                    }
-                } else if (op1 == indVarPhi) {
-                    if (auto* c0 = dynamic_cast<ir::ConstantInt*>(op0)) {
-                        coeff += c0->getValue();
-                        return true;
-                    }
-                }
-            }
-        } else if (op == ir::Instruction::Shl) {
-            // EGraph and InstCombine canonicalize multiplication by a power of
-            // two to a shift before SCEV runs.  Preserve the linear recurrence
-            // information instead of making that canonicalization hide it.
-            if (inst->getOperands().size() >= 2 && inst->getOperands()[0] && inst->getOperands()[1]) {
-                ir::Value* shifted = stripExtensions(inst->getOperands()[0]->get(), &detectedExt, &srcBits);
-                auto* amount = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get());
-                if (shifted == indVarPhi && amount) {
-                    const int64_t shift = amount->getValue();
-                    if (shift >= 0 && shift < 63) {
-                        const uint64_t scale = uint64_t{1} << static_cast<unsigned>(shift);
-                        if (scale <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-                            coeff += static_cast<int64_t>(scale);
-                            return true;
-                        }
-                    }
-                }
-            }
-        } else if (op == ir::Instruction::Add) {
-            if (inst->getOperands().size() >= 2 && inst->getOperands()[0] && inst->getOperands()[1]) {
-                return parseLinearTerm(inst->getOperands()[0]->get(), indVarPhi, coeff, constAdd, detectedExt, srcBits) &&
-                       parseLinearTerm(inst->getOperands()[1]->get(), indVarPhi, coeff, constAdd, detectedExt, srcBits);
-            }
+    int64_t inductionCoefficient = 0;
+    std::optional<uint32_t> commonWidth;
+    std::optional<bool> commonSignedness;
+    for (const auto& term : expression.terms) {
+        if (term.value != indVarPhi && term.rawValue != indVarPhi)
+            return false;
+        int64_t combined = 0;
+        if (__builtin_add_overflow(inductionCoefficient, term.coefficient, &combined))
+            return false;
+        inductionCoefficient = combined;
+        if (term.bitWidth) {
+            if (commonWidth && *commonWidth != term.bitWidth) return false;
+            commonWidth = term.bitWidth;
+            srcBits = term.bitWidth;
         }
+        if (commonSignedness && *commonSignedness != term.isSigned) return false;
+        commonSignedness = term.isSigned;
+
+        auto* rawInstruction = dynamic_cast<ir::Instruction*>(term.rawValue);
+        if (!rawInstruction) continue;
+        const auto opcode = rawInstruction->getOpcode();
+        if (opcode == ir::Instruction::ExtSW || opcode == ir::Instruction::ExtUW)
+            detectedExt = opcode;
+        else if (opcode == ir::Instruction::ExtSB || opcode == ir::Instruction::ExtSH ||
+                 opcode == ir::Instruction::ExtS || opcode == ir::Instruction::ExtUB ||
+                 opcode == ir::Instruction::ExtUH || opcode == ir::Instruction::TruncD)
+            return false; // SCEV's closed-form representation cannot encode it.
     }
 
-    return false;
+    int64_t combinedCoefficient = 0;
+    int64_t combinedConstant = 0;
+    if (__builtin_add_overflow(coeff, inductionCoefficient, &combinedCoefficient) ||
+        __builtin_add_overflow(constAdd, expression.constant, &combinedConstant))
+        return false;
+    coeff = combinedCoefficient;
+    constAdd = combinedConstant;
+    return true;
 }
 
 bool ScalarEvolution::run(ir::Function& func) {
@@ -287,7 +273,10 @@ bool ScalarEvolution::analyzeRecurrence(Loop& loop, const IndVar& indVar, LoopRe
         // Pattern 1: Linear f(i) = b*i + c
         int64_t coeffB = 0;
         int64_t coeffC = 0;
-        if (parseLinearTerm(strippedTerm, indVar.phi, coeffB, coeffC, detectedExt, srcBits)) {
+        // Analyze the expression with its width-changing wrapper intact.
+        // AffineAnalysis deliberately rejects distributing an extension over
+        // narrow arithmetic whose intermediate result can wrap.
+        if (parseLinearTerm(termVal, indVar.phi, coeffB, coeffC, detectedExt, srcBits)) {
             rec.sumPhi = phi;
             rec.sumNextInst = nextInst;
             rec.initSumVal = initVal;

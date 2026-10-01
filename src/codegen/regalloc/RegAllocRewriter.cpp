@@ -19,6 +19,38 @@ bool RegAllocRewriter::run(ir::Function& func) {
 }
 
 bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targetInfo) {
+    // Materialize register-passed parameters as ordinary virtual registers before
+    // allocation.  Parameters otherwise keep living in their ABI registers, but
+    // are absent from LiveIntervalAnalysis (which tracks instructions).  That let
+    // the allocator reuse an argument register while the parameter was still live
+    // -- for example, a loop temporary could overwrite its trip-count argument.
+    // Copies make the complete lifetime visible to the allocator and also give it
+    // freedom to coalesce short-lived arguments into caller-saved registers.
+    if (!func.getBasicBlocks().empty()) {
+        ir::BasicBlock* entry = func.getBasicBlocks().front().get();
+        auto insertAt = entry->getInstructions().begin();
+        ir::IRBuilder parameterBuilder(func.getParent()->getContextShared());
+        parameterBuilder.setModule(func.getParent());
+
+        for (auto& parameterOwner : func.getParameters()) {
+            ir::Parameter* parameter = parameterOwner.get();
+            if (!parameter || parameter->use_empty()) continue;
+
+            // Snapshot the original uses before creating the copy so that the
+            // copy's own source operand is not rewritten into a self-reference.
+            std::vector<ir::Use*> originalUses(parameter->getUseList().begin(),
+                                                parameter->getUseList().end());
+            parameterBuilder.setInsertPoint(entry, insertAt);
+            ir::Instruction* home = parameterBuilder.createCopy(parameter);
+            home->setName(parameter->getName().empty()
+                              ? "arg.home"
+                              : parameter->getName() + ".home");
+            for (ir::Use* use : originalUses) {
+                use->set(home);
+            }
+        }
+    }
+
     // 1. Run the allocator
     LinearScanAllocator allocator;
     allocator.run(func, targetInfo);

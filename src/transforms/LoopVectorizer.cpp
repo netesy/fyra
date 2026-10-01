@@ -409,7 +409,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // A versioned loop deliberately retains this original loop as the
         // unsafe scalar fallback.  The marker prevents fixed-point pipelines
         // from versioning that fallback again.
-        if (headerBB->getName().find("alias.scalar_fallback") == 0)
+        if (headerBB->getName().find("alias.scalar_fallback") == 0 ||
+            headerBB->getName().find("v_loop_") == 0 ||
+            headerBB->getName().find("epi_") == 0)
             continue;
 
         std::vector<ir::PhiNode*> headerPhis;
@@ -1103,6 +1105,12 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
         nVec = builder.createAdd(inductionInit, vectorSpan);
 
+        // Keep the versioning guard before its vector successor in layout
+        // order.  Linear-scan intervals cannot otherwise represent a value
+        // live across the backward layout edge alias-check -> vector preheader.
+        ir::BasicBlock* aliasCheckBB = nullptr;
+        if (plan.memoryLegality.kind == MemoryLegalityKind::RequiresRuntimeCheck)
+            aliasCheckBB = builder.createBasicBlock("alias.runtime_check", &func);
         ir::BasicBlock* vPreheaderBB = builder.createBasicBlock("v_preheader", &func);
         ir::BasicBlock* vLoopHeaderBB = builder.createBasicBlock("v_loop_header", &func);
         ir::BasicBlock* vLoopBodyBB = builder.createBasicBlock("v_loop_body", &func);
@@ -1118,10 +1126,6 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             epiMergeBB = builder.createBasicBlock("epi_pred_merge", &func);
         }
         ir::BasicBlock* epiLatchBB = plan.predication ? epiMergeBB : epiBodyBB;
-        ir::BasicBlock* aliasCheckBB = nullptr;
-        if (plan.memoryLegality.kind == MemoryLegalityKind::RequiresRuntimeCheck)
-            aliasCheckBB = builder.createBasicBlock("alias.runtime_check", &func);
-
         builder.createBr(hasVec, aliasCheckBB ? aliasCheckBB : vPreheaderBB,
                          epiHeaderBB);
 
@@ -1193,14 +1197,11 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 allSafe = allSafe ? static_cast<ir::Value*>(builder.createAnd(allSafe, safe))
                                   : static_cast<ir::Value*>(safe);
             }
-            // Materialize fresh values after the guard.  They have no live
-            // range through the guard itself, avoiding destructive reuse by
-            // scalar two-address lowering while dominating both successors.
-            for (const auto& copiedBase : baseCopyMap) {
-                ir::Instruction* preserved = builder.createCeq(
-                    copiedBase.second, copiedBase.second);
-                allSafe = builder.createAnd(allSafe, preserved);
-            }
+            // Parameter homes and base copies are ordinary SSA values whose
+            // live ranges extend into both successors.  Do not manufacture
+            // self-comparisons to keep them live: allocating such a comparison
+            // result in its operand register destructively replaces the pointer
+            // with boolean 1 before the vector path.
             postGuardBound = builder.createCopy(boundNCopy);
             if (!dynamic_cast<ir::ConstantInt*>(inductionInit))
                 postGuardInit = builder.createCopy(inductionInit);
@@ -1697,12 +1698,24 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                         else vResult = builder.createVMul(vOp0, vOp1);
                         vValueMap[inst.get()] = vResult;
                     }
+                } else if (opc == ir::Instruction::Shl) {
+                    auto* scalarValue = dynamic_cast<ir::Instruction*>(
+                        inst->getOperands()[0]->get());
+                    auto* amount = dynamic_cast<ir::ConstantInt*>(
+                        inst->getOperands()[1]->get());
+                    if (scalarValue && amount && vValueMap.count(scalarValue))
+                        vValueMap[inst.get()] = builder.createVShl(
+                            vValueMap[scalarValue], amount);
                 } else if (opc == ir::Instruction::Store || opc == ir::Instruction::Stored || opc == ir::Instruction::Stores) {
                     ir::Value* valToStore = inst->getOperands()[0]->get();
                     ir::Value* ptrToStore = inst->getOperands()[1]->get();
 
                     auto* instVal = dynamic_cast<ir::Instruction*>(valToStore);
-                    ir::Value* vVal = (instVal && vValueMap.count(instVal)) ? vValueMap[instVal] : valToStore;
+                    ir::Value* vVal = (instVal && vValueMap.count(instVal)) ? vValueMap[instVal] : nullptr;
+                    if (!vVal || !vVal->getType() || !vVal->getType()->isVectorTy()) {
+                        logDiag("reject during transform: store value was not vectorized");
+                        continue;
+                    }
 
                     ir::Value* basePtr = extractBasePointer(ptrToStore);
                     ir::Value* safeBase = vectorBaseMap.count(basePtr) ? vectorBaseMap[basePtr] : basePtr;
@@ -1911,6 +1924,13 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 ir::Instruction* epiSub = opc == ir::Instruction::FSub
                     ? builder.createFSub(eOp0, eOp1) : builder.createSub(eOp0, eOp1);
                 epiValueMap[inst.get()] = epiSub;
+            } else if (opc == ir::Instruction::Shl) {
+                ir::Value* op0 = inst->getOperands()[0]->get();
+                ir::Value* op1 = inst->getOperands()[1]->get();
+                auto* inst0 = dynamic_cast<ir::Instruction*>(op0);
+                ir::Value* eOp0 = op0 == iPhi ? static_cast<ir::Value*>(rawPhiEpiI)
+                    : ((inst0 && epiValueMap.count(inst0)) ? epiValueMap[inst0] : op0);
+                epiValueMap[inst.get()] = builder.createShl(eOp0, op1);
             } else if (opc == ir::Instruction::Loaduw || opc == ir::Instruction::Load ||
                        opc == ir::Instruction::Loads || opc == ir::Instruction::Loadd) {
                 ir::Value* ptr = inst->getOperands()[0]->get();
@@ -2109,6 +2129,23 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         if (!aliasCheckBB) {
             removeBB(headerBB);
             removeBB(bodyBB);
+        } else {
+            // Lay the backward scalar fallback out after the versioning guard
+            // and vector/epilogue blocks.  Besides matching execution order,
+            // this lets linear live intervals cover guard -> fallback edges;
+            // otherwise guard temporaries may reuse a fallback base register.
+            auto moveToEnd = [&](ir::BasicBlock* target) {
+                auto& blocks = func.getBasicBlocks();
+                for (auto it = blocks.begin(); it != blocks.end(); ++it) {
+                    if (it->get() != target) continue;
+                    auto owner = std::move(*it);
+                    blocks.erase(it);
+                    blocks.push_back(std::move(owner));
+                    return;
+                }
+            };
+            moveToEnd(headerBB);
+            moveToEnd(bodyBB);
         }
 
         CFGBuilder::run(func);

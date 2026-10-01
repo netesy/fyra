@@ -240,7 +240,9 @@ ir::BasicBlock* LoopInvariantCodeMotion::getOrCreatePreheader(Loop& loop, ir::Fu
     ir::IRBuilder builder(ctx);
     builder.setModule(func.getParent());
 
-    ir::BasicBlock* preheader = builder.createBasicBlock("loop_preheader", &func);
+    const std::string preheaderName = loop.header->getName().empty()
+        ? "loop.preheader" : loop.header->getName() + ".preheader";
+    ir::BasicBlock* preheader = builder.createBasicBlock(preheaderName, &func);
 
     // Insert preheader immediately before loop header in func.getBasicBlocks()
     auto& blocks = func.getBasicBlocks();
