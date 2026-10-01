@@ -9,6 +9,7 @@
 #include "ir/PhiNode.h"
 #include "ir/Use.h"
 #include <algorithm>
+#include <limits>
 #include <vector>
 #include <iostream>
 
@@ -70,6 +71,24 @@ static bool parseLinearTerm(ir::Value* val, ir::Value* indVarPhi, int64_t& coeff
                     if (auto* c0 = dynamic_cast<ir::ConstantInt*>(op0)) {
                         coeff += c0->getValue();
                         return true;
+                    }
+                }
+            }
+        } else if (op == ir::Instruction::Shl) {
+            // EGraph and InstCombine canonicalize multiplication by a power of
+            // two to a shift before SCEV runs.  Preserve the linear recurrence
+            // information instead of making that canonicalization hide it.
+            if (inst->getOperands().size() >= 2 && inst->getOperands()[0] && inst->getOperands()[1]) {
+                ir::Value* shifted = stripExtensions(inst->getOperands()[0]->get(), &detectedExt, &srcBits);
+                auto* amount = dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get());
+                if (shifted == indVarPhi && amount) {
+                    const int64_t shift = amount->getValue();
+                    if (shift >= 0 && shift < 63) {
+                        const uint64_t scale = uint64_t{1} << static_cast<unsigned>(shift);
+                        if (scale <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+                            coeff += static_cast<int64_t>(scale);
+                            return true;
+                        }
                     }
                 }
             }

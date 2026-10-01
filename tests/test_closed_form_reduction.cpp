@@ -5,6 +5,7 @@
 #include "ir/Use.h"
 #include "transforms/CFGBuilder.h"
 #include "transforms/ScalarEvolution.h"
+#include "transforms/EGraphPass.h"
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -451,6 +452,11 @@ void test_inliner_scev_integration() {
     transforms::FunctionInliner inliner;
     bool inlined = inliner.runOnModule(module);
     assert(inlined && "sum_loop(2000000) call MUST be inlined into caller!");
+
+    // Match the production ordering: EGraph canonicalizes i * 2 to i << 1
+    // before SCEV.  SCEV must retain the linear-recurrence information.
+    transforms::EGraphPass egraph;
+    assert(egraph.run(*caller) && "EGraph should canonicalize the power-of-two multiply");
 
     // Run ScalarEvolution on caller
     transforms::ScalarEvolution scev;

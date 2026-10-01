@@ -285,12 +285,7 @@ bool LoopStrengthReduction::performTransformation(ir::Function& func) {
                     if (baseVal->getType() != resTy && baseVal->getType()->isInteger()) {
                         baseVal = builder.createExtSW(baseVal, resTy);
                     }
-                    auto* cInitScaled = dynamic_cast<ir::ConstantInt*>(initScaled);
-                    if (cInitScaled && cInitScaled->getValue() == 0) {
-                        initScaled = baseVal;
-                    } else {
-                        initScaled = builder.createAdd(baseVal, initScaled);
-                    }
+                    initScaled = builder.createAdd(baseVal, initScaled);
                 }
 
                 // 2. Insert derived PHI in loop header

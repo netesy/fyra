@@ -16,10 +16,20 @@
 #include <sstream>
 #include <cstdlib>
 #include <vector>
+#include <algorithm>
 #include <memory>
 #include <unistd.h>
 
 using namespace ir;
+
+[[noreturn]] static void fail(const std::string& message) {
+    std::cerr << "CROSS_TARGET_VECTOR_TEST_FAILURE: " << message << std::endl;
+    std::exit(1);
+}
+
+static void require(bool condition, const std::string& message) {
+    if (!condition) fail(message);
+}
 
 // Helper to build a vectorizable loop: C[i] = A[i] + B[i]
 static Function* buildAddKernel(IRBuilder& b, Module& m, const std::string& name) {
@@ -183,7 +193,7 @@ static const std::vector<int> AWKWARD_TRIP_COUNTS = {0, 1, 3, 7, 15, 16, 17, 31,
 
 int main() {
     std::cout << "=========================================================\n";
-    std::cout << " Cross-Target Semantic Vector Test Suite\n";
+    std::cout << " Cross-Target Compile Evidence + Native x64 Semantic Suite\n";
     std::cout << "=========================================================\n";
 
     // 1. Cross-target compilation tests across all 4 SIMD target triples
@@ -211,26 +221,49 @@ int main() {
         config.optLevel = fyra::OptimizationLevel::O2;
         config.enableLoopVectorization = true;
         config.enableSLP = true;
+        config.enableLoopUnroll = false;
 
         fyra::PipelineResult result = pipeline.run(module, config);
         if (!result.success) {
             for (const auto& err : result.errors) std::cerr << "Pipeline error (" << target << "): " << err << std::endl;
         }
-        assert(result.success && "CompilerPipeline failed for target!");
+        require(result.success, "CompilerPipeline failed for " + target);
+
+        size_t vectorIRCount = 0;
+        for (const auto& function : module.getFunctions())
+            for (const auto& block : function->getBasicBlocks())
+                for (const auto& instruction : block->getInstructions())
+                    if ((instruction->getType() && instruction->getType()->isVectorTy()) ||
+                        std::any_of(instruction->getOperands().begin(), instruction->getOperands().end(),
+                            [](const auto& operand) { return operand && operand->get() &&
+                                operand->get()->getType() && operand->get()->getType()->isVectorTy(); }))
+                        ++vectorIRCount;
 
         // Lower to target assembly or binary module
         auto desc = target::TargetDescriptor::fromString(target);
-        assert(desc.has_value());
+        require(desc.has_value(), "invalid target descriptor for " + target);
         auto targetInfo = target::TargetResolver::resolve(*desc);
-        assert(targetInfo != nullptr);
+        require(targetInfo != nullptr, "target resolver failed for " + target);
 
         std::ostringstream asmOut;
         codegen::CodeGen cg(module, std::move(targetInfo), &asmOut);
         cg.emit();
 
         std::string text = asmOut.str();
-        assert(!text.empty() || target.find("wasm") != std::string::npos);
-        std::cout << "  -> " << target << " compilation succeeded." << std::endl;
+        bool artifactValidated = false;
+        if (target.find("wasm") != std::string::npos) {
+            auto binaryTarget = target::TargetResolver::resolve(*desc);
+            codegen::CodeGen binaryCodeGen(module, std::move(binaryTarget));
+            binaryCodeGen.emit();
+            const auto& bytes = binaryCodeGen.getAssembler().getCode();
+            artifactValidated = bytes.size() >= 8 && bytes[0] == 0x00 && bytes[1] == 0x61 &&
+                                bytes[2] == 0x73 && bytes[3] == 0x6d;
+        } else {
+            artifactValidated = !text.empty();
+        }
+        require(artifactValidated, "target artifact was not validated for " + target);
+        std::cout << "  -> " << target << ": " << vectorIRCount
+                  << " vector-typed IR instructions; artifact validated (not executed)." << std::endl;
     }
 
     // 2. Executable semantic verification on host for all awkward trip counts
@@ -256,7 +289,7 @@ int main() {
     configExec.enableLoopUnroll = false; // Test scalar/vector loops without unrolling mutation issues
 
     fyra::PipelineResult resExec = pipelineExec.run(moduleExec, configExec);
-    assert(resExec.success);
+    require(resExec.success, "native x64 optimization pipeline failed");
 
     auto targetInfoExec = std::make_unique<target::CompositeTargetInfo>(
         std::make_unique<target::X64Architecture>(target::X64ABI::SystemV),
@@ -335,12 +368,12 @@ int main(void) {
 
     std::string cmd = "cc -mavx2 -no-pie " + base + ".s " + base + ".c -o " + base + " && " + base;
     int rc = std::system(cmd.c_str());
-    assert(rc == 0 && "Execution of cross-target vector test failed!");
+    require(rc == 0, "native x64 execution or scalar-reference comparison failed");
 
     std::remove((base + ".s").c_str());
     std::remove((base + ".c").c_str());
     std::remove(base.c_str());
 
-    std::cout << "[SUCCESS] All cross-target semantic vector tests passed!\n";
+    std::cout << "[SUCCESS] Four targets compiled; native x64 semantic test passed!\n";
     return 0;
 }

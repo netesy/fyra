@@ -471,3 +471,7 @@ add_executable(test_cross_target_vector test_cross_target_vector.cpp)
 target_link_libraries(test_cross_target_vector PRIVATE fyra)
 add_test(NAME CrossTargetVectorTest COMMAND test_cross_target_vector)
 set_tests_properties(CrossTargetVectorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_instcombine_width_semantics test_instcombine_width_semantics.cpp)
+target_link_libraries(test_instcombine_width_semantics PRIVATE fyra)
+add_test(NAME InstCombineWidthSemanticsTest COMMAND test_instcombine_width_semantics)
