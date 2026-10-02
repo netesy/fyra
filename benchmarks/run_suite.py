@@ -79,13 +79,6 @@ def analyze_assembly(asm_file):
                 if m:
                     frame_size = int(m.group(1))
 
-            if 'zmm' in line:
-                max_vector_width = max(max_vector_width, 512)
-            elif 'ymm' in line:
-                max_vector_width = max(max_vector_width, 256)
-            elif 'xmm' in line:
-                max_vector_width = max(max_vector_width, 128)
-
             # Non-x86 vector spellings: AArch64 NEON, RISC-V V, and WASM SIMD.
             non_x86_vector = bool(
                 re.search(r'\bv(?:mm)?\d+\.(?:16b|8b|8h|4h|4s|2s|2d)\b', line) or
@@ -98,6 +91,12 @@ def analyze_assembly(asm_file):
 
             if not non_x86_vector and op.startswith(vector_op_prefixes) and op not in ('var', 'val'):
                 vector_instrs += 1
+                if 'zmm' in line:
+                    max_vector_width = max(max_vector_width, 512)
+                elif 'ymm' in line:
+                    max_vector_width = max(max_vector_width, 256)
+                else:
+                    max_vector_width = max(max_vector_width, 128)
 
             if op in ('call', 'callq'):
                 calls += 1
