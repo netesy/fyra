@@ -31,6 +31,16 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
     stats.numVregs = intervals.size();
     std::set<unsigned int> used_regs;
 
+    if (std::getenv("FYRA_REGALLOC_DIAG")) {
+        std::cout << "[RegAlloc Diag] Function: " << func.getName() << " vregs=" << intervals.size() << std::endl;
+        for (const auto& iv : intervals) {
+            std::cout << "  vreg=" << (iv.getVreg() ? iv.getVreg()->getName() : "null")
+                      << " range=[" << iv.getStart() << ", " << iv.getEnd() << "]"
+                      << " crossesCall=" << iv.isLiveAcrossCall()
+                      << " weight=" << iv.getSpillWeight() << std::endl;
+        }
+    }
+
     std::vector<PhysicalReg> free_caller_regs;
     std::vector<PhysicalReg> free_callee_regs;
     std::vector<PhysicalReg> free_xmm_regs;
@@ -120,7 +130,7 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
 
         // Prefer operand 0's physical register if available to enable two-address in-place reuse / ABI param affinity
         int preferredRegIdx = -1;
-        if (instr && !instr->getOperands().empty() && instr->getOperands()[0]) {
+        if (instr && instr->getOpcode() == ir::Instruction::Copy && !instr->getOperands().empty() && instr->getOperands()[0]) {
             ir::Value* op0Val = instr->getOperands()[0]->get();
             if (auto* op0Inst = dynamic_cast<ir::Instruction*>(op0Val)) {
                 if (op0Inst->hasPhysicalRegister()) {
@@ -232,7 +242,7 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
     while (it != active_intervals.end()) {
         const LiveInterval* interval = *it;
         if (interval->getEnd() > current_start_point) {
-            return;
+            break;
         }
 
         RegLocation loc = vreg_to_location_map.at(interval->getVreg());
@@ -245,12 +255,27 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
             } else {
                 free_caller.push_back(reg);
             }
-        } else if (std::holds_alternative<StackSlot>(loc)) {
-            StackSlot slot = std::get<StackSlot>(loc);
-            free_stack_slots.push_back(slot);
         }
 
         it = active_intervals.erase(it);
+    }
+
+    auto stackIt = active_stack_intervals.begin();
+    while (stackIt != active_stack_intervals.end()) {
+        const LiveInterval* interval = *stackIt;
+        if (interval->getEnd() > current_start_point) {
+            break;
+        }
+
+        if (vreg_to_location_map.count(interval->getVreg())) {
+            RegLocation loc = vreg_to_location_map.at(interval->getVreg());
+            if (std::holds_alternative<StackSlot>(loc)) {
+                StackSlot slot = std::get<StackSlot>(loc);
+                free_stack_slots.push_back(slot);
+            }
+        }
+
+        stackIt = active_stack_intervals.erase(stackIt);
     }
 }
 
@@ -263,7 +288,7 @@ StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
     }
 
     for (auto it = free_stack_slots.begin(); it != free_stack_slots.end(); ++it) {
-        if (it->byteOffset % requiredAlign == 0) {
+        if (it->size >= slotBytes && it->byteOffset % requiredAlign == 0) {
             StackSlot reused = *it;
             free_stack_slots.erase(it);
             return reused;
@@ -274,7 +299,7 @@ StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
         current_frame_bytes += (requiredAlign - (current_frame_bytes % requiredAlign));
     }
 
-    StackSlot slot{next_stack_slot++, static_cast<unsigned int>(current_frame_bytes)};
+    StackSlot slot{next_stack_slot++, static_cast<unsigned int>(current_frame_bytes), slotBytes};
     current_frame_bytes += slotBytes;
     return slot;
 }
@@ -305,6 +330,11 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
 
                 min_spill_candidate->getVreg()->setPhysicalRegister(-1);
                 vreg_to_location_map[min_spill_candidate->getVreg()] = allocateStackSlot(min_spill_candidate->getVreg());
+                active_stack_intervals.push_back(min_spill_candidate);
+                std::sort(active_stack_intervals.begin(), active_stack_intervals.end(),
+                    [](const LiveInterval* a, const LiveInterval* b) {
+                        return a->getEnd() < b->getEnd();
+                    });
 
                 active_intervals.erase(minIt);
                 active_intervals.push_back(&current_interval);
@@ -318,6 +348,11 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
     }
 
     vreg_to_location_map[current_interval.getVreg()] = allocateStackSlot(current_interval.getVreg());
+    active_stack_intervals.push_back(&current_interval);
+    std::sort(active_stack_intervals.begin(), active_stack_intervals.end(),
+        [](const LiveInterval* a, const LiveInterval* b) {
+            return a->getEnd() < b->getEnd();
+        });
 }
 
 } // namespace transforms

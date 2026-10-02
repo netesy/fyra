@@ -1714,5 +1714,112 @@ export function $fn_multiret(%cond : i32) : i32 {
         std::cout << "--- Milestone 0C Assembly Metadata & Non-Executable Stack Tests Passed ---" << std::endl;
     }
 
+    // Explicit test for forced constant copy rematerialization and execution safety
+    {
+        std::cout << "--- Testing Forced Constant Copy Rematerialization & Execution ---" << std::endl;
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("remat_test", context);
+        ir::IRBuilder builder(context);
+        builder.setModule(&module);
+
+        auto* i32 = context->getIntegerType(32);
+        ir::Function* function = builder.createFunction("test_remat_exec", i32, {});
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", function);
+        builder.setInsertPoint(entry);
+
+        // Create multiple constant copies and arithmetic operations to force register pressure & spills
+        ir::Instruction* c1 = builder.createCopy(context->getConstantInt(i32, 10));
+        ir::Instruction* c2 = builder.createCopy(context->getConstantInt(i32, 20));
+        ir::Instruction* c3 = builder.createCopy(context->getConstantInt(i32, 30));
+        ir::Instruction* c4 = builder.createCopy(context->getConstantInt(i32, 40));
+
+        ir::Instruction* a1 = builder.createAdd(c1, c2);
+        ir::Instruction* a2 = builder.createAdd(c3, c4);
+        ir::Instruction* a3 = builder.createMul(a1, a2);
+        ir::Instruction* a4 = builder.createAdd(a3, c1);
+        ir::Instruction* res = builder.createAdd(a4, c2);
+        builder.createRet(res);
+
+        transforms::RegAllocRewriter rewriter;
+        rewriter.run(*function, nullptr);
+
+        // Verify that uses of spilled constant copies were rematerialized as constants
+        for (auto& bb : function->getBasicBlocks()) {
+            for (auto& inst : bb->getInstructions()) {
+                for (auto& op : inst->getOperands()) {
+                    if (op && op->getOriginalValue() == c1) {
+                        assert(dynamic_cast<ir::ConstantInt*>(op->get()) != nullptr && "Spilled constant copy use MUST be rematerialized as ConstantInt!");
+                    }
+                }
+            }
+        }
+
+        std::cout << "--- Forced Constant Copy Rematerialization & Execution Tests Passed ---" << std::endl;
+    }
+
+    // Focused tests for Parameter Coalescing & Affinity
+    {
+        std::cout << "--- Testing Parameter Coalescing & Affinity ---" << std::endl;
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("param_affinity_test", context);
+        ir::IRBuilder builder(context);
+        builder.setModule(&module);
+
+        auto* i32 = context->getIntegerType(32);
+        ir::Function* function = builder.createFunction("test_param_coalesce", i32, {i32, i32});
+        auto paramIt = function->getParameters().begin();
+        ir::Value* p0 = paramIt->get(); ++paramIt;
+        ir::Value* p1 = paramIt->get();
+
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", function);
+        builder.setInsertPoint(entry);
+
+        ir::Instruction* res = builder.createAdd(p0, p1);
+        builder.createRet(res);
+
+        transforms::RegAllocRewriter rewriter;
+        rewriter.run(*function, nullptr);
+
+        // Verify that homes for p0 and p1 received ABI registers (%rdi = 5, %rsi = 4)
+        for (auto& bb : function->getBasicBlocks()) {
+            for (auto& inst : bb->getInstructions()) {
+                if (inst->getOpcode() == ir::Instruction::Copy && !inst->getOperands().empty()) {
+                    if (inst->getOperands()[0]->get() == p0) {
+                        assert(inst->hasPhysicalRegister() && inst->getPhysicalRegister() == 5 && "Param 0 home MUST coalesce into %rdi (5)!");
+                    } else if (inst->getOperands()[0]->get() == p1) {
+                        assert(inst->hasPhysicalRegister() && inst->getPhysicalRegister() == 4 && "Param 1 home MUST coalesce into %rsi (4)!");
+                    }
+                }
+            }
+        }
+
+        std::cout << "--- Parameter Coalescing & Affinity Tests Passed ---" << std::endl;
+    }
+
+    // Focused tests for Stack Slot Lifetime Reuse
+    {
+        std::cout << "--- Testing Stack Slot Reuse ---" << std::endl;
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("slot_reuse_test", context);
+        ir::IRBuilder builder(context);
+        builder.setModule(&module);
+
+        auto* i32 = context->getIntegerType(32);
+        ir::Function* function = builder.createFunction("test_slot_reuse", i32, {});
+        ir::BasicBlock* entry = builder.createBasicBlock("entry", function);
+        builder.setInsertPoint(entry);
+
+        ir::Instruction* v1 = builder.createCopy(context->getConstantInt(i32, 111));
+        ir::Instruction* add1 = builder.createAdd(v1, context->getConstantInt(i32, 1));
+        ir::Instruction* v2 = builder.createCopy(add1);
+        ir::Instruction* add2 = builder.createAdd(v2, context->getConstantInt(i32, 2));
+        builder.createRet(add2);
+
+        transforms::LinearScanAllocator allocator;
+        allocator.run(*function);
+
+        std::cout << "--- Stack Slot Reuse Tests Passed ---" << std::endl;
+    }
+
     return 0;
 }

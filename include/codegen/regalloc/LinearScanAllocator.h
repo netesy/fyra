@@ -21,6 +21,7 @@ struct PhysicalReg {
 struct StackSlot {
     unsigned int index;
     unsigned int byteOffset = 0;
+    size_t size = 8;
     bool operator==(const StackSlot& other) const { return index == other.index; }
 };
 
@@ -64,6 +65,7 @@ private:
     size_t current_frame_bytes = 0;
     std::vector<StackSlot> free_stack_slots;
     std::vector<const class LiveInterval*> active_intervals;
+    std::vector<const class LiveInterval*> active_stack_intervals;
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;
     RegAllocStats stats;
 };
