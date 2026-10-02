@@ -118,12 +118,23 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
             }
         }
 
-        // Prefer operand 0's physical register if available to enable two-address in-place reuse
+        // Prefer operand 0's physical register if available to enable two-address in-place reuse / ABI param affinity
         int preferredRegIdx = -1;
         if (instr && !instr->getOperands().empty() && instr->getOperands()[0]) {
-            if (auto* op0Inst = dynamic_cast<ir::Instruction*>(instr->getOperands()[0]->get())) {
+            ir::Value* op0Val = instr->getOperands()[0]->get();
+            if (auto* op0Inst = dynamic_cast<ir::Instruction*>(op0Val)) {
                 if (op0Inst->hasPhysicalRegister()) {
                     preferredRegIdx = (int)op0Inst->getPhysicalRegister();
+                }
+            } else if (auto* param = dynamic_cast<ir::Parameter*>(op0Val)) {
+                size_t pIdx = 0;
+                for (const auto& paramOwner : func.getParameters()) {
+                    if (paramOwner.get() == param && pIdx < 6) {
+                        static const int sysVParamRegs[6] = {5, 4, 3, 2, 6, 7}; // rdi, rsi, rdx, rcx, r8, r9
+                        preferredRegIdx = sysVParamRegs[pIdx];
+                        break;
+                    }
+                    pIdx++;
                 }
             }
         }
@@ -249,6 +260,14 @@ StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
     if (vreg && vreg->getType()) {
         requiredAlign = std::max<size_t>(8, vreg->getType()->getAlignment());
         slotBytes = std::max<size_t>(8, vreg->getType()->getSize());
+    }
+
+    for (auto it = free_stack_slots.begin(); it != free_stack_slots.end(); ++it) {
+        if (it->byteOffset % requiredAlign == 0) {
+            StackSlot reused = *it;
+            free_stack_slots.erase(it);
+            return reused;
+        }
     }
 
     if (current_frame_bytes % requiredAlign != 0) {
