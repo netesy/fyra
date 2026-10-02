@@ -130,7 +130,7 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
 
         // Prefer operand 0's physical register if available to enable two-address in-place reuse / ABI param affinity
         int preferredRegIdx = -1;
-        if (instr && instr->getOpcode() == ir::Instruction::Copy && !instr->getOperands().empty() && instr->getOperands()[0]) {
+        if (instr && !instr->getOperands().empty() && instr->getOperands()[0]) {
             ir::Value* op0Val = instr->getOperands()[0]->get();
             if (auto* op0Inst = dynamic_cast<ir::Instruction*>(op0Val)) {
                 if (op0Inst->hasPhysicalRegister()) {

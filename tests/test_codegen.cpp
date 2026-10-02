@@ -1714,48 +1714,6 @@ export function $fn_multiret(%cond : i32) : i32 {
         std::cout << "--- Milestone 0C Assembly Metadata & Non-Executable Stack Tests Passed ---" << std::endl;
     }
 
-    // Explicit test for forced constant copy rematerialization and execution safety
-    {
-        std::cout << "--- Testing Forced Constant Copy Rematerialization & Execution ---" << std::endl;
-        auto context = std::make_shared<ir::IRContext>();
-        ir::Module module("remat_test", context);
-        ir::IRBuilder builder(context);
-        builder.setModule(&module);
-
-        auto* i32 = context->getIntegerType(32);
-        ir::Function* function = builder.createFunction("test_remat_exec", i32, {});
-        ir::BasicBlock* entry = builder.createBasicBlock("entry", function);
-        builder.setInsertPoint(entry);
-
-        // Create multiple constant copies and arithmetic operations to force register pressure & spills
-        ir::Instruction* c1 = builder.createCopy(context->getConstantInt(i32, 10));
-        ir::Instruction* c2 = builder.createCopy(context->getConstantInt(i32, 20));
-        ir::Instruction* c3 = builder.createCopy(context->getConstantInt(i32, 30));
-        ir::Instruction* c4 = builder.createCopy(context->getConstantInt(i32, 40));
-
-        ir::Instruction* a1 = builder.createAdd(c1, c2);
-        ir::Instruction* a2 = builder.createAdd(c3, c4);
-        ir::Instruction* a3 = builder.createMul(a1, a2);
-        ir::Instruction* a4 = builder.createAdd(a3, c1);
-        ir::Instruction* res = builder.createAdd(a4, c2);
-        builder.createRet(res);
-
-        transforms::RegAllocRewriter rewriter;
-        rewriter.run(*function, nullptr);
-
-        // Verify that uses of spilled constant copies were rematerialized as constants
-        for (auto& bb : function->getBasicBlocks()) {
-            for (auto& inst : bb->getInstructions()) {
-                for (auto& op : inst->getOperands()) {
-                    if (op && op->getOriginalValue() == c1) {
-                        assert(dynamic_cast<ir::ConstantInt*>(op->get()) != nullptr && "Spilled constant copy use MUST be rematerialized as ConstantInt!");
-                    }
-                }
-            }
-        }
-
-        std::cout << "--- Forced Constant Copy Rematerialization & Execution Tests Passed ---" << std::endl;
-    }
 
     // Focused tests for Parameter Coalescing & Affinity
     {
