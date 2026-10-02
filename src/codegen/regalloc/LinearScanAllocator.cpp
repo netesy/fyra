@@ -71,7 +71,31 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
             stats.liveAcrossCalls++;
         }
 
+        size_t activeGprCount = 0;
+        for (const auto* ai : active_intervals) {
+            ir::Instruction* v = ai->getVreg();
+            if (v && v->getType() && !v->getType()->isFloatingPoint() && !v->getType()->isVectorTy() && !v->getType()->isSIMDType())
+                activeGprCount++;
+        }
+
         expireOldIntervals(current_interval.getStart(), free_caller_regs, free_callee_regs, free_xmm_regs);
+
+        size_t activeGprAfterExpire = 0;
+        for (const auto* ai : active_intervals) {
+            ir::Instruction* v = ai->getVreg();
+            if (v && v->getType() && !v->getType()->isFloatingPoint() && !v->getType()->isVectorTy() && !v->getType()->isSIMDType())
+                activeGprAfterExpire++;
+        }
+
+        if (std::getenv("FYRA_REGALLOC_DIAG")) {
+            std::cout << "[LinearScan Pos " << current_interval.getStart() << "] "
+                      << (current_interval.getVreg() ? current_interval.getVreg()->getName() : "null")
+                      << " active_gprs=" << activeGprAfterExpire
+                      << " free_caller=" << free_caller_regs.size()
+                      << " free_callee=" << free_callee_regs.size()
+                      << " free_xmm=" << free_xmm_regs.size()
+                      << std::endl;
+        }
 
         bool assigned = false;
         PhysicalReg reg;
