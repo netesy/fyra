@@ -311,6 +311,7 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::VXor:
         case ir::Instruction::VShl:
         case ir::Instruction::VShr:
+        case ir::Instruction::VSar:
         case ir::Instruction::VNot:
         case ir::Instruction::VBroadcast:
         case ir::Instruction::VExtract:

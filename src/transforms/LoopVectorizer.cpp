@@ -143,6 +143,7 @@ struct VectorizationPlan {
     uint64_t mulScaleFactor = 1;
     bool isWideningReduction = false;
     bool isRegisterWideningReduction = false;
+    bool isCompositeWideningReduction = false;
     bool inclusiveBound = false;
 };
 
@@ -163,6 +164,44 @@ bool isPureI32Expression(ir::Value* value, ir::PhiNode* induction,
     bool result = supported && inst->getOperands().size() == 2 &&
         isPureI32Expression(inst->getOperands()[0]->get(), induction, visiting) &&
         isPureI32Expression(inst->getOperands()[1]->get(), induction, visiting);
+    visiting.erase(value);
+    return result;
+}
+
+bool isNarrowExtension(ir::Instruction::Opcode opcode) {
+    using O = ir::Instruction::Opcode;
+    return opcode == O::ExtSB || opcode == O::ExtUB ||
+           opcode == O::ExtSH || opcode == O::ExtUH ||
+           opcode == O::ExtSW || opcode == O::ExtUW;
+}
+
+bool isCompositeWideningExpression(ir::Value* value, ir::PhiNode* induction,
+                                   std::set<ir::Value*>& visiting,
+                                   bool& sawExtension) {
+    if (auto* constant = dynamic_cast<ir::ConstantInt*>(value))
+        return constant->getType() && constant->getType()->isIntegerTy() &&
+               constant->getType()->getSize() == 8;
+    auto* inst = dynamic_cast<ir::Instruction*>(value);
+    if (!inst || !inst->getType() || !inst->getType()->isIntegerTy() ||
+        inst->getType()->getSize() != 8 || !visiting.insert(value).second)
+        return false;
+
+    bool result = false;
+    if (isNarrowExtension(inst->getOpcode()) && inst->getOperands().size() == 1) {
+        ir::Value* source = inst->getOperands()[0]->get();
+        std::set<ir::Value*> sourceVisiting;
+        result = source && source->getType() && source->getType()->isIntegerTy() &&
+                 source->getType()->getSize() == 4 &&
+                 isPureI32Expression(source, induction, sourceVisiting);
+        sawExtension |= result;
+    } else if ((inst->getOpcode() == ir::Instruction::Add ||
+                inst->getOpcode() == ir::Instruction::Sub) &&
+               inst->getOperands().size() == 2) {
+        result = isCompositeWideningExpression(inst->getOperands()[0]->get(), induction,
+                                               visiting, sawExtension) &&
+                 isCompositeWideningExpression(inst->getOperands()[1]->get(), induction,
+                                               visiting, sawExtension);
+    }
     visiting.erase(value);
     return result;
 }
@@ -831,8 +870,23 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                             }
                         }
                     } else {
-                        logDiag("Rejected loop: i64 reduction is not a supported widening sum pattern");
-                        unsupportedReduction = true;
+                        std::set<ir::Value*> visiting;
+                        bool sawExtension = false;
+                        if (update->getOpcode() == ir::Instruction::Add &&
+                            isCompositeWideningExpression(term, iPhi, visiting,
+                                                          sawExtension) &&
+                            sawExtension) {
+                            reduction.kind = ReductionKind::Add;
+                            reduction.vectorOpcode = ir::Instruction::VAdd;
+                            reduction.identity = 0;
+                            reduction.isRegisterWidening = true;
+                            reduction.scalarTerm = term;
+                            plan.isCompositeWideningReduction = true;
+                            logDiag("composite widening reduction expression accepted");
+                        } else {
+                            logDiag("Rejected loop: i64 reduction is not a supported widening sum pattern");
+                            unsupportedReduction = true;
+                        }
                     }
                 } else if (reductionPhi->getType()->getSize() == 4) {
                     switch (update->getOpcode()) {
@@ -899,7 +953,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // Pure-register widening is the new path which overlaps SCEV's
         // existing scalar recurrence language.  Preserve only that overlap;
         // other runtime reductions retain the vectorizer's prior behavior.
-        if (plan.isRegisterWideningReduction) {
+        if (plan.isRegisterWideningReduction && !plan.isCompositeWideningReduction) {
             ScalarEvolution scalarEvolution;
             if (scalarEvolution.canEliminateClosedForm(func, headerBB)) {
                 logDiag("reject: preserving scalar closed-form recurrence for ScalarEvolution");
@@ -918,7 +972,32 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::IntegerType* i32Ty = ctx->getIntegerType(32);
         ir::IntegerType* i64Ty = ctx->getIntegerType(64);
 
-        if (plan.isRegisterWideningReduction) {
+        if (plan.isCompositeWideningReduction) {
+            ir::VectorType* srcVecTy = ctx->getVectorType(i32Ty, 4);
+            ir::VectorType* dstVecTy = ctx->getVectorType(i64Ty, 4);
+            const bool conversions = targetInfo &&
+                targetInfo->supportsVectorConversion(ir::Instruction::VSExt, srcVecTy, dstVecTy) &&
+                targetInfo->supportsVectorConversion(ir::Instruction::VZExt, srcVecTy, dstVecTy);
+            const bool operations = targetInfo &&
+                targetInfo->supportsVectorOperation(ir::Instruction::VAdd, dstVecTy) &&
+                targetInfo->supportsVectorOperation(ir::Instruction::VSub, dstVecTy) &&
+                targetInfo->supportsVectorOperation(ir::Instruction::VAnd, srcVecTy) &&
+                targetInfo->supportsVectorOperation(ir::Instruction::VShl, srcVecTy) &&
+                targetInfo->supportsVectorOperation(ir::Instruction::VSar, srcVecTy);
+            if (!conversions || !operations) {
+                logDiag("Rejected loop: target lacks composite widening expression operations");
+                continue;
+            }
+            plan.vectorFactor = 4;
+            plan.vectorWidthBits = 128;
+            plan.mainElemType = i32Ty;
+            plan.elementByteSize = 4;
+            plan.reductions[0].sourceType = i32Ty;
+            plan.reductions[0].sourceVectorType = srcVecTy;
+            plan.reductions[0].vectorType = dstVecTy;
+            plan.reductions[0].scalarType = i64Ty;
+            logDiag("composite widening reduction: VF=4, <4xi32> sources, <4xi64> accumulator");
+        } else if (plan.isRegisterWideningReduction) {
             // The x64 backend already has complete 128-bit i32 arithmetic.
             // Four scalar signed extracts are cheaper and substantially
             // smaller than introducing a new 256-bit widening operation.
@@ -1026,7 +1105,7 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         }
         if (!plan.reductions.empty()) {
             auto& reduction = plan.reductions[0];
-            if (!plan.isWideningReduction) {
+            if (!plan.isWideningReduction && !plan.isCompositeWideningReduction) {
                 reduction.vectorType = vecTy;
             }
             const char* kind = reduction.kind == ReductionKind::Add ? "add" :
@@ -1064,8 +1143,17 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // the scalar initializer is combined exactly once after horizontal
         // reduction (or used directly on the no-vector path).
         ir::Value* reductionInit = nullptr;
-        if (!plan.reductions.empty())
-            reductionInit = builder.createCopy(plan.reductions[0].initialValue);
+        if (!plan.reductions.empty()) {
+            ir::Value* initial = plan.reductions[0].initialValue;
+            if (auto* integer = dynamic_cast<ir::ConstantInt*>(initial);
+                integer && plan.reductions[0].scalarType->isIntegerTy()) {
+                reductionInit = ctx->getConstantInt(
+                    static_cast<ir::IntegerType*>(plan.reductions[0].scalarType),
+                    integer->getValue());
+            } else {
+                reductionInit = builder.createCopy(initial);
+            }
+        }
 
         // Copy pointer bases in entryBB to ensure stable SSA virtual registers
         std::map<ir::Value*, ir::Value*> baseCopyMap;
@@ -1274,6 +1362,8 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::VectorInstruction* vScale = nullptr;
         ir::Instruction* registerLaneBuffer = nullptr;
         std::map<ir::Value*, ir::Value*> registerConstants;
+        std::map<uint64_t, ir::Value*> compositeI32Constants;
+        std::map<uint64_t, ir::Value*> compositeI64Constants;
         if (plan.memoryAccesses.empty() && !plan.isWideningReduction) {
             if (dynamic_cast<ir::ConstantInt*>(inductionInit)) {
                 vInitI = buildVectorConst(startValConst, plan.stepConst);
@@ -1302,13 +1392,43 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             };
             if (extension) materializeConstants(extension->getOperands()[0]->get());
         }
+        if (plan.isCompositeWideningReduction) {
+            for (uint64_t value : {255u, 65535u})
+                compositeI32Constants[value] = buildVectorConst(
+                    static_cast<uint32_t>(value), 0);
+            auto* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+            std::set<ir::Value*> seen;
+            std::function<void(ir::Value*)> collectI64Constants = [&](ir::Value* value) {
+                if (!value || !seen.insert(value).second) return;
+                if (auto* constant = dynamic_cast<ir::ConstantInt*>(value)) {
+                    if (constant->getType() && constant->getType()->getSize() == 8) {
+                        compositeI64Constants[constant->getValue()] =
+                            builder.createVBroadcast(v4i64Ty, constant);
+                    } else if (constant->getType() && constant->getType()->getSize() == 4 &&
+                               !compositeI32Constants.count(constant->getValue())) {
+                        compositeI32Constants[constant->getValue()] = buildVectorConst(
+                            static_cast<uint32_t>(constant->getValue()), 0);
+                    }
+                    return;
+                }
+                if (auto* inst = dynamic_cast<ir::Instruction*>(value))
+                    for (auto& operand : inst->getOperands())
+                        collectI64Constants(operand->get());
+            };
+            collectI64Constants(plan.reductions[0].scalarTerm);
+        }
 
         ir::VectorInstruction* vReductionIdentity = nullptr;
         ir::VectorInstruction* vZeroAcc0 = nullptr;
         ir::VectorInstruction* vZeroAcc1 = nullptr;
+        ir::VectorInstruction* vCompositeIdentity = nullptr;
 
         if (!plan.reductions.empty()) {
-            if (plan.isWideningReduction) {
+            if (plan.isCompositeWideningReduction) {
+                auto* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+                vCompositeIdentity = builder.createVBroadcast(
+                    v4i64Ty, ctx->getConstantInt(i64Ty, 0));
+            } else if (plan.isWideningReduction) {
                 ir::VectorType* v4i64Ty = ctx->getVectorType(i64Ty, 4);
                 vZeroAcc0 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
                 vZeroAcc1 = builder.createVBroadcast(v4i64Ty, ctx->getConstantInt(i64Ty, 0));
@@ -1371,9 +1491,17 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::PhiNode* rawPhiVSum1 = nullptr;
         ir::PhiNode* rawPhiVSum = nullptr;
         ir::PhiNode* rawPhiRegisterSum = nullptr;
+        ir::PhiNode* rawPhiCompositeSum = nullptr;
 
         if (!plan.reductions.empty()) {
-            if (plan.isRegisterWideningReduction) {
+            if (plan.isCompositeWideningReduction) {
+                auto* v4i64Ty = ctx->getVectorType(i64Ty, 4);
+                auto owner = std::make_unique<ir::PhiNode>(v4i64Ty, 0, nullptr,
+                                                           vLoopHeaderBB);
+                rawPhiCompositeSum = owner.get();
+                vLoopHeaderBB->getInstructions().push_back(std::move(owner));
+                rawPhiCompositeSum->addIncoming(vCompositeIdentity, vPreheaderBB);
+            } else if (plan.isRegisterWideningReduction) {
                 auto owner = std::make_unique<ir::PhiNode>(i64Ty, 0, nullptr, vLoopHeaderBB);
                 rawPhiRegisterSum = owner.get();
                 vLoopHeaderBB->getInstructions().push_back(std::move(owner));
@@ -1424,7 +1552,86 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         // Vector Body
         builder.setInsertPoint(vLoopBodyBB);
 
-        if (plan.isRegisterWideningReduction) {
+        if (plan.isCompositeWideningReduction) {
+            std::map<ir::Value*, ir::Value*> i32Values;
+            std::map<ir::Value*, ir::Value*> i64Values;
+            i32Values[iPhi] = rawPhiVI;
+
+            std::function<ir::Value*(ir::Value*)> vectorizeI32 =
+                [&](ir::Value* value) -> ir::Value* {
+                if (i32Values.count(value)) return i32Values[value];
+                if (auto* constant = dynamic_cast<ir::ConstantInt*>(value)) {
+                    auto it = compositeI32Constants.find(constant->getValue());
+                    return it == compositeI32Constants.end() ? nullptr : it->second;
+                }
+                auto* inst = dynamic_cast<ir::Instruction*>(value);
+                if (!inst || inst->getOperands().size() != 2) return nullptr;
+                ir::Value* lhs = vectorizeI32(inst->getOperands()[0]->get());
+                ir::Value* rhs = vectorizeI32(inst->getOperands()[1]->get());
+                if (!lhs || !rhs) return nullptr;
+                if (inst->getOpcode() == ir::Instruction::Add)
+                    i32Values[value] = builder.createVAdd(lhs, rhs);
+                else if (inst->getOpcode() == ir::Instruction::Sub)
+                    i32Values[value] = builder.createVSub(lhs, rhs);
+                else if (inst->getOpcode() == ir::Instruction::Mul)
+                    i32Values[value] = builder.createVMul(lhs, rhs);
+                return i32Values.count(value) ? i32Values[value] : nullptr;
+            };
+
+            auto normalizeNarrow = [&](ir::Value* source, unsigned width,
+                                       bool isSigned) -> ir::Value* {
+                if (width == 32) return source;
+                const uint64_t mask = width == 8 ? 255 : 65535;
+                ir::Value* low = builder.createVAnd(
+                    source, compositeI32Constants.at(mask));
+                if (!isSigned) return low;
+                ir::Value* shift = ctx->getConstantInt(i32Ty, 32 - width);
+                return builder.createVSar(builder.createVShl(low, shift), shift);
+            };
+
+            std::function<ir::Value*(ir::Value*)> vectorizeI64 =
+                [&](ir::Value* value) -> ir::Value* {
+                if (i64Values.count(value)) return i64Values[value];
+                if (auto* constant = dynamic_cast<ir::ConstantInt*>(value)) {
+                    auto it = compositeI64Constants.find(constant->getValue());
+                    return it == compositeI64Constants.end() ? nullptr : it->second;
+                }
+                auto* inst = dynamic_cast<ir::Instruction*>(value);
+                if (!inst) return nullptr;
+                const auto opcode = inst->getOpcode();
+                if (isNarrowExtension(opcode) && inst->getOperands().size() == 1) {
+                    ir::Value* source = vectorizeI32(inst->getOperands()[0]->get());
+                    if (!source) return nullptr;
+                    const bool isSigned = opcode == ir::Instruction::ExtSB ||
+                                          opcode == ir::Instruction::ExtSH ||
+                                          opcode == ir::Instruction::ExtSW;
+                    const unsigned width = (opcode == ir::Instruction::ExtSB ||
+                                            opcode == ir::Instruction::ExtUB) ? 8 :
+                                           (opcode == ir::Instruction::ExtSH ||
+                                            opcode == ir::Instruction::ExtUH) ? 16 : 32;
+                    ir::Value* normalized = normalizeNarrow(source, width, isSigned);
+                    auto* destination = ctx->getVectorType(i64Ty, 4);
+                    i64Values[value] = isSigned
+                        ? static_cast<ir::Value*>(builder.createVSExt(normalized, destination))
+                        : static_cast<ir::Value*>(builder.createVZExt(normalized, destination));
+                    return i64Values[value];
+                }
+                if ((opcode == ir::Instruction::Add || opcode == ir::Instruction::Sub) &&
+                    inst->getOperands().size() == 2) {
+                    ir::Value* lhs = vectorizeI64(inst->getOperands()[0]->get());
+                    ir::Value* rhs = vectorizeI64(inst->getOperands()[1]->get());
+                    if (!lhs || !rhs) return nullptr;
+                    i64Values[value] = opcode == ir::Instruction::Add
+                        ? static_cast<ir::Value*>(builder.createVAdd(lhs, rhs))
+                        : static_cast<ir::Value*>(builder.createVSub(lhs, rhs));
+                }
+                return i64Values.count(value) ? i64Values[value] : nullptr;
+            };
+
+            ir::Value* term = vectorizeI64(plan.reductions[0].scalarTerm);
+            ir::VectorInstruction* next = builder.createVAdd(rawPhiCompositeSum, term);
+            rawPhiCompositeSum->addIncoming(next, vLoopBodyBB);
+        } else if (plan.isRegisterWideningReduction) {
             std::map<ir::Value*, ir::Value*> values;
             values[iPhi] = rawPhiVI;
             std::map<uint32_t, ir::Value*> affineInductions;
@@ -1758,7 +1965,20 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         ir::Instruction* sumReduced = nullptr;
         ir::Value* vectorPathSum = nullptr;
 
-        if (plan.isRegisterWideningReduction && rawPhiRegisterSum) {
+        if (plan.isCompositeWideningReduction && rawPhiCompositeSum) {
+            ir::Instruction* l0 = builder.createVExtract(
+                rawPhiCompositeSum, ctx->getConstantInt(i32Ty, 0));
+            ir::Instruction* l1 = builder.createVExtract(
+                rawPhiCompositeSum, ctx->getConstantInt(i32Ty, 1));
+            ir::Instruction* l2 = builder.createVExtract(
+                rawPhiCompositeSum, ctx->getConstantInt(i32Ty, 2));
+            ir::Instruction* l3 = builder.createVExtract(
+                rawPhiCompositeSum, ctx->getConstantInt(i32Ty, 3));
+            ir::Instruction* pair0 = builder.createAdd(l0, l1);
+            ir::Instruction* pair1 = builder.createAdd(l2, l3);
+            vectorPathSum = builder.createAdd(
+                reductionInit, builder.createAdd(pair0, pair1));
+        } else if (plan.isRegisterWideningReduction && rawPhiRegisterSum) {
             vectorPathSum = rawPhiRegisterSum;
         } else if (plan.isWideningReduction && rawPhiVSum0 && rawPhiVSum1) {
             ir::VectorInstruction* vCombined = builder.createVAdd(rawPhiVSum0, rawPhiVSum1);
@@ -1846,19 +2066,22 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             if (!plan.reductions.empty() && inst.get() == plan.reductions[0].update) continue;
             if (!plan.reductions.empty() && plan.memoryAccesses.empty() &&
                 !plan.isRegisterWideningReduction &&
+                !plan.isCompositeWideningReduction &&
                 inst.get() == plan.reductions[0].scalarTerm) continue;
 
-            if (opc == ir::Instruction::ExtSW) {
+            if (isNarrowExtension(opc)) {
                 ir::Value* srcVal = inst->getOperands()[0]->get();
-                if (srcVal == iPhi) {
-                    ir::Instruction* epiI64 = builder.createExtSW(rawPhiEpiI, i64Ty);
-                    epiValueMap[inst.get()] = epiI64;
-                } else {
-                    auto* instSrc = dynamic_cast<ir::Instruction*>(srcVal);
-                    ir::Value* eSrc = (instSrc && epiValueMap.count(instSrc)) ? epiValueMap[instSrc] : srcVal;
-                    ir::Instruction* extVal = builder.createExtSW(eSrc, i64Ty);
-                    epiValueMap[inst.get()] = extVal;
-                }
+                auto* instSrc = dynamic_cast<ir::Instruction*>(srcVal);
+                ir::Value* eSrc = srcVal == iPhi ? static_cast<ir::Value*>(rawPhiEpiI)
+                    : ((instSrc && epiValueMap.count(instSrc)) ? epiValueMap[instSrc] : srcVal);
+                ir::Instruction* extVal = nullptr;
+                if (opc == ir::Instruction::ExtSB) extVal = builder.createExtSB(eSrc, i64Ty);
+                else if (opc == ir::Instruction::ExtUB) extVal = builder.createExtUB(eSrc, i64Ty);
+                else if (opc == ir::Instruction::ExtSH) extVal = builder.createExtSH(eSrc, i64Ty);
+                else if (opc == ir::Instruction::ExtUH) extVal = builder.createExtUH(eSrc, i64Ty);
+                else if (opc == ir::Instruction::ExtSW) extVal = builder.createExtSW(eSrc, i64Ty);
+                else extVal = builder.createExtUW(eSrc, i64Ty);
+                epiValueMap[inst.get()] = extVal;
             } else if (opc == ir::Instruction::Mul || opc == ir::Instruction::FMul ||
                        opc == ir::Instruction::FDiv) {
                 ir::Value* op0 = inst->getOperands()[0]->get();

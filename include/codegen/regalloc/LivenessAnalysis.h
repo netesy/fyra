@@ -25,6 +25,10 @@ public:
     // Returns true if value is live immediately after instruction according to CFG-aware pre-spill analysis
     bool isLiveAfter(const ir::Instruction* instruction, const ir::Value* value) const;
 
+    // Returns true if value is live immediately before instruction according
+    // to the same CFG-aware dataflow solution as isLiveAfter().
+    bool isLiveBefore(const ir::Instruction* instruction, const ir::Value* value) const;
+
     // Returns true if use represents the final live use of its original pre-spill SSA value
     bool isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const;
 

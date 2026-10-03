@@ -1,0 +1,56 @@
+export function $main() : i32 {
+@entry
+    jmp @loop
+@loop
+    %i = phi @entry 0, @latch %next : i32
+    %state = phi @entry 1, @latch %state_next : i32
+    %sum = phi @entry 0, @latch %sum_next : i64
+    %more = slt %i, 20000000 : i32
+    jnz %more, @body, @exit
+@body
+    %product = mul %state, 1664525 : i32
+    %state_next = add %product, 1013904223 : i32
+    %low4 = and %state_next, 15 : i32
+    %rare = eq %low4, 0 : i32
+    jnz %rare, @rare, @common_check
+@rare
+    %upper = shr %state_next, 8 : i32
+    %upper64 = extuw %upper : i64
+    %rare_sum = add %sum, %upper64 : i64
+    jmp @merge
+@common_check
+    %low2 = and %state_next, 3 : i32
+    %second = eq %low2, 1 : i32
+    jnz %second, @subtract, @small
+@subtract
+    %low16 = and %state_next, 65535 : i32
+    %low16_64 = extuw %low16 : i64
+    %subtract_sum = sub %sum, %low16_64 : i64
+    jmp @merge
+@small
+    %bit = and %state_next, 1 : i32
+    %odd = ne %bit, 0 : i32
+    jnz %odd, @odd, @even
+@odd
+    %odd_sum = add %sum, 7 : i64
+    jmp @merge
+@even
+    %even_sum = add %sum, 3 : i64
+    jmp @merge
+@merge
+    %selected = phi @rare %rare_sum, @subtract %subtract_sum, @odd %odd_sum, @even %even_sum : i64
+    %guard_bits = and %state_next, 65535 : i32
+    %guard = eq %guard_bits, 44257 : i32
+    jnz %guard, @toggle, @latch
+@toggle
+    %i64 = extuw %i : i64
+    %toggled = xor %selected, %i64 : i64
+    jmp @latch
+@latch
+    %sum_next = phi @merge %selected, @toggle %toggled : i64
+    %next = add %i, 1 : i32
+    jmp @loop
+@exit
+    call $print_checksum(i64 %sum)
+    ret 0 : i32
+}

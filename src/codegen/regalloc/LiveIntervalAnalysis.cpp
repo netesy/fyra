@@ -20,16 +20,16 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
     // 2. Clear out any old data
     intervals.clear();
 
-    // Collect call sites instruction indices
-    std::set<int> callSites;
-    int idx = 0;
+    // Keep the actual call instructions.  A bounding [first definition, last
+    // use] range may contain a call in a CFG-linearized hole; that does not
+    // make the value live across the call.
+    std::vector<const ir::Instruction*> callSites;
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
             auto opc = instr->getOpcode();
             if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                callSites.insert(idx);
+                callSites.push_back(instr.get());
             }
-            idx++;
         }
     }
 
@@ -80,8 +80,8 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
         const ir::Instruction* vreg = pair.first;
         const LiveRange& range = pair.second;
         bool crossesCall = false;
-        for (int c : callSites) {
-            if (range.start < c && c < range.end) {
+        for (const ir::Instruction* call : callSites) {
+            if (liveness.isLiveBefore(call, vreg) && liveness.isLiveAfter(call, vreg)) {
                 crossesCall = true;
                 break;
             }

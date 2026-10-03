@@ -147,7 +147,9 @@ public:
     VectorInstruction* createVAdd(Value* lhs, Value* rhs);
     VectorInstruction* createVSub(Value* lhs, Value* rhs);
     VectorInstruction* createVMul(Value* lhs, Value* rhs);
+    VectorInstruction* createVAnd(Value* lhs, Value* rhs);
     VectorInstruction* createVShl(Value* lhs, Value* amount);
+    VectorInstruction* createVSar(Value* lhs, Value* amount);
     VectorInstruction* createVFAdd(Value* lhs, Value* rhs);
     VectorInstruction* createVFSub(Value* lhs, Value* rhs);
     VectorInstruction* createVFMul(Value* lhs, Value* rhs);

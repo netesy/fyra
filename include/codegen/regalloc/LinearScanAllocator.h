@@ -68,6 +68,7 @@ private:
     std::vector<const class LiveInterval*> active_stack_intervals;
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;
     RegAllocStats stats;
+    size_t next_spill_id = 0;
 };
 
 } // namespace transforms

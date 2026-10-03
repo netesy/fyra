@@ -1,0 +1,33 @@
+export function $main() : i32 {
+@entry
+    jmp @outer
+@outer
+    %i = phi @entry 0, @outer_latch %i_next : i32
+    %outer_sum = phi @entry 0, @outer_latch %inner_result : i64
+    %outer_more = slt %i, 2000000 : i32
+    jnz %outer_more, @inner_preheader, @exit
+@inner_preheader
+    %low = and %i, 31 : i32
+    %inner_bound = add %low, 32 : i32
+    jmp @inner
+@inner
+    %j = phi @inner_preheader 0, @inner_body %j_next : i32
+    %inner_sum = phi @inner_preheader %outer_sum, @inner_body %sum_next : i64
+    %inner_more = slt %j, %inner_bound : i32
+    jnz %inner_more, @inner_body, @outer_latch
+@inner_body
+    %scaled = mul %j, 17 : i32
+    %mixed = xor %i, %scaled : i32
+    %byte = and %mixed, 255 : i32
+    %wide = extuw %byte : i64
+    %sum_next = add %inner_sum, %wide : i64
+    %j_next = add %j, 1 : i32
+    jmp @inner
+@outer_latch
+    %inner_result = copy %inner_sum : i64
+    %i_next = add %i, 1 : i32
+    jmp @outer
+@exit
+    call $print_checksum(i64 %outer_sum)
+    ret 0 : i32
+}

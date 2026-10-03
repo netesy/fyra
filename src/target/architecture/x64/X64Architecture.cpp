@@ -3287,6 +3287,41 @@ unsigned X64Architecture::getReservedScratchVectorRegIndex() const {
     return 115;
 }
 
+bool X64Architecture::canUseMemoryOperand(ir::Instruction::Opcode opcode, size_t operandIndex) const {
+    switch (opcode) {
+        case ir::Instruction::Copy:
+        case ir::Instruction::Jz:
+        case ir::Instruction::Jnz:
+            return operandIndex == 0;
+        case ir::Instruction::Shl:
+        case ir::Instruction::Shr:
+        case ir::Instruction::Sar:
+            return operandIndex == 0; // shift counts are immediate or %cl
+        case ir::Instruction::Add:
+        case ir::Instruction::Sub:
+        case ir::Instruction::Mul:
+        case ir::Instruction::And:
+        case ir::Instruction::Or:
+        case ir::Instruction::Xor:
+        case ir::Instruction::Ceq:
+        case ir::Instruction::Cne:
+        case ir::Instruction::Csle:
+        case ir::Instruction::Cslt:
+        case ir::Instruction::Csge:
+        case ir::Instruction::Csgt:
+        case ir::Instruction::Cule:
+        case ir::Instruction::Cult:
+        case ir::Instruction::Cuge:
+        case ir::Instruction::Cugt:
+            return operandIndex < 2;
+        case ir::Instruction::Call:
+        case ir::Instruction::ExternCall:
+            return true;
+        default:
+            return false;
+    }
+}
+
 VectorCapabilities X64Architecture::getVectorCapabilities() const {
     VectorCapabilities caps;
     caps.supportsSSE = true;
@@ -3368,6 +3403,9 @@ bool X64Architecture::supportsVectorOperation(ir::Instruction::Opcode op, const 
         case ir::Instruction::VAnd:
         case ir::Instruction::VOr:
         case ir::Instruction::VXor:
+        case ir::Instruction::VShl:
+        case ir::Instruction::VShr:
+        case ir::Instruction::VSar:
         case ir::Instruction::VBroadcast:
         case ir::Instruction::VExtract:
         case ir::Instruction::VInsert:
@@ -3851,8 +3889,9 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                     unsigned bits = elemTy->getSize() * 8 * numElem;
                     if (bits == 256) {
                         std::string source = op0;
-                        std::string dstYmm = toYmmReg(dst);
                         std::string scratchXmm = getReservedScratchVectorReg();
+                        const bool dstIsRegister = isXmmRegisterName(dst);
+                        std::string dstYmm = dstIsRegister ? toYmmReg(dst) : toYmmReg(scratchXmm);
                         if (isXmmRegisterName(source)) {
                             *os << "  vpbroadcastd " << source << ", " << dstYmm << "\n";
                         } else {
@@ -3865,16 +3904,20 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
                             }
                             *os << "  vpbroadcastd " << scratchXmm << ", " << dstYmm << "\n";
                         }
+                        if (!dstIsRegister) *os << "  vmovdqu " << dstYmm << ", " << dst << "\n";
                     } else {
+                        const bool dstIsRegister = isXmmRegisterName(dst);
+                        const std::string workDst = dstIsRegister ? dst : getReservedScratchVectorReg();
                         if (!op0.empty() && op0[0] == '$') {
                             *os << "  movl " << op0 << ", %eax\n";
-                            *os << "  movd %eax, " << dst << "\n";
+                            *os << "  movd %eax, " << workDst << "\n";
                         } else if (isDirectGprRegister(op0)) {
-                            *os << "  movd " << to32BitReg(op0) << ", " << dst << "\n";
+                            *os << "  movd " << to32BitReg(op0) << ", " << workDst << "\n";
                         } else {
-                            *os << "  movd " << op0 << ", " << dst << "\n";
+                            *os << "  movd " << op0 << ", " << workDst << "\n";
                         }
-                        *os << "  pshufd $0, " << dst << ", " << dst << "\n";
+                        *os << "  pshufd $0, " << workDst << ", " << workDst << "\n";
+                        if (!dstIsRegister) *os << "  movdqu " << workDst << ", " << dst << "\n";
                     }
                 } else if (bw == 64) {
                     std::string dstYmm = toYmmReg(dst);
@@ -4042,6 +4085,12 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
             auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
             unsigned bw = intTy ? intTy->getBitwidth() : 32;
             simdInst = (bw == 16) ? "psrlw" : "psrld";
+        } else if (i.getOpcode() == ir::Instruction::VSar && elemTy->isIntegerTy()) {
+            auto* intTy = dynamic_cast<const ir::IntegerType*>(elemTy);
+            unsigned bw = intTy ? intTy->getBitwidth() : 32;
+            if (bw != 16 && bw != 32)
+                throw std::runtime_error("Unsupported arithmetic vector shift width");
+            simdInst = (bw == 16) ? "psraw" : "psrad";
         } else if (i.getOpcode() == ir::Instruction::VMin) {
             simdInst = (elemTy->getSize() == 1) ? "pminub" : ((elemTy->getSize() == 2) ? "pminsw" : "pminsd");
         } else if (i.getOpcode() == ir::Instruction::VMax) {
@@ -4170,24 +4219,28 @@ void X64Architecture::emitVectorArithmetic(CodeGen& cg, ir::VectorInstruction& i
         // the amount like a second vector register produces invalid operands
         // (and used to let a scalar value reach VStore when loop vectorization
         // was enabled in the production pipeline).
-        if (i.getOpcode() == ir::Instruction::VShl) {
+        if (i.getOpcode() == ir::Instruction::VShl ||
+            i.getOpcode() == ir::Instruction::VShr ||
+            i.getOpcode() == ir::Instruction::VSar) {
             auto* amount = dynamic_cast<ir::ConstantInt*>(
                 i.getOperands().size() > 1 ? i.getOperands()[1]->get() : nullptr);
-            if (!amount) throw std::runtime_error("VShl requires a constant shift amount");
+            if (!amount) throw std::runtime_error("vector shift requires a constant shift amount");
             const uint64_t shift = amount->getValue();
+            const char* mnemonic = i.getOpcode() == ir::Instruction::VShl ? "pslld" :
+                                   i.getOpcode() == ir::Instruction::VShr ? "psrld" : "psrad";
             if (totalBitWidth == 256) {
                 std::string source = toYmmReg(op0);
                 std::string target = toYmmReg(dst);
                 if (abi == X64ABI::Windows)
-                    *os << "  vpslld " << target << ", " << source << ", " << shift << "\n";
+                    *os << "  v" << mnemonic << " " << target << ", " << source << ", " << shift << "\n";
                 else
-                    *os << "  vpslld $" << shift << ", " << source << ", " << target << "\n";
+                    *os << "  v" << mnemonic << " $" << shift << ", " << source << ", " << target << "\n";
             } else {
                 if (dst != op0) *os << "  movdqu " << op0 << ", " << dst << "\n";
                 if (abi == X64ABI::Windows)
-                    *os << "  pslld " << dst << ", " << shift << "\n";
+                    *os << "  " << mnemonic << " " << dst << ", " << shift << "\n";
                 else
-                    *os << "  pslld $" << shift << ", " << dst << "\n";
+                    *os << "  " << mnemonic << " $" << shift << ", " << dst << "\n";
             }
             return;
         }

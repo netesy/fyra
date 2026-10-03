@@ -1098,9 +1098,29 @@ VectorInstruction* IRBuilder::createVMul(Value* lhs, Value* rhs) {
     return instrPtr;
 }
 
+VectorInstruction* IRBuilder::createVAnd(Value* lhs, Value* rhs) {
+    auto instr = std::make_unique<VectorInstruction>(
+        lhs->getType(), Instruction::VAnd, std::vector<Value*>{lhs, rhs},
+        getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get();
+    result->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
 VectorInstruction* IRBuilder::createVShl(Value* lhs, Value* amount) {
     auto instr = std::make_unique<VectorInstruction>(
         lhs->getType(), Instruction::VShl, std::vector<Value*>{lhs, amount},
+        getVecWidthBits(lhs), insertPoint);
+    auto* result = instr.get();
+    result->setSourceLine(currentLine);
+    insertPoint->addInstruction(insertIterator, std::move(instr));
+    return result;
+}
+
+VectorInstruction* IRBuilder::createVSar(Value* lhs, Value* amount) {
+    auto instr = std::make_unique<VectorInstruction>(
+        lhs->getType(), Instruction::VSar, std::vector<Value*>{lhs, amount},
         getVecWidthBits(lhs), insertPoint);
     auto* result = instr.get();
     result->setSourceLine(currentLine);

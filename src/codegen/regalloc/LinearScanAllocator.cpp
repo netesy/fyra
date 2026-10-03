@@ -126,6 +126,7 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                 case ir::Instruction::VXor:
                 case ir::Instruction::VShl:
                 case ir::Instruction::VShr:
+                case ir::Instruction::VSar:
                 case ir::Instruction::VNot:
                 case ir::Instruction::VBroadcast:
                 case ir::Instruction::VInsert:
@@ -330,6 +331,7 @@ StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
 
 void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
     stats.numSpills++;
+    const size_t spillId = next_spill_id++;
     if (active_intervals.empty()) {
         vreg_to_location_map[current_interval.getVreg()] = allocateStackSlot(current_interval.getVreg());
         return;
@@ -353,7 +355,25 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
                 vreg_to_location_map[current_interval.getVreg()] = reg;
 
                 min_spill_candidate->getVreg()->setPhysicalRegister(-1);
-                vreg_to_location_map[min_spill_candidate->getVreg()] = allocateStackSlot(min_spill_candidate->getVreg());
+                StackSlot slot = allocateStackSlot(min_spill_candidate->getVreg());
+                vreg_to_location_map[min_spill_candidate->getVreg()] = slot;
+                if (std::getenv("FYRA_REGALLOC_DIAG")) {
+                    const std::string spilledName = min_spill_candidate->getVreg()->getName().empty()
+                        ? "v@" + std::to_string(min_spill_candidate->getStart())
+                        : min_spill_candidate->getVreg()->getName();
+                    const std::string replacementName = current_interval.getVreg()->getName().empty()
+                        ? "v@" + std::to_string(current_interval.getStart())
+                        : current_interval.getVreg()->getName();
+                    std::cout << "[RegAlloc spill-decision] id=" << spillId
+                              << " position=" << current_interval.getStart()
+                              << " spilled=" << spilledName
+                              << " def=" << min_spill_candidate->getStart()
+                              << " end=" << min_spill_candidate->getEnd()
+                              << " slot=" << slot.index
+                              << " slot_offset=" << slot.byteOffset
+                              << " replacement=" << replacementName
+                              << std::endl;
+                }
                 active_stack_intervals.push_back(min_spill_candidate);
                 std::sort(active_stack_intervals.begin(), active_stack_intervals.end(),
                     [](const LiveInterval* a, const LiveInterval* b) {
@@ -371,7 +391,21 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         }
     }
 
-    vreg_to_location_map[current_interval.getVreg()] = allocateStackSlot(current_interval.getVreg());
+    StackSlot slot = allocateStackSlot(current_interval.getVreg());
+    vreg_to_location_map[current_interval.getVreg()] = slot;
+    if (std::getenv("FYRA_REGALLOC_DIAG")) {
+        const std::string spilledName = current_interval.getVreg()->getName().empty()
+            ? "v@" + std::to_string(current_interval.getStart())
+            : current_interval.getVreg()->getName();
+        std::cout << "[RegAlloc spill-decision] id=" << spillId
+                  << " position=" << current_interval.getStart()
+                  << " spilled=" << spilledName
+                  << " def=" << current_interval.getStart()
+                  << " end=" << current_interval.getEnd()
+                  << " slot=" << slot.index
+                  << " slot_offset=" << slot.byteOffset
+                  << " replacement=none" << std::endl;
+    }
     active_stack_intervals.push_back(&current_interval);
     std::sort(active_stack_intervals.begin(), active_stack_intervals.end(),
         [](const LiveInterval* a, const LiveInterval* b) {

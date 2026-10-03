@@ -453,6 +453,93 @@ void test_register_widening_rejects_non_i32_leaf() {
     assert(!vectorizer.performTransformation(*function));
 }
 
+void test_composite_widening_reduction_execution() {
+    auto ctx = std::make_shared<IRContext>();
+    Module module("composite_widening", ctx);
+    IRBuilder builder(ctx); builder.setModule(&module);
+    auto* i32 = ctx->getIntegerType(32);
+    auto* i64 = ctx->getIntegerType(64);
+    Function* function = builder.createFunction("mixed_width_sum", i64, {i32, i32});
+    auto parameter = function->getParameters().begin();
+    Value* start = parameter->get();
+    Value* bound = (++parameter)->get();
+    BasicBlock* entry = builder.createBasicBlock("entry", function);
+    BasicBlock* header = builder.createBasicBlock("loop", function);
+    BasicBlock* body = builder.createBasicBlock("body", function);
+    BasicBlock* exit = builder.createBasicBlock("exit", function);
+    builder.setInsertPoint(entry); builder.createJmp(header);
+    builder.setInsertPoint(header);
+    auto iOwner = std::make_unique<PhiNode>(i32, 0, nullptr, header);
+    PhiNode* i = iOwner.get(); header->getInstructions().push_back(std::move(iOwner));
+    auto sumOwner = std::make_unique<PhiNode>(i64, 0, nullptr, header);
+    PhiNode* sum = sumOwner.get(); header->getInstructions().push_back(std::move(sumOwner));
+    i->addIncoming(start, entry);
+    sum->addIncoming(ctx->getConstantInt(i64, 0), entry);
+    builder.createBr(builder.createCslt(i, bound), body, exit);
+    builder.setInsertPoint(body);
+    Value* byteWrapped = builder.createAdd(i, ctx->getConstantInt(i32, 1));
+    Value* term = builder.createAdd(builder.createExtSB(byteWrapped, i64),
+                                    builder.createExtUB(i, i64));
+    term = builder.createAdd(term, builder.createExtSH(i, i64));
+    term = builder.createAdd(term, builder.createExtUH(i, i64));
+    term = builder.createAdd(term, builder.createExtSW(i, i64));
+    term = builder.createAdd(term, builder.createExtUW(i, i64));
+    Value* sumNext = builder.createAdd(sum, term);
+    Value* iNext = builder.createAdd(i, ctx->getConstantInt(i32, 1));
+    i->addIncoming(iNext, body); sum->addIncoming(sumNext, body);
+    builder.createJmp(header);
+    builder.setInsertPoint(exit); builder.createRet(sum);
+    transforms::CFGBuilder::run(*function);
+
+    transforms::LoopVectorizer vectorizer;
+    assert(vectorizer.performTransformation(*function));
+    transforms::LinearScanAllocator allocator; allocator.run(*function);
+    auto architecture = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+    auto os = std::make_unique<target::LinuxOS>();
+    std::unique_ptr<target::TargetInfo> target =
+        std::make_unique<target::CompositeTargetInfo>(std::move(architecture), std::move(os));
+    std::ostringstream assembly;
+    codegen::CodeGen codegen(module, std::move(target), &assembly); codegen.emit(false);
+    const std::string text = assembly.str();
+    assert(text.find("pmovsxdq") != std::string::npos);
+    assert(text.find("pmovzxdq") != std::string::npos);
+    assert(text.find("psrad") != std::string::npos);
+    assert(text.find("%ymm") != std::string::npos);
+
+    const std::string stem = "/tmp/fyra_composite_widening_" + std::to_string(getpid());
+    const std::string asmPath = stem + ".s", harnessPath = stem + ".c", binaryPath = stem;
+    { std::ofstream output(asmPath); output << text; }
+    { std::ofstream output(harnessPath); output << R"(
+#include <stdint.h>
+extern int64_t mixed_width_sum(int32_t, int32_t);
+static int64_t reference(int32_t start, int32_t bound) {
+  int64_t sum=0;
+  for (int32_t i=start;i<bound;i++) {
+    uint32_t u=(uint32_t)i;
+    sum+=(int64_t)(int8_t)(uint8_t)(u+1)+(int64_t)(uint8_t)u+
+         (int64_t)(int16_t)(uint16_t)u+(int64_t)(uint16_t)u+
+         (int64_t)(int32_t)u+(int64_t)(uint32_t)u;
+  }
+  return sum;
+}
+int main(void) {
+  const int32_t starts[]={0,-1,-129,125,253,32765,65533,-2147483647};
+  const int lengths[]={0,1,2,3,4,7,8,15,16,17,31,32,33,63,64,65};
+  for (unsigned s=0;s<sizeof(starts)/sizeof(starts[0]);s++)
+    for (unsigned n=0;n<sizeof(lengths)/sizeof(lengths[0]);n++) {
+      int32_t bound=starts[s]+lengths[n];
+      if (mixed_width_sum(starts[s],bound)!=reference(starts[s],bound)) return 1;
+    }
+  return 0;
+})"; }
+#if !defined(_WIN32)
+    const std::string command = "gcc -no-pie " + asmPath + " " + harnessPath + " -o " + binaryPath;
+    assert(std::system(command.c_str()) == 0);
+    assert(std::system(binaryPath.c_str()) == 0);
+#endif
+    std::remove(asmPath.c_str()); std::remove(harnessPath.c_str()); std::remove(binaryPath.c_str());
+}
+
 void test_closed_form_has_priority_over_vectorization() {
     auto ctx = std::make_shared<IRContext>();
     Module module("closed_form_priority", ctx);
@@ -561,6 +648,7 @@ int main() {
     test_closed_form_has_priority_over_vectorization();
     test_runtime_closed_form_shape_remains_vectorizable();
     test_register_expression_widening_execution();
+    test_composite_widening_reduction_execution();
     test_register_widening_rejects_non_i32_leaf();
 
     test_rejection_cases();

@@ -57,6 +57,7 @@ public:
         VXor,          // Vector bitwise XOR
         VShl,          // Vector bitwise shift left
         VShr,          // Vector bitwise shift right
+        VSar,          // Vector arithmetic shift right
         VNot,          // Vector bitwise NOT
         VLoad,         // Vector load
         VStore,        // Vector store

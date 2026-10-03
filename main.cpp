@@ -109,6 +109,7 @@ int main(int argc, char** argv) {
         std::cerr << "  -O1                                              Enable conservative optimizations" << std::endl;
         std::cerr << "  -O2                                              Enable full optimization pipeline (default)" << std::endl;
         std::cerr << "  --disable-slp                                     Disable SLP vectorization" << std::endl;
+        std::cerr << "  --disable-loop-vectorization                      Disable loop vectorization" << std::endl;
         std::cerr << "  --disable-egraph                                  Disable e-graph optimization" << std::endl;
         std::cerr << "  --validate                                       Enable ASM validation (default: enabled)" << std::endl;
         std::cerr << "  --no-validate                                    Disable ASM validation" << std::endl;
@@ -149,6 +150,7 @@ int main(int argc, char** argv) {
     bool enableLTO = false;
     bool enableUnroll = true;
     bool enableSLP = true;
+    bool enableLoopVectorization = true;
     bool enableEGraph = true;
 
     for (int i = 1; i < argc; ++i) {
@@ -157,6 +159,8 @@ int main(int argc, char** argv) {
             enableUnroll = false;
         } else if (arg == "--disable-slp") {
             enableSLP = false;
+        } else if (arg == "--disable-loop-vectorization") {
+            enableLoopVectorization = false;
         } else if (arg == "--disable-egraph") {
             enableEGraph = false;
         } else if (arg == "--no-validate") {
@@ -219,6 +223,7 @@ int main(int argc, char** argv) {
            .optimize(optLevel)
            .validate(enableValidation)
            .enableSLP(enableSLP)
+           .enableLoopVectorization(enableLoopVectorization)
            .enableEGraph(enableEGraph)
            .enableLoopUnroll(enableUnroll);
 

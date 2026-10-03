@@ -120,6 +120,13 @@ bool LivenessAnalysis::isLiveAfter(const ir::Instruction* instruction, const ir:
     return it->second.count(value) > 0;
 }
 
+bool LivenessAnalysis::isLiveBefore(const ir::Instruction* instruction, const ir::Value* value) const {
+    if (!instruction || !value) return false;
+    auto it = liveBeforeMap.find(instruction);
+    if (it == liveBeforeMap.end()) return false;
+    return it->second.count(value) > 0;
+}
+
 bool LivenessAnalysis::isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const {
     if (!user || !use) return false;
     const ir::Value* origVal = use->getOriginalValue();

@@ -107,6 +107,7 @@ public:
     bool isReserved(const std::string& reg) const override;
     std::string getReservedScratchVectorReg() const override;
     unsigned getReservedScratchVectorRegIndex() const override;
+    bool canUseMemoryOperand(ir::Instruction::Opcode opcode, size_t operandIndex) const override;
     std::string getRegisterName(const std::string& base, const ir::Type* type) const override;
 
     VectorCapabilities getVectorCapabilities() const override;

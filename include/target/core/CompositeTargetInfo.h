@@ -151,6 +151,7 @@ public:
     bool isReserved(const std::string& r) const override;
     std::string getReservedScratchVectorReg() const override;
     unsigned getReservedScratchVectorRegIndex() const override;
+    bool canUseMemoryOperand(ir::Instruction::Opcode opcode, size_t operandIndex) const override;
     std::string getRegisterName(const std::string& b, const ir::Type* t) const override;
 
 protected:

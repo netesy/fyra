@@ -1,0 +1,33 @@
+function $mix(%value : i64) : i64 {
+@entry
+    %s0 = shr %value, 30 : i64
+    %x0 = xor %value, %s0 : i64
+    %m0 = mul %x0, 636413622 : i64
+    %s1 = shr %m0, 27 : i64
+    %x1 = xor %m0, %s1 : i64
+    %m1 = mul %x1, 1442695041 : i64
+    %s2 = shr %m1, 31 : i64
+    %result = xor %m1, %s2 : i64
+    ret %result : i64
+}
+
+export function $main() : i32 {
+@entry
+    jmp @loop
+
+@loop
+    %i = phi @entry 1, @body %next : i64
+    %checksum = phi @entry 0, @body %checksum_next : i64
+    %keep_going = sle %i, 50000000 : i64
+    jnz %keep_going, @body, @exit
+
+@body
+    %mixed = call $mix(%i) : i64
+    %checksum_next = xor %checksum, %mixed : i64
+    %next = add %i, 1 : i64
+    jmp @loop
+
+@exit
+    call $print_checksum(i64 %checksum)
+    ret 0 : i32
+}

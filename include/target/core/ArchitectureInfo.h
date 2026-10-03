@@ -142,6 +142,7 @@ public:
     virtual bool isReserved(const std::string& reg) const { return false; }
     virtual std::string getReservedScratchVectorReg() const { return ""; }
     virtual unsigned getReservedScratchVectorRegIndex() const { return 0; }
+    virtual bool canUseMemoryOperand(ir::Instruction::Opcode, size_t) const { return false; }
     virtual std::string getRegisterName(const std::string& base, const ir::Type* type) const { return base; }
     virtual std::string formatConstant(const ir::ConstantInt* C) const;
     virtual std::string formatConstant(const ir::ConstantFP* C) const;

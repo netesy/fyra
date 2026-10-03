@@ -11,6 +11,39 @@ import re
 import shutil
 import argparse
 
+# Categories describe the workload, not an expected optimization outcome.  Keep
+# this mapping explicit so canonical results remain stable as files are added.
+BENCHMARK_CATEGORIES = {
+    "arithmetic": "scalar_integer",
+    "int_widths": "scalar_integer",
+    "bitwise_hash": "real_world_microkernels",
+    "loops": "loops",
+    "realistic_dot_product": "vector",
+    "reg_pressure": "register_pressure",
+    "simd_loop_liveness": "vector",
+    "tail_recursion": "calls",
+}
+
+BENCHMARK_METADATA = {
+    "arithmetic": {"categories": ["integer_arithmetic"], "features": ["mixed_ops", "spill_materialization"]},
+    "bitwise_hash": {"categories": ["bit_manipulation", "hashing"], "features": ["xor", "shift", "multiply", "dependency_chain"]},
+    "branch_state": {"categories": ["branch_heavy", "parser_state_machine"], "features": ["data_dependent_branch", "nested_condition", "early_exit"]},
+    "int_widths": {"categories": ["integer_arithmetic", "reductions", "vector"], "features": ["sext", "zext", "i64_reduction", "scalar_epilogue"]},
+    "loops": {"categories": ["loops"], "features": ["scev_closed_form", "asymptotic"]},
+    "nested_loops": {"categories": ["nested_loops", "reductions"], "features": ["runtime_bounds", "multiple_inductions"]},
+    "realistic_dot_product": {"categories": ["fp_reductions", "vector"], "features": ["dot_product", "horizontal_reduction"]},
+    "reg_pressure": {"categories": ["high_gpr_pressure"], "features": ["long_live_ranges", "spill_materialization"]},
+    "simd_loop_liveness": {"categories": ["high_simd_pressure", "vector"], "features": ["vector_liveness", "register_native_simd"]},
+    "tail_recursion": {"categories": ["calls"], "features": ["tail_call_optimization", "recursion"]},
+}
+
+# Primary summary category. Coverage metadata above may intentionally associate
+# one workload with several compiler behaviors.
+BENCHMARK_CATEGORIES.update({
+    "branch_state": "control_flow",
+    "nested_loops": "loops",
+})
+
 BENCHMARKS_DIR = os.path.dirname(os.path.abspath(__file__))
 CORPUS_C_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "c")
 CORPUS_FYRA_DIR = os.path.join(BENCHMARKS_DIR, "corpus", "fyra")
@@ -39,7 +72,12 @@ def analyze_assembly(asm_file):
         return {
             "total": 0, "loads": 0, "stores": 0, "moves": 0,
             "branches": 0, "calls": 0, "frame_size": 0,
-            "vector_instrs": 0, "spills": 0, "reloads": 0, "max_vector_width": 0
+            "vector_instrs": 0, "assembly_stack_stores": 0,
+            "assembly_stack_loads": 0, "stack_reading_ops": 0,
+            "stack_writing_ops": 0,
+            "stack_reading_ops_including_implicit": 0,
+            "stack_writing_ops_including_implicit": 0,
+            "max_vector_width": 0
         }
 
     total = 0
@@ -52,6 +90,10 @@ def analyze_assembly(asm_file):
     vector_instrs = 0
     spills = 0
     reloads = 0
+    stack_reading_ops = 0
+    stack_writing_ops = 0
+    implicit_stack_reads = 0
+    implicit_stack_writes = 0
     max_vector_width = 0
 
     vector_op_prefixes = (
@@ -73,6 +115,26 @@ def analyze_assembly(asm_file):
             total += 1
             parts = line.split()
             op = parts[0].lower() if parts else ""
+
+            stack_ref = ('%rbp)' in line or '[rbp' in line or '%rsp)' in line or '[rsp' in line)
+            # push/pop access the stack implicitly even though their textual
+            # operand is a register rather than an rbp/rsp memory expression.
+            if op.startswith('push'):
+                implicit_stack_writes += 1
+            elif op.startswith('pop'):
+                implicit_stack_reads += 1
+            if stack_ref and not op.startswith('lea'):
+                operands = line[len(parts[0]):].split(',') if parts else []
+                destination_is_stack = bool(operands) and any(x in operands[-1] for x in ('%rbp)', '[rbp', '%rsp)', '[rsp'))
+                if op.startswith('mov'):
+                    stack_writing_ops += int(destination_is_stack)
+                    stack_reading_ops += int(not destination_is_stack)
+                elif op.startswith(('pop', 'push')):
+                    pass  # Counted above because the stack access is implicit.
+                else:
+                    stack_reading_ops += 1
+                    # x64 read/modify/write forms have a memory destination.
+                    stack_writing_ops += int(destination_is_stack)
 
             if ('subq' in op or 'sub' in op) and ('rsp' in line or '%rsp' in line) and ('$' in line or ',' in line):
                 m = re.search(r'\$(\d+)', line) or re.search(r', (\d+)', line)
@@ -128,8 +190,13 @@ def analyze_assembly(asm_file):
         "calls": calls,
         "frame_size": frame_size,
         "vector_instrs": vector_instrs,
-        "spills": spills,
-        "reloads": reloads,
+        # These are syntactic assembly stack accesses, not allocator events.
+        "assembly_stack_stores": spills,
+        "assembly_stack_loads": reloads,
+        "stack_reading_ops": stack_reading_ops,
+        "stack_writing_ops": stack_writing_ops,
+        "stack_reading_ops_including_implicit": stack_reading_ops + implicit_stack_reads,
+        "stack_writing_ops_including_implicit": stack_writing_ops + implicit_stack_writes,
         "max_vector_width": max_vector_width
     }
 
@@ -149,11 +216,71 @@ def run_exec(exec_path, timeout=30.0):
     except subprocess.TimeoutExpired:
         return 124, "", f"timeout after {timeout}s"
 
+def summarize_runtimes(runtimes, output=""):
+    """Return distribution data without hiding noisy measurements in a median."""
+    if not runtimes:
+        return {
+            "median": 0.0, "min": 0.0, "max": 0.0, "mean": 0.0,
+            "stddev": 0.0, "cv": 0.0, "samples": 0, "output": ""
+        }
+
+    mean = statistics.mean(runtimes)
+    stdev = statistics.stdev(runtimes) if len(runtimes) > 1 else 0.0
+    return {
+        "median": statistics.median(runtimes),
+        "min": min(runtimes),
+        "max": max(runtimes),
+        "mean": mean,
+        "stddev": stdev,
+        "cv": stdev / mean if mean > 0 else 0.0,
+        "samples": len(runtimes),
+        "output": output,
+    }
+
+
+def classify_runtime(candidate, reference):
+    """Classify a same-run comparison while accounting for observed noise.
+
+    A 3% difference is only called meaningful when it also exceeds two pooled
+    coefficients of variation.  Large variability is reported explicitly
+    rather than converted into a spurious compiler ranking.
+    """
+    if candidate["median"] <= 0 or reference["median"] <= 0:
+        return "unavailable"
+    ratio = candidate["median"] / reference["median"]
+    noise_band = max(0.03, 2.0 * math.hypot(candidate["cv"], reference["cv"]))
+    if abs(ratio - 1.0) <= noise_band:
+        return "noisy/inconclusive" if noise_band > 0.05 else "unchanged"
+    return "improved" if ratio < 1.0 else "regressed"
+
+
+def classify_vector_profitability(vector, scalar):
+    classification = classify_runtime(vector, scalar)
+    return {
+        "improved": "profitable",
+        "regressed": "unprofitable",
+        "unchanged": "neutral/inconclusive",
+        "noisy/inconclusive": "neutral/inconclusive",
+        "unavailable": "unavailable",
+    }[classification]
+
+
+def validate_benchmark_catalog(names):
+    duplicates = len(names) != len(set(names))
+    uncategorized = [name for name in names if name not in BENCHMARK_CATEGORIES]
+    missing_metadata = [name for name in names if name not in BENCHMARK_METADATA]
+    return duplicates, uncategorized, missing_metadata
+
+
+def checksums_match(*outputs):
+    return bool(outputs) and bool(outputs[0]) and all(value == outputs[0] for value in outputs)
+
+
 def measure_execution(exec_path, samples=15, warmup=2, timeout=30.0):
     if not os.path.exists(exec_path) and os.path.exists(exec_path + ".exe"):
         exec_path = exec_path + ".exe"
     if not os.path.exists(exec_path):
-        return {"median": 0.0, "min": 0.0, "stddev": 0.0, "output": ""}
+        return summarize_runtimes([])
 
     for _ in range(warmup):
         run_exec(exec_path, timeout=timeout)
@@ -169,16 +296,9 @@ def measure_execution(exec_path, samples=15, warmup=2, timeout=30.0):
             output = out.strip()
 
     if not runtimes:
-        return {"median": 0.0, "min": 0.0, "stddev": 0.0, "output": ""}
+        return summarize_runtimes([])
 
-    med = statistics.median(runtimes)
-    stdev = statistics.stdev(runtimes) if len(runtimes) > 1 else 0.0
-    return {
-        "median": med,
-        "min": min(runtimes),
-        "stddev": stdev,
-        "output": output
-    }
+    return summarize_runtimes(runtimes, output)
 
 def verify_static(exec_path):
     rc, out, err = run_cmd(f"readelf -d {exec_path}")
@@ -195,6 +315,7 @@ def parse_args():
     parser.add_argument("--targets", type=str, default=os.environ.get("FYRA_BENCH_TARGETS", default_target), help="Comma-separated list of target architectures (x64-windows, x64-linux, aarch64-linux, riscv64-linux, wasm32-wasi …)")
     parser.add_argument("--samples", type=int, default=int(os.environ.get("FYRA_BENCH_SAMPLES", "15")), help="Number of timing samples per benchmark")
     parser.add_argument("--warmup", type=int, default=int(os.environ.get("FYRA_BENCH_WARMUP", "2")), help="Number of warmup executions per benchmark")
+    parser.add_argument("--quick", action="store_true", help="Use three samples and one warmup for a fast correctness-oriented run")
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("FYRA_BENCH_TIMEOUT", "30")), help="Execution timeout in seconds")
     parser.add_argument("--verbose", action="store_true", help="Print verbose assembly analysis details")
     parser.add_argument("--json", type=str, default="", help="Custom JSON output file path")
@@ -203,6 +324,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.quick:
+        args.samples = 3
+        args.warmup = 1
 
     print("==========================================================================")
     print(" Fyra Backend — Multi-Category Benchmark Harness (Granular Vector Metrics)")
@@ -214,6 +338,12 @@ def main():
 
     bench_names = [f[:-2] for f in os.listdir(CORPUS_C_DIR) if f.endswith(".c")]
     bench_names.sort()
+
+    duplicates, uncategorized, missing_metadata = validate_benchmark_catalog(bench_names)
+    if duplicates or uncategorized or missing_metadata:
+        details = uncategorized + missing_metadata
+        print("Error: benchmarks require unique identifiers, categories, and metadata: " + ", ".join(details))
+        return 1
 
     requested = {name.strip() for name in args.filter.split(",") if name.strip()}
     if requested:
@@ -270,7 +400,7 @@ def main():
             # Hold loop unrolling constant so this harness isolates SLP and
             # e-graph effects; unrolling has dedicated semantic tests.
             cmd_o2 = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_o2_s_f} -O2 --no-unroll"
-            cmd_scalar = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_scalar_s_f} -O2 --no-unroll --disable-slp"
+            cmd_scalar = f"{fyra_bin_f} {fyra_src_f} --target {target_triple} -o {t_scalar_s_f} -O2 --no-unroll --disable-slp --disable-loop-vectorization"
 
             rc1, stdout1, stderr1 = run_cmd(cmd_o2, timeout=args.timeout)
             if rc1 != 0:
@@ -302,15 +432,18 @@ def main():
         commands += [
             f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o1_s_f} -O1 --no-unroll",
             f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_o2_s_f} -O2 --no-unroll",
-            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_scalar_s_f} -O2 --no-unroll --disable-slp",
+            f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_scalar_s_f} -O2 --no-unroll --disable-slp --disable-loop-vectorization",
             f"{fyra_bin_f} {fyra_src_f} --target x64-linux -o {fyra_no_egraph_s_f} -O2 --no-unroll --disable-egraph",
         ]
+        compile_seconds = {"gcc": 0.0, "clang": 0.0, "fyra": 0.0}
         for command in commands:
-            t0 = time.time()
+            t0 = time.perf_counter()
             rc, stdout, stderr = run_cmd(command, timeout=args.timeout)
-            t1 = time.time()
+            elapsed = time.perf_counter() - t0
+            compiler = "gcc" if command.startswith("gcc ") else ("clang" if command.startswith("clang ") else "fyra")
+            compile_seconds[compiler] += elapsed
             if args.verbose:
-                print(f"  Command '{command}' took {t1 - t0:.3f}s", flush=True)
+                print(f"  Command '{command}' took {elapsed:.3f}s", flush=True)
             if rc != 0:
                 print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
                 return 1
@@ -335,9 +468,12 @@ def main():
                     with open(s_path, 'w') as sf:
                         sf.writelines(filtered)
 
+        link_seconds = 0.0
         for command in [f"gcc {static_flag} {no_pie_flag} {fyra_o2_s_f} {harness_c_f} -o {fyra_exec_f}",
                         f"gcc {static_flag} {no_pie_flag} {fyra_scalar_s_f} {harness_c_f} -o {fyra_scalar_exec_f}"]:
+            t0 = time.perf_counter()
             rc, stdout, stderr = run_cmd(command, timeout=args.timeout)
+            link_seconds += time.perf_counter() - t0
             if rc != 0:
                 print(f"[FAILED] {bname}: command failed ({rc}): {command}\n{stderr}")
                 return 1
@@ -356,18 +492,60 @@ def main():
         fyra_scalar_perf = measure_execution(fyra_scalar_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
 
         # Correctness Verification
-        correct = (fyra_perf["output"] == clang_perf["output"] == fyra_scalar_perf["output"] and len(fyra_perf["output"]) > 0)
+        correct = checksums_match(gcc_perf["output"], clang_perf["output"],
+                                  fyra_perf["output"], fyra_scalar_perf["output"])
         fyra_static = verify_static(fyra_exec)
 
         entry = {
             "name": bname,
+            "category": BENCHMARK_CATEGORIES[bname],
+            "categories": BENCHMARK_METADATA[bname]["categories"],
+            "features": BENCHMARK_METADATA[bname]["features"],
+            # Corpus programs currently time their kernel loop and process
+            # startup together.  Naming the scope prevents these samples from
+            # being mistaken for an in-process kernel timer.
+            "timing_scope": "process_with_internal_kernel_loop",
             "correct": correct,
             "static_linked": fyra_static,
+            "gcc_compile_time": compile_seconds["gcc"],
+            "clang_compile_time": compile_seconds["clang"],
+            "fyra_compile_time": compile_seconds["fyra"],
+            "fyra_link_time": link_seconds,
+            "fyra_binary_size": os.path.getsize(fyra_exec) if os.path.exists(fyra_exec) else 0,
             "gcc_time": gcc_perf["median"],
             "clang_time": clang_perf["median"],
             "fyra_time": fyra_perf["median"],
             "fyra_scalar_time": fyra_scalar_perf["median"],
+            "gcc_time_min": gcc_perf["min"],
+            "gcc_time_max": gcc_perf["max"],
+            "gcc_time_mean": gcc_perf["mean"],
+            "gcc_time_stddev": gcc_perf["stddev"],
+            "gcc_time_cv": gcc_perf["cv"],
+            "gcc_time_samples": gcc_perf["samples"],
+            "clang_time_min": clang_perf["min"],
+            "clang_time_max": clang_perf["max"],
+            "clang_time_mean": clang_perf["mean"],
+            "clang_time_stddev": clang_perf["stddev"],
+            "clang_time_cv": clang_perf["cv"],
+            "clang_time_samples": clang_perf["samples"],
+            "fyra_time_min": fyra_perf["min"],
+            "fyra_time_max": fyra_perf["max"],
+            "fyra_time_mean": fyra_perf["mean"],
+            "fyra_time_stddev": fyra_perf["stddev"],
+            "fyra_time_cv": fyra_perf["cv"],
+            "fyra_time_samples": fyra_perf["samples"],
+            "fyra_scalar_time_min": fyra_scalar_perf["min"],
+            "fyra_scalar_time_max": fyra_scalar_perf["max"],
+            "fyra_scalar_time_mean": fyra_scalar_perf["mean"],
+            "fyra_scalar_time_stddev": fyra_scalar_perf["stddev"],
+            "fyra_scalar_time_cv": fyra_scalar_perf["cv"],
+            "fyra_scalar_time_samples": fyra_scalar_perf["samples"],
+            "fyra_over_gcc": (fyra_perf["median"] / gcc_perf["median"] if gcc_perf["median"] > 0 else 0.0),
+            "fyra_over_clang": (fyra_perf["median"] / clang_perf["median"] if clang_perf["median"] > 0 else 0.0),
+            "fyra_vs_gcc": classify_runtime(fyra_perf, gcc_perf),
+            "fyra_vs_clang": classify_runtime(fyra_perf, clang_perf),
             "fyra_speedup": (fyra_scalar_perf["median"] / fyra_perf["median"] if fyra_perf["median"] > 0 else 0.0),
+            "vector_profitability": classify_vector_profitability(fyra_perf, fyra_scalar_perf),
             "gcc_instrs": gcc_asm["total"],
             "clang_instrs": clang_asm["total"],
             "fyra_instrs": fyra_asm["total"],
@@ -379,8 +557,12 @@ def main():
             "fyra_frame_size": fyra_asm["frame_size"],
             "clang_frame_size": clang_asm["frame_size"],
             "fyra_vector_instrs": fyra_asm["vector_instrs"],
-            "fyra_spills": fyra_asm["spills"],
-            "fyra_reloads": fyra_asm["reloads"],
+            "fyra_assembly_stack_stores": fyra_asm["assembly_stack_stores"],
+            "fyra_assembly_stack_loads": fyra_asm["assembly_stack_loads"],
+            "fyra_stack_reading_ops": fyra_asm["stack_reading_ops"],
+            "fyra_stack_writing_ops": fyra_asm["stack_writing_ops"],
+            "fyra_stack_reading_ops_including_implicit": fyra_asm["stack_reading_ops_including_implicit"],
+            "fyra_stack_writing_ops_including_implicit": fyra_asm["stack_writing_ops_including_implicit"],
             "max_vector_width": fyra_asm["max_vector_width"]
         }
         entry["egraph_enabled"] = True
@@ -394,14 +576,26 @@ def main():
         results.append(entry)
 
         status = "PASSED" if correct else "FAILED"
-        print(f"[{status}] {bname:<24} | Scalar: {fyra_scalar_perf['median']:.6f}s | SLP: {fyra_perf['median']:.6f}s | Speedup: {entry['fyra_speedup']:.3f}x | VecInstrs: {fyra_asm['vector_instrs']} | FrameAlignWidth: {fyra_asm['max_vector_width']}b")
+        print(f"[{status}] {bname:<24} | Fyra: {fyra_perf['median']:.6f}s "
+              f"[{fyra_perf['min']:.6f}, {fyra_perf['max']:.6f}] "
+              f"n={fyra_perf['samples']} CV={fyra_perf['cv']:.1%} | "
+              f"Fyra/GCC: {entry['fyra_over_gcc']:.3f} ({entry['fyra_vs_gcc']}) | "
+              f"Fyra/Clang: {entry['fyra_over_clang']:.3f} ({entry['fyra_vs_clang']}) | "
+              f"Vector speedup: {entry['fyra_speedup']:.3f}x")
+        if fyra_perf["median"] < 0.100:
+            print("  timing note: interval is below 100 ms; treat runtime ranking as provisional")
 
         if args.verbose:
-            print(f"   Assembly detail: instrs={fyra_asm['total']}, loads={fyra_asm['loads']}, stores={fyra_asm['stores']}, spills={fyra_asm['spills']}, reloads={fyra_asm['reloads']}, frame_size={fyra_asm['frame_size']}")
+            print(f"   Assembly detail: instrs={fyra_asm['total']}, loads={fyra_asm['loads']}, stores={fyra_asm['stores']}, assembly_stack_stores={fyra_asm['assembly_stack_stores']}, assembly_stack_loads={fyra_asm['assembly_stack_loads']}, frame_size={fyra_asm['frame_size']}")
 
     failed = [r["name"] for r in results if not r["correct"]]
     if failed:
         print(f"Refusing to update result files; failed benchmarks: {', '.join(failed)}")
+        return 1
+
+    names = [r["name"] for r in results]
+    if len(names) != len(set(names)):
+        print("Refusing to update result files; duplicate benchmark identifiers detected.")
         return 1
 
     if requested:
@@ -415,25 +609,22 @@ def main():
         json.dump(results, f, indent=2)
 
     with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=results[0].keys())
+        writer = csv.DictWriter(f, fieldnames=results[0].keys(), lineterminator="\n")
         writer.writeheader()
         writer.writerows(results)
 
     print("\n--------------------------------------------------------------------------")
-    print(" Benchmark Category Summary & Normalized Geometric Means")
+    print(" Benchmark Category Runtime Summary")
     print("--------------------------------------------------------------------------")
 
-    time_ratios = [r["clang_time"] / r["fyra_time"] for r in results if r["fyra_time"] > 0]
-    instr_ratios = [r["fyra_instrs"] / r["clang_instrs"] for r in results if r["clang_instrs"] > 0]
-    mem_ratios = [r["fyra_mem"] / r["clang_mem"] for r in results if r["clang_mem"] > 0]
-
-    geo_perf = geomean(time_ratios) * 100.0
-    geo_instr = geomean(instr_ratios)
-    geo_mem = geomean(mem_ratios)
-
-    print(f" Geometric Mean Relative Performance (Fyra / Clang -O2) : {geo_perf:.1f}%")
-    print(f" Geometric Mean Instruction Ratio    (Fyra / Clang -O2) : {geo_instr:.2f}x")
-    print(f" Geometric Mean Memory Operations     (Fyra / Clang -O2) : {geo_mem:.2f}x")
+    categories = sorted({r["category"] for r in results})
+    for category in categories:
+        members = [r for r in results if r["category"] == category]
+        gcc_ratio = geomean(r["fyra_over_gcc"] for r in members)
+        clang_ratio = geomean(r["fyra_over_clang"] for r in members)
+        print(f" {category:<22} Fyra/GCC: {gcc_ratio:.3f}x | "
+              f"Fyra/Clang: {clang_ratio:.3f}x | workloads: {len(members)}")
+    print(" Runtime ratios are reported by category; static counts remain diagnostics, not a compiler score.")
     no_egraph_total = sum(r["no_egraph_instrs"] for r in results)
     egraph_total = sum(r["fyra_instrs"] for r in results)
     egraph_reduction = no_egraph_total - egraph_total

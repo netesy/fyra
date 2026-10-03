@@ -9,6 +9,7 @@
 #include "ir/Use.h"
 #include "ir/Constant.h"
 #include <map>
+#include <set>
 #include <vector>
 #include <iostream>
 
@@ -57,10 +58,24 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     const auto& location_map = allocator.getRegisterMap();
 
     // 2. Update the function's stack frame information
-    int numRegParams = std::max(1, std::min(static_cast<int>(func.getParameters().size()), 6));
-    int paramOffsetBytes = numRegParams * 8;
-    int baseSpillOffset = (paramOffsetBytes + 63) & ~63;
-    if (baseSpillOffset == 0) baseSpillOffset = 64;
+    // Stack slots are addressed from %rbp and must start below registers saved
+    // by the prologue.  The old formula unconditionally reserved 64 bytes and
+    // described it as parameter space, although register parameters never
+    // consumed it.  Size the x64 prefix from the callee-saved registers that
+    // allocation actually selected; retain the conservative legacy prefix on
+    // targets whose prologue layout is not represented by x64 register IDs.
+    int baseSpillOffset = 64;
+    if (targetInfo && targetInfo->getArch() == ::target::Arch::X64) {
+        std::set<unsigned> usedCalleeRegisters;
+        for (const auto& [vreg, location] : location_map) {
+            if (std::holds_alternative<PhysicalReg>(location)) {
+                unsigned reg = std::get<PhysicalReg>(location).index;
+                if (reg >= 8 && reg <= 12) usedCalleeRegisters.insert(reg);
+            }
+        }
+        const int savedRegisterBytes = static_cast<int>(usedCalleeRegisters.size()) * 8;
+        baseSpillOffset = std::max(8, (savedRegisterBytes + 15) & ~15);
+    }
 
     int stack_frame_size = baseSpillOffset;
     for (const auto& [vreg, location] : location_map) {
@@ -89,6 +104,12 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
             if (!instr->getType() || instr->getType()->isVoidTy()) continue;
             if (dynamic_cast<ir::Parameter*>(instr.get())) continue;
             if (!func.hasStackSlot(instr.get()) && !instr->hasPhysicalRegister()) {
+                if (std::getenv("FYRA_REGALLOC_DIAG")) {
+                    std::cout << "[RegAlloc fallback] function=" << func.getName()
+                              << " value=" << instr->getName()
+                              << " opcode=" << static_cast<int>(instr->getOpcode())
+                              << " uses=" << instr->getUseList().size() << std::endl;
+                }
                 size_t align = 8;
                 if (instr->getType()) {
                     if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
@@ -134,6 +155,29 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
                 uses.push_back(use.get());
             }
 
+            // On x64, r11 is excluded from the allocator specifically for
+            // backend scratch use.  A reload used by one instruction does not
+            // need its own stack home: keep it in r11 until that instruction
+            // consumes it.  Restrict this to users with one distinct spilled
+            // scalar input; multiple spill inputs need parallel residency and
+            // must continue through the conservative path.
+            std::set<ir::Instruction*> spilledOperands;
+            size_t operandIndex = 0;
+            for (ir::Use* use : uses) {
+                auto* operand = dynamic_cast<ir::Instruction*>(use->get());
+                if (operand && location_map.count(operand) &&
+                    std::holds_alternative<StackSlot>(location_map.at(operand))) {
+                    spilledOperands.insert(operand);
+                }
+            }
+            const bool useX64ScratchReload = targetInfo &&
+                targetInfo->getArch() == ::target::Arch::X64 &&
+                spilledOperands.size() == 1 &&
+                !(*spilledOperands.begin())->getType()->isFloatingPoint() &&
+                !(*spilledOperands.begin())->getType()->isVectorTy() &&
+                !(*spilledOperands.begin())->getType()->isSIMDType();
+            ir::Instruction* cachedReload = nullptr;
+
             for (ir::Use* use : uses) {
                 ir::Value* operand_val = use->get();
                 if (auto* operand_vreg = dynamic_cast<ir::Instruction*>(operand_val)) {
@@ -149,22 +193,67 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
                                     continue;
                                 }
                             }
-                            builder.setInsertPoint(bb.get(), it);
-                            ir::Instruction* load = builder.createLoadStack(operand_vreg->getType(), slot);
+                            const bool hasRegisterDestination = instr->hasPhysicalRegister() ||
+                                !instr->getType() || instr->getType()->isVoidTy();
+                            if (targetInfo && hasRegisterDestination &&
+                                targetInfo->canUseMemoryOperand(instr->getOpcode(), operandIndex)) {
+                                if (std::getenv("FYRA_REGALLOC_DIAG")) {
+                                    const StackSlot spillSlot = std::get<StackSlot>(location_map.at(operand_vreg));
+                                    std::cout << "[RegAlloc folded-reload] function=" << func.getName()
+                                              << " value=" << operand_vreg->getName()
+                                              << " slot=" << spillSlot.index
+                                              << " offset=" << slot
+                                              << " consumer_opcode=" << static_cast<int>(instr->getOpcode())
+                                              << " operand_index=" << operandIndex << std::endl;
+                                }
+                                ++operandIndex;
+                                continue;
+                            }
+                            ir::Instruction* load = cachedReload;
+                            if (!load) {
+                                builder.setInsertPoint(bb.get(), it);
+                                load = builder.createLoadStack(operand_vreg->getType(), slot);
+                                if (useX64ScratchReload) {
+                                    load->setPhysicalRegister(1); // reserved %r11
+                                    cachedReload = load;
+                                }
+                                if (std::getenv("FYRA_REGALLOC_DIAG")) {
+                                    const StackSlot spillSlot = std::get<StackSlot>(location_map.at(operand_vreg));
+                                    std::cout << "[RegAlloc reload] function=" << func.getName()
+                                              << " value=" << operand_vreg->getName()
+                                              << " slot=" << spillSlot.index
+                                              << " offset=" << slot
+                                              << " scratch=" << (useX64ScratchReload ? "r11" : "stack-fallback")
+                                              << " consumer_opcode=" << static_cast<int>(instr->getOpcode())
+                                              << " operand_index=" << operandIndex
+                                              << std::endl;
+                                }
+                            }
                             use->setOriginalValue(operand_vreg);
                             use->set(load);
                         }
                     }
                 }
+                ++operandIndex;
             }
 
-            // Rewrite definitions
+            // Spilled definitions already have a Function stack-slot mapping.
+            // Target lowering therefore writes the defining instruction's
+            // result directly to that slot.  Inserting an additional Store IR
+            // here used to read the just-written slot and write it back to the
+            // same address, creating one redundant load/store round trip per
+            // spilled definition.
             if (!dynamic_cast<ir::Parameter*>(instr) && func.hasStackSlot(instr) && !instr->hasPhysicalRegister()) {
                 int slot = func.getStackSlotForVreg(instr);
                 if (slot > 0) {
-                    auto next_it = std::next(it);
-                    builder.setInsertPoint(bb.get(), next_it);
-                    builder.createStoreStack(instr, slot);
+                    if (std::getenv("FYRA_REGALLOC_DIAG") && location_map.count(instr) &&
+                        std::holds_alternative<StackSlot>(location_map.at(instr))) {
+                        const StackSlot spillSlot = std::get<StackSlot>(location_map.at(instr));
+                        std::cout << "[RegAlloc direct-store] function=" << func.getName()
+                                  << " value=" << instr->getName()
+                                  << " slot=" << spillSlot.index
+                                  << " offset=" << slot << std::endl;
+                    }
                 }
             }
 

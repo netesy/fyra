@@ -288,7 +288,7 @@ bool VectorInstruction::isVectorArithmetic() const {
 
 bool VectorInstruction::isVectorLogical() const {
     switch (getOpcode()) {
-        case VAnd: case VOr: case VXor:
+        case VAnd: case VOr: case VXor: case VShl: case VShr: case VSar:
         case VHAnd: case VHOr: case VHXor:
             return true;
         default:
@@ -325,6 +325,9 @@ void VectorInstruction::print(std::ostream& os) const {
         case VAnd: os << "vand"; break;
         case VOr: os << "vor"; break;
         case VXor: os << "vxor"; break;
+        case VShl: os << "vshl"; break;
+        case VShr: os << "vshr"; break;
+        case VSar: os << "vsar"; break;
         case VLoad: os << "vload"; break;
         case VStore: os << "vstore"; break;
         case VBroadcast: os << "vbroadcast"; break;

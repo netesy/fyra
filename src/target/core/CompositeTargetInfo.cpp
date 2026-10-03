@@ -165,6 +165,7 @@ bool CompositeTargetInfo::isCalleeSaved(const std::string& r) const { return arc
 bool CompositeTargetInfo::isReserved(const std::string& r) const { return architecture->isReserved(r); }
 std::string CompositeTargetInfo::getReservedScratchVectorReg() const { return architecture->getReservedScratchVectorReg(); }
 unsigned CompositeTargetInfo::getReservedScratchVectorRegIndex() const { return architecture->getReservedScratchVectorRegIndex(); }
+bool CompositeTargetInfo::canUseMemoryOperand(ir::Instruction::Opcode opcode, size_t operandIndex) const { return architecture->canUseMemoryOperand(opcode, operandIndex); }
 std::string CompositeTargetInfo::getRegisterName(const std::string& b, const ir::Type* t) const { return architecture->getRegisterName(b, t); }
 
 }
