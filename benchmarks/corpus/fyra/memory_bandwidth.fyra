@@ -1,0 +1,105 @@
+function $exercise(%n : i64, %rounds : i32) : i64 {
+@entry
+  %bytes = mul %n, 8 : i64
+  %a_slot = alloc 1048576 : i64
+  %a = copy %a_slot : i64
+  %b_slot = alloc 1048576 : i64
+  %b = copy %b_slot : i64
+  %c_slot = alloc 1048576 : i64
+  %c = copy %c_slot : i64
+  jmp @init
+@init
+  %i = phi @entry 0, @init_body %in : i64
+  %more = ult %i, %n : i64
+  jnz %more, @init_body, @round
+@init_body
+  %off = mul %i, 8 : i64
+  %ap = add %a, %off : i64
+  %bp = add %b, %off : i64
+  %av = add %i, 1 : i64
+  %m3 = mul %i, 3 : i64
+  %bv = xor %m3, 85 : i64
+  store %av, %ap : i64
+  store %bv, %bp : i64
+  %in = add %i, 1 : i64
+  jmp @init
+@round
+  %r = phi @init 0, @round_next %rn : i32
+  %rmore = ult %r, %rounds : i32
+  jnz %rmore, @copy, @done
+@copy
+  %ci = phi @round 0, @copy_body %cin : i64
+  %cmore = ult %ci, %n : i64
+  jnz %cmore, @copy_body, @add_pre
+@copy_body
+  %coff = mul %ci, 8 : i64
+  %cap = add %a, %coff : i64
+  %ccp = add %c, %coff : i64
+  %cval = load %cap : i64
+  store %cval, %ccp : i64
+  %cin = add %ci, 1 : i64
+  jmp @copy
+@add_pre
+  jmp @add_loop
+@add_loop
+  %ai = phi @add_pre 0, @add_body %ain : i64
+  %amore = ult %ai, %n : i64
+  jnz %amore, @add_body, @triad_pre
+@add_body
+  %aoff = mul %ai, 8 : i64
+  %acp = add %c, %aoff : i64
+  %abp = add %b, %aoff : i64
+  %acv = load %acp : i64
+  %abv = load %abp : i64
+  %as = add %acv, %abv : i64
+  store %as, %acp : i64
+  %ain = add %ai, 1 : i64
+  jmp @add_loop
+@triad_pre
+  jmp @triad
+@triad
+  %ti = phi @triad_pre 0, @triad_body %tin : i64
+  %tmore = ult %ti, %n : i64
+  jnz %tmore, @triad_body, @round_next
+@triad_body
+  %toff = mul %ti, 8 : i64
+  %tap = add %a, %toff : i64
+  %tbp = add %b, %toff : i64
+  %tcp = add %c, %toff : i64
+  %tcv = load %tcp : i64
+  %tbv = load %tbp : i64
+  %tb3 = mul %tbv, 3 : i64
+  %tv = add %tcv, %tb3 : i64
+  store %tv, %tap : i64
+  %tin = add %ti, 1 : i64
+  jmp @triad
+@round_next
+  %rn = add %r, 1 : i32
+  jmp @round
+@done
+  %mid = udiv %n, 2 : i64
+  %third = udiv %n, 3 : i64
+  %last = sub %n, 1 : i64
+  %mpoff = mul %mid, 8 : i64
+  %lpoff = mul %last, 8 : i64
+  %tpoff = mul %third, 8 : i64
+  %mp = add %a, %mpoff : i64
+  %lp = add %a, %lpoff : i64
+  %tp = add %c, %tpoff : i64
+  %v0 = load %a : i64
+  %v1 = load %mp : i64
+  %v2 = load %lp : i64
+  %v3 = load %tp : i64
+  %x0 = xor %v0, %v1 : i64
+  %x1 = xor %v2, %v3 : i64
+  %sum = xor %x0, %x1 : i64
+  ret %sum : i64
+}
+export function $main() : i32 {
+@entry
+  %small = call $exercise(i64 4096, i32 512) : i64
+  %large = call $exercise(i64 131072, i32 24) : i64
+  %sum = xor %small, %large : i64
+  call $print_checksum(i64 %sum)
+  ret 0 : i32
+}

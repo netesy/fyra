@@ -22,6 +22,8 @@ BENCHMARK_CATEGORIES = {
     "reg_pressure": "register_pressure",
     "simd_loop_liveness": "vector",
     "tail_recursion": "calls",
+    "aggregate_matrix": "aggregate",
+    "memory_bandwidth": "memory",
 }
 
 BENCHMARK_METADATA = {
@@ -35,6 +37,25 @@ BENCHMARK_METADATA = {
     "reg_pressure": {"categories": ["high_gpr_pressure"], "features": ["long_live_ranges", "spill_materialization"]},
     "simd_loop_liveness": {"categories": ["high_simd_pressure", "vector"], "features": ["vector_liveness", "register_native_simd"]},
     "tail_recursion": {"categories": ["calls"], "features": ["tail_call_optimization", "recursion"]},
+    "aggregate_matrix": {"categories": ["aggregates", "small_matrix"], "features": ["field_access", "aggregate_copy", "arrays_of_aggregates", "matrix_4x4"]},
+    "memory_bandwidth": {"categories": ["memory_bandwidth"], "features": ["cache_resident", "streaming", "copy", "add", "triad"]},
+}
+
+# Gate-A coverage is deliberately feature based: a benchmark name is not
+# evidence that the generated program exercises a behavior.  Keep incomplete
+# areas visible until an executable, checksum-validated workload supplies each
+# feature.
+REQUIRED_COVERAGE_FEATURES = {
+    "aliasing": {"no_alias", "exact_alias", "overlap_forward", "overlap_backward", "runtime_unknown_alias"},
+    "memory_bandwidth": {"cache_resident", "streaming", "copy", "add", "triad"},
+    "aggregates": {"field_access", "aggregate_copy", "arrays_of_aggregates"},
+    "mixed_integer_fp": {"integer_indexing", "fp_reduction"},
+    "fp_exceptional_semantics": {"nan", "signed_zero", "positive_infinity", "negative_infinity"},
+    "small_matrix": {"matrix_4x4"},
+    "non_tail_calls": {"non_tail_recursion", "mixed_width_arguments", "nested_calls"},
+    "second_gpr_pressure": {"mixed_live_ranges"},
+    "high_simd_pressure": {"vector_liveness", "register_native_simd"},
+    "multiple_vector_widths": {"vector_128", "vector_256"},
 }
 
 # Primary summary category. Coverage metadata above may intentionally associate
@@ -272,6 +293,15 @@ def validate_benchmark_catalog(names):
     return duplicates, uncategorized, missing_metadata
 
 
+def missing_coverage(metadata=BENCHMARK_METADATA):
+    supplied = {feature for item in metadata.values() for feature in item["features"]}
+    return {
+        category: sorted(required - supplied)
+        for category, required in REQUIRED_COVERAGE_FEATURES.items()
+        if required - supplied
+    }
+
+
 def checksums_match(*outputs):
     return bool(outputs) and bool(outputs[0]) and all(value == outputs[0] for value in outputs)
 
@@ -344,6 +374,12 @@ def main():
         details = uncategorized + missing_metadata
         print("Error: benchmarks require unique identifiers, categories, and metadata: " + ", ".join(details))
         return 1
+
+    coverage_gaps = missing_coverage()
+    if coverage_gaps:
+        print("Coverage gate incomplete (benchmarks still run for validated partial coverage):")
+        for category, features in coverage_gaps.items():
+            print(f"  {category}: {', '.join(features)}")
 
     requested = {name.strip() for name in args.filter.split(",") if name.strip()}
     if requested:

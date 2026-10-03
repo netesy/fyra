@@ -73,6 +73,23 @@ class RuntimeStatisticsTest(unittest.TestCase):
             self.assertTrue(run_suite.BENCHMARK_METADATA[name]["categories"])
             self.assertTrue(run_suite.BENCHMARK_METADATA[name]["features"])
 
+    def test_coverage_gate_is_feature_based(self):
+        complete = {
+            "probe": {
+                "categories": ["all"],
+                "features": sorted({
+                    feature
+                    for required in run_suite.REQUIRED_COVERAGE_FEATURES.values()
+                    for feature in required
+                }),
+            }
+        }
+        self.assertEqual(run_suite.missing_coverage(complete), {})
+        incomplete = {"named_alias_test": {"categories": ["aliasing"], "features": ["no_alias"]}}
+        gaps = run_suite.missing_coverage(incomplete)
+        self.assertIn("aliasing", gaps)
+        self.assertIn("exact_alias", gaps["aliasing"])
+
 
 if __name__ == "__main__":
     unittest.main()

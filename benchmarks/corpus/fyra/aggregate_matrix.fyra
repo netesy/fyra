@@ -1,0 +1,177 @@
+export function $adjust(%p:i64,%dx:i32,%dy:i32) : i32 {
+@entry
+  %py = add %p, 4 : i64
+  %pw = add %p, 8 : i64
+  %x = load %p : i32
+  %y = load %py : i32
+  %w = load %pw : i32
+  %xn = add %x, %dx : i32
+  %yn = add %y, %dy : i32
+  %d = sub %xn, %yn : i32
+  %wn = add %w, %d : i32
+  store %xn, %p : i32
+  store %yn, %py : i32
+  store %wn, %pw : i32
+  ret %wn : i32
+}
+export function $main() : i32 {
+@entry
+  %a_slot = alloc 1024 : i64
+  %a = copy %a_slot : i64
+  %m_slot = alloc 128 : i64
+  %m = copy %m_slot : i64
+  %x_slot = alloc 128 : i64
+  %x = copy %x_slot : i64
+  %y_slot = alloc 128 : i64
+  %y = copy %y_slot : i64
+  jmp @rep
+@rep
+  %r = phi @entry 0, @rep_latch %rn : i32
+  %sum = phi @entry 0, @rep_latch %sumn : i64
+  %rmore = slt %r, 100000 : i32
+  jnz %rmore, @records, @matrix_init
+@records
+  %i = phi @rep 0, @record_body %in : i32
+  %imore = slt %i, 64 : i32
+  jnz %imore, @record_body, @record_sum
+@record_body
+  %i64 = extuw %i : i64
+  %off = mul %i64, 16 : i64
+  %p = add %a, %off : i64
+  %py = add %p, 4 : i64
+  %pw = add %p, 8 : i64
+  %pid = add %p, 12 : i64
+  %vx = add %i, %r : i32
+  %i3 = mul %i, 3 : i32
+  %vy = sub %i3, %r : i32
+  %vw = xor %i, %r : i32
+  %vxa = add %vx, 7 : i32
+  %vya = add %vy, 11 : i32
+  %vd = sub %vxa, %vya : i32
+  %vwa = add %vw, %vd : i32
+  store %vxa, %p : i32
+  store %vya, %py : i32
+  store %vwa, %pw : i32
+  store %i, %pid : i32
+  %in = add %i, 1 : i32
+  jmp @records
+@record_sum
+  %idx0 = and %r, 63 : i32
+  %rp17 = add %r, 17 : i32
+  %idx1 = and %rp17, 63 : i32
+  %rp31 = add %r, 31 : i32
+  %idx2 = and %rp31, 63 : i32
+  %q0 = extuw %idx0 : i64
+  %q1 = extuw %idx1 : i64
+  %q2 = extuw %idx2 : i64
+  %o0 = mul %q0, 16 : i64
+  %o1a = mul %q1, 16 : i64
+  %o1 = add %o1a, 4 : i64
+  %o2a = mul %q2, 16 : i64
+  %o2 = add %o2a, 8 : i64
+  %p0 = add %a, %o0 : i64
+  %p1 = add %a, %o1 : i64
+  %p2 = add %a, %o2 : i64
+  %v0w = load %p0 : i32
+  %v1w = load %p1 : i32
+  %v2w = load %p2 : i32
+  %v0 = extsw %v0w : i64
+  %v1 = extsw %v1w : i64
+  %v2 = extsw %v2w : i64
+  %ss0 = add %sum, %v0 : i64
+  %ss1 = add %ss0, %v1 : i64
+  %sumn = add %ss1, %v2 : i64
+  jmp @rep_latch
+@rep_latch
+  %rn = add %r, 1 : i32
+  jmp @rep
+@matrix_init
+  jmp @mi
+@mi
+  %ii = phi @matrix_init 0, @mi_latch %iin : i32
+  %iimore = slt %ii, 4 : i32
+  jnz %iimore, @mj, @mat_rep
+@mj
+  %jj = phi @mi 0, @mj_body %jjn : i32
+  %jjmore = slt %jj, 4 : i32
+  jnz %jjmore, @mj_body, @mi_latch
+@mj_body
+  %ii4 = mul %ii, 4 : i32
+  %idx = add %ii4, %jj : i32
+  %idx64 = extuw %idx : i64
+  %offm = mul %idx64, 8 : i64
+  %mp = add %m, %offm : i64
+  %xp = add %x, %offm : i64
+  %mv32 = add %idx, 1 : i32
+  %mv = extuw %mv32 : i64
+  %same = eq %ii, %jj : i32
+  %xv32 = add %same, %jj : i32
+  %xv = extuw %xv32 : i64
+  store %mv, %mp : i64
+  store %xv, %xp : i64
+  %jjn = add %jj, 1 : i32
+  jmp @mj
+@mi_latch
+  %iin = add %ii, 1 : i32
+  jmp @mi
+@mat_rep
+  %mr = phi @mi 0, @mat_rep_latch %mrn : i32
+  %mrmore = slt %mr, 200000 : i32
+  jnz %mrmore, @row, @finish
+@row
+  %ri = phi @mat_rep 0, @row_latch %rin : i32
+  %rimore = slt %ri, 4 : i32
+  jnz %rimore, @col, @mat_rep_latch
+@col
+  %cj = phi @row 0, @col_latch %cjn : i32
+  %cjmore = slt %cj, 4 : i32
+  jnz %cjmore, @dot, @row_latch
+@dot
+  %kk = phi @col 0, @dot_body %kkn : i32
+  %ds = phi @col 0, @dot_body %dsn : i64
+  %kkmore = slt %kk, 4 : i32
+  jnz %kkmore, @dot_body, @col_latch
+@dot_body
+  %ri4 = mul %ri, 4 : i32
+  %mi32 = add %ri4, %kk : i32
+  %kk4 = mul %kk, 4 : i32
+  %xi32 = add %kk4, %cj : i32
+  %mi64 = extuw %mi32 : i64
+  %xi64 = extuw %xi32 : i64
+  %mo = mul %mi64, 8 : i64
+  %xo = mul %xi64, 8 : i64
+  %mpd = add %m, %mo : i64
+  %xpd = add %x, %xo : i64
+  %mvv = load %mpd : i64
+  %xvv = load %xpd : i64
+  %prod = mul %mvv, %xvv : i64
+  %dsn = add %ds, %prod : i64
+  %kkn = add %kk, 1 : i32
+  jmp @dot
+@col_latch
+  %ri4b = mul %ri, 4 : i32
+  %yi32 = add %ri4b, %cj : i32
+  %yi64 = extuw %yi32 : i64
+  %yo = mul %yi64, 8 : i64
+  %yp = add %y, %yo : i64
+  store %ds, %yp : i64
+  %cjn = add %cj, 1 : i32
+  jmp @col
+@row_latch
+  %rin = add %ri, 1 : i32
+  jmp @row
+@mat_rep_latch
+  %mrn = add %mr, 1 : i32
+  jmp @mat_rep
+@finish
+  %y6p = add %y, 48 : i64
+  %y15p = add %y, 120 : i64
+  %y0 = load %y : i64
+  %y6 = load %y6p : i64
+  %y15 = load %y15p : i64
+  %fs0 = add %sum, %y0 : i64
+  %fs1 = add %fs0, %y6 : i64
+  %out = add %fs1, %y15 : i64
+  call $print_checksum(i64 %out)
+  ret 0 : i32
+}
