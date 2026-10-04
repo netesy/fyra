@@ -99,6 +99,34 @@ static Function* buildRejectedFPLoop(Module& module, IRBuilder& builder, bool re
     transforms::CFGBuilder::run(*fn); return fn;
 }
 
+static Function* buildMixedObservableRecurrences(Module& module, IRBuilder& builder) {
+    auto ctx = module.getContextShared(); auto* i32 = ctx->getIntegerType(32);
+    auto* f64 = ctx->getDoubleType();
+    Function* fn = builder.createFunction("mixed_observable_recurrences", i32, {i32});
+    Value* n = fn->getParameters().front().get();
+    BasicBlock* entry = builder.createBasicBlock("entry", fn);
+    BasicBlock* header = builder.createBasicBlock("loop", fn);
+    BasicBlock* body = builder.createBasicBlock("body", fn);
+    BasicBlock* exit = builder.createBasicBlock("exit", fn);
+    builder.setInsertPoint(entry); builder.createJmp(header); builder.setInsertPoint(header);
+    auto iOwner = std::make_unique<PhiNode>(i32, 0, nullptr, header); PhiNode* index = iOwner.get();
+    header->getInstructions().push_back(std::move(iOwner)); index->addIncoming(ctx->getConstantInt(i32, 0), entry);
+    auto sOwner = std::make_unique<PhiNode>(f64, 0, nullptr, header); PhiNode* sum = sOwner.get();
+    header->getInstructions().push_back(std::move(sOwner)); sum->addIncoming(ctx->getConstantFP(f64, 0.0), entry);
+    auto cOwner = std::make_unique<PhiNode>(i32, 0, nullptr, header); PhiNode* count = cOwner.get();
+    header->getInstructions().push_back(std::move(cOwner)); count->addIncoming(ctx->getConstantInt(i32, 0), entry);
+    builder.createBr(builder.createCslt(index, n), body, exit); builder.setInsertPoint(body);
+    Value* asFP = builder.createSWtoF(index, f64);
+    Value* nextSum = builder.createFAdd(sum, asFP);
+    Value* nextIndex = builder.createAdd(index, ctx->getConstantInt(i32, 1));
+    Value* nextAsFP = builder.createSWtoF(nextIndex, f64);
+    Value* observedPrefix = builder.createCgt(nextSum, nextAsFP);
+    Value* nextCount = builder.createAdd(count, observedPrefix);
+    index->addIncoming(nextIndex, body); sum->addIncoming(nextSum, body); count->addIncoming(nextCount, body);
+    builder.createJmp(header); builder.setInsertPoint(exit); builder.createRet(count);
+    transforms::CFGBuilder::run(*fn); return fn;
+}
+
 int main() {
     auto ctx = std::make_shared<IRContext>(); Module module("auto_vec_float", ctx);
     IRBuilder builder(ctx); builder.setModule(&module);
@@ -150,5 +178,11 @@ int main(){
         transforms::LoopVectorizer vectorizer(nullptr, {target::Arch::X64, target::OS::Linux}, false);
         assert(!vectorizer.performTransformation(*rejected));
     }
+    Function* mixed = buildMixedObservableRecurrences(module, builder);
+    std::ostringstream before; mixed->print(before);
+    transforms::LoopVectorizer mixedVectorizer;
+    assert(!mixedVectorizer.performTransformation(*mixed));
+    std::ostringstream after; mixed->print(after);
+    assert(before.str() == after.str() && "rejected mixed recurrences must not mutate IR");
     return 0;
 }

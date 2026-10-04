@@ -1,0 +1,52 @@
+function $mixed64(%n:i32):i32 {
+@entry
+  jmp @loop
+@loop
+  %i = phi @entry 0, @body %in:i32
+  %sum = phi @entry d_0.0, @body %sumn:f64
+  %count = phi @entry 0, @body %countn:i32
+  %more = slt %i,%n:i32
+  jnz %more,@body,@exit
+@body
+  %fi = swtof %i:f64
+  %half = fmul %fi,d_0.5:f64
+  %x = fadd %half,d_1.25:f64
+  %sumn = fadd %sum,%x:f64
+  %in = add %i,1:i32
+  %fin = swtof %in:f64
+  %gt = gt %sumn,%fin:i32
+  %countn = add %count,%gt:i32
+  jmp @loop
+@exit
+  ret %count:i32
+}
+function $mixed32(%n:i32):i32 {
+@entry
+  jmp @loop
+@loop
+  %i = phi @entry 0, @body %in:i32
+  %sum = phi @entry f32_0.0, @body %sumn:f32
+  %count = phi @entry 0, @body %countn:i32
+  %more = slt %i,%n:i32
+  jnz %more,@body,@exit
+@body
+  %fi = swtof %i:f32
+  %half = fmul %fi,f32_0.5:f32
+  %x = fadd %half,f32_1.25:f32
+  %sumn = fadd %sum,%x:f32
+  %in = add %i,1:i32
+  %fin = swtof %in:f32
+  %gt = gt %sumn,%fin:i32
+  %countn = add %count,%gt:i32
+  jmp @loop
+@exit
+  ret %count:i32
+}
+export function $main():i32 {
+@entry
+  %a = call $mixed64(1000000):i32
+  %b = call $mixed32(1000000):i32
+  %out = add %a,%b:i32
+  call $print_checksum(i32 %out)
+  ret 0:i32
+}

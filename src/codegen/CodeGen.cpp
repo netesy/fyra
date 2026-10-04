@@ -347,7 +347,24 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
 std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (!value) return targetInfo->getImmediatePrefix() + "0";
     if (auto* ci = dynamic_cast<const ir::ConstantInt*>(value)) return targetInfo->formatConstant(ci);
-    if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) return targetInfo->formatConstant(cfp);
+    if (auto* cfp = dynamic_cast<const ir::ConstantFP*>(value)) {
+        // SSE scalar arithmetic, comparisons, and movss/movsd do not accept an
+        // immediate operand.  Keep the location representation honest on x64:
+        // intern the exact IEEE payload and expose it as a RIP-relative memory
+        // location.  Other targets retain their native constant spelling.
+        if (targetInfo && targetInfo->getArch() == ::target::Arch::X64 && os) {
+            VectorConstant bytes{};
+            if (cfp->getType()->isFloatTy()) {
+                const float scalar = static_cast<float>(cfp->getValue());
+                std::memcpy(bytes.data(), &scalar, sizeof(scalar));
+            } else {
+                const double scalar = cfp->getValue();
+                std::memcpy(bytes.data(), &scalar, sizeof(scalar));
+            }
+            return targetInfo->formatGlobalOperand(getOrCreateVectorConstantLabel(bytes));
+        }
+        return targetInfo->formatConstant(cfp);
+    }
 
     // Handle physical registers and stack slots assigned by Register Allocator
     if (value->hasPhysicalRegister()) {
@@ -373,20 +390,30 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
     if (auto* param = dynamic_cast<const ir::Parameter*>(value)) {
         if (currentFunction) {
             const auto& params = currentFunction->getParameters();
-            size_t idx = 0;
+            size_t integerIdx = 0;
+            size_t floatIdx = 0;
             for (auto& p : params) {
                 if (p.get() == param) break;
-                idx++;
+                if (p->getType() && p->getType()->isFloatingPoint()) ++floatIdx;
+                else ++integerIdx;
             }
-            if (idx < 6 && targetInfo) {
-                const auto& argRegs = targetInfo->getIntegerArgumentRegisters();
-                if (idx < argRegs.size()) {
-                    return targetInfo->getRegisterName(argRegs[idx], param->getType());
-                }
+            if (param->getType() && param->getType()->isFloatingPoint() && targetInfo) {
+                const auto& argRegs = targetInfo->getFloatArgumentRegisters();
+                if (floatIdx < argRegs.size())
+                    return targetInfo->getRegisterName(argRegs[floatIdx], param->getType());
             } else if (targetInfo) {
-                int32_t stackOff = 16 + (idx - 6) * 8;
-                return targetInfo->formatStackOperand(stackOff);
+                const auto& argRegs = targetInfo->getIntegerArgumentRegisters();
+                if (integerIdx < argRegs.size()) {
+                    return targetInfo->getRegisterName(argRegs[integerIdx], param->getType());
+                }
             }
+            // The current ABI lowering uses eight-byte stack slots after the
+            // register banks are exhausted.
+            const size_t registerCount = param->getType() && param->getType()->isFloatingPoint()
+                ? targetInfo->getFloatArgumentRegisters().size()
+                : targetInfo->getIntegerArgumentRegisters().size();
+            const size_t classIdx = param->getType() && param->getType()->isFloatingPoint() ? floatIdx : integerIdx;
+            return targetInfo->formatStackOperand(16 + (classIdx - registerCount) * 8);
         }
     }
     if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();

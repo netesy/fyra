@@ -776,9 +776,9 @@ function $test_liveness_precision(%n : i32, %inv : i32) : i32 {
         allocator.run(*func);
 
         // Prove XMM Control cases received XMM physical registers (>= 100)
-        assert(v1->hasPhysicalRegister() && v1->getPhysicalRegister() >= 100 && v1->getPhysicalRegister() <= 115);
-        assert(v2->hasPhysicalRegister() && v2->getPhysicalRegister() >= 100 && v2->getPhysicalRegister() <= 115);
-        assert(vAdd->hasPhysicalRegister() && vAdd->getPhysicalRegister() >= 100 && vAdd->getPhysicalRegister() <= 115);
+        assert(v1->hasPhysicalRegister() && v1->getPhysicalRegister() >= 100 && v1->getPhysicalRegister() < 115);
+        assert(v2->hasPhysicalRegister() && v2->getPhysicalRegister() >= 100 && v2->getPhysicalRegister() < 115);
+        assert(vAdd->hasPhysicalRegister() && vAdd->getPhysicalRegister() >= 100 && vAdd->getPhysicalRegister() < 115);
 
         // Prove Integer VExtract received GPR physical registers (< 100)
         assert(ext8->hasPhysicalRegister() && ext8->getPhysicalRegister() < 100);
@@ -786,9 +786,10 @@ function $test_liveness_precision(%n : i32, %inv : i32) : i32 {
         assert(ext32->hasPhysicalRegister() && ext32->getPhysicalRegister() < 100);
         assert(ext64->hasPhysicalRegister() && ext64->getPhysicalRegister() < 100);
 
-        // Prove Floating-Point VExtract received scalar physical registers (< 100)
-        assert(extF32->hasPhysicalRegister());
-        assert(extF64->hasPhysicalRegister());
+        // Scalar FP values share the XMM class, while xmm15 remains reserved
+        // for lowering scratch and must never be allocator-owned.
+        assert(extF32->hasPhysicalRegister() && extF32->getPhysicalRegister() >= 100 && extF32->getPhysicalRegister() < 115);
+        assert(extF64->hasPhysicalRegister() && extF64->getPhysicalRegister() >= 100 && extF64->getPhysicalRegister() < 115);
 
         std::cout << "--- VExtract Register-Class Allocation Unit Tests Passed ---" << std::endl;
     }

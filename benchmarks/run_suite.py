@@ -24,21 +24,32 @@ BENCHMARK_CATEGORIES = {
     "tail_recursion": "calls",
     "aggregate_matrix": "aggregate",
     "memory_bandwidth": "memory",
+    "non_tail_calls": "calls",
+    "fp_semantics": "floating_point",
+    "reg_pressure_b": "register_pressure",
+    "aliasing": "memory",
+    "mixed_fp": "floating_point",
 }
 
 BENCHMARK_METADATA = {
     "arithmetic": {"categories": ["integer_arithmetic"], "features": ["mixed_ops", "spill_materialization"]},
     "bitwise_hash": {"categories": ["bit_manipulation", "hashing"], "features": ["xor", "shift", "multiply", "dependency_chain"]},
     "branch_state": {"categories": ["branch_heavy", "parser_state_machine"], "features": ["data_dependent_branch", "nested_condition", "early_exit"]},
-    "int_widths": {"categories": ["integer_arithmetic", "reductions", "vector"], "features": ["sext", "zext", "i64_reduction", "scalar_epilogue"]},
+    "int_widths": {"categories": ["integer_arithmetic", "reductions", "vector"], "features": ["sext", "zext", "i64_reduction", "scalar_epilogue", "vector_256"]},
     "loops": {"categories": ["loops"], "features": ["scev_closed_form", "asymptotic"]},
     "nested_loops": {"categories": ["nested_loops", "reductions"], "features": ["runtime_bounds", "multiple_inductions"]},
     "realistic_dot_product": {"categories": ["fp_reductions", "vector"], "features": ["dot_product", "horizontal_reduction"]},
     "reg_pressure": {"categories": ["high_gpr_pressure"], "features": ["long_live_ranges", "spill_materialization"]},
-    "simd_loop_liveness": {"categories": ["high_simd_pressure", "vector"], "features": ["vector_liveness", "register_native_simd"]},
+    "simd_loop_liveness": {"categories": ["high_simd_pressure", "vector"], "features": ["vector_liveness", "register_native_simd", "vector_128"]},
     "tail_recursion": {"categories": ["calls"], "features": ["tail_call_optimization", "recursion"]},
     "aggregate_matrix": {"categories": ["aggregates", "small_matrix"], "features": ["field_access", "aggregate_copy", "arrays_of_aggregates", "matrix_4x4"]},
     "memory_bandwidth": {"categories": ["memory_bandwidth"], "features": ["cache_resident", "streaming", "copy", "add", "triad"]},
+    "non_tail_calls": {"categories": ["non_tail_calls"], "features": ["non_tail_recursion", "mixed_width_arguments", "nested_calls"]},
+    "fp_semantics": {"categories": ["fp_exceptional_semantics"], "features": ["nan", "signed_zero", "positive_infinity", "negative_infinity"]},
+    "reg_pressure_b": {"categories": ["second_gpr_pressure"], "features": ["mixed_live_ranges"]},
+    "aliasing": {"categories": ["aliasing"], "features": ["no_alias", "exact_alias", "overlap_forward", "overlap_backward", "runtime_unknown_alias", "guard_regions"]},
+    "mixed_fp": {"categories": ["mixed_integer_fp"], "features": ["integer_induction", "integer_indexing", "integer_to_fp", "fp_arithmetic", "fp_reduction", "fp_comparison"]},
+    "_fp_spill_regression": {"categories": ["scalar_fp_spills"], "features": ["f32_spill_reload", "f64_spill_reload", "mixed_gpr_xmm_pressure", "reserved_xmm_scratch"]},
 }
 
 # Gate-A coverage is deliberately feature based: a benchmark name is not
@@ -56,6 +67,7 @@ REQUIRED_COVERAGE_FEATURES = {
     "second_gpr_pressure": {"mixed_live_ranges"},
     "high_simd_pressure": {"vector_liveness", "register_native_simd"},
     "multiple_vector_widths": {"vector_128", "vector_256"},
+    "scalar_fp_spills": {"f32_spill_reload", "f64_spill_reload", "mixed_gpr_xmm_pressure", "reserved_xmm_scratch"},
 }
 
 # Primary summary category. Coverage metadata above may intentionally associate
@@ -330,6 +342,56 @@ def measure_execution(exec_path, samples=15, warmup=2, timeout=30.0):
 
     return summarize_runtimes(runtimes, output)
 
+PERF_EVENTS = ("cycles", "instructions", "branches", "branch-misses",
+               "cache-references", "cache-misses")
+
+def hardware_counters_available():
+    """Probe real Linux counters; absence/permissions are non-fatal."""
+    perf = shutil.which("perf")
+    if not perf:
+        return False
+    try:
+        probe = subprocess.run(
+            [perf, "stat", "-x,", "-e", "cycles", "--", "true"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            timeout=5.0)
+        return probe.returncode == 0 and "<not supported>" not in probe.stderr
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+def measure_hardware_counters(exec_path, enabled, timeout=30.0):
+    result = {event.replace("-", "_"): None for event in PERF_EVENTS}
+    result.update({"hardware_counters_available": False, "ipc": None,
+                   "branch_miss_rate": None, "cache_miss_rate": None})
+    if not enabled:
+        return result
+    perf = shutil.which("perf")
+    try:
+        measured = subprocess.run(
+            [perf, "stat", "-x,", "-e", ",".join(PERF_EVENTS), "--", exec_path],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return result
+    if measured.returncode != 0:
+        return result
+    for line in measured.stderr.splitlines():
+        fields = line.split(",")
+        if len(fields) < 3 or fields[2] not in PERF_EVENTS:
+            continue
+        try:
+            result[fields[2].replace("-", "_")] = int(fields[0].replace(" ", ""))
+        except ValueError:
+            pass
+    result["hardware_counters_available"] = result["cycles"] is not None
+    if result["cycles"] and result["instructions"] is not None:
+        result["ipc"] = result["instructions"] / result["cycles"]
+    if result["branches"] and result["branch_misses"] is not None:
+        result["branch_miss_rate"] = result["branch_misses"] / result["branches"]
+    if result["cache_references"] and result["cache_misses"] is not None:
+        result["cache_miss_rate"] = result["cache_misses"] / result["cache_references"]
+    return result
+
 def verify_static(exec_path):
     rc, out, err = run_cmd(f"readelf -d {exec_path}")
     return "There is no dynamic section in this file" in out or "no dynamic section" in out
@@ -348,6 +410,7 @@ def parse_args():
     parser.add_argument("--quick", action="store_true", help="Use three samples and one warmup for a fast correctness-oriented run")
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("FYRA_BENCH_TIMEOUT", "30")), help="Execution timeout in seconds")
     parser.add_argument("--verbose", action="store_true", help="Print verbose assembly analysis details")
+    parser.add_argument("--perf-counters", action="store_true", help="Collect optional Linux perf hardware counters when available")
     parser.add_argument("--json", type=str, default="", help="Custom JSON output file path")
     parser.add_argument("--csv", type=str, default="", help="Custom CSV output file path")
     return parser.parse_args()
@@ -357,6 +420,7 @@ def main():
     if args.quick:
         args.samples = 3
         args.warmup = 1
+    counters_enabled = args.perf_counters and hardware_counters_available()
 
     print("==========================================================================")
     print(" Fyra Backend — Multi-Category Benchmark Harness (Granular Vector Metrics)")
@@ -526,6 +590,7 @@ def main():
         clang_perf = measure_execution(clang_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
         fyra_perf = measure_execution(fyra_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
         fyra_scalar_perf = measure_execution(fyra_scalar_exec, samples=args.samples, warmup=args.warmup, timeout=args.timeout)
+        dynamic_counters = measure_hardware_counters(fyra_exec, counters_enabled, timeout=args.timeout)
 
         # Correctness Verification
         correct = checksums_match(gcc_perf["output"], clang_perf["output"],
@@ -541,6 +606,9 @@ def main():
             # startup together.  Naming the scope prevents these samples from
             # being mistaken for an in-process kernel timer.
             "timing_scope": "process_with_internal_kernel_loop",
+            # Static counts below are structural diagnostics, not runtime
+            # proxies.  Dynamic counters are optional and never fabricated.
+            "static_metrics_role": "structural_diagnostic",
             "correct": correct,
             "static_linked": fyra_static,
             "gcc_compile_time": compile_seconds["gcc"],
@@ -601,6 +669,7 @@ def main():
             "fyra_stack_writing_ops_including_implicit": fyra_asm["stack_writing_ops_including_implicit"],
             "max_vector_width": fyra_asm["max_vector_width"]
         }
+        entry.update(dynamic_counters)
         entry["egraph_enabled"] = True
         entry["no_egraph_instrs"] = fyra_no_egraph_asm["total"]
         entry["egraph_instr_reduction"] = fyra_no_egraph_asm["total"] - fyra_asm["total"]

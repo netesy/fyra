@@ -1,0 +1,43 @@
+export function $main():i32 {
+@entry
+  jmp @loop
+@loop
+  %i = phi @entry 1, @body %in:i64
+  %a = phi @entry 1, @body %an:i64
+  %b = phi @entry 2, @body %bn:i64
+  %c = phi @entry 3, @body %cn:i64
+  %d = phi @entry 4, @body %dn:i64
+  %e = phi @entry 5, @body %en:i64
+  %f = phi @entry 6, @body %fn:i64
+  %more = ule %i,10000000:i64
+  jnz %more,@body,@exit
+@body
+  %i3 = mul %i,3:i64
+  %x = xor %i3,%a:i64
+  %ip17 = add %i,17:i64
+  %i5 = mul %ip17,5:i64
+  %y = add %i5,%b:i64
+  %xy = add %x,%y:i64
+  %i4 = shl %i,2:i64
+  %z = xor %xy,%i4:i64
+  %an = add %a,%x:i64
+  %bn = xor %b,%y:i64
+  %cn = add %c,%z:i64
+  %xmy = sub %x,%y:i64
+  %dn = add %d,%xmy:i64
+  %zed = add %z,%dn:i64
+  %en = xor %e,%zed:i64
+  %xyx = xor %x,%y:i64
+  %xyz = xor %xyx,%z:i64
+  %fn = add %f,%xyz:i64
+  %in = add %i,1:i64
+  jmp @loop
+@exit
+  %ab = xor %a,%b:i64
+  %abc = xor %ab,%c:i64
+  %abcd = xor %abc,%d:i64
+  %abcde = xor %abcd,%e:i64
+  %out = xor %abcde,%f:i64
+  call $print_checksum(i64 %out)
+  ret 0:i32
+}

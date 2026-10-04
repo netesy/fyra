@@ -15,6 +15,14 @@ namespace ir {
 
 bool Validator::validateModule(const Module& module, std::vector<std::string>& errors) {
     bool valid = true;
+    std::set<std::string> localDefinitions;
+    for (const auto& func : module.getFunctions()) {
+        if (!func) continue;
+        if (!localDefinitions.insert(func->getName()).second) {
+            errors.push_back("Duplicate local function definition '" + func->getName() + "'");
+            valid = false;
+        }
+    }
 
     for (const auto& func : module.getFunctions()) {
         if (!func) continue;
@@ -93,6 +101,21 @@ bool Validator::validateModule(const Module& module, std::vector<std::string>& e
 
                 // Check terminator logic and branch targets
                 Instruction::Opcode opc = inst->getOpcode();
+                if (opc == Instruction::Call && !inst->getOperands().empty()) {
+                    if (auto* callee = dynamic_cast<Function*>(inst->getOperands()[0]->get())) {
+                        // A Function operand denotes a module-local target.
+                        // Imported calls use ExternCall/GlobalValue instead.
+                        // Therefore a reachable local call may never point at
+                        // a declaration whose body was lost during parsing or
+                        // transformation.
+                        if (callee->getBasicBlocks().empty()) {
+                            errors.push_back("Call in function '" + func->getName() +
+                                             "' references local function '" + callee->getName() +
+                                             "' without a definition");
+                            valid = false;
+                        }
+                    }
+                }
                 if (opc == Instruction::Jmp) {
                     if (inst->getOperands().empty()) {
                         errors.push_back("Jmp instruction in block '" + bb->getName() + "' has no target operand");

@@ -95,5 +95,33 @@ int main() {
 
     std::cout << "Canonical type parsing and round-trip unit tests passed!" << std::endl;
 
+    // Adjacent ':' annotations must be identical to their spaced spelling.
+    // This is an execution-critical parser invariant: a swallowed return type
+    // previously left an ordinary helper declaration with no body while calls
+    // to its symbol remained in the caller.
+    {
+        std::stringstream compact(
+            "type :pair = { i32, i64 }\n"
+            "function $helper(%x:i16,%y:i64):i64 {\n"
+            "@entry\n"
+            "  %wide = extsh %x:i64\n"
+            "  %sum = add %wide,%y:i64\n"
+            "  ret %sum:i64\n"
+            "}\n"
+            "export function $main():i32 {\n"
+            "@entry\n"
+            "  %r = call $helper(i16 2,i64 40):i64\n"
+            "  ret 0:i32\n"
+            "}\n");
+        parser::Parser compactParser(compact, parser::FileFormat::FYRA);
+        auto compactModule = compactParser.parseModule();
+        assert(compactModule != nullptr);
+        auto* helper = compactModule->getFunction("helper");
+        auto* compactMain = compactModule->getFunction("main");
+        assert(helper && helper->getBasicBlocks().size() == 1);
+        assert(compactMain && compactMain->getBasicBlocks().size() == 1);
+        assert(compactModule->getType("pair") != nullptr);
+    }
+
     return 0;
 }

@@ -551,7 +551,13 @@ void Parser::parseGlobal() {
 }
 
 void Parser::parseType() {
-    getNextToken(); if (currentToken.type != TokenType::Type && currentToken.type != TokenType::Global) return;
+    getNextToken();
+    // Named types historically used a lexer-only `:name` token.  The colon is
+    // now consistently punctuation so ordinary annotations such as `%x:i32`
+    // cannot swallow their type.  Retain the documented `type :name` syntax.
+    if (currentToken.type == TokenType::Colon) getNextToken();
+    if (currentToken.type != TokenType::Type && currentToken.type != TokenType::Global &&
+        currentToken.type != TokenType::Identifier) return;
     std::string typeName = currentToken.value; getNextToken(); consume(TokenType::Equal, "Expected =");
     if (currentToken.type == TokenType::Keyword && currentToken.value == "union") {
         getNextToken();

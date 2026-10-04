@@ -242,6 +242,13 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
         }
 
         if (assigned) {
+            // Register classes are disjoint in the physical-id namespace.  In
+            // particular, the backend's reserved XMM scratch must never become
+            // an allocator-owned live value.
+            assert((isVector ? reg.index >= 100 : reg.index < 100) &&
+                   "register allocator crossed GPR/XMM classes");
+            assert((!isVector || reserved_xmm_idx == 0 || reg.index != reserved_xmm_idx) &&
+                   "reserved XMM scratch register was allocated");
             used_regs.insert(reg.index);
             if (reg.index >= 8) stats.calleeSavedUsed++;
             current_interval.getVreg()->setPhysicalRegister(reg.index);
@@ -256,7 +263,8 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                 });
         } else {
             if (current_interval.isLiveAcrossCall()) stats.crossCallSpills++;
-            spillAtInterval(current_interval, free_caller_regs, free_callee_regs);
+            spillAtInterval(current_interval, free_caller_regs, free_callee_regs,
+                            free_xmm_regs, reserved_xmm_idx);
         }
     }
     stats.numPhysicalRegsUsed = used_regs.size();
@@ -304,7 +312,7 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
     }
 }
 
-StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
+StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg, bool allowReuse) {
     size_t requiredAlign = 8;
     size_t slotBytes = 8;
     if (vreg && vreg->getType()) {
@@ -312,11 +320,13 @@ StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
         slotBytes = std::max<size_t>(8, vreg->getType()->getSize());
     }
 
-    for (auto it = free_stack_slots.begin(); it != free_stack_slots.end(); ++it) {
-        if (it->size >= slotBytes && it->byteOffset % requiredAlign == 0) {
-            StackSlot reused = *it;
-            free_stack_slots.erase(it);
-            return reused;
+    if (allowReuse) {
+        for (auto it = free_stack_slots.begin(); it != free_stack_slots.end(); ++it) {
+            if (it->size >= slotBytes && it->byteOffset % requiredAlign == 0) {
+                StackSlot reused = *it;
+                free_stack_slots.erase(it);
+                return reused;
+            }
         }
     }
 
@@ -329,7 +339,11 @@ StackSlot LinearScanAllocator::allocateStackSlot(ir::Instruction* vreg) {
     return slot;
 }
 
-void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, std::vector<PhysicalReg>& free_caller, std::vector<PhysicalReg>& free_callee) {
+void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval,
+                                          std::vector<PhysicalReg>& free_caller,
+                                          std::vector<PhysicalReg>& free_callee,
+                                          std::vector<PhysicalReg>& free_xmm,
+                                          unsigned reserved_xmm_idx) {
     stats.numSpills++;
     const size_t spillId = next_spill_id++;
     if (active_intervals.empty()) {
@@ -337,9 +351,18 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         return;
     }
 
+    auto isFPOrVector = [](const LiveInterval& interval) {
+        ir::Instruction* value = interval.getVreg();
+        return value && value->getType() &&
+               (value->getType()->isFloatingPoint() || value->getType()->isVectorTy() ||
+                value->getType()->isSIMDType() ||
+                dynamic_cast<const ir::VectorType*>(value->getType()) != nullptr);
+    };
+    const bool currentIsFP = isFPOrVector(current_interval);
     const LiveInterval* min_spill_candidate = nullptr;
     auto minIt = active_intervals.end();
     for (auto it = active_intervals.begin(); it != active_intervals.end(); ++it) {
+        if (isFPOrVector(**it) != currentIsFP) continue;
         if (!min_spill_candidate || (*it)->getSpillWeight() < min_spill_candidate->getSpillWeight()) {
             min_spill_candidate = *it;
             minIt = it;
@@ -350,12 +373,19 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         RegLocation loc = vreg_to_location_map.at(min_spill_candidate->getVreg());
         if (std::holds_alternative<PhysicalReg>(loc)) {
             PhysicalReg reg = std::get<PhysicalReg>(loc);
+            if ((currentIsFP && (reg.index < 100 || reg.index == reserved_xmm_idx)) ||
+                (!currentIsFP && reg.index >= 100))
+                goto allocate_current_slot;
             if (!current_interval.isLiveAcrossCall() || reg.index >= 8) {
                 current_interval.getVreg()->setPhysicalRegister(reg.index);
                 vreg_to_location_map[current_interval.getVreg()] = reg;
 
                 min_spill_candidate->getVreg()->setPhysicalRegister(-1);
-                StackSlot slot = allocateStackSlot(min_spill_candidate->getVreg());
+                // The candidate was defined before the current scan position.
+                // A slot that became free *now* may overlap the candidate's
+                // earlier live range, so retroactive spills require a fresh
+                // slot rather than a slot reusable by a newly-defined value.
+                StackSlot slot = allocateStackSlot(min_spill_candidate->getVreg(), false);
                 vreg_to_location_map[min_spill_candidate->getVreg()] = slot;
                 if (std::getenv("FYRA_REGALLOC_DIAG")) {
                     const std::string spilledName = min_spill_candidate->getVreg()->getName().empty()
@@ -391,6 +421,7 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval, 
         }
     }
 
+allocate_current_slot:
     StackSlot slot = allocateStackSlot(current_interval.getVreg());
     vreg_to_location_map[current_interval.getVreg()] = slot;
     if (std::getenv("FYRA_REGALLOC_DIAG")) {

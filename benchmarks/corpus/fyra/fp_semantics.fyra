@@ -1,0 +1,24 @@
+export function $main(%argc:i32):i32 {
+@entry
+  %a = fadd d_1.5,d_2.25:f64
+  %b = fsub %a,d_0.5:f64
+  %c = fmul %b,d_2.0:f64
+  %nan = fdiv d_0.0,d_0.0:f64
+  %pinf = fdiv d_1.0,d_0.0:f64
+  %ninf = fdiv d_-1.0,d_0.0:f64
+  %eq = eq %c,d_6.5:i32
+  %nan_ne = ne %nan,%nan:i32
+  %nan_lt = lt %nan,d_1.0:i32
+  %inf_gt = gt %pinf,%c:i32
+  %ninf_lt = lt %ninf,%c:i32
+  %zero_eq = eq d_0.0,d_-0.0:i32
+  %s0 = add %eq,%nan_ne:i32
+  %s1 = add %s0,%nan_lt:i32
+  %s2 = add %s1,%inf_gt:i32
+  %s3 = add %s2,%ninf_lt:i32
+  %s4 = add %s3,%zero_eq:i32
+  %adj = sub %argc,1:i32
+  %out = add %s4,%adj:i32
+  call $print_checksum(i32 %out)
+  ret 0:i32
+}

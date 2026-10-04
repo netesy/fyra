@@ -557,13 +557,21 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
     if (auto* os = cg.getTextStream()) {
         if (!i.getOperands().empty() && i.getOperands()[0]->get() != nullptr) {
             ir::Value* retVal = i.getOperands()[0]->get();
-            bool is32 = is32BitType(retVal->getType());
-            std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-            std::string src = cg.getValueAsOperand(retVal);
-            if (abi == X64ABI::Windows) {
-                *os << "  mov " << rax << ", " << src << "\n";
+            if (retVal->getType() && retVal->getType()->isFloatingPoint()) {
+                const char* move = retVal->getType()->isFloatTy() ? "movss" : "movsd";
+                if (abi == X64ABI::Windows)
+                    *os << "  " << move << " xmm0, " << cg.getValueAsOperand(retVal) << "\n";
+                else
+                    *os << "  " << move << " " << cg.getValueAsOperand(retVal) << ", %xmm0\n";
             } else {
-                emitMov(cg, os, src, rax, is32);
+                bool is32 = is32BitType(retVal->getType());
+                std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
+                std::string src = cg.getValueAsOperand(retVal);
+                if (abi == X64ABI::Windows) {
+                    *os << "  mov " << rax << ", " << src << "\n";
+                } else {
+                    emitMov(cg, os, src, rax, is32);
+                }
             }
         }
         ir::Function* func = i.getParent()->getParent();
@@ -1484,6 +1492,26 @@ void X64Architecture::emitCopy(CodeGen& cg, ir::Instruction& i) {
 
     bool is32 = is32BitType(i.getType());
     if (auto* os = cg.getTextStream()) {
+        if (i.getType() && i.getType()->isFloatingPoint()) {
+            const char* move = i.getType()->isFloatTy() ? "movss" : "movsd";
+            const bool srcReg = isXmmRegisterName(srcOp);
+            const bool dstReg = isXmmRegisterName(destOp);
+            if (!srcReg && !dstReg) {
+                const std::string scratch = getReservedScratchVectorReg();
+                if (abi == X64ABI::Windows) {
+                    *os << "  " << move << " " << scratch << ", " << srcOp << "\n";
+                    *os << "  " << move << " " << destOp << ", " << scratch << "\n";
+                } else {
+                    *os << "  " << move << " " << srcOp << ", " << scratch << "\n";
+                    *os << "  " << move << " " << scratch << ", " << destOp << "\n";
+                }
+            } else if (abi == X64ABI::Windows) {
+                *os << "  " << move << " " << destOp << ", " << srcOp << "\n";
+            } else {
+                *os << "  " << move << " " << srcOp << ", " << destOp << "\n";
+            }
+            return;
+        }
         // emitMov already handles register, stack, immediate, and the
         // memory-to-memory scratch case.  Routing every copy through RAX added
         // two dependency-forming moves and could clobber a live allocated RAX.
@@ -1563,7 +1591,8 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
                 if (isFloat) {
                     if (float_idx < floatArgRegs.size()) {
                         std::string reg = floatArgRegs[float_idx++];
-                        *os << "  movsd " << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
+                        *os << "  " << (argVal->getType()->isFloatTy() ? "movss " : "movsd ")
+                            << cg.getValueAsOperand(argVal) << ", %" << reg << "\n";
                     }
                 } else {
                     if (int_idx < 6) {
@@ -1610,6 +1639,14 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         if (systemVStackBytes != 0)
             *os << "  addq $" << systemVStackBytes << ", %rsp\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
+            if (i.getType()->isFloatingPoint()) {
+                const char* move = i.getType()->isFloatTy() ? "movss" : "movsd";
+                if (abi == X64ABI::Windows)
+                    *os << "  " << move << " " << cg.getValueAsOperand(&i) << ", xmm0\n";
+                else
+                    *os << "  " << move << " %xmm0, " << cg.getValueAsOperand(&i) << "\n";
+                return;
+            }
             bool resultIs32 = is32BitType(i.getType());
             if (abi == X64ABI::Windows) {
                 std::string destination = resultIs32 ? to32BitReg(cg.getValueAsOperand(&i)) : to64BitReg(cg.getValueAsOperand(&i));
@@ -1880,16 +1917,29 @@ void X64Architecture::emitCmp(CodeGen& cg, ir::Instruction& i) {
             const bool single = i.getOperands()[0]->get()->getType()->isFloatTy();
             const char* move = single ? "movss" : "movsd";
             const char* compare = single ? "ucomiss" : "ucomisd";
+            const std::string fpScratch = getReservedScratchVectorReg();
             if (abi == X64ABI::Windows) {
-                *os << "  movsd xmm0, " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
-                *os << "  ucomisd xmm0, " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
-                *os << "  " << set << " " << al << "\n";
+                *os << "  " << move << " " << fpScratch << ", " << cg.getValueAsOperand(i.getOperands()[0]->get()) << "\n";
+                *os << "  " << compare << " " << fpScratch << ", " << cg.getValueAsOperand(i.getOperands()[1]->get()) << "\n";
+                if (i.getOpcode() == ir::Instruction::Ceqf || i.getOpcode() == ir::Instruction::Clt || i.getOpcode() == ir::Instruction::Cle) {
+                    *os << "  setnp r11b\n  " << set << " " << al << "\n  and " << al << ", r11b\n";
+                } else if (i.getOpcode() == ir::Instruction::Cnef) {
+                    *os << "  setp r11b\n  " << set << " " << al << "\n  or " << al << ", r11b\n";
+                } else {
+                    *os << "  " << set << " " << al << "\n";
+                }
                 *os << "  movzx " << eax << ", " << al << "\n";
                 *os << "  mov " << cg.getValueAsOperand(&i) << ", " << rax << "\n";
             } else {
-                *os << "  " << move << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", %xmm0\n";
-                *os << "  " << compare << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", %xmm0\n";
-                *os << "  " << set << " " << al << "\n";
+                *os << "  " << move << " " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << fpScratch << "\n";
+                *os << "  " << compare << " " << cg.getValueAsOperand(i.getOperands()[1]->get()) << ", " << fpScratch << "\n";
+                if (i.getOpcode() == ir::Instruction::Ceqf || i.getOpcode() == ir::Instruction::Clt || i.getOpcode() == ir::Instruction::Cle) {
+                    *os << "  setnp %r11b\n  " << set << " " << al << "\n  andb %r11b, " << al << "\n";
+                } else if (i.getOpcode() == ir::Instruction::Cnef) {
+                    *os << "  setp %r11b\n  " << set << " " << al << "\n  orb %r11b, " << al << "\n";
+                } else {
+                    *os << "  " << set << " " << al << "\n";
+                }
                 *os << "  movzbq " << al << ", " << rax << "\n";
                 *os << "  movl " << eax << ", " << cg.getValueAsOperand(&i) << "\n";
             }
@@ -1963,24 +2013,29 @@ void X64Architecture::emitCast(CodeGen& cg, ir::Instruction& i, const ir::Type* 
 
     if (auto* os = cg.getTextStream()) {
         ir::Instruction::Opcode op = i.getOpcode();
+        const std::string fpScratch = getReservedScratchVectorReg();
         if (op == ir::Instruction::Sltof || op == ir::Instruction::SWtoF) {
+            const char* convert = to && to->isFloatTy() ? "cvtsi2ss" : "cvtsi2sd";
+            const char* move = to && to->isFloatTy() ? "movss" : "movsd";
             if (abi == X64ABI::Windows) {
-                *os << "  cvtsi2sd xmm0, " << srcOp << "\n";
-                *os << "  movsd " << destOp << ", xmm0\n";
+                *os << "  " << convert << " " << fpScratch << ", " << srcOp << "\n";
+                *os << "  " << move << " " << destOp << ", " << fpScratch << "\n";
             } else {
-                *os << "  cvtsi2sd " << srcOp << ", %xmm0\n";
-                *os << "  movsd %xmm0, " << destOp << "\n";
+                *os << "  " << convert << " " << srcOp << ", " << fpScratch << "\n";
+                *os << "  " << move << " " << fpScratch << ", " << destOp << "\n";
             }
         } else if (op == ir::Instruction::UWtoF) {
+            const char* convert = to && to->isFloatTy() ? "cvtsi2ss" : "cvtsi2sd";
+            const char* move = to && to->isFloatTy() ? "movss" : "movsd";
             if (abi == X64ABI::Windows) {
                 *os << "  mov eax, " << srcOp << "\n";
-                *os << "  cvtsi2sd xmm0, rax\n";
-                *os << "  movsd " << destOp << ", xmm0\n";
+                *os << "  " << convert << " " << fpScratch << ", rax\n";
+                *os << "  " << move << " " << destOp << ", " << fpScratch << "\n";
             } else {
                 std::string s32 = (srcOp[0] == '%') ? to32BitReg(srcOp) : srcOp;
                 *os << "  movl " << s32 << ", %eax\n";
-                *os << "  cvtsi2sd %rax, %xmm0\n";
-                *os << "  movsd %xmm0, " << destOp << "\n";
+                *os << "  " << convert << " %rax, " << fpScratch << "\n";
+                *os << "  " << move << " " << fpScratch << ", " << destOp << "\n";
             }
         } else if (op == ir::Instruction::Ultof) {
             std::string labelHigh = ".L_ultof_high_" + std::to_string((uintptr_t)&i);
@@ -2204,8 +2259,23 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             std::string dest = (abi == X64ABI::Windows) ? (is32 ? "eax" : "rax") : (is32 ? "%eax" : "%rax");
             if (i.getType() && i.getType()->isFloatingPoint()) {
                 dest = fpScratch;
-            }
-            if (i.hasPhysicalRegister()) {
+                if (i.hasPhysicalRegister()) dest = cg.getValueAsOperand(&i);
+                const char* move = i.getType()->isFloatTy() ? "movss" : "movsd";
+                if (abi == X64ABI::Windows)
+                    *os << "  " << move << " " << dest << ", " << stackOp << "\n";
+                else
+                    *os << "  " << move << " " << stackOp << ", " << dest << "\n";
+                if (!i.hasPhysicalRegister()) {
+                    const std::string result = cg.getValueAsOperand(&i);
+                    if (result != dest) {
+                        if (abi == X64ABI::Windows)
+                            *os << "  " << move << " " << result << ", " << dest << "\n";
+                        else
+                            *os << "  " << move << " " << dest << ", " << result << "\n";
+                    }
+                }
+                return;
+            } else if (i.hasPhysicalRegister()) {
                 dest = cg.getValueAsOperand(&i);
             }
             emitMov(cg, os, stackOp, dest, is32);

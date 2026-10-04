@@ -104,6 +104,12 @@ target_link_libraries(test_float PRIVATE fyra)
 add_test(NAME FloatTest COMMAND test_float)
 set_tests_properties(FloatTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME X64CorrectnessRegressionTest
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_x64_correctness.py
+            $<TARGET_FILE:fyra_compiler> cc)
+set_tests_properties(X64CorrectnessRegressionTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_functions test_functions.cpp)
 target_link_libraries(test_functions PRIVATE fyra)
 
@@ -480,3 +486,8 @@ set_tests_properties(CrossTargetVectorTest PROPERTIES WORKING_DIRECTORY ${CMAKE_
 add_executable(test_instcombine_width_semantics test_instcombine_width_semantics.cpp)
 target_link_libraries(test_instcombine_width_semantics PRIVATE fyra)
 add_test(NAME InstCombineWidthSemanticsTest COMMAND test_instcombine_width_semantics)
+
+add_executable(test_idempotent_loop_collapse test_idempotent_loop_collapse.cpp)
+target_link_libraries(test_idempotent_loop_collapse PRIVATE fyra)
+add_test(NAME IdempotentLoopCollapseTest COMMAND test_idempotent_loop_collapse)
+set_tests_properties(IdempotentLoopCollapseTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

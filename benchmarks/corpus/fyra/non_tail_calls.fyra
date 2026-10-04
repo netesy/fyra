@@ -1,0 +1,51 @@
+function $helper2(%x:i16):i64 {
+@entry
+  %w = extsh %x:i64
+  %a = add %w,11:i64
+  ret %a:i64
+}
+function $helper(%x:i16,%y:i64):i64 {
+@entry
+  %a = call $helper2(%x):i64
+  %b = add %a,%y:i64
+  %c = mul %b,3:i64
+  %d = xor %c,%y:i64
+  %e = add %d,7:i64
+  %f = mul %e,5:i64
+  %g = sub %f,%a:i64
+  %h0 = xor %g,17:i64
+  %h1 = add %h0,19:i64
+  %h2 = xor %h1,23:i64
+  %h3 = add %h2,29:i64
+  %h4 = xor %h3,31:i64
+  %h5 = add %h4,37:i64
+  %h6 = xor %h5,41:i64
+  %h7 = add %h6,43:i64
+  %h8 = xor %h7,47:i64
+  %h9 = add %h8,53:i64
+  %h10 = xor %h9,59:i64
+  %h11 = add %h10,61:i64
+  %h12 = xor %h11,67:i64
+  %h13 = add %h12,71:i64
+  %h14 = xor %h13,73:i64
+  %h15 = add %h14,79:i64
+  %h16 = xor %h15,83:i64
+  %h17 = add %h16,89:i64
+  %h18 = xor %h17,97:i64
+  %h19 = add %h18,101:i64
+  ret %h19:i64
+}
+export function $main(%argc:i32):i32 {
+@entry
+  %arg16 = truncd %argc:i16
+  %arg64 = extsw %argc:i64
+  %y0 = add %arg64,99:i64
+  %y1 = add %arg64,199:i64
+  %x1 = add %arg16,4:i16
+  %a = call $helper(%arg16,%y0):i64
+  %b = call $helper(%x1,%y1):i64
+  %sum = add %a,%b:i64
+  %out = add %sum,1:i64
+  call $print_checksum(i64 %out)
+  ret 0:i32
+}

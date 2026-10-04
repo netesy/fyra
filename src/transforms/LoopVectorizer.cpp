@@ -383,6 +383,42 @@ MemoryLegality classifyMemory(const std::vector<MemoryAccess>& accesses) {
     return result;
 }
 
+bool canVectorizeMemoryValue(ir::Value* value, std::set<ir::Value*>& visiting) {
+    if (dynamic_cast<ir::ConstantInt*>(value) || dynamic_cast<ir::ConstantFP*>(value))
+        return true;
+    auto* inst = dynamic_cast<ir::Instruction*>(value);
+    if (!inst || !visiting.insert(value).second) return false;
+    bool legal = false;
+    switch (inst->getOpcode()) {
+        case ir::Instruction::Load:
+        case ir::Instruction::Loaduw:
+        case ir::Instruction::Loads:
+        case ir::Instruction::Loadd:
+            legal = true;
+            break;
+        case ir::Instruction::Add:
+        case ir::Instruction::Sub:
+        case ir::Instruction::Mul:
+        case ir::Instruction::FAdd:
+        case ir::Instruction::FSub:
+        case ir::Instruction::FMul:
+        case ir::Instruction::FDiv:
+            legal = inst->getOperands().size() == 2 &&
+                    canVectorizeMemoryValue(inst->getOperands()[0]->get(), visiting) &&
+                    canVectorizeMemoryValue(inst->getOperands()[1]->get(), visiting);
+            break;
+        case ir::Instruction::Shl:
+            legal = inst->getOperands().size() == 2 &&
+                    dynamic_cast<ir::ConstantInt*>(inst->getOperands()[1]->get()) &&
+                    canVectorizeMemoryValue(inst->getOperands()[0]->get(), visiting);
+            break;
+        default:
+            break;
+    }
+    visiting.erase(value);
+    return legal;
+}
+
 // Recognize typed byte addressing in either commutative order.  A scalar access
 // is consecutive only when its address is base + sext(i) * element byte size.
 bool isUnitStrideAddress(ir::Value* pointer, ir::PhiNode* induction, size_t elementByteSize) {
@@ -754,6 +790,19 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             logDiag("Rejected loop: " + plan.memoryLegality.reason);
             continue;
         }
+        bool storesVectorizable = true;
+        for (const auto& access : plan.memoryAccesses) {
+            if (!access.isStore) continue;
+            std::set<ir::Value*> visiting;
+            if (!canVectorizeMemoryValue(access.inst->getOperands()[0]->get(), visiting)) {
+                storesVectorizable = false;
+                break;
+            }
+        }
+        if (!storesVectorizable) {
+            logDiag("Rejected loop: store expression is not supported by vector lowering");
+            continue;
+        }
         if (plan.memoryLegality.kind == MemoryLegalityKind::RequiresRuntimeCheck) {
             bool rangesRepresentable = true;
             for (const auto& access : plan.memoryAccesses)
@@ -797,8 +846,19 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
 
         // 2. Identify reductions without mutating IR.
         ir::PhiNode* reductionPhi = nullptr;
+        size_t nonInductionPhiCount = 0;
         for (ir::PhiNode* phi : headerPhis) {
-            if (phi != iPhi) { reductionPhi = phi; break; }
+            if (phi != iPhi) {
+                ++nonInductionPhiCount;
+                if (!reductionPhi) reductionPhi = phi;
+            }
+        }
+        // The transformation currently constructs one vector accumulator and
+        // one scalar-tail accumulator.  Silently ignoring a second recurrence
+        // changes semantics (for example an FP sum plus an integer count).
+        if (nonInductionPhiCount > 1) {
+            logDiag("Rejected loop: multiple loop-carried recurrences are not supported");
+            continue;
         }
 
         bool unsupportedReduction = false;
@@ -935,6 +995,25 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                     unsupportedReduction = true;
                 }
 
+                if (!unsupportedReduction && term) {
+                    auto isInsideLoop = [&](ir::Instruction* user) {
+                        return user && (user->getParent() == headerBB || user->getParent() == bodyBB);
+                    };
+                    // A reduction may only feed its own recurrence inside the
+                    // loop.  Prefix sums/products observed by another body
+                    // instruction are sequential recurrences, not associative
+                    // reductions: lane accumulation would expose a different
+                    // per-iteration value even if the final sum happened to
+                    // match.
+                    for (ir::Use* use : update->getUseList()) {
+                        auto* user = dynamic_cast<ir::Instruction*>(use->getUser());
+                        if (isInsideLoop(user) && user != reductionPhi) {
+                            logDiag("Rejected loop: reduction update has a loop-local observable use");
+                            unsupportedReduction = true;
+                            break;
+                        }
+                    }
+                }
                 if (!unsupportedReduction && term) {
                     plan.reductions.push_back(reduction);
                     plan.mulScaleFactor = mulFactor;
@@ -1782,6 +1861,22 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
             }
         } else if (!plan.memoryAccesses.empty()) {
             std::map<ir::Instruction*, ir::Value*> vValueMap;
+            std::set<ir::Value*> storeExpressionValues;
+            std::function<void(ir::Value*)> collectStoreExpression = [&](ir::Value* value) {
+                if (!value || !storeExpressionValues.insert(value).second) return;
+                auto* instruction = dynamic_cast<ir::Instruction*>(value);
+                if (!instruction) return;
+                if (instruction->getOpcode() == ir::Instruction::Load ||
+                    instruction->getOpcode() == ir::Instruction::Loaduw ||
+                    instruction->getOpcode() == ir::Instruction::Loads ||
+                    instruction->getOpcode() == ir::Instruction::Loadd)
+                    return;
+                for (const auto& operand : instruction->getOperands())
+                    collectStoreExpression(operand->get());
+            };
+            for (const auto& access : plan.memoryAccesses)
+                if (access.isStore)
+                    collectStoreExpression(access.inst->getOperands()[0]->get());
             ir::Instruction* i64ICnt = builder.createExtSW(rawPhiICnt, i64Ty);
             ir::Instruction* byteOffset = builder.createMul(
                 i64ICnt, ctx->getConstantInt(i64Ty, plan.elementByteSize));
@@ -1808,6 +1903,17 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                         ctx->getConstantInt(i32Ty, lane));
                 }
                 return packed;
+            };
+            auto vectorOperand = [&](ir::Value* scalar, bool allowConstant) -> ir::Value* {
+                if (auto* scalarInst = dynamic_cast<ir::Instruction*>(scalar)) {
+                    auto found = vValueMap.find(scalarInst);
+                    if (found != vValueMap.end()) return found->second;
+                }
+                if (allowConstant && (dynamic_cast<ir::ConstantInt*>(scalar) ||
+                    dynamic_cast<ir::ConstantFP*>(scalar))
+                    )
+                    return builder.createVBroadcast(vecTy, scalar);
+                return nullptr;
             };
 
             for (auto& inst : bodyBB->getInstructions()) {
@@ -1846,32 +1952,21 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                 } else if ((opc == ir::Instruction::Add || opc == ir::Instruction::FAdd) && inst.get() != addINextInst) {
                     ir::Value* op0 = inst->getOperands()[0]->get();
                     ir::Value* op1 = inst->getOperands()[1]->get();
-                    auto* inst0 = dynamic_cast<ir::Instruction*>(op0);
-                    auto* inst1 = dynamic_cast<ir::Instruction*>(op1);
-
-                    ir::Value* vOp0 = (inst0 && vValueMap.count(inst0)) ? vValueMap[inst0] : nullptr;
-                    ir::Value* vOp1 = (inst1 && vValueMap.count(inst1)) ? vValueMap[inst1] : nullptr;
+                    const bool storeExpression = storeExpressionValues.count(inst.get());
+                    ir::Value* vOp0 = vectorOperand(op0, storeExpression);
+                    ir::Value* vOp1 = vectorOperand(op1, storeExpression);
 
                     if (vOp0 && vOp1) {
                         ir::VectorInstruction* vAdd = opc == ir::Instruction::FAdd
                             ? builder.createVFAdd(vOp0, vOp1) : builder.createVAdd(vOp0, vOp1);
                         vValueMap[inst.get()] = vAdd;
-                    } else if (rawPhiVSum) {
-                        ir::Value* ldVal = vOp0 ? vOp0 : vOp1;
-                        if (ldVal) {
-                            ir::VectorInstruction* vAddSum = builder.createVAdd(rawPhiVSum, ldVal);
-                            vValueMap[inst.get()] = vAddSum;
-                            rawPhiVSum->addIncoming(vAddSum, vLoopBodyBB);
-                        }
                     }
                 } else if (opc == ir::Instruction::Sub || opc == ir::Instruction::FSub) {
                     ir::Value* op0 = inst->getOperands()[0]->get();
                     ir::Value* op1 = inst->getOperands()[1]->get();
-                    auto* inst0 = dynamic_cast<ir::Instruction*>(op0);
-                    auto* inst1 = dynamic_cast<ir::Instruction*>(op1);
-
-                    ir::Value* vOp0 = (inst0 && vValueMap.count(inst0)) ? vValueMap[inst0] : nullptr;
-                    ir::Value* vOp1 = (inst1 && vValueMap.count(inst1)) ? vValueMap[inst1] : nullptr;
+                    const bool storeExpression = storeExpressionValues.count(inst.get());
+                    ir::Value* vOp0 = vectorOperand(op0, storeExpression);
+                    ir::Value* vOp1 = vectorOperand(op1, storeExpression);
 
                     if (vOp0 && vOp1) {
                         ir::VectorInstruction* vSub = opc == ir::Instruction::FSub
@@ -1882,11 +1977,9 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
                            opc == ir::Instruction::FDiv) {
                     ir::Value* op0 = inst->getOperands()[0]->get();
                     ir::Value* op1 = inst->getOperands()[1]->get();
-                    auto* inst0 = dynamic_cast<ir::Instruction*>(op0);
-                    auto* inst1 = dynamic_cast<ir::Instruction*>(op1);
-
-                    ir::Value* vOp0 = (inst0 && vValueMap.count(inst0)) ? vValueMap[inst0] : nullptr;
-                    ir::Value* vOp1 = (inst1 && vValueMap.count(inst1)) ? vValueMap[inst1] : nullptr;
+                    const bool storeExpression = storeExpressionValues.count(inst.get());
+                    ir::Value* vOp0 = vectorOperand(op0, storeExpression);
+                    ir::Value* vOp1 = vectorOperand(op1, storeExpression);
 
                     if (vOp0 && vOp1) {
                         ir::VectorInstruction* vResult = nullptr;

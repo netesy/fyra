@@ -1,0 +1,84 @@
+function $kernel(%dst:i64,%src:i64,%n:i32):void {
+@entry
+  jmp @loop
+@loop
+  %i = phi @entry 0, @body %in:i32
+  %more = slt %i,%n:i32
+  jnz %more,@body,@exit
+@body
+  %i64 = extuw %i:i64
+  %off = mul %i64,8:i64
+  %sp = add %src,%off:i64
+  %dp = add %dst,%off:i64
+  %v = load %sp:i64
+  %vn = add %v,1:i64
+  store %vn,%dp:i64
+  %in = add %i,1:i32
+  jmp @loop
+@exit
+  ret
+}
+export function $main(%argc:i32):i32 {
+@entry
+  %as = alloc 640:i64
+  %a = copy %as:i64
+  %bs = alloc 640:i64
+  %b = copy %bs:i64
+  jmp @init
+@init
+  %i = phi @entry 0, @ib %in:i32
+  %more = slt %i,80:i32
+  jnz %more,@ib,@cases
+@ib
+  %i64 = extuw %i:i64
+  %off = mul %i64,8:i64
+  %ap = add %a,%off:i64
+  %bp = add %b,%off:i64
+  %i3 = mul %i64,3:i64
+  %av = add %i3,7:i64
+  %i5 = mul %i64,5:i64
+  %bv = add %i5,11:i64
+  store %av,%ap:i64
+  store %bv,%bp:i64
+  %in = add %i,1:i32
+  jmp @init
+@cases
+  %a8 = add %a,64:i64
+  %a9 = add %a,72:i64
+  %b8 = add %b,64:i64
+  %b9 = add %b,72:i64
+  call $kernel(%a8,%b8,64):void
+  call $kernel(%a8,%a8,64):void
+  call $kernel(%a9,%a8,63):void
+  call $kernel(%b8,%b9,63):void
+  %one = eq %argc,1:i32
+  jnz %one,@ua,@ub
+@ua
+  jmp @unknown
+@ub
+  jmp @unknown
+@unknown
+  %p = phi @ua %a8, @ub %b8:i64
+  call $kernel(%p,%p,64):void
+  jmp @sum
+@sum
+  %j = phi @unknown 0, @sb %jn:i32
+  %acc = phi @unknown 0, @sb %accn:i64
+  %jmore = slt %j,80:i32
+  jnz %jmore,@sb,@exit
+@sb
+  %j64 = extuw %j:i64
+  %jo = mul %j64,8:i64
+  %ajp = add %a,%jo:i64
+  %bjp = add %b,%jo:i64
+  %avv = load %ajp:i64
+  %bvv = load %bjp:i64
+  %m = mul %acc,131:i64
+  %x = xor %m,%avv:i64
+  %accn = xor %x,%bvv:i64
+  %jn = add %j,1:i32
+  jmp @sum
+@exit
+  call $print_checksum(i64 %acc)
+  ret 0:i32
+}

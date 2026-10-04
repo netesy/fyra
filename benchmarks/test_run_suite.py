@@ -90,6 +90,13 @@ class RuntimeStatisticsTest(unittest.TestCase):
         self.assertIn("aliasing", gaps)
         self.assertIn("exact_alias", gaps["aliasing"])
 
+    def test_disabled_hardware_counters_are_explicitly_unavailable(self):
+        counters = run_suite.measure_hardware_counters("/does/not/exist", False)
+        self.assertFalse(counters["hardware_counters_available"])
+        self.assertIsNone(counters["cycles"])
+        self.assertIsNone(counters["instructions"])
+        self.assertIsNone(counters["ipc"])
+
 
 if __name__ == "__main__":
     unittest.main()

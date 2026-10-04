@@ -193,7 +193,13 @@ Token Lexer::getNextToken() {
         return {TokenType::Number, numStr, currentLine};
     }
 
-    if (lastChar == '$' || lastChar == '%' || lastChar == '@' || lastChar == ':') {
+    // ':' is punctuation, not an identifier sigil.  Treating an adjacent
+    // spelling such as "%x:i32" as a single Type token consumed both the
+    // colon and `i32`; the function parser then silently treated the
+    // parameter as default-i32 and abandoned the definition at the unexpected
+    // token.  Keeping ':' separate also makes spaced and unspaced type
+    // annotations lexically identical.
+    if (lastChar == '$' || lastChar == '%' || lastChar == '@') {
         char sigil = lastChar;
         if (isalnum(input.peek()) || input.peek() == '_') {
              std::string identifier;
@@ -206,7 +212,6 @@ Token Lexer::getNextToken() {
                  case '$': return {TokenType::Global, identifier, currentLine};
                  case '%': return {TokenType::Temporary, identifier, currentLine};
                  case '@': return {TokenType::Label, identifier, currentLine};
-                 case ':': return {TokenType::Type, identifier, currentLine};
              }
         }
     }

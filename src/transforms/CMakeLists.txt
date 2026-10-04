@@ -17,6 +17,7 @@ set(TRANSFORMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ControlFlowSimplification.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/FunctionInliner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopUnroll.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IdempotentLoopCollapse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LoopVectorizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SLPVectorizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EGraph.cpp

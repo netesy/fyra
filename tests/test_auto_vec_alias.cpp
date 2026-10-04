@@ -191,9 +191,24 @@ static int independent(int n) {
  for(int i=0;i<count;i++){a[i]=i*3-7;b[i]=i+11;o[i]=-1;} path_counter=0; alias_i32(o,a,b,n);
  CHECK(path_counter==(n>=8?1:0),"independent routing"); for(int i=0;i<n;i++)CHECK(o[i]==a[i]+b[i],"independent value"); free(a);free(b);free(o);return 0;
 }
-static int exact_alias(void) { int32_t x[80],b[80],ref[80]; for(int i=0;i<80;i++){x[i]=ref[i]=i;b[i]=5;} for(int i=0;i<31;i++)ref[i]+=b[i]; path_counter=0;alias_i32(x,x,b,31);CHECK(path_counter==2,"exact alias routing");CHECK(!memcmp(x,ref,sizeof(x)),"exact alias value");return 0; }
-static int forward_overlap(void) { int32_t x[96],b[96],ref[96]; for(int i=0;i<96;i++){x[i]=ref[i]=i+1;b[i]=2;} for(int i=0;i<31;i++)ref[i+1]=ref[i]+b[i]; path_counter=0;alias_i32(x+1,x,b,31);CHECK(path_counter==2,"forward routing");CHECK(!memcmp(x,ref,sizeof(x)),"forward value");return 0; }
-static int reverse_overlap(void) { int32_t x[96],b[96],ref[96]; for(int i=0;i<96;i++){x[i]=ref[i]=i+1;b[i]=3;} for(int i=0;i<31;i++)ref[i]=ref[i+1]+b[i]; path_counter=0;alias_i32(x,x+1,b,31);CHECK(path_counter==2,"reverse routing");CHECK(!memcmp(x,ref,sizeof(x)),"reverse value");return 0; }
+static int overlap_matrix(void) {
+ const int ns[]={0,1,2,3,7,8,9,15,16,17,31,32,33,63,64,65};
+ for(unsigned ni=0;ni<sizeof(ns)/sizeof(ns[0]);++ni){int n=ns[ni];
+  int32_t x[160],b[160],ref[160];
+  for(int i=0;i<160;i++){x[i]=ref[i]=i+1;b[i]=3;}
+  for(int i=0;i<n;i++)ref[i]+=b[i];path_counter=0;alias_i32(x,x,b,n);
+  CHECK(path_counter==(n>=8?2:0),"exact alias routing");CHECK(!memcmp(x,ref,sizeof(x)),"exact alias value");
+  for(int delta=1;delta<=3;delta+=2){
+   for(int i=0;i<160;i++)x[i]=ref[i]=i+1;
+   for(int i=0;i<n;i++)ref[i+delta]=ref[i]+b[i];path_counter=0;alias_i32(x+delta,x,b,n);
+   CHECK(path_counter==(n>=8?2:0),"forward overlap routing");CHECK(!memcmp(x,ref,sizeof(x)),"forward overlap value");
+   for(int i=0;i<160;i++)x[i]=ref[i]=i+1;
+   for(int i=0;i<n;i++)ref[i]=ref[i+delta]+b[i];path_counter=0;alias_i32(x,x+delta,b,n);
+   CHECK(path_counter==(n>=8?2:0),"backward overlap routing");CHECK(!memcmp(x,ref,sizeof(x)),"backward overlap value");
+  }
+ }
+ return 0;
+}
 static int touching(void) { int32_t x[128],b[64],ref[128]; for(int i=0;i<128;i++)x[i]=ref[i]=i+4;for(int i=0;i<64;i++)b[i]=i;for(int i=0;i<31;i++)ref[31+i]=ref[i]+b[i];path_counter=0;alias_i32(x+31,x,b,31);CHECK(path_counter==1,"touching routing");CHECK(!memcmp(x,ref,sizeof(x)),"touching value");return 0; }
 static int zero_length(void) { int32_t x[4]={1,2,3,4};path_counter=0;alias_i32(x,x,x,0);CHECK(path_counter==0,"zero routing");CHECK(x[0]==1&&x[3]==4,"zero value");return 0; }
 static int dynamic_cases(void) { int32_t a[96],b[96],o[96],x[128],ref[128];
@@ -203,7 +218,7 @@ static int dynamic_cases(void) { int32_t a[96],b[96],o[96],x[128],ref[128];
 static int readread(void){int32_t a[64],b[64],o[64];for(int i=0;i<64;i++){a[i]=i-9;b[i]=0;o[i]=0;}path_counter=0;alias_readread(o,a,b,24);CHECK(path_counter==1,"read/read routing");for(int i=0;i<24;i++)CHECK(o[i]==2*a[i],"read/read value");return 0;}
 static int floating(void){float af[64],bf[64],of[64],xf[80],rf[80];double ad[64],bd[64],od[64],xd[80],rd[80];for(int i=0;i<64;i++){af[i]=i+1;bf[i]=2;of[i]=0;ad[i]=i+1;bd[i]=3;od[i]=0;}path_counter=0;alias_f32(of,af,bf,31);CHECK(path_counter==1,"f32 vector routing");for(int i=0;i<31;i++)CHECK(of[i]==af[i]+bf[i],"f32 value");path_counter=0;alias_f64(od,ad,bd,31);CHECK(path_counter==1,"f64 vector routing");for(int i=0;i<31;i++)CHECK(od[i]==ad[i]*bd[i],"f64 value");
  for(int i=0;i<80;i++){xf[i]=rf[i]=i+1;}for(int i=0;i<31;i++)rf[i+1]=rf[i]+bf[i];path_counter=0;alias_f32(xf+1,xf,bf,31);CHECK(path_counter==2,"f32 scalar routing");CHECK(!memcmp(xf,rf,sizeof(xf)),"f32 overlap value");for(int i=0;i<80;i++){xd[i]=rd[i]=i+1;}for(int i=0;i<31;i++)rd[i+1]=rd[i]*bd[i];path_counter=0;alias_f64(xd+1,xd,bd,31);CHECK(path_counter==2,"f64 scalar routing");CHECK(!memcmp(xd,rd,sizeof(xd)),"f64 overlap value");return 0;}
-int main(void){const int ns[]={0,1,7,8,9,31,1024,100000};for(unsigned i=0;i<sizeof(ns)/sizeof(ns[0]);i++)if(independent(ns[i]))return 1;if(exact_alias()||forward_overlap()||reverse_overlap()||touching()||zero_length()||dynamic_cases()||readread()||floating())return 2;puts("alias versioning execution and routing passed");return 0;}
+int main(void){const int ns[]={0,1,2,3,7,8,9,15,16,17,31,32,33,63,64,65,1024,100000};for(unsigned i=0;i<sizeof(ns)/sizeof(ns[0]);i++)if(independent(ns[i]))return 1;if(overlap_matrix()||touching()||zero_length()||dynamic_cases()||readread()||floating())return 2;puts("alias versioning execution and routing passed");return 0;}
 )C";
     harness.close();
     const std::string command = "gcc -O0 -no-pie " + asmPath + " " + cPath +
