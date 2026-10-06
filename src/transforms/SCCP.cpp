@@ -935,8 +935,8 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
 
     if (op == ir::Instruction::Br || op == ir::Instruction::Jnz || op == ir::Instruction::Jz) {
         LatticeEntry cond = getLatticeValue(instr->getOperands()[0]->get());
-        ir::BasicBlock* t_dest = static_cast<ir::BasicBlock*>(instr->getOperands()[1]->get());
-        ir::BasicBlock* f_dest = (instr->getOperands().size() > 2) ? static_cast<ir::BasicBlock*>(instr->getOperands()[2]->get()) : nullptr;
+        ir::BasicBlock* t_dest = dynamic_cast<ir::BasicBlock*>(instr->getOperands()[1] ? instr->getOperands()[1]->get() : nullptr);
+        ir::BasicBlock* f_dest = (instr->getOperands().size() > 2 && instr->getOperands()[2]) ? dynamic_cast<ir::BasicBlock*>(instr->getOperands()[2]->get()) : nullptr;
 
         if (cond.type == Constant) {
             int64_t val = static_cast<ir::ConstantInt*>(cond.constant)->getValue();

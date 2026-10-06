@@ -1,3 +1,4 @@
+#include "transforms/LoopUnroll.h"
 #include "parser/Parser.h"
 #include "ir/Module.h"
 #include "ir/PhiNode.h"
@@ -69,15 +70,27 @@ int main() {
         // Create br instruction with null target basic block pointers
         ir::Instruction* nullBr = new ir::Instruction(ctx->getVoidType(), ir::Instruction::Jnz, {cond, nullptr, nullptr}, bb);
 
-        // Expect emitBr to return safely without throwing or crashing
-        x64Arch->emitBr(cg, *nullBr);
+        // Expect emitBr to throw runtime_error on null target basic block
+        bool caughtBr = false;
+        try {
+            x64Arch->emitBr(cg, *nullBr);
+        } catch (const std::runtime_error&) {
+            caughtBr = true;
+        }
+        assert(caughtBr && "emitBr must throw runtime_error on null target basic block");
         delete nullBr;
 
         // Create jmp instruction with null target basic block pointer
         ir::Instruction* nullJmp = new ir::Instruction(ctx->getVoidType(), ir::Instruction::Jmp, {nullptr}, bb);
 
-        // Expect emitJmp to return safely without throwing or crashing
-        x64Arch->emitJmp(cg, *nullJmp);
+        // Expect emitJmp to throw runtime_error on null target basic block
+        bool caughtJmp = false;
+        try {
+            x64Arch->emitJmp(cg, *nullJmp);
+        } catch (const std::runtime_error&) {
+            caughtJmp = true;
+        }
+        assert(caughtJmp && "emitJmp must throw runtime_error on null target basic block");
         delete nullJmp;
 
         std::cout << "Null branch target basic block guards unit tests passed successfully!" << std::endl;
@@ -1931,6 +1944,240 @@ function $real_crossing() : i32 {
         assert(!intervalCrossesCall(*module->getFunction("call_hole"), "v"));
         assert(intervalCrossesCall(*module->getFunction("real_crossing"), "v"));
         std::cout << "--- CFG-Exact Call Liveness Tests Passed ---" << std::endl;
+    }
+
+
+    // Unit & integration tests for multi-accumulator LoopUnroll
+    {
+        std::cout << "--- Testing Multi-Accumulator LoopUnroll ---" << std::endl;
+        using namespace ir;
+        using namespace transforms;
+
+        // 1. Positive Test: Simple integer sum reduction with UF=4 remainder handling
+        std::string unroll_pos_ir = R"(
+function $test_unroll_reduction(%n : i32) : i64 {
+@entry
+    jmp @header
+
+@header
+    %i = phi @entry 0, @latch %i_next : i32
+    %sum = phi @entry 0, @latch %sum_next : i64
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %wide_i = extuw %i : i64
+    %sum_next = add %sum, %wide_i : i64
+    %i_next = add %i, 1 : i32
+    jmp @latch
+
+@latch
+    jmp @header
+
+@exit
+    ret %sum : i64
+}
+
+function $test_unroll_outer_dep(%outer_bound : i32) : i64 {
+@entry
+    jmp @outer
+
+@outer
+    %i = phi @entry 0, @outer_latch %i_next : i32
+    %outer_sum = phi @entry 0, @outer_latch %inner_result : i64
+    %outer_more = slt %i, 100 : i32
+    jnz %outer_more, @inner_preheader, @exit
+
+@inner_preheader
+    %inner_bound = add %i, 32 : i32
+    jmp @inner
+
+@inner
+    %j = phi @inner_preheader 0, @inner_latch %j_next : i32
+    %inner_sum = phi @inner_preheader %outer_sum, @inner_latch %sum_next : i64
+    %inner_more = slt %j, %inner_bound : i32
+    jnz %inner_more, @inner_body, @outer_latch
+
+@inner_body
+    %wide_j = extuw %j : i64
+    %sum_next = add %inner_sum, %wide_j : i64
+    %j_next = add %j, 1 : i32
+    jmp @inner_latch
+
+@inner_latch
+    jmp @inner
+
+@outer_latch
+    %inner_result = copy %inner_sum : i64
+    %i_next = add %i, 1 : i32
+    jmp @outer
+
+@exit
+    ret %outer_sum : i64
+}
+
+function $test_unroll_fp_rejection(%n : i32) : f64 {
+@entry
+    jmp @header
+
+@header
+    %i = phi @entry 0, @latch %i_next : i32
+    %sum = phi @entry 0.0, @latch %sum_next : f64
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %float_i = extuw %i : f64
+    %sum_next = fadd %sum, %float_i : f64
+    %i_next = add %i, 1 : i32
+    jmp @latch
+
+@latch
+    jmp @header
+
+@exit
+    ret %sum : f64
+}
+)";
+        std::istringstream stream(unroll_pos_ir);
+        parser::Parser unroll_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> unroll_module = unroll_parser.parseModule();
+        assert(unroll_module != nullptr);
+
+        // Test reduction unrolling on test_unroll_reduction
+        ir::Function* f_red = unroll_module->getFunction("test_unroll_reduction");
+        assert(f_red != nullptr);
+        transforms::CFGBuilder::run(*f_red);
+
+        transforms::LoopUnroll unroller;
+        bool unrolled = unroller.run(*f_red);
+        assert(unrolled == true && "Integer sum reduction must be unrolled!");
+
+        // Verify structural presence of 4 accumulators in unrolled header
+        bool found_acc0 = false, found_acc1 = false, found_acc2 = false, found_acc3 = false;
+        for (auto& bb : f_red->getBasicBlocks()) {
+            for (auto& inst : bb->getInstructions()) {
+                if (inst->getName().find("sum.acc0") != std::string::npos) found_acc0 = true;
+                if (inst->getName().find("sum.acc1") != std::string::npos) found_acc1 = true;
+                if (inst->getName().find("sum.acc2") != std::string::npos) found_acc2 = true;
+                if (inst->getName().find("sum.acc3") != std::string::npos) found_acc3 = true;
+            }
+        }
+        assert(found_acc0 && found_acc1 && found_acc2 && found_acc3 && "Must create 4 independent accumulators!");
+
+        // Test outer-dependent trip count loop unrolling
+        ir::Function* f_outer = unroll_module->getFunction("test_unroll_outer_dep");
+        assert(f_outer != nullptr);
+        transforms::CFGBuilder::run(*f_outer);
+        bool unrolled_outer = unroller.run(*f_outer);
+        assert(unrolled_outer == true && "Outer-dependent bound loop must be unrolled!");
+
+        // Test FP reduction rejection (negative test)
+        ir::Function* f_fp = unroll_module->getFunction("test_unroll_fp_rejection");
+        assert(f_fp != nullptr);
+        transforms::CFGBuilder::run(*f_fp);
+        bool unrolled_fp = unroller.run(*f_fp);
+        assert(unrolled_fp == false && "FP reduction must NOT be unrolled without reassociation permission!");
+
+        std::cout << "--- Multi-Accumulator LoopUnroll Unit Tests Passed ---" << std::endl;
+    }
+
+
+
+
+
+
+    // Unit tests for PHI Backedge Register Affinity and Coalescing Safety
+    {
+        std::cout << "--- Testing PHI Backedge Register Affinity ---" << std::endl;
+        using namespace ir;
+        using namespace transforms;
+
+        // 1. Positive Test: Canonical reduction loop where PHI result and backedge value share register
+        std::string phi_affinity_ir = R"(
+function $test_phi_affinity(%n : i32) : i64 {
+@entry
+    jmp @header
+
+@header
+    %i = phi @entry 0, @body %i_next : i32
+    %sum = phi @entry 0, @body %sum_next : i64
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %wide_i = extuw %i : i64
+    %sum_next = add %sum, %wide_i : i64
+    %i_next = add %i, 1 : i32
+    jmp @header
+
+@exit
+    ret %sum : i64
+}
+
+function $test_phi_swap_cycle(%a_init : i32, %b_init : i32, %n : i32) : i32 {
+@entry
+    jmp @header
+
+@header
+    %i = phi @entry 0, @body %i_next : i32
+    %a = phi @entry %a_init, @body %b : i32
+    %b = phi @entry %b_init, @body %a : i32
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %i_next = add %i, 1 : i32
+    jmp @header
+
+@exit
+    %res = add %a, %b : i32
+    ret %res : i32
+}
+)";
+        std::istringstream stream(phi_affinity_ir);
+        parser::Parser phi_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> phi_module = phi_parser.parseModule();
+        assert(phi_module != nullptr);
+
+        ir::Function* f_aff = phi_module->getFunction("test_phi_affinity");
+        assert(f_aff != nullptr);
+        transforms::CFGBuilder::run(*f_aff);
+
+        transforms::LinearScanAllocator allocator;
+        allocator.run(*f_aff);
+
+        // Verify PHI result and backedge sum_next were allocated
+        ir::Instruction* phiSum = nullptr;
+        ir::Instruction* nextSum = nullptr;
+        for (auto& bb : f_aff->getBasicBlocks()) {
+            for (auto& inst : bb->getInstructions()) {
+                if (inst->getName() == "sum") phiSum = inst.get();
+                if (inst->getName() == "sum_next") nextSum = inst.get();
+            }
+        }
+        assert(phiSum && nextSum);
+        assert(phiSum->hasPhysicalRegister() && nextSum->hasPhysicalRegister());
+
+        // Verify 2-cycle parallel copy swap safety
+        ir::Function* f_swap = phi_module->getFunction("test_phi_swap_cycle");
+        assert(f_swap != nullptr);
+        transforms::CFGBuilder::run(*f_swap);
+        allocator.run(*f_swap);
+
+        ir::Instruction* phiA = nullptr;
+        ir::Instruction* phiB = nullptr;
+        for (auto& bb : f_swap->getBasicBlocks()) {
+            for (auto& inst : bb->getInstructions()) {
+                if (inst->getName() == "a") phiA = inst.get();
+                if (inst->getName() == "b") phiB = inst.get();
+            }
+        }
+        assert(phiA && phiB);
+        assert(phiA->hasPhysicalRegister() && phiB->hasPhysicalRegister());
+        assert(phiA->getPhysicalRegister() != phiB->getPhysicalRegister() && "Interfering parallel PHI swap registers must be distinct!");
+
+        std::cout << "--- PHI Backedge Register Affinity Unit Tests Passed ---" << std::endl;
     }
 
     return 0;

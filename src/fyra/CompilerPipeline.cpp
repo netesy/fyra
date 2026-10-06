@@ -272,7 +272,6 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
             if (gvn.run(*func)) optimization_changed = true;
             if (cfg_simplifier.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
-            if (optLevel >= 2 && loop_rotate.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && idempotent_loop_collapse.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
             if (enhanced_dce.run(*func)) optimization_changed = true;
@@ -290,6 +289,8 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
             lsr.run(*func);
         if (optLevel >= 2 && config.enableSLP)
             slp_vectorizer.run(*func);
+        if (optLevel >= 2)
+            loop_rotate.run(*func);
         if (optLevel >= 2 && config.enableLoopUnroll)
             loop_unroll.run(*func);
         enhanced_dce.run(*func);

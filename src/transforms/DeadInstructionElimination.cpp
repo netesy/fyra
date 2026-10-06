@@ -76,6 +76,55 @@ bool DeadInstructionElimination::eliminateDeadInstructions(ir::Function& func) {
     return changed;
 }
 
+static void fixupPredecessorBranches(ir::BasicBlock* deadBB) {
+    if (!deadBB) return;
+    std::vector<ir::Instruction*> users;
+    for (ir::Use* use : deadBB->getUseList()) {
+        if (!use || !use->getUser()) continue;
+        if (auto* inst = dynamic_cast<ir::Instruction*>(use->getUser())) {
+            if (inst->getParent() && inst->getParent() != deadBB) {
+                if (std::find(users.begin(), users.end(), inst) == users.end()) {
+                    users.push_back(inst);
+                }
+            }
+        }
+    }
+
+    for (ir::Instruction* userInst : users) {
+        ir::BasicBlock* pred = userInst->getParent();
+        if (!pred || pred == deadBB) continue;
+
+        ir::Instruction::Opcode op = userInst->getOpcode();
+        if (op == ir::Instruction::Jmp) {
+            auto& instrs = pred->getInstructions();
+            for (auto it = instrs.begin(); it != instrs.end(); ++it) {
+                if (it->get() == userInst) {
+                    instrs.erase(it);
+                    break;
+                }
+            }
+        } else if (op == ir::Instruction::Br || op == ir::Instruction::Jnz || op == ir::Instruction::Jz) {
+            if (userInst->getOperands().size() >= 3) {
+                ir::Value* trueTarget = userInst->getOperands()[1] ? userInst->getOperands()[1]->get() : nullptr;
+                ir::Value* falseTarget = userInst->getOperands()[2] ? userInst->getOperands()[2]->get() : nullptr;
+                ir::Value* aliveTarget = (trueTarget == deadBB) ? falseTarget : trueTarget;
+                if (aliveTarget && aliveTarget != deadBB) {
+                    auto jmp = std::make_unique<ir::Instruction>(
+                        userInst->getType(), ir::Instruction::Jmp, std::vector<ir::Value*>{aliveTarget}, pred
+                    );
+                    auto& instrs = pred->getInstructions();
+                    for (auto it = instrs.begin(); it != instrs.end(); ++it) {
+                        if (it->get() == userInst) {
+                            *it = std::move(jmp);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) {
     std::set<ir::BasicBlock*> reachable;
     findReachableBlocks(func, reachable);
@@ -100,18 +149,13 @@ bool DeadInstructionElimination::eliminateUnreachableBlocks(ir::Function& func) 
                     }
                 }
             }
-            for (auto& inst_ptr : bb->getInstructions()) {
-                if (inst_ptr) {
-                    inst_ptr->replaceAllUsesWith(nullptr);
-                }
-            }
+            fixupPredecessorBranches(bb);
             for (auto* pred : bb->getPredecessors()) {
                 pred->removeSuccessor(bb);
             }
             for (auto* succ : bb->getSuccessors()) {
                 succ->removePredecessor(bb);
             }
-            bb->replaceAllUsesWith(nullptr);
             it = blocks.erase(it);
             changed = true;
             unreachable_blocks_removed_++;
@@ -210,6 +254,7 @@ bool DeadInstructionElimination::isTerminator(const ir::Instruction* instr) cons
 
 void DeadInstructionElimination::findReachableBlocks(ir::Function& func, std::set<ir::BasicBlock*>& reachable) {
     if (func.getBasicBlocks().empty()) return;
+    CFGBuilder::run(func);
     
     std::vector<ir::BasicBlock*> worklist;
     ir::BasicBlock* entry = func.getBasicBlocks().front().get();

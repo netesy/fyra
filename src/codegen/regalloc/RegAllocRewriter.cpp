@@ -75,6 +75,19 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
         }
         const int savedRegisterBytes = static_cast<int>(usedCalleeRegisters.size()) * 8;
         baseSpillOffset = std::max(8, (savedRegisterBytes + 15) & ~15);
+        size_t maxAlign = 16;
+        for (const auto& [vreg, location] : location_map) {
+            if (vreg && vreg->getType()) {
+                if (auto* vt = dynamic_cast<const ir::VectorType*>(vreg->getType())) {
+                    size_t bits = vt->getSize() * 8;
+                    if (bits >= 512) maxAlign = std::max<size_t>(maxAlign, 64);
+                    else if (bits >= 256) maxAlign = std::max<size_t>(maxAlign, 32);
+                }
+            }
+        }
+        if (baseSpillOffset % maxAlign != 0) {
+            baseSpillOffset += (maxAlign - (baseSpillOffset % maxAlign));
+        }
     }
 
     int stack_frame_size = baseSpillOffset;

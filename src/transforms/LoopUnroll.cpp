@@ -72,17 +72,11 @@ bool LoopUnroll::analyzeLoopLegality(Loop& loop, ir::Function& func, IndVarInfo&
     // Check for nested child loops
     if (!loop.children.empty()) return false;
 
-    // The current cloning implementation is intentionally limited to small
-    // loop bodies.  Large, inlined bodies create enough simultaneously live
-    // cloned values that the rewritten induction update can be assigned the
-    // same physical register as an unrelated temporary, corrupting the back
-    // edge.  Reject those loops until the unroller has explicit live-range
-    // repair rather than emitting a semantically invalid loop.
     size_t bodyInstructionCount = 0;
     for (ir::BasicBlock* bb : loop.blocks) {
         if (bb) bodyInstructionCount += bb->getInstructions().size();
     }
-    if (bodyInstructionCount > 12) return false;
+    if (bodyInstructionCount > 25) return false;
 
     // Safety checks on all instructions in loop blocks
     for (ir::BasicBlock* bb : loop.blocks) {
@@ -95,6 +89,10 @@ bool LoopUnroll::analyzeLoopLegality(Loop& loop, ir::Function& func, IndVarInfo&
             // Disallow calls and unsupported side effects
             if (op == ir::Instruction::Call || op == ir::Instruction::Syscall ||
                 op == ir::Instruction::ExternCall) {
+                return false;
+            }
+            // Disallow FP instructions to ensure conservative preservation of FP semantics
+            if (inst->getType()->isFloatTy() || inst->getType()->isDoubleTy()) {
                 return false;
             }
         }
@@ -282,138 +280,247 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
         phiLatchMap[phi] = latchV;
     }
 
+    // Recognize reductions vs IV
+    // A reduction PHI is a non-IV header PHI whose latch update is an Add where one operand is the PHI.
+    struct ReductionInfo {
+        ir::PhiNode* phi = nullptr;
+        ir::Instruction* addInst = nullptr;
+        ir::Value* contrib = nullptr; // value added in each iteration
+        ir::Value* initVal = nullptr;
+    };
+
+    std::map<ir::PhiNode*, ReductionInfo> reductionMap;
+
+    for (ir::PhiNode* phi : headerPhis) {
+        if (phi == ivInfo.phi) continue;
+
+        ir::Value* latchV = phiLatchMap[phi];
+        auto* addInst = dynamic_cast<ir::Instruction*>(latchV);
+        if (!addInst || addInst->getOpcode() != ir::Instruction::Add || addInst->getOperands().size() < 2) {
+            continue;
+        }
+
+        ir::Value* op0 = addInst->getOperands()[0]->get();
+        ir::Value* op1 = addInst->getOperands()[1]->get();
+        ir::Value* contrib = nullptr;
+
+        if (op0 == phi) {
+            contrib = op1;
+        } else if (op1 == phi) {
+            contrib = op0;
+        }
+
+        if (contrib) {
+            // Ensure reduction is not observed mid-loop in an order-sensitive way
+            bool valid = true;
+            for (ir::Use* u : phi->getUseList()) {
+                if (!u || !u->getUser()) continue;
+                auto* userInst = dynamic_cast<ir::Instruction*>(u->getUser());
+                if (userInst && userInst != addInst) {
+                    if (loop.blocks.find(userInst->getParent()) != loop.blocks.end()) {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+            if (valid) {
+                ReductionInfo rinfo;
+                rinfo.phi = phi;
+                rinfo.addInst = addInst;
+                rinfo.contrib = contrib;
+                rinfo.initVal = phiInitMap[phi];
+                reductionMap[phi] = rinfo;
+            }
+        }
+    }
+
+    const size_t UF = 4;
+
     // Create new basic blocks
     std::string prefix = header->getName() + ".unroll";
     auto unrolledHeader = std::make_unique<ir::BasicBlock>(&func, prefix + ".header");
-    auto body0 = std::make_unique<ir::BasicBlock>(&func, prefix + ".body0");
-    auto body1 = std::make_unique<ir::BasicBlock>(&func, prefix + ".body1");
+
+    std::vector<std::unique_ptr<ir::BasicBlock>> bodyBlocks;
+    std::vector<ir::BasicBlock*> bodyPtrs;
+    for (size_t k = 0; k < UF; ++k) {
+        auto b = std::make_unique<ir::BasicBlock>(&func, prefix + ".body" + std::to_string(k));
+        bodyPtrs.push_back(b.get());
+        bodyBlocks.push_back(std::move(b));
+    }
+
+    auto epiloguePrep = std::make_unique<ir::BasicBlock>(&func, prefix + ".epi.prep");
     auto epilogueHeader = std::make_unique<ir::BasicBlock>(&func, prefix + ".epi.header");
     auto epilogueBody = std::make_unique<ir::BasicBlock>(&func, prefix + ".epi.body");
     auto finalExit = std::make_unique<ir::BasicBlock>(&func, prefix + ".final.exit");
 
     ir::BasicBlock* uHeaderPtr = unrolledHeader.get();
-    ir::BasicBlock* b0Ptr = body0.get();
-    ir::BasicBlock* b1Ptr = body1.get();
+    ir::BasicBlock* epiPrepPtr = epiloguePrep.get();
     ir::BasicBlock* epiHeaderPtr = epilogueHeader.get();
     ir::BasicBlock* epiBodyPtr = epilogueBody.get();
     ir::BasicBlock* finalExitPtr = finalExit.get();
 
     // 1. Setup PHIs in unrolledHeader
-    std::map<ir::PhiNode*, ir::PhiNode*> uHeaderPhiMap;
+    std::map<ir::PhiNode*, std::vector<ir::PhiNode*>> uHeaderAccMap; // For reductions: UF accumulators
+    std::map<ir::PhiNode*, ir::PhiNode*> uHeaderPhiMap;             // For IV / normal PHIs
+
     for (ir::PhiNode* origPhi : headerPhis) {
-        auto uPhi = std::make_unique<ir::PhiNode>(origPhi->getType(), 0, origPhi->getVariable(), uHeaderPtr);
-        uPhi->setName(origPhi->getName() + ".2x");
-        uPhi->addIncoming(phiInitMap[origPhi], preheader);
-        uHeaderPhiMap[origPhi] = uPhi.get();
-        uHeaderPtr->addInstruction(std::move(uPhi));
+        if (reductionMap.count(origPhi)) {
+            // Create UF accumulator PHIs
+            ir::Value* zeroVal = ir::ConstantInt::get(dynamic_cast<ir::IntegerType*>(origPhi->getType()) ? static_cast<ir::IntegerType*>(origPhi->getType()) : ir::IntegerType::get(64), 0);
+            for (size_t k = 0; k < UF; ++k) {
+                auto accPhi = std::make_unique<ir::PhiNode>(origPhi->getType(), 0, origPhi->getVariable(), uHeaderPtr);
+                accPhi->setName(origPhi->getName() + ".acc" + std::to_string(k));
+                ir::Value* initV = (k == 0) ? phiInitMap[origPhi] : zeroVal;
+                accPhi->addIncoming(initV, preheader);
+                uHeaderAccMap[origPhi].push_back(accPhi.get());
+                uHeaderPtr->addInstruction(std::move(accPhi));
+            }
+        } else {
+            auto uPhi = std::make_unique<ir::PhiNode>(origPhi->getType(), 0, origPhi->getVariable(), uHeaderPtr);
+            uPhi->setName(origPhi->getName() + "." + std::to_string(UF) + "x");
+            uPhi->addIncoming(phiInitMap[origPhi], preheader);
+            uHeaderPhiMap[origPhi] = uPhi.get();
+            uHeaderPtr->addInstruction(std::move(uPhi));
+        }
     }
 
-    // 2. Compute 2x exit condition in unrolledHeader
+    // 2. Compute UF exit condition in unrolledHeader
     ir::PhiNode* uIVPhi = uHeaderPhiMap[ivInfo.phi];
     ir::Type* ivType = uIVPhi->getType();
     auto* intIvType = dynamic_cast<ir::IntegerType*>(ivType);
     if (!intIvType) intIvType = ir::IntegerType::get(32);
-    ir::ConstantInt* stepConst = ir::ConstantInt::get(intIvType, ivInfo.stepVal);
 
-    // Calculate second iteration's IV value for condition checking
-    auto addStepInst = std::make_unique<ir::Instruction>(ivType, ir::Instruction::Add,
-                                                         std::vector<ir::Value*>{uIVPhi, stepConst}, uHeaderPtr);
-    addStepInst->setName(uIVPhi->getName() + ".step1");
-    ir::Value* condIVVal = addStepInst.get();
+    // Check if IV + (UF-1)*step satisfies loop bound
+    ir::ConstantInt* ufMinus1StepConst = ir::ConstantInt::get(intIvType, ivInfo.stepVal * (int64_t)(UF - 1));
+    auto addUFStepInst = std::make_unique<ir::Instruction>(ivType, ir::Instruction::Add,
+                                                           std::vector<ir::Value*>{uIVPhi, ufMinus1StepConst}, uHeaderPtr);
+    addUFStepInst->setName(uIVPhi->getName() + ".step.uf");
+    ir::Value* condIVVal = addUFStepInst.get();
     if (!ivInfo.condUsesIV) {
-        // If condition used stepInst, calculate i + 2*step
-        ir::ConstantInt* twoStepConst = ir::ConstantInt::get(intIvType, ivInfo.stepVal * 2);
-        auto add2StepInst = std::make_unique<ir::Instruction>(ivType, ir::Instruction::Add,
-                                                             std::vector<ir::Value*>{uIVPhi, twoStepConst}, uHeaderPtr);
-        add2StepInst->setName(uIVPhi->getName() + ".step2");
-        condIVVal = add2StepInst.get();
-        uHeaderPtr->addInstruction(std::move(add2StepInst));
+        ir::ConstantInt* ufStepConst = ir::ConstantInt::get(intIvType, ivInfo.stepVal * (int64_t)UF);
+        auto addUFStepInst2 = std::make_unique<ir::Instruction>(ivType, ir::Instruction::Add,
+                                                              std::vector<ir::Value*>{uIVPhi, ufStepConst}, uHeaderPtr);
+        addUFStepInst2->setName(uIVPhi->getName() + ".step.uf2");
+        condIVVal = addUFStepInst2.get();
+        uHeaderPtr->addInstruction(std::move(addUFStepInst2));
     } else {
-        uHeaderPtr->addInstruction(std::move(addStepInst));
+        uHeaderPtr->addInstruction(std::move(addUFStepInst));
     }
 
-    auto cond2xInst = std::make_unique<ir::Instruction>(ir::IntegerType::get(1), ivInfo.cmpOpcode,
+    auto condUFInst = std::make_unique<ir::Instruction>(ir::IntegerType::get(1), ivInfo.cmpOpcode,
                                                          std::vector<ir::Value*>{condIVVal, ivInfo.boundVal}, uHeaderPtr);
-    cond2xInst->setName(ivInfo.condInst->getName() + ".2x");
-    ir::Instruction* cond2xPtr = cond2xInst.get();
-    uHeaderPtr->addInstruction(std::move(cond2xInst));
+    condUFInst->setName(ivInfo.condInst->getName() + "." + std::to_string(UF) + "x");
+    ir::Instruction* condUFPtr = condUFInst.get();
+    uHeaderPtr->addInstruction(std::move(condUFInst));
 
-    auto br2x = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jnz,
-                                                   std::vector<ir::Value*>{cond2xPtr, b0Ptr, epiHeaderPtr}, uHeaderPtr);
-    uHeaderPtr->addInstruction(std::move(br2x));
+    auto brUF = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jnz,
+                                                   std::vector<ir::Value*>{condUFPtr, bodyPtrs[0], epiPrepPtr}, uHeaderPtr);
+    uHeaderPtr->addInstruction(std::move(brUF));
 
-    // 3. Clone Body 0
-    std::map<ir::Value*, ir::Value*> map0;
-    for (ir::PhiNode* origPhi : headerPhis) {
-        map0[origPhi] = uHeaderPhiMap[origPhi];
-    }
-    ValueCloner cloner0(map0);
+    // 3. Clone Body 0..UF-1
+    std::vector<std::map<ir::Value*, ir::Value*>> bodyMaps(UF);
 
-    for (ir::BasicBlock* bb : std::vector<ir::BasicBlock*>{header, latch}) {
-        if (!bb) continue;
-        for (auto& instPtr : bb->getInstructions()) {
-            ir::Instruction* inst = instPtr.get();
-            if (!inst || dynamic_cast<ir::PhiNode*>(inst)) continue;
-            ir::Instruction::Opcode op = inst->getOpcode();
-            if (op == ir::Instruction::Jmp || op == ir::Instruction::Jnz ||
-                op == ir::Instruction::Jz  || op == ir::Instruction::Br) continue;
+    for (size_t k = 0; k < UF; ++k) {
+        ir::BasicBlock* curBB = bodyPtrs[k];
+        auto& curMap = bodyMaps[k];
 
-            auto cloned = cloner0.cloneInstruction(inst, b0Ptr);
-            map0[inst] = cloned.get();
-            b0Ptr->addInstruction(std::move(cloned));
+        // Map PHI values for iteration k
+        for (ir::PhiNode* origPhi : headerPhis) {
+            if (reductionMap.count(origPhi)) {
+                curMap[origPhi] = uHeaderAccMap[origPhi][k];
+            } else if (origPhi == ivInfo.phi) {
+                if (k == 0) {
+                    curMap[origPhi] = uHeaderPhiMap[origPhi];
+                } else {
+                    ir::Value* prevIV = bodyMaps[k-1][phiLatchMap[origPhi]];
+                    curMap[origPhi] = prevIV ? prevIV : bodyMaps[k-1][origPhi];
+                }
+            } else {
+                if (k == 0) {
+                    curMap[origPhi] = uHeaderPhiMap[origPhi];
+                } else {
+                    ir::Value* prevL = bodyMaps[k-1][phiLatchMap[origPhi]];
+                    curMap[origPhi] = prevL ? prevL : bodyMaps[k-1][origPhi];
+                }
+            }
         }
-        if (header == latch) break;
-    }
-    auto jmpToB1 = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jmp,
-                                                      std::vector<ir::Value*>{b1Ptr}, b0Ptr);
-    b0Ptr->addInstruction(std::move(jmpToB1));
 
-    // 4. Clone Body 1
-    std::map<ir::Value*, ir::Value*> map1;
-    for (ir::PhiNode* origPhi : headerPhis) {
-        ir::Value* latchVal0 = map0[phiLatchMap[origPhi]];
-        map1[origPhi] = latchVal0 ? latchVal0 : phiLatchMap[origPhi];
-    }
-    ValueCloner cloner1(map1);
+        ValueCloner cloner(curMap);
 
-    for (ir::BasicBlock* bb : std::vector<ir::BasicBlock*>{header, latch}) {
-        if (!bb) continue;
-        for (auto& instPtr : bb->getInstructions()) {
-            ir::Instruction* inst = instPtr.get();
-            if (!inst || dynamic_cast<ir::PhiNode*>(inst)) continue;
-            ir::Instruction::Opcode op = inst->getOpcode();
-            if (op == ir::Instruction::Jmp || op == ir::Instruction::Jnz ||
-                op == ir::Instruction::Jz  || op == ir::Instruction::Br) continue;
+        for (ir::BasicBlock* bb : std::vector<ir::BasicBlock*>{header, latch}) {
+            if (!bb) continue;
+            for (auto& instPtr : bb->getInstructions()) {
+                ir::Instruction* inst = instPtr.get();
+                if (!inst || dynamic_cast<ir::PhiNode*>(inst)) continue;
+                ir::Instruction::Opcode op = inst->getOpcode();
+                if (op == ir::Instruction::Jmp || op == ir::Instruction::Jnz ||
+                    op == ir::Instruction::Jz  || op == ir::Instruction::Br) continue;
 
-            auto cloned = cloner1.cloneInstruction(inst, b1Ptr);
-            map1[inst] = cloned.get();
-            b1Ptr->addInstruction(std::move(cloned));
+                auto cloned = cloner.cloneInstruction(inst, curBB);
+                curMap[inst] = cloned.get();
+                curBB->addInstruction(std::move(cloned));
+            }
+            if (header == latch) break;
         }
-        if (header == latch) break;
+
+        ir::BasicBlock* nextBB = (k + 1 < UF) ? bodyPtrs[k + 1] : uHeaderPtr;
+        auto jmpNext = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jmp,
+                                                         std::vector<ir::Value*>{nextBB}, curBB);
+        curBB->addInstruction(std::move(jmpNext));
     }
-    auto jmpToHeader = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jmp,
-                                                          std::vector<ir::Value*>{uHeaderPtr}, b1Ptr);
-    b1Ptr->addInstruction(std::move(jmpToHeader));
 
     // Complete back-edge incoming operands for uHeader PHIs
     for (ir::PhiNode* origPhi : headerPhis) {
-        ir::PhiNode* uPhi = uHeaderPhiMap[origPhi];
-        ir::Value* latchVal1 = map1[phiLatchMap[origPhi]];
-        uPhi->addIncoming(latchVal1 ? latchVal1 : phiLatchMap[origPhi], b1Ptr);
+        if (reductionMap.count(origPhi)) {
+            for (size_t k = 0; k < UF; ++k) {
+                ir::PhiNode* accPhi = uHeaderAccMap[origPhi][k];
+                ir::Value* latchAccVal = bodyMaps[k][phiLatchMap[origPhi]];
+                accPhi->addIncoming(latchAccVal ? latchAccVal : phiLatchMap[origPhi], bodyPtrs[UF - 1]);
+            }
+        } else {
+            ir::PhiNode* uPhi = uHeaderPhiMap[origPhi];
+            ir::Value* latchValLast = bodyMaps[UF - 1][phiLatchMap[origPhi]];
+            uPhi->addIncoming(latchValLast ? latchValLast : phiLatchMap[origPhi], bodyPtrs[UF - 1]);
+        }
     }
 
-    // 5. Setup Epilogue Header
+    // 4. Combine accumulators in epiloguePrep
+    std::map<ir::PhiNode*, ir::Value*> epiInitMap;
+
+    for (ir::PhiNode* origPhi : headerPhis) {
+        if (reductionMap.count(origPhi)) {
+            // Combine acc0 + acc1 + ... + accUF-1 in epiPrep
+            ir::Value* combined = uHeaderAccMap[origPhi][0];
+            for (size_t k = 1; k < UF; ++k) {
+                auto addCombine = std::make_unique<ir::Instruction>(origPhi->getType(), ir::Instruction::Add,
+                                                                    std::vector<ir::Value*>{combined, uHeaderAccMap[origPhi][k]}, epiPrepPtr);
+                addCombine->setName(origPhi->getName() + ".combine" + std::to_string(k));
+                combined = addCombine.get();
+                epiPrepPtr->addInstruction(std::move(addCombine));
+            }
+            epiInitMap[origPhi] = combined;
+        } else {
+            epiInitMap[origPhi] = uHeaderPhiMap[origPhi];
+        }
+    }
+
+    auto jmpPrepToHeader = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jmp,
+                                                             std::vector<ir::Value*>{epiHeaderPtr}, epiPrepPtr);
+    epiPrepPtr->addInstruction(std::move(jmpPrepToHeader));
+
+    // 5. Setup Epilogue Header PHIs (1x tail loop)
     std::map<ir::PhiNode*, ir::PhiNode*> epiPhiMap;
     for (ir::PhiNode* origPhi : headerPhis) {
         auto epiPhi = std::make_unique<ir::PhiNode>(origPhi->getType(), 0, origPhi->getVariable(), epiHeaderPtr);
         epiPhi->setName(origPhi->getName() + ".epi");
-        epiPhi->addIncoming(uHeaderPhiMap[origPhi], uHeaderPtr);
+        epiPhi->addIncoming(epiInitMap[origPhi], epiPrepPtr);
         epiPhiMap[origPhi] = epiPhi.get();
         epiHeaderPtr->addInstruction(std::move(epiPhi));
     }
 
     ir::PhiNode* epiIVPhi = epiPhiMap[ivInfo.phi];
     ir::Value* epiCondIVVal = epiIVPhi;
+    ir::ConstantInt* stepConst = ir::ConstantInt::get(intIvType, ivInfo.stepVal);
     if (!ivInfo.condUsesIV) {
         auto addEpiStep = std::make_unique<ir::Instruction>(ivType, ir::Instruction::Add,
                                                             std::vector<ir::Value*>{epiIVPhi, stepConst}, epiHeaderPtr);
@@ -454,9 +561,17 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
         }
         if (header == latch) break;
     }
-    auto jmpToFinalExit = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jmp,
-                                                             std::vector<ir::Value*>{finalExitPtr}, epiBodyPtr);
-    epiBodyPtr->addInstruction(std::move(jmpToFinalExit));
+
+    // Complete epilogue back-edge incoming operands
+    for (ir::PhiNode* origPhi : headerPhis) {
+        ir::PhiNode* epiPhi = epiPhiMap[origPhi];
+        ir::Value* epiLatchVal = mapEpi[phiLatchMap[origPhi]];
+        epiPhi->addIncoming(epiLatchVal ? epiLatchVal : phiLatchMap[origPhi], epiBodyPtr);
+    }
+
+    auto jmpToEpiHeader = std::make_unique<ir::Instruction>(ir::VoidType::get(), ir::Instruction::Jmp,
+                                                            std::vector<ir::Value*>{epiHeaderPtr}, epiBodyPtr);
+    epiBodyPtr->addInstruction(std::move(jmpToEpiHeader));
 
     // 7. Setup Final Exit Block and PHI values for outside uses
     std::map<ir::Value*, ir::PhiNode*> finalExitPhiMap;
@@ -469,8 +584,8 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
 
     std::set<ir::BasicBlock*> allUnrolledBlocks = loop.blocks;
     allUnrolledBlocks.insert(uHeaderPtr);
-    allUnrolledBlocks.insert(b0Ptr);
-    allUnrolledBlocks.insert(b1Ptr);
+    for (ir::BasicBlock* b : bodyPtrs) allUnrolledBlocks.insert(b);
+    allUnrolledBlocks.insert(epiPrepPtr);
     allUnrolledBlocks.insert(epiHeaderPtr);
     allUnrolledBlocks.insert(epiBodyPtr);
     allUnrolledBlocks.insert(finalExitPtr);
@@ -493,34 +608,16 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
             auto finalPhi = std::make_unique<ir::PhiNode>(val->getType(), 0, nullptr, finalExitPtr);
             finalPhi->setName(val->getName() + ".final");
 
-            ir::Value* valEpiHeader = nullptr;
+            ir::Value* valEpiExit = nullptr;
             if (auto* phiVal = dynamic_cast<ir::PhiNode*>(val)) {
-                valEpiHeader = epiPhiMap[phiVal];
-            } else if (map1.count(val)) {
-                valEpiHeader = map1[val];
-            } else if (map0.count(val)) {
-                valEpiHeader = map0[val];
-            } else {
-                valEpiHeader = val;
-            }
-
-            ir::Value* valEpiBody = nullptr;
-            if (auto* phiVal = dynamic_cast<ir::PhiNode*>(val)) {
-                if (phiLatchMap.count(phiVal) && mapEpi.count(phiLatchMap[phiVal])) {
-                    valEpiBody = mapEpi[phiLatchMap[phiVal]];
-                } else if (phiLatchMap.count(phiVal) && map1.count(phiLatchMap[phiVal])) {
-                    valEpiBody = map1[phiLatchMap[phiVal]];
-                } else {
-                    valEpiBody = epiPhiMap[phiVal];
-                }
+                valEpiExit = epiPhiMap[phiVal];
             } else if (mapEpi.count(val)) {
-                valEpiBody = mapEpi[val];
+                valEpiExit = mapEpi[val];
             } else {
-                valEpiBody = valEpiHeader;
+                valEpiExit = val;
             }
 
-            finalPhi->addIncoming(valEpiHeader, epiHeaderPtr);
-            finalPhi->addIncoming(valEpiBody, epiBodyPtr);
+            finalPhi->addIncoming(valEpiExit, epiHeaderPtr);
             finalExitPhiMap[val] = finalPhi.get();
             finalExitPtr->addInstruction(std::move(finalPhi));
         }
@@ -552,13 +649,14 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
         }
     }
 
-    // Redirect preheader terminator to unrolledHeader
-    auto& preheaderInstrs = preheader->getInstructions();
-    if (!preheaderInstrs.empty()) {
-        ir::Instruction* term = preheaderInstrs.back().get();
-        for (auto& op : term->getOperands()) {
-            if (op && op->get() == header) {
-                op->set(uHeaderPtr);
+    // Redirect all incoming branches to header from outside the loop to uHeaderPtr
+    auto headerUses = header->getUseList();
+    for (ir::Use* u : headerUses) {
+        if (!u || !u->getUser()) continue;
+        auto* userInst = dynamic_cast<ir::Instruction*>(u->getUser());
+        if (userInst && userInst->getParent()) {
+            if (allUnrolledBlocks.find(userInst->getParent()) == allUnrolledBlocks.end()) {
+                u->set(uHeaderPtr);
             }
         }
     }
@@ -589,8 +687,10 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
 
     // Add new blocks to function
     func.addBasicBlock(std::move(unrolledHeader));
-    func.addBasicBlock(std::move(body0));
-    func.addBasicBlock(std::move(body1));
+    for (auto& b : bodyBlocks) {
+        func.addBasicBlock(std::move(b));
+    }
+    func.addBasicBlock(std::move(epiloguePrep));
     func.addBasicBlock(std::move(epilogueHeader));
     func.addBasicBlock(std::move(epilogueBody));
     func.addBasicBlock(std::move(finalExit));

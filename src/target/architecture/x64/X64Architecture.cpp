@@ -591,8 +591,18 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
 }
 
 static bool canUseInPlace(CodeGen& cg, ir::Instruction& i, ir::Value* val0) {
+    if (!val0) return false;
     if (dynamic_cast<ir::Parameter*>(val0)) return false;
-    if (!i.hasPhysicalRegister() || !val0 || !val0->hasPhysicalRegister()) {
+    if (auto* inst0 = dynamic_cast<ir::Instruction*>(val0)) {
+        if (inst0->getOpcode() == ir::Instruction::Copy && !inst0->getOperands().empty() &&
+            dynamic_cast<ir::Parameter*>(inst0->getOperands()[0]->get())) {
+            return false;
+        }
+        if (cg.currentFunction && inst0->getParent() != i.getParent()) {
+            return false;
+        }
+    }
+    if (!i.hasPhysicalRegister() || !val0->hasPhysicalRegister()) {
         return false;
     }
     if (i.getPhysicalRegister() != val0->getPhysicalRegister()) {
@@ -2835,7 +2845,10 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
 void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
     auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
     auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
-    if (!targetTrue || !targetFalse) return;
+    if (!targetTrue || !targetFalse) {
+        throw std::runtime_error("X64Architecture::emitBr: null basic block target in function " +
+                                 (i.getParent() && i.getParent()->getParent() ? i.getParent()->getParent()->getName() : "unknown"));
+    }
     bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
     std::string movOp = is32 ? "movl" : "movq";
     std::string testOp = is32 ? "testl" : "testq";
@@ -2920,9 +2933,11 @@ void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {
-    if (i.getOperands().empty() || !i.getOperands()[0]->get()) return;
-    auto* targetBB = dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get());
-    if (!targetBB) return;
+    auto* targetBB = (i.getOperands().empty() || !i.getOperands()[0]) ? nullptr : dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get());
+    if (!targetBB) {
+        throw std::runtime_error("X64Architecture::emitJmp: null basic block target in function " +
+                                 (i.getParent() && i.getParent()->getParent() ? i.getParent()->getParent()->getName() : "unknown"));
+    }
     emitPhiCopies(cg, i.getParent(), targetBB);
     if (auto* os = cg.getTextStream()) {
         *os << "  jmp " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";

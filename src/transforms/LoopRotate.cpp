@@ -54,6 +54,17 @@ bool LoopRotate::rotateLoop(Loop& loop, ir::Function& func) {
     ir::BasicBlock* header = loop.header;
     if (header->getInstructions().empty()) return false;
 
+    // Do not rotate complex vector/versioned loops with > 3 blocks
+    if (loop.blocks.size() > 3) return false;
+
+    // Do not rotate vector loops, vector epilogues, or scalar fallbacks created by LoopVectorizer
+    std::string headerName = header->getName();
+    if (headerName.find("v_") != std::string::npos ||
+        headerName.find("epi_") != std::string::npos ||
+        headerName.find("alias.") != std::string::npos) {
+        return false;
+    }
+
     ir::Instruction* headerTerm = header->getInstructions().back().get();
     if (!headerTerm) return false;
 

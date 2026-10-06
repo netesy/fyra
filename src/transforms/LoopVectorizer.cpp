@@ -793,8 +793,10 @@ bool LoopVectorizer::performTransformation(ir::Function& func) {
         bool storesVectorizable = true;
         for (const auto& access : plan.memoryAccesses) {
             if (!access.isStore) continue;
+            ir::Value* storedVal = access.inst->getOperands()[0]->get();
+            if (plan.predication && storedVal == plan.predication->mergePhi) continue;
             std::set<ir::Value*> visiting;
-            if (!canVectorizeMemoryValue(access.inst->getOperands()[0]->get(), visiting)) {
+            if (!canVectorizeMemoryValue(storedVal, visiting)) {
                 storesVectorizable = false;
                 break;
             }
