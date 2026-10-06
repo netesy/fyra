@@ -23,6 +23,7 @@
 #include "transforms/LoopVectorizer.h"
 #include "transforms/SLPVectorizer.h"
 #include "transforms/LoopUnroll.h"
+#include "transforms/LoopRotate.h"
 #include "transforms/IdempotentLoopCollapse.h"
 #include "transforms/DeadInstructionElimination.h"
 #include "transforms/EGraphPass.h"
@@ -247,6 +248,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
         transforms::ScalarEvolution scev;
         transforms::LoopStrengthReduction lsr(error_reporter);
         transforms::LoopUnroll loop_unroll(error_reporter);
+        transforms::LoopRotate loop_rotate(error_reporter);
         transforms::IdempotentLoopCollapse idempotent_loop_collapse(error_reporter);
         const target::TargetDescriptor vectorTarget = desc.value_or(
             target::TargetDescriptor{target::Arch::X64, target::OS::Linux});
@@ -270,6 +272,7 @@ PipelineResult CompilerPipeline::runOptimizations(ir::Module& module, const Pipe
             if (gvn.run(*func)) optimization_changed = true;
             if (cfg_simplifier.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && licm.run(*func)) optimization_changed = true;
+            if (optLevel >= 2 && loop_rotate.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && idempotent_loop_collapse.run(*func)) optimization_changed = true;
             if (optLevel >= 2 && scev.run(*func)) optimization_changed = true;
             if (enhanced_dce.run(*func)) optimization_changed = true;

@@ -12,6 +12,7 @@
 #include "target/core/TargetInfo.h"
 #include "target/core/TargetDescriptor.h"
 #include "target/architecture/x64/X64Architecture.h"
+#include "transforms/LoopRotate.h"
 #include "ir/IRBuilder.h"
 #include <cassert>
 #include <fstream>
@@ -63,29 +64,68 @@ int main() {
         std::stringstream asmStream;
         codegen::CodeGen cg(module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &asmStream);
 
-        ir::Instruction* cond = builder.createAdd(func->getParameters()[0].get(), ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1));
+        ir::Instruction* cond = builder.createAdd(func->getParameters().front().get(), ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1));
 
         // Create br instruction with null target basic block pointers
-        ir::Instruction* nullBr = new ir::Instruction(Instruction::Jnz, ctx->getVoidType());
-        nullBr->addOperand(cond);
-        nullBr->addOperand(nullptr);
-        nullBr->addOperand(nullptr);
-        nullBr->setParent(bb);
+        ir::Instruction* nullBr = new ir::Instruction(ctx->getVoidType(), ir::Instruction::Jnz, {cond, nullptr, nullptr}, bb);
 
         // Expect emitBr to return safely without throwing or crashing
         x64Arch->emitBr(cg, *nullBr);
         delete nullBr;
 
         // Create jmp instruction with null target basic block pointer
-        ir::Instruction* nullJmp = new ir::Instruction(Instruction::Jmp, ctx->getVoidType());
-        nullJmp->addOperand(nullptr);
-        nullJmp->setParent(bb);
+        ir::Instruction* nullJmp = new ir::Instruction(ctx->getVoidType(), ir::Instruction::Jmp, {nullptr}, bb);
 
         // Expect emitJmp to return safely without throwing or crashing
         x64Arch->emitJmp(cg, *nullJmp);
         delete nullJmp;
 
         std::cout << "Null branch target basic block guards unit tests passed successfully!" << std::endl;
+    }
+
+    // Unit test for LoopRotate pass
+    {
+        std::string while_loop_ir = R"(
+function $test_while_loop(%n : i32) : i32 {
+@entry
+    jmp @header
+
+@header
+    %i = phi @entry 0, @latch %i_next : i32
+    %sum = phi @entry 0, @latch %sum_next : i32
+    %cond = slt %i, %n : i32
+    jnz %cond, @body, @exit
+
+@body
+    %sum_next = add %sum, %i : i32
+    %i_next = add %i, 1 : i32
+    jmp @latch
+
+@latch
+    jmp @header
+
+@exit
+    ret %sum : i32
+}
+)";
+        std::istringstream stream(while_loop_ir);
+        parser::Parser l_parser(stream, parser::FileFormat::FYRA);
+        std::unique_ptr<ir::Module> l_module = l_parser.parseModule();
+        assert(l_module != nullptr);
+
+        ir::Function* func = l_module->getFunction("test_while_loop");
+        assert(func != nullptr);
+
+        transforms::CFGBuilder::run(*func);
+        transforms::LoopRotate loop_rotate;
+        bool rotated = loop_rotate.run(*func);
+        assert(rotated == true);
+
+        // Verify idempotence
+        bool rotated_again = loop_rotate.run(*func);
+        assert(rotated_again == false);
+
+        std::cout << "LoopRotate unit test passed successfully!" << std::endl;
     }
 
     assert(generated_asm.find("main:") != std::string::npos);

@@ -1,5 +1,6 @@
 #include "codegen/regalloc/LiveIntervalAnalysis.h"
 #include "codegen/regalloc/LivenessAnalysis.h"
+#include "transforms/DominatorTree.h"
 #include "ir/BasicBlock.h"
 #include "ir/Instruction.h"
 #include "ir/Use.h"
@@ -39,18 +40,13 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
         loopDepthMap[bb.get()] = 0;
     }
 
+    DominatorTree domTree;
+    domTree.run(func);
+
     for (auto& bb : func.getBasicBlocks()) {
         for (const auto* successor : bb->getSuccessors()) {
             if (!successor) continue;
-            bool isBackEdge = false;
-            for (auto& candidate : func.getBasicBlocks()) {
-                if (candidate.get() == successor) {
-                    isBackEdge = true;
-                    break;
-                }
-                if (candidate.get() == bb.get()) break;
-            }
-            if (isBackEdge) {
+            if (domTree.dominates(const_cast<ir::BasicBlock*>(successor), const_cast<ir::BasicBlock*>(bb.get()))) {
                 std::set<const ir::BasicBlock*> loopBlocks;
                 std::vector<const ir::BasicBlock*> worklist;
                 loopBlocks.insert(successor);
