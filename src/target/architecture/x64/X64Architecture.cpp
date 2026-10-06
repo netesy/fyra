@@ -2833,12 +2833,13 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
 }
 
 void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
+    auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
+    auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
+    if (!targetTrue || !targetFalse) return;
     bool is32 = is32BitType(i.getOperands()[0]->get()->getType());
     std::string movOp = is32 ? "movl" : "movq";
     std::string testOp = is32 ? "testl" : "testq";
     std::string rax = (abi == X64ABI::SystemV) ? (is32 ? "%eax" : "%rax") : (is32 ? "eax" : "rax");
-    auto* targetTrue = dynamic_cast<ir::BasicBlock*>(i.getOperands()[1]->get());
-    auto* targetFalse = dynamic_cast<ir::BasicBlock*>(i.getOperands()[2]->get());
 
     if (auto* os = cg.getTextStream()) {
         if (abi == X64ABI::Windows) {
@@ -2919,7 +2920,9 @@ void X64Architecture::emitBr(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitJmp(CodeGen& cg, ir::Instruction& i) {
+    if (i.getOperands().empty() || !i.getOperands()[0]->get()) return;
     auto* targetBB = dynamic_cast<ir::BasicBlock*>(i.getOperands()[0]->get());
+    if (!targetBB) return;
     emitPhiCopies(cg, i.getParent(), targetBB);
     if (auto* os = cg.getTextStream()) {
         *os << "  jmp " << cg.getTargetInfo()->getBBLabel(targetBB) << "\n";

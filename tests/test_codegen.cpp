@@ -11,6 +11,8 @@
 #include "target/core/TargetResolver.h"
 #include "target/core/TargetInfo.h"
 #include "target/core/TargetDescriptor.h"
+#include "target/architecture/x64/X64Architecture.h"
+#include "ir/IRBuilder.h"
 #include <cassert>
 #include <fstream>
 #include <memory>
@@ -44,6 +46,47 @@ int main() {
 
     std::string generated_asm = ss.str();
     std::cout << "Generated ASM:\n" << generated_asm << std::endl;
+
+    // Unit tests for null target basic blocks in emitBr and emitJmp
+    {
+        auto ctx = std::make_shared<ir::IRContext>();
+        ir::Module module("null_branch_test", ctx);
+        ir::IRBuilder builder(ctx);
+        builder.setModule(&module);
+
+        ir::Type* i32Ty = ctx->getIntegerType(32);
+        ir::Function* func = builder.createFunction("test_null_branch_func", i32Ty, {i32Ty});
+        ir::BasicBlock* bb = builder.createBasicBlock("entry", func);
+        builder.setInsertPoint(bb);
+
+        auto x64Arch = std::make_unique<target::X64Architecture>(target::X64ABI::SystemV);
+        std::stringstream asmStream;
+        codegen::CodeGen cg(module, target::TargetResolver::resolve({::target::Arch::X64, ::target::OS::Linux}), &asmStream);
+
+        ir::Instruction* cond = builder.createAdd(func->getParameters()[0].get(), ctx->getConstantInt(static_cast<ir::IntegerType*>(i32Ty), 1));
+
+        // Create br instruction with null target basic block pointers
+        ir::Instruction* nullBr = new ir::Instruction(Instruction::Jnz, ctx->getVoidType());
+        nullBr->addOperand(cond);
+        nullBr->addOperand(nullptr);
+        nullBr->addOperand(nullptr);
+        nullBr->setParent(bb);
+
+        // Expect emitBr to return safely without throwing or crashing
+        x64Arch->emitBr(cg, *nullBr);
+        delete nullBr;
+
+        // Create jmp instruction with null target basic block pointer
+        ir::Instruction* nullJmp = new ir::Instruction(Instruction::Jmp, ctx->getVoidType());
+        nullJmp->addOperand(nullptr);
+        nullJmp->setParent(bb);
+
+        // Expect emitJmp to return safely without throwing or crashing
+        x64Arch->emitJmp(cg, *nullJmp);
+        delete nullJmp;
+
+        std::cout << "Null branch target basic block guards unit tests passed successfully!" << std::endl;
+    }
 
     assert(generated_asm.find("main:") != std::string::npos);
     assert(generated_asm.find("movq $42, %rax") != std::string::npos || generated_asm.find("movl $42, %eax") != std::string::npos);
