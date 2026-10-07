@@ -525,7 +525,25 @@ PeImage createPeImageFromDynamicPlan(const linker::DynamicLinkPlan& plan, const 
         for (const auto& r : plan.relocations) vmas.push_back(r.offset);
         return vmas;
     }();
+    pe.importThunkVmas = plan.importThunkVmas;
+    pe.dataImportFixups = plan.dataImportFixups;
     appendLinkedSections(plan.sections, pe.sections);
+    
+    // Process imports for DLL
+    std::map<std::string, std::vector<PeImportSymbol>> importMap;
+    for (const auto& imp : plan.imports) {
+        PeImportSymbol peSym;
+        peSym.name = imp.symbol;
+        peSym.hint = 0;
+        peSym.isOrdinal = imp.isOrdinal;
+        peSym.ordinal = imp.ordinal;
+        peSym.isData = (imp.kind == linker::DynamicImportKind::Data);
+        importMap[imp.dependencyLibrary].push_back(peSym);
+    }
+    for (const auto& [dll, syms] : importMap) {
+        pe.imports.push_back({dll, syms});
+    }
+    
     for (const auto& exp : plan.exports) {
         const auto* section = plan.findSection(exp.sectionName);
         if (!section || exp.address < section->virtualAddress) continue;

@@ -39,10 +39,6 @@ bool PeDynamicImageBuilder::buildSharedLibrary(const DynamicLinkPlan& plan, cons
         lastError_ = "PE shared-library builder requires a Windows x64 shared-library plan";
         return false;
     }
-    if (!plan.imports.empty() || !plan.dependencies.empty() || !plan.relocations.empty()) {
-        lastError_ = "PE imports, dependencies, and dynamic relocations are not implemented";
-        return false;
-    }
     std::string imageName = outputPath;
     const size_t slash = imageName.find_last_of("/\\");
     if (slash != std::string::npos) imageName.erase(0, slash + 1);
