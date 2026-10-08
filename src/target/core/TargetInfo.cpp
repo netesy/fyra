@@ -217,7 +217,10 @@ int32_t TargetInfo::getStackOffset(const codegen::CodeGen& cg, ir::Value* val) c
             }
         }
     }
-    return 0;
+    throw std::runtime_error("Missing stack slot for " + (val ? val->getName() : std::string("null")) +
+        " in " + (cg.getCurrentFunction() ? cg.getCurrentFunction()->getName() : std::string("no function")) +
+        " (slots=" + std::to_string(cg.getStackOffsets().size()) + ", instruction=" +
+        std::to_string(dynamic_cast<ir::Instruction*>(val) ? static_cast<int>(static_cast<ir::Instruction*>(val)->getOpcode()) : -1) + ")");
 }
 
 uint16_t TargetInfo::getElfMachine(Arch arch) {

@@ -491,3 +491,7 @@ add_executable(test_idempotent_loop_collapse test_idempotent_loop_collapse.cpp)
 target_link_libraries(test_idempotent_loop_collapse PRIVATE fyra)
 add_test(NAME IdempotentLoopCollapseTest COMMAND test_idempotent_loop_collapse)
 set_tests_properties(IdempotentLoopCollapseTest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_x64_object_runtime test_x64_object_runtime.cpp)
+target_link_libraries(test_x64_object_runtime PRIVATE fyra)
+add_test(NAME X64ObjectRuntimeTest COMMAND test_x64_object_runtime)

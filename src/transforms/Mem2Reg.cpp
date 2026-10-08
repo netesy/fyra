@@ -2,6 +2,7 @@
 #include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
+#include "transforms/AllocaPromotion.h"
 #include <set>
 #include <vector>
 
@@ -17,16 +18,15 @@ bool Mem2Reg::run(ir::Function& func) {
 
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
-            if (instr->getOpcode() == ir::Instruction::Alloc ||
-                instr->getOpcode() == ir::Instruction::Alloc4 ||
-                instr->getOpcode() == ir::Instruction::Alloc16)
+            if (isPromotableAlloca(instr.get()))
                 localAllocs.insert(instr.get());
         }
     }
 
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
-            if (instr->getOpcode() != ir::Instruction::Store || instr->getOperands().size() < 2)
+            if ((instr->getOpcode() != ir::Instruction::Store && instr->getOpcode() != ir::Instruction::Storel &&
+                 instr->getOpcode() != ir::Instruction::Stored && instr->getOpcode() != ir::Instruction::Stores) || instr->getOperands().size() < 2)
                 continue;
             auto* pointer = dynamic_cast<ir::Instruction*>(instr->getOperands()[1]->get());
             if (pointer && localAllocs.count(pointer)) deadStores.push_back(instr.get());

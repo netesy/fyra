@@ -236,7 +236,8 @@ bool DeadInstructionElimination::eliminateDeadStores(ir::Function& func) {
 bool DeadInstructionElimination::hasSideEffects(const ir::Instruction* instr) const {
     if (!instr) return false;
     ir::Instruction::Opcode op = instr->getOpcode();
-    return op == ir::Instruction::Call || 
+    return op == ir::Instruction::Call ||
+           op == ir::Instruction::ExternCall ||
            op == ir::Instruction::Syscall || 
            isStoreInstruction(instr) ||
            op == ir::Instruction::Ret;

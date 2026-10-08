@@ -2,6 +2,7 @@
 #include "transforms/CFGBuilder.h"
 #include "ir/IRBuilder.h"
 #include "ir/PhiNode.h"
+#include "ir/SIMDInstruction.h"
 #include "ir/Use.h"
 #include "ir/Instruction.h"
 #include <map>
@@ -581,7 +582,17 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
                     valueMap[calleeInst] = clonedPhi.get();
                     targetBB->getInstructions().push_back(std::move(clonedPhi));
                 } else {
-                    auto cloned = std::make_unique<ir::Instruction>(calleeInst->getType(), calleeInst->getOpcode(), clonedOps, targetBB);
+                    std::unique_ptr<ir::Instruction> cloned;
+                    if (auto* external = dynamic_cast<ir::ExternCallInstruction*>(calleeInst))
+                        cloned = std::make_unique<ir::ExternCallInstruction>(external->getType(), clonedOps, external->getCapability(), targetBB);
+                    else if (auto* syscall = dynamic_cast<ir::SyscallInstruction*>(calleeInst))
+                        cloned = std::make_unique<ir::SyscallInstruction>(syscall->getType(), clonedOps, syscall->getSyscallId(), targetBB);
+                    else if (auto* vector = dynamic_cast<ir::VectorInstruction*>(calleeInst)) {
+                        auto copy = std::make_unique<ir::VectorInstruction>(vector->getType(), vector->getOpcode(), clonedOps, vector->getVectorWidth(), targetBB);
+                        if (vector->getShuffleMask()) copy->setShuffleMask(*vector->getShuffleMask());
+                        cloned = std::move(copy);
+                    } else
+                        cloned = std::make_unique<ir::Instruction>(calleeInst->getType(), calleeInst->getOpcode(), clonedOps, targetBB);
                     static size_t inlineCounter = 0;
                     cloned->setName(calleeInst->getName() + "_inl_" + std::to_string(inlineCounter++));
                     valueMap[calleeInst] = cloned.get();

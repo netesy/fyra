@@ -277,7 +277,8 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
         for (auto& bb : func.getBasicBlocks()) {
             for (auto& instr : bb->getInstructions()) {
                 auto opc = instr->getOpcode();
-                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
+                if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall ||
+                    opc == ir::Instruction::Alloc || opc == ir::Instruction::Alloc4 || opc == ir::Instruction::Alloc16) {
                     layout.makesCalls = true;
                     break;
                 }
@@ -315,6 +316,18 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
                 cg.getStackOffsets()[const_cast<ir::Value*>(vreg)] = -slotBytes;
             }
         }
+        if (!cg.getTextStream()) {
+            // The binary emitter evaluates through scratch registers and stack
+            // slots, independently of text-mode physical register assignments.
+            for (auto& param : func.getParameters()) {
+                if (!func.hasStackSlot(param.get())) {
+                    int offset = std::max(64, func.getStackFrameSize());
+                    func.setStackSlotForVreg(param.get(), offset);
+                    func.setStackFrameSize(offset + 8);
+                }
+                cg.getStackOffsets()[param.get()] = -func.getStackSlotForVreg(param.get());
+            }
+        }
 
         int maxAlign = 16;
         for (auto& bb : func.getBasicBlocks()) {
@@ -337,7 +350,7 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
                 if (instr->getType() && !instr->getType()->isVoidTy()) {
                     if (func.hasStackSlot(instr.get())) {
                         cg.getStackOffsets()[instr.get()] = -func.getStackSlotForVreg(instr.get());
-                    } else if (!instr->hasPhysicalRegister()) {
+                    } else if (!cg.getTextStream() || !instr->hasPhysicalRegister()) {
                         size_t align = 8;
                         size_t slotBytes = 8;
                         if (auto* vt = dynamic_cast<const ir::VectorType*>(instr->getType())) {
@@ -377,7 +390,9 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
         if (total_frame % maxAlign != 0) {
             total_frame += (maxAlign - (total_frame % maxAlign));
         }
-        layout.stackAlloc = total_frame - 8 * (1 + (int)layout.usedCalleeRegs.size());
+        // RBP is already pushed: offsets and alignment are relative to RBP,
+        // rather than to the caller's return-address slot.
+        layout.stackAlloc = total_frame - 8 * static_cast<int>(layout.usedCalleeRegs.size());
         bool hasStackParameters = func.getParameters().size() > integerArgRegs.size();
         layout.isZeroFrame = (!layout.makesCalls && total_frame == 0 &&
                               layout.usedCalleeRegs.empty() && !hasStackParameters && func.getParameters().empty());
@@ -396,6 +411,9 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
 }
 
 void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
+    // CodeGen clears the offset map for each emission. A previous assembly
+    // pass's cached layout must not skip rebuilding it for the binary pass.
+    frameLayoutCache_.erase(&func);
     X64FrameLayout layout = computeFrameLayout(cg, func);
     if (abi == X64ABI::SystemV) {
         if (auto* os = cg.getTextStream()) {
@@ -442,6 +460,23 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                 if (layout.stackAlloc > 0) {
                     if (layout.stackAlloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)layout.stackAlloc});
                     else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(layout.stackAlloc); }
+                }
+                size_t integer_index = 0, float_index = 0, stack_index = 0;
+                for (auto& parameter : func.getParameters()) {
+                    bool floating = parameter->getType()->isFloatingPoint();
+                    auto offset = cg.getStackOffset(parameter.get());
+                    if (floating && float_index < 8) {
+                        // Preserve incoming XMM values before helper calls.
+                        as.emitBytes({0x66, 0x48, 0x0F, 0x7E});
+                        as.emitByte(0xC0 | (float_index++ << 3));
+                        emitRegMem(as, 0x48, 0x89, 0, offset);
+                    } else if (!floating && integer_index < integerArgRegs.size()) {
+                        auto reg = getArchRegIndex(integerArgRegs[integer_index++]);
+                        emitRegMem(as, reg >= 8 ? 0x4C : 0x48, 0x89, reg & 7, offset);
+                    } else {
+                        emitRegMem(as, 0x48, 0x8B, 0, 16 + 8 * stack_index++);
+                        emitRegMem(as, 0x48, 0x89, 0, offset);
+                    }
                 }
             }
         }
@@ -583,6 +618,8 @@ void X64Architecture::emitRet(CodeGen& cg, ir::Instruction& i) {
         }
     } else {
         if (!i.getOperands().empty()) emitLoadValue(cg, cg.getAssembler(), i.getOperands()[0]->get(), 0);
+        if (!i.getOperands().empty() && i.getOperands()[0]->get()->getType()->isFloatingPoint())
+            cg.getAssembler().emitBytes({0x66, 0x48, 0x0F, 0x6E, 0xC0});
         cg.getAssembler().emitByte(0xE9);
         uint64_t off = cg.getAssembler().getCodeSize();
         cg.getAssembler().emitDWord(0);
@@ -1667,6 +1704,47 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
             }
         }
     } else {
+        if (abi == X64ABI::SystemV) {
+            auto& as = cg.getAssembler();
+            size_t integers = 0, floats = 0, spills = 0;
+            for (size_t j = 1; j < i.getOperands().size(); ++j) {
+                bool floating = i.getOperands()[j]->get()->getType()->isFloatingPoint();
+                if (floating ? floats++ >= 8 : integers++ >= 6) ++spills;
+            }
+            auto stack_bytes = (spills * 8 + 15) & ~size_t(15);
+            if (stack_bytes) { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(stack_bytes); }
+            integers = floats = spills = 0;
+            for (size_t j = 1; j < i.getOperands().size(); ++j) {
+                auto* argument = i.getOperands()[j]->get();
+                bool floating = argument->getType()->isFloatingPoint();
+                if (floating && floats < 8) {
+                    emitLoadValue(cg, as, argument, 0);
+                    as.emitBytes({0x66, 0x48, 0x0F, 0x6E});
+                    as.emitByte(0xC0 | (floats++ << 3));
+                } else if (!floating && integers < 6) {
+                    emitLoadValue(cg, as, argument, getArchRegIndex(integerArgRegs[integers++]));
+                } else {
+                    emitLoadValue(cg, as, argument, 0);
+                    as.emitBytes({0x48, 0x89, 0x84, 0x24});
+                    as.emitDWord(spills++ * 8);
+                }
+            }
+            if (isDirectCall) {
+                as.emitByte(0xE8);
+                auto offset = as.getCodeSize();
+                as.emitDWord(0);
+                cg.addRelocation(CodeGen::RelocationInfo{offset, "R_X86_64_PLT32", -4, calleeVal->getName(), ".text"});
+            } else {
+                emitLoadValue(cg, as, calleeVal, 0);
+                as.emitBytes({0xFF, 0xD0});
+            }
+            if (stack_bytes) { as.emitBytes({0x48, 0x81, 0xC4}); as.emitDWord(stack_bytes); }
+            if (!i.getType()->isVoidTy()) {
+                if (i.getType()->isFloatingPoint()) as.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0});
+                emitStoreResult(cg, i, 0);
+            }
+            return;
+        }
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
         for (size_t j = 1; j < i.getOperands().size(); ++j) {
             if (j <= maxArgs) {
@@ -2386,7 +2464,13 @@ void X64Architecture::emitLoad(CodeGen& cg, ir::Instruction& i) {
             emitMov(cg, os, is32 ? eax : rax, cg.getValueAsOperand(&i), is32);
         }
     } else {
-        auto& as = cg.getAssembler(); emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        auto& as = cg.getAssembler();
+        if (auto* slot = dynamic_cast<ir::ConstantInt*>(i.getOperands()[0]->get())) {
+            // createLoadStack encodes an RBP-relative spill offset as a constant.
+            emitRegMem(as, 0x48, 0x8D, 0, -slot->getValue());
+        } else {
+            emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+        }
         if (size == 1) as.emitBytes({0x48, 0x0F, (uint8_t)(isSigned ? 0xBE : 0xB6), 0x00});
         else if (size == 2) as.emitBytes({0x48, 0x0F, (uint8_t)(isSigned ? 0xBF : 0xB7), 0x00});
         else if (size == 4) as.emitBytes(isSigned ? std::vector<uint8_t>{0x48, 0x63, 0x00} : std::vector<uint8_t>{0x8B, 0x00});
@@ -2661,7 +2745,10 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
         }
     } else {
         auto& as = cg.getAssembler(); emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
-        emitLoadValue(cg, as, i.getOperands()[1]->get(), 2);
+        if (auto* slot = dynamic_cast<ir::ConstantInt*>(i.getOperands()[1]->get()))
+            emitRegMem(as, 0x48, 0x8D, 2, -slot->getValue());
+        else
+            emitLoadValue(cg, as, i.getOperands()[1]->get(), 2);
         if (size == 1) as.emitBytes({0x88, 0x02});
         else if (size == 2) as.emitBytes({0x66, 0x89, 0x02});
         else if (size == 4) as.emitBytes({0x89, 0x02});
@@ -2670,6 +2757,23 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
 }
 
 void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
+    if (abi == X64ABI::SystemV) {
+        // IR alloc is function-local stack storage. Language heap allocation
+        // uses the explicit memory.alloc capability and its ownership runtime.
+        if (auto* os = cg.getTextStream()) {
+            if (!i.getOperands().empty()) emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), "%rax", false);
+            else *os << "  movq $8, %rax\n";
+            *os << "  addq $15, %rax\n  andq $-16, %rax\n  subq %rax, %rsp\n";
+            emitMov(cg, os, "%rsp", cg.getValueAsOperand(&i), false);
+        } else {
+            auto& as = cg.getAssembler();
+            if (!i.getOperands().empty()) emitLoadValue(cg, as, i.getOperands()[0]->get(), 0);
+            else { as.emitBytes({0x48, 0xB8}); as.emitQWord(8); }
+            as.emitBytes({0x48, 0x83, 0xC0, 15, 0x48, 0x83, 0xE0, 0xF0, 0x48, 0x29, 0xC4, 0x48, 0x89, 0xE0});
+            emitStoreResult(cg, i, 0);
+        }
+        return;
+    }
     int32_t pointerOffset = cg.getStackOffset(&i);
     uint64_t size = 8;
     if (i.getOpcode() == ir::Instruction::Alloc4) size = 4;
@@ -4575,10 +4679,14 @@ void X64Architecture::emitLoadValue(CodeGen& cg, asm_::Assembler& as, ir::Value*
     else if (v->getName() == "__heap_ptr" || v->getName() == "heap_ptr") {
         uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; as.emitByte(rex); as.emitByte(0x8B); as.emitByte(0x05 | ((regIdx & 7) << 3));
         uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, v->getName(), ".text"});
-    } else if (dynamic_cast<ir::GlobalVariable*>(v) || dynamic_cast<ir::GlobalValue*>(v)) {
+    } else if (dynamic_cast<ir::GlobalVariable*>(v) || dynamic_cast<ir::GlobalValue*>(v) || dynamic_cast<ir::Function*>(v)) {
         uint8_t rex = (regIdx >= 8) ? 0x4C : 0x48; as.emitByte(rex); as.emitByte(0x8D); as.emitByte(0x05 | ((regIdx & 7) << 3));
         uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, v->getName(), ".text"});
     } else if (auto* param = dynamic_cast<ir::Parameter*>(v)) {
+        if (auto slot = cg.getStackOffsets().find(param); slot != cg.getStackOffsets().end()) {
+            emitRegMem(as, regIdx >= 8 ? 0x4C : 0x48, 0x8B, regIdx & 7, slot->second);
+            return;
+        }
         size_t idx = 0;
         if (cg.getCurrentFunction()) {
             for (auto& p : cg.getCurrentFunction()->getParameters()) {

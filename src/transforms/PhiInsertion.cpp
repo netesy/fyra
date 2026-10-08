@@ -2,6 +2,7 @@
 #include "ir/Instruction.h"
 #include "ir/IRBuilder.h"
 #include "ir/Use.h"
+#include "transforms/AllocaPromotion.h"
 #include <vector>
 #include <set>
 
@@ -12,9 +13,7 @@ void PhiInsertion::run(ir::Function& func, const DominanceFrontier& df) {
     std::vector<ir::Instruction*> allocs;
     for (auto& bb_ptr : func.getBasicBlocks()) {
         for (auto& instr_ptr : bb_ptr->getInstructions()) {
-            if (instr_ptr->getOpcode() == ir::Instruction::Alloc ||
-                instr_ptr->getOpcode() == ir::Instruction::Alloc4 ||
-                instr_ptr->getOpcode() == ir::Instruction::Alloc16) {
+            if (isPromotableAlloca(instr_ptr.get())) {
                 allocs.push_back(instr_ptr.get());
             }
         }
@@ -53,7 +52,7 @@ void PhiInsertion::run(ir::Function& func, const DominanceFrontier& df) {
         for (ir::BasicBlock* bb : phi_blocks) {
             builder.setInsertPoint(bb);
             unsigned num_preds = bb->getPredecessors().size();
-            builder.createPhi(alloc->getType(), 2 * num_preds, alloc);
+            builder.createPhi(static_cast<ir::PointerType*>(alloc->getType())->getElementType(), 2 * num_preds, alloc);
         }
     }
 }

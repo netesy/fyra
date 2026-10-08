@@ -7,6 +7,7 @@
 #include "ir/Type.h"
 #include "ir/Module.h"
 #include "ir/Use.h"
+#include "transforms/AllocaPromotion.h"
 #include <iostream>
 #include <map>
 #include <vector>
@@ -19,10 +20,8 @@ void SSARenamer::run(ir::Function& func, DominatorTree& dt) {
     // 1. Find all variables (allocs) and initialize their stacks
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr : bb->getInstructions()) {
-            if (instr->getOpcode() == ir::Instruction::Alloc ||
-                instr->getOpcode() == ir::Instruction::Alloc4 ||
-                instr->getOpcode() == ir::Instruction::Alloc16) {
-                ir::Type* ty = instr->getType();
+            if (isPromotableAlloca(instr.get())) {
+                ir::Type* ty = static_cast<ir::PointerType*>(instr->getType())->getElementType();
                 ir::IRContext& context = *func.getParent()->getContext();
                 if (ty->isInteger()) {
                     varStacks[instr.get()].push(ir::ConstantInt::get(dynamic_cast<ir::IntegerType*>(ty), 0));
@@ -52,42 +51,23 @@ void SSARenamer::renameBlock(ir::BasicBlock* bb) {
         }
     }
 
-    // 2. Replace loads with the current live value
-    for (auto& instr_ptr : bb->getInstructions()) {
-        if (instr_ptr->getOpcode() == ir::Instruction::Load ||
-            instr_ptr->getOpcode() == ir::Instruction::Loadub ||
-            instr_ptr->getOpcode() == ir::Instruction::Loadsb ||
-            instr_ptr->getOpcode() == ir::Instruction::Loaduh ||
-            instr_ptr->getOpcode() == ir::Instruction::Loadsh ||
-            instr_ptr->getOpcode() == ir::Instruction::Loaduw ||
-            instr_ptr->getOpcode() == ir::Instruction::Loadl ||
-            instr_ptr->getOpcode() == ir::Instruction::Loads ||
-            instr_ptr->getOpcode() == ir::Instruction::Loadd) {
-            ir::Instruction* var = dynamic_cast<ir::Instruction*>(instr_ptr->getOperands()[0]->get());
-            if (var && varStacks.count(var) && !varStacks[var].empty()) {
-                ir::Value* live_val = varStacks[var].top();
-                if (live_val) {
-                    instr_ptr->replaceAllUsesWith(live_val);
-                    dead_loads.push_back(instr_ptr.get());
-                }
-            }
-        }
-    }
-
-    // 3. Rename definitions (stores)
-    for (auto& instr_ptr : bb->getInstructions()) {
-        if (instr_ptr->getOpcode() == ir::Instruction::Store ||
-            instr_ptr->getOpcode() == ir::Instruction::Storeb ||
-            instr_ptr->getOpcode() == ir::Instruction::Storeh ||
-            instr_ptr->getOpcode() == ir::Instruction::Storel ||
-            instr_ptr->getOpcode() == ir::Instruction::Stores ||
-            instr_ptr->getOpcode() == ir::Instruction::Stored) {
-            ir::Value* val = instr_ptr->getOperands()[0]->get();
-            ir::Instruction* var = dynamic_cast<ir::Instruction*>(instr_ptr->getOperands()[1]->get());
-            if (var && varStacks.count(var)) {
-                varStacks[var].push(val);
-                local_defs.push_back(var);
-            }
+    // Observe definitions in program order: a load after a store in the same
+    // block must see that store, rather than the incoming block value.
+    for (auto& instruction : bb->getInstructions()) {
+        auto op = instruction->getOpcode();
+        const bool load = op == ir::Instruction::Load || op == ir::Instruction::Loadl ||
+                          op == ir::Instruction::Loads || op == ir::Instruction::Loadd;
+        const bool store = op == ir::Instruction::Store || op == ir::Instruction::Storel ||
+                           op == ir::Instruction::Stores || op == ir::Instruction::Stored;
+        if (!load && !store) continue;
+        auto* variable = dynamic_cast<ir::Instruction*>(instruction->getOperands()[store ? 1 : 0]->get());
+        if (!variable || !varStacks.count(variable)) continue;
+        if (store) {
+            varStacks[variable].push(instruction->getOperands()[0]->get());
+            local_defs.push_back(variable);
+        } else if (!varStacks[variable].empty()) {
+            instruction->replaceAllUsesWith(varStacks[variable].top());
+            dead_loads.push_back(instruction.get());
         }
     }
 

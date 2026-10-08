@@ -161,17 +161,22 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         sectionIndexMap[s->name] = static_cast<uint16_t>(finalSectionHeaders.size() - 1);
     }
 
-    // Add .rela.text if relocations exist
-    if (!artCopy.relocations.empty()) {
+    // Relocation offsets are relative to their source section. Combining data
+    // relocations into .rela.text lets the linker overwrite executable code.
+    std::map<std::string, size_t> relocationCounts;
+    for (const auto& relocation : artCopy.relocations)
+        ++relocationCounts[relocation.sectionName.empty() ? ".text" : relocation.sectionName];
+    for (const auto& [section, count] : relocationCounts) {
         SectionHeader64 relaHdr = {};
-        relaHdr.sh_name = addToStringTable(shStringTable, ".rela.text");
+        auto name = ".rela" + section;
+        relaHdr.sh_name = addToStringTable(shStringTable, name);
         relaHdr.sh_type = SHT_RELA;
         relaHdr.sh_flags = 0;
         relaHdr.sh_addralign = 8;
         relaHdr.sh_entsize = sizeof(Elf64_Rela);
-        relaHdr.sh_size = artCopy.relocations.size() * sizeof(Elf64_Rela);
+        relaHdr.sh_size = count * sizeof(Elf64_Rela);
         finalSectionHeaders.push_back(relaHdr);
-        sectionIndexMap[".rela.text"] = static_cast<uint16_t>(finalSectionHeaders.size() - 1);
+        sectionIndexMap[name] = static_cast<uint16_t>(finalSectionHeaders.size() - 1);
     }
 
     // Metadata section headers
@@ -226,8 +231,7 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         symbolIndexMap[symName] = static_cast<uint32_t>(i);
     }
 
-    // Build .rela.text payload
-    std::vector<Elf64_Rela> relaTable;
+    std::map<std::string, std::vector<Elf64_Rela>> relaTables;
     for (const auto& reloc : artCopy.relocations) {
         Elf64_Rela r = {};
         r.r_offset = reloc.offset;
@@ -271,14 +275,14 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         }
         r.r_info = ELF64_R_INFO(symIdx, typeCode);
         r.r_addend = reloc.addend;
-        relaTable.push_back(r);
+        relaTables[reloc.sectionName.empty() ? ".text" : reloc.sectionName].push_back(r);
     }
 
     // Link headers
-    if (!artCopy.relocations.empty()) {
-        uint16_t relaIdx = sectionIndexMap[".rela.text"];
+    for (const auto& [section, table] : relaTables) {
+        uint16_t relaIdx = sectionIndexMap.at(".rela" + section);
         finalSectionHeaders[relaIdx].sh_link = sectionIndexMap[".symtab"];
-        finalSectionHeaders[relaIdx].sh_info = sectionIndexMap[".text"];
+        finalSectionHeaders[relaIdx].sh_info = sectionIndexMap.at(section);
     }
 
     finalSectionHeaders[sectionIndexMap[".shstrtab"]].sh_size = shStringTable.size();
@@ -299,11 +303,11 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         if (s->name != ".bss") fileOffset += s->data.size();
     }
 
-    if (!artCopy.relocations.empty()) {
+    for (const auto& [section, table] : relaTables) {
         fileOffset = (fileOffset + 7) & ~7;
-        uint16_t relaIdx = sectionIndexMap[".rela.text"];
+        uint16_t relaIdx = sectionIndexMap.at(".rela" + section);
         finalSectionHeaders[relaIdx].sh_offset = fileOffset;
-        fileOffset += relaTable.size() * sizeof(Elf64_Rela);
+        fileOffset += table.size() * sizeof(Elf64_Rela);
     }
 
     auto align_offset = [&](uint64_t off, uint64_t align) { return (off + align - 1) & ~(align - 1); };
@@ -355,9 +359,9 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         }
     }
 
-    if (!artCopy.relocations.empty()) {
-        uint16_t relaIdx = sectionIndexMap[".rela.text"];
-        std::memcpy(buffer.data() + finalSectionHeaders[relaIdx].sh_offset, relaTable.data(), relaTable.size() * sizeof(Elf64_Rela));
+    for (const auto& [section, table] : relaTables) {
+        uint16_t relaIdx = sectionIndexMap.at(".rela" + section);
+        std::memcpy(buffer.data() + finalSectionHeaders[relaIdx].sh_offset, table.data(), table.size() * sizeof(Elf64_Rela));
     }
 
     std::memcpy(buffer.data() + finalSectionHeaders[sectionIndexMap[".shstrtab"]].sh_offset, shStringTable.c_str(), shStringTable.size());
