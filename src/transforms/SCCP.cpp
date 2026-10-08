@@ -133,7 +133,7 @@ static bool computeScalarOpValueFast(
 ) {
     std::vector<ir::ConstantInt*> opCIs;
     for (auto* c : opConsts) {
-        auto* ci = static_cast<ir::ConstantInt*>(c);
+        auto* ci = dynamic_cast<ir::ConstantInt*>(c);
         if (!ci) return false;
         opCIs.push_back(ci);
     }
@@ -938,14 +938,15 @@ void SCCP::visit(ir::Instruction* instr, std::set<std::pair<ir::BasicBlock*, ir:
         ir::BasicBlock* t_dest = dynamic_cast<ir::BasicBlock*>(instr->getOperands()[1] ? instr->getOperands()[1]->get() : nullptr);
         ir::BasicBlock* f_dest = (instr->getOperands().size() > 2 && instr->getOperands()[2]) ? dynamic_cast<ir::BasicBlock*>(instr->getOperands()[2]->get()) : nullptr;
 
-        if (cond.type == Constant) {
-            int64_t val = static_cast<ir::ConstantInt*>(cond.constant)->getValue();
+        auto* integerCondition = dynamic_cast<ir::ConstantInt*>(cond.constant);
+        if (cond.type == Constant && integerCondition) {
+            int64_t val = integerCondition->getValue();
             bool is_true = (op == ir::Instruction::Jz) ? (val == 0) : (val != 0);
             ir::BasicBlock* taken = is_true ? t_dest : f_dest;
             if (taken && executableEdges.insert({instr->getParent(), taken}).second) {
                 blockWorklist.push_back(taken);
             }
-        } else if (cond.type == Bottom) {
+        } else if (cond.type == Bottom || cond.type == Constant) {
             if (t_dest && executableEdges.insert({instr->getParent(), t_dest}).second) blockWorklist.push_back(t_dest);
             if (f_dest && executableEdges.insert({instr->getParent(), f_dest}).second) blockWorklist.push_back(f_dest);
         }
