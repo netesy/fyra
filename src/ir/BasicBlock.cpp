@@ -43,11 +43,12 @@ void BasicBlock::removeSuccessor(BasicBlock* succ) {
 }
 
 void BasicBlock::removeInstructions(const std::vector<Instruction*>& to_remove) {
-    for (auto* instr : to_remove) {
-        if (instr->getParent() == this) {
-            for (auto& op : instr->getOperands()) {
-                op->set(nullptr);
-            }
+    // A bulk removal list may be shared across blocks. Earlier blocks can
+    // already have destroyed some candidates, so inspect owned live nodes
+    // instead of dereferencing every raw pointer in the shared list.
+    for (auto& instr : instructions) {
+        if (std::find(to_remove.begin(), to_remove.end(), instr.get()) != to_remove.end()) {
+            for (auto& op : instr->getOperands()) op->set(nullptr);
         }
     }
     instructions.remove_if([&](const std::unique_ptr<Instruction>& instr) {

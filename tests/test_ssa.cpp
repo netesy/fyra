@@ -98,5 +98,26 @@ int main() {
         assert(foundStore && "externally observable pointer-parameter store was removed");
     }
 
+    // Both blocks contribute dead stores to the same bulk-removal list.
+    // Removing the first block must not dereference its freed store in the
+    // second block (run this regression under ASan as well).
+    auto* bulk = storeBuilder.createFunction("multi_block_dead_stores", storeCtx->getVoidType(), {});
+    auto* first = storeBuilder.createBasicBlock("entry", bulk);
+    auto* second = storeBuilder.createBasicBlock("next", bulk);
+    storeBuilder.setInsertPoint(first);
+    auto* slot = storeBuilder.createAlloc(storeCtx->getConstantInt(storeCtx->getIntegerType(64), 8), storeCtx->getIntegerType(64));
+    storeBuilder.createStore(storeCtx->getConstantInt(storeCtx->getIntegerType(64), 1), slot);
+    storeBuilder.createJmp(second);
+    storeBuilder.setInsertPoint(second);
+    storeBuilder.createStore(storeCtx->getConstantInt(storeCtx->getIntegerType(64), 2), slot);
+    storeBuilder.createRet(nullptr);
+    transforms::Mem2Reg cleanup;
+    assert(cleanup.run(*bulk));
+    for (const auto& block : bulk->getBasicBlocks())
+        for (const auto& instruction : block->getInstructions()) {
+            assert(instruction->getOpcode() != ir::Instruction::Alloc);
+            assert(instruction->getOpcode() != ir::Instruction::Store);
+        }
+
     return 0;
 }
