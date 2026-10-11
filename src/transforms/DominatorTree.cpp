@@ -4,121 +4,81 @@
 #include <unordered_set>
 #include <algorithm>
 #include <iterator>
-#include <bit>
-#include <cstdint>
 
 namespace transforms {
 
 void DominatorTree::run(ir::Function& func) {
-    iDomMap.clear();
-    childrenMap.clear();
-
-    if (func.getBasicBlocks().empty()) {
-        return;
-    }
-
+    iDomMap.clear(); childrenMap.clear(); intervals.clear();
+    if (func.getBasicBlocks().empty()) return;
     std::vector<ir::BasicBlock*> blocks;
-    std::map<ir::BasicBlock*, int> blockToIndex;
-    int index = 0;
-    for (auto& bb_ptr : func.getBasicBlocks()) {
-        blocks.push_back(bb_ptr.get());
-        blockToIndex[bb_ptr.get()] = index++;
+    std::map<ir::BasicBlock*, size_t> indices;
+    for (auto& block : func.getBasicBlocks()) {
+        indices.emplace(block.get(), blocks.size()); blocks.push_back(block.get());
     }
-
-    ir::BasicBlock* entry = func.getBasicBlocks().front().get();
-
-    // The original intersection equations, stored densely. Checked-call
-    // continuations can produce hundreds of blocks; tree nodes for every
-    // member of every dominator set made sanitizer builds allocation-heavy.
-    using Bits = std::vector<uint64_t>;
-    const size_t words = (blocks.size() + 63) / 64;
-    Bits all(words, ~uint64_t(0));
-    if (blocks.size() % 64) all.back() = (uint64_t(1) << (blocks.size() % 64)) - 1;
-    std::vector<Bits> domSets(blocks.size(), all);
-    domSets[0].assign(words, 0); domSets[0][0] = 1;
-    // Solve in reverse postorder instead of physical layout order. Checked
-    // continuations and reverse-layout joins otherwise need one full sweep
-    // per edge. Include disconnected components: their existing equations and
-    // initial sets must also reach the same fixed point.
-    std::vector<size_t> solveOrder;
+    // Entry-rooted reverse postorder. Disconnected components must not become
+    // artificial dominator cycles or contribute predecessors to reachable joins.
     std::vector<bool> visited(blocks.size(), false);
-    for (size_t root = 0; root < blocks.size(); ++root) {
-        if (visited[root]) continue;
-        std::vector<std::pair<size_t, size_t>> stack{{root, 0}};
-        std::vector<size_t> postorder;
-        visited[root] = true;
-        while (!stack.empty()) {
-            auto& [position, edge] = stack.back();
-            const auto& successors = blocks[position]->getSuccessors();
-            if (edge < successors.size()) {
-                auto successor = blockToIndex.at(successors[edge++]);
-                if (!visited[successor]) {
-                    visited[successor] = true;
-                    stack.emplace_back(successor, 0);
-                }
-            } else {
-                postorder.push_back(position);
-                stack.pop_back();
-            }
-        }
-        solveOrder.insert(solveOrder.end(), postorder.rbegin(), postorder.rend());
+    std::vector<size_t> postorder;
+    std::vector<std::pair<size_t, size_t>> pending{{0, 0}};
+    visited[0] = true;
+    while (!pending.empty()) {
+        auto& [position, edge] = pending.back();
+        const auto& successors = blocks[position]->getSuccessors();
+        if (edge < successors.size()) {
+            auto next = indices.at(successors[edge++]);
+            if (!visited[next]) { visited[next] = true; pending.emplace_back(next, 0); }
+        } else { postorder.push_back(position); pending.pop_back(); }
     }
+    std::vector<size_t> order(postorder.rbegin(), postorder.rend());
+    const auto missing = blocks.size();
+    std::vector<size_t> rank(blocks.size(), missing), parent(blocks.size(), missing);
+    std::vector<std::vector<size_t>> predecessors(blocks.size());
+    for (size_t position = 0; position < order.size(); ++position) {
+        auto index = order[position]; rank[index] = position;
+        for (auto* predecessor : blocks[index]->getPredecessors()) {
+            auto incoming = indices.at(predecessor);
+            if (visited[incoming]) predecessors[index].push_back(incoming);
+        }
+    }
+    parent[0] = 0;
+    // Cooper/Harvey/Kennedy intersection computes immediate dominators directly;
+    // no quadratic dominator-set matrix is needed. Parent chains descend in
+    // reverse-postorder rank, so intersection always terminates.
+    auto intersect = [&](size_t left, size_t right) {
+        while (left != right) {
+            while (rank[left] > rank[right]) left = parent[left];
+            while (rank[right] > rank[left]) right = parent[right];
+        }
+        return left;
+    };
     bool changed = true;
     while (changed) {
         changed = false;
-        for (auto index : solveOrder) {
+        for (auto index : order) {
             if (index == 0) continue;
-            auto* block = blocks[index];
-            Bits next(words, 0);
-            const auto& predecessors = block->getPredecessors();
-            if (!predecessors.empty()) {
-                next = domSets[blockToIndex.at(predecessors[0])];
-                for (size_t predecessor = 1; predecessor < predecessors.size(); ++predecessor) {
-                    const auto& incoming = domSets[blockToIndex.at(predecessors[predecessor])];
-                    for (size_t word = 0; word < words; ++word) next[word] &= incoming[word];
-                }
+            size_t next = missing;
+            for (auto predecessor : predecessors[index]) {
+                if (parent[predecessor] == missing) continue;
+                next = next == missing ? predecessor : intersect(next, predecessor);
             }
-            next[index / 64] |= uint64_t(1) << (index % 64);
-            if (next != domSets[index]) { domSets[index] = std::move(next); changed = true; }
+            if (parent[index] != next) { parent[index] = next; changed = true; }
         }
     }
-    auto cardinality = [](const Bits& bits) {
-        size_t count = 0; for (auto word : bits) count += std::popcount(word); return count;
-    };
-    // Keep the previous pointer ordering for ambiguous unreachable components.
-    std::set<ir::BasicBlock*> ordered(blocks.begin(), blocks.end());
-    std::vector<size_t> orderedIndices;
-    for (auto* block : ordered) orderedIndices.push_back(blockToIndex.at(block));
-    std::vector<size_t> depths;
-    for (const auto& dominators : domSets) depths.push_back(cardinality(dominators));
     for (size_t index = 0; index < blocks.size(); ++index) {
-        auto* block = blocks[index];
-        if (block == entry) { iDomMap[block] = nullptr; continue; }
-        auto strict = domSets[index]; strict[index / 64] &= ~(uint64_t(1) << (index % 64));
-        std::vector<size_t> candidates;
-        size_t deepest = blocks.size(), depth = 0;
-        for (auto position : orderedIndices) {
-            if (!(strict[position / 64] & (uint64_t(1) << (position % 64)))) continue;
-            candidates.push_back(position);
-            auto count = depths[position];
-            if (deepest == blocks.size() || count > depth) { deepest = position; depth = count; }
-        }
-        auto qualifies = [&](size_t candidate) {
-            const auto& dominators = domSets[candidate];
-            for (size_t word = 0; word < words; ++word)
-                if ((dominators[word] & strict[word]) != strict[word]) return false;
-            return true;
-        };
-        if (deepest != blocks.size() && qualifies(deepest)) { iDomMap[block] = blocks[deepest]; continue; }
-        for (auto candidate : candidates)
-            if (qualifies(candidate)) { iDomMap[block] = blocks[candidate]; break; }
+        auto* dominator = index == 0 || parent[index] == missing ? nullptr : blocks[parent[index]];
+        iDomMap[blocks[index]] = dominator;
+        if (dominator) childrenMap[dominator].push_back(blocks[index]);
     }
-
-    // Build the children map from the idom map
-    for (auto const& [bb, idom] : iDomMap) {
-        if (idom != nullptr) {
-            childrenMap[idom].push_back(bb);
-        }
+    size_t clock = 0;
+    std::vector<std::pair<ir::BasicBlock*, size_t>> stack{{blocks[0], 0}};
+    intervals[blocks[0]].first = clock++;
+    while (!stack.empty()) {
+        auto& [block, child] = stack.back();
+        const auto& children = getChildren(block);
+        if (child < children.size()) {
+            auto* next = children[child++]; intervals[next].first = clock++;
+            stack.emplace_back(next, 0);
+        } else { intervals[block].second = clock++; stack.pop_back(); }
     }
 }
 
@@ -139,18 +99,27 @@ const std::vector<ir::BasicBlock*>& DominatorTree::getChildren(ir::BasicBlock* b
 }
 
 bool DominatorTree::dominates(ir::BasicBlock* a, ir::BasicBlock* b) const {
+    if (!a || !b) return false;
     if (a == b) return true;
-    ir::BasicBlock* current = b;
-    while (current != nullptr) {
-        current = getImmediateDominator(current);
-        if (current == a) {
-            return true;
-        }
+    if (!intervals.empty()) {
+        auto ancestor = intervals.find(a), descendant = intervals.find(b);
+        return ancestor != intervals.end() && descendant != intervals.end() &&
+            ancestor->second.first <= descendant->second.first &&
+            descendant->second.second <= ancestor->second.second;
     }
+    // Postdominator clients still use the forest representation. Guard cycles
+    // in disconnected components instead of walking forever.
+    std::set<ir::BasicBlock*> seen;
+    for (auto* current = b; current && seen.insert(current).second;
+         current = getImmediateDominator(current))
+        if (current == a) return true;
     return false;
 }
 
 void DominatorTree::runPostDominator(ir::Function& func) {
+    intervals.clear();
+    iDomMap.clear();
+    childrenMap.clear();
     if (func.getBasicBlocks().empty()) return;
 
     std::vector<ir::BasicBlock*> blocks;

@@ -53,18 +53,21 @@ bool FunctionInliner::canInline(const ir::Function* callee, const ir::Function* 
     if (callee == caller) return false;
     if (callee->getBasicBlocks().empty()) return false;
 
+    // Reject size-ineligible callees before traversing their entire call graph.
+    // This is the same eligibility rule, ordered to avoid repeated graph walks
+    // for large generated functions with many rejected call sites.
+    size_t totalInstrs = 0;
+    for (const auto& bb : callee->getBasicBlocks()) {
+        totalInstrs += bb->getInstructions().size();
+        if (totalInstrs > threshold) return false;
+    }
+
     // Reject self-recursive or cycle-producing functions
     std::set<const ir::Function*> visitedSelf;
     if (calleeCanReach(callee, callee, visitedSelf)) return false;
 
     std::set<const ir::Function*> visitedCaller;
     if (calleeCanReach(callee, caller, visitedCaller)) return false;
-
-    size_t totalInstrs = 0;
-    for (const auto& bb : callee->getBasicBlocks()) {
-        totalInstrs += bb->getInstructions().size();
-    }
-    if (totalInstrs > threshold) return false;
 
     return true;
 }

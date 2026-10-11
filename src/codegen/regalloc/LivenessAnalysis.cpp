@@ -10,7 +10,6 @@
 #include <iostream>
 #include <climits>
 #include <deque>
-#include <bit>
 
 namespace transforms {
 
@@ -137,7 +136,15 @@ void LivenessAnalysis::run(ir::Function& func) {
             for (size_t word = 0; word < live.size(); ++word) {
                 auto members = live[word];
                 while (members) {
-                    auto bit = std::countr_zero(members); members &= members - 1;
+                    // Fyra's standalone build remains C++17. The word is nonzero.
+                    unsigned bit = 0;
+#if defined(__GNUC__) || defined(__clang__)
+                    bit = static_cast<unsigned>(__builtin_ctzll(members));
+#else
+                    auto shifted = members;
+                    while ((shifted & 1) == 0) { ++bit; shifted >>= 1; }
+#endif
+                    members &= members - 1;
                     auto* definition = dynamic_cast<const ir::Instruction*>(indexedValues[word * 64 + bit]);
                     auto range = liveRanges.find(definition);
                     if (range == liveRanges.end()) continue;
@@ -198,12 +205,33 @@ void LivenessAnalysis::computePerInstructionCFGLiveness(ir::Function& func) {
         if (!dynamic_cast<ir::PhiNode*>(instruction))
             for (auto& operand : instruction->getOperands()) include(live, operand->get());
     };
-    std::map<ir::BasicBlock*, LiveBits> incoming, outgoing;
+    std::map<ir::BasicBlock*, LiveBits> incoming, outgoing, generated, killed;
+    for (auto& block : func.getBasicBlocks()) {
+        auto* node = block.get();
+        incoming[node] = LiveBits(words); outgoing[node] = LiveBits(words);
+        auto& gen = generated[node]; gen = LiveBits(words);
+        auto& kill = killed[node]; kill = LiveBits(words);
+        for (auto it = block->getInstructions().rbegin(); it != block->getInstructions().rend(); ++it) {
+            transfer(gen, it->get());
+            if ((*it)->getType() && !(*it)->getType()->isVoidTy()) include(kill, it->get());
+        }
+    }
+    // Backward equations converge quickly in CFG postorder, regardless of the
+    // emitter's block layout. Include disconnected components in the solution.
     std::deque<ir::BasicBlock*> pending;
-    std::set<ir::BasicBlock*> queued;
-    for (auto it = func.getBasicBlocks().rbegin(); it != func.getBasicBlocks().rend(); ++it) {
-        auto* block = it->get(); incoming[block] = LiveBits(words); outgoing[block] = LiveBits(words);
-        pending.push_back(block); queued.insert(block);
+    std::set<ir::BasicBlock*> queued, visited;
+    for (auto& root : func.getBasicBlocks()) {
+        if (!visited.insert(root.get()).second) continue;
+        std::vector<std::pair<ir::BasicBlock*, size_t>> stack{{root.get(), 0}};
+        while (!stack.empty()) {
+            auto& [block, edge] = stack.back();
+            if (edge < block->getSuccessors().size()) {
+                auto* next = block->getSuccessors()[edge++];
+                if (visited.insert(next).second) stack.emplace_back(next, 0);
+            } else {
+                pending.push_back(block); queued.insert(block); stack.pop_back();
+            }
+        }
     }
     while (!pending.empty()) {
         auto* block = pending.front(); pending.pop_front(); queued.erase(block);
@@ -220,7 +248,10 @@ void LivenessAnalysis::computePerInstructionCFGLiveness(ir::Function& func) {
             for (size_t word = 0; word < words; ++word) after[word] |= edge[word];
         }
         outgoing[block] = after;
-        for (auto it = block->getInstructions().rbegin(); it != block->getInstructions().rend(); ++it) transfer(after, it->get());
+        const auto& gen = generated.at(block);
+        const auto& kill = killed.at(block);
+        for (size_t word = 0; word < words; ++word)
+            after[word] = (after[word] & ~kill[word]) | gen[word];
         if (after != incoming[block]) {
             incoming[block] = std::move(after);
             for (auto* predecessor : block->getPredecessors())

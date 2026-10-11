@@ -112,6 +112,35 @@ static void check_liveness_reference(ir::Function& function) {
 }
 
 int main() {
+    {
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("unreachable_dominance", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("main", context->getIntegerType(64));
+        auto* entry = builder.createBasicBlock("entry", function);
+        auto* joined = builder.createBasicBlock("joined", function);
+        auto* deadA = builder.createBasicBlock("dead_a", function);
+        auto* deadB = builder.createBasicBlock("dead_b", function);
+        builder.setInsertPoint(entry); builder.createJmp(joined);
+        builder.setInsertPoint(joined); builder.createRet(context->getConstantInt(context->getIntegerType(64), 7));
+        builder.setInsertPoint(deadA); builder.createJmp(deadB);
+        builder.setInsertPoint(deadB); builder.createJnz(context->getConstantInt(context->getIntegerType(64), 1), deadA, joined);
+        transforms::CFGBuilder::run(*function);
+        transforms::DominatorTree tree; tree.run(*function);
+        assert(tree.getImmediateDominator(joined) == entry);
+        assert(tree.getImmediateDominator(deadA) == nullptr);
+        assert(tree.getImmediateDominator(deadB) == nullptr);
+        assert(tree.dominates(entry, joined));
+        assert(!tree.dominates(entry, deadA)); // Used to loop forever.
+        assert(!tree.dominates(deadA, joined));
+        assert(!tree.dominates(deadA, deadB));
+        assert(tree.dominates(deadA, deadA));
+        assert(!tree.dominates(nullptr, nullptr));
+        tree.run(*function); // Reuse cannot retain stale tree intervals.
+        assert(tree.dominates(entry, joined));
+        std::cout << "--- Unreachable Dominance Cycle Regression Passed ---\n";
+    }
+
     std::string test_file = "tests/simple.fyra";
     std::ifstream input(test_file);
     if (!input.good()) input.open("../" + test_file);
@@ -2335,7 +2364,7 @@ function $test_phi_swap_cycle(%a_init : i32, %b_init : i32, %n : i32) : i32 {
         auto* seed = function->getBasicBlocks().front()->getInstructions().front().get();
         assert(analysis.isLiveAfter(seed, seed));
         for (auto& block : function->getBasicBlocks()) {
-            if (block->getName().starts_with("chain"))
+            if (block->getName().compare(0, 5, "chain") == 0)
                 assert(analysis.isLiveBefore(block->getInstructions().front().get(), seed));
         }
         std::cout << "--- Reverse-Layout Liveness Worklist Tests Passed ---" << std::endl;

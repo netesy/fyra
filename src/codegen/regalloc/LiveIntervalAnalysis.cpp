@@ -75,6 +75,16 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
         }
     }
 
+    // Accumulate operand weights once. Scanning every operand separately for
+    // every live value made register allocation quadratic in generated IR size.
+    std::map<const ir::Value*, double> useWeights;
+    for (auto& bb : func.getBasicBlocks()) {
+        const double weight = std::pow(10.0, loopDepthMap[bb.get()]);
+        for (auto& instruction : bb->getInstructions())
+            for (auto& operand : instruction->getOperands())
+                if (operand && operand->get()) useWeights[operand->get()] += weight;
+    }
+
     // 3. Create LiveInterval objects with loop-depth sensitive spill weights
     for (const auto& pair : liveRanges) {
         const ir::Instruction* vreg = pair.first;
@@ -92,16 +102,7 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
         if (defBB && loopDepthMap.count(defBB)) {
             useWeight += std::pow(10.0, loopDepthMap[defBB]);
         }
-        for (auto& bb : func.getBasicBlocks()) {
-            for (auto& inst : bb->getInstructions()) {
-                for (auto& op : inst->getOperands()) {
-                    if (op && op->get() == vreg) {
-                        int depth = loopDepthMap.count(bb.get()) ? loopDepthMap[bb.get()] : 0;
-                        useWeight += std::pow(10.0, depth);
-                    }
-                }
-            }
-        }
+        useWeight += useWeights[vreg];
         double len = std::max(1.0, static_cast<double>(range.end - range.start + 1));
         double spillWeight = useWeight / len;
 

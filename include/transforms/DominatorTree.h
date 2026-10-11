@@ -19,6 +19,8 @@ public:
 private:
     std::map<ir::BasicBlock*, ir::BasicBlock*> iDomMap; // Immediate dominator map
     std::map<ir::BasicBlock*, std::vector<ir::BasicBlock*>> childrenMap;
+    // Forward-tree DFS intervals. Unreachable blocks have no tree membership.
+    std::map<ir::BasicBlock*, std::pair<size_t, size_t>> intervals;
 };
 
 } // namespace transforms
