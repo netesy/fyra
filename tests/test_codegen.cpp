@@ -4,6 +4,7 @@
 #include "ir/PhiNode.h"
 #include "ir/Use.h"
 #include "transforms/CFGBuilder.h"
+#include "transforms/DominatorTree.h"
 #include "codegen/CodeGen.h"
 #include "codegen/regalloc/LivenessAnalysis.h"
 #include "codegen/regalloc/LiveIntervalAnalysis.h"
@@ -30,6 +31,51 @@
 #define WIFEXITED(s) true
 #endif
 #endif
+
+// Independent set-based oracle for the dense liveness representation.
+static void check_liveness_reference(ir::Function& function) {
+    using Values = std::set<const ir::Value*>;
+    std::map<const ir::Instruction*, Values> before, after;
+    Values values;
+    for (auto& parameter : function.getParameters()) values.insert(parameter.get());
+    for (auto& block : function.getBasicBlocks()) for (auto& instruction : block->getInstructions()) values.insert(instruction.get());
+    transforms::CFGBuilder::run(function);
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (auto block = function.getBasicBlocks().rbegin(); block != function.getBasicBlocks().rend(); ++block) {
+            auto& instructions = (*block)->getInstructions();
+            if (instructions.empty()) continue;
+            Values live;
+            for (auto* successor : (*block)->getSuccessors()) {
+                if (successor->getInstructions().empty()) continue;
+                auto edge = before[successor->getInstructions().front().get()];
+                for (auto& instruction : successor->getInstructions()) {
+                    auto* phi = dynamic_cast<ir::PhiNode*>(instruction.get());
+                    if (!phi) break;
+                    edge.erase(phi);
+                    auto* incoming = phi->getIncomingValueForBlock(block->get());
+                    if (values.count(incoming)) edge.insert(incoming);
+                }
+                live.insert(edge.begin(), edge.end());
+            }
+            for (auto instruction = instructions.rbegin(); instruction != instructions.rend(); ++instruction) {
+                auto* current = instruction->get();
+                if (after[current] != live) { after[current] = live; changed = true; }
+                if (current->getType() && !current->getType()->isVoidTy()) live.erase(current);
+                if (!dynamic_cast<ir::PhiNode*>(current))
+                    for (auto& operand : current->getOperands()) if (values.count(operand->get())) live.insert(operand->get());
+                if (before[current] != live) { before[current] = live; changed = true; }
+            }
+        }
+    }
+    transforms::LivenessAnalysis analysis; analysis.run(function);
+    for (auto& block : function.getBasicBlocks()) for (auto& instruction : block->getInstructions())
+        for (auto* value : values) {
+            assert(analysis.isLiveBefore(instruction.get(), value) == before[instruction.get()].count(value));
+            assert(analysis.isLiveAfter(instruction.get(), value) == after[instruction.get()].count(value));
+        }
+}
 
 int main() {
     std::string test_file = "tests/simple.fyra";
@@ -306,6 +352,47 @@ function $test_dot_overflow(%n : i32) : i64 {
     assert(dot_asm.find("cltq") != std::string::npos || dot_asm.find("mov") != std::string::npos);
     // Verify %edi is compared against loop counter and not overwritten by local variables
     assert(dot_asm.find("cmpl %edi,") != std::string::npos);
+
+    // A late-layout branch must not reuse the home of a value live into
+    // an earlier-layout join (scheduler dispatch has this CFG shape).
+    {
+        std::istringstream input(R"(
+function $late_branch(%condition : i32) : i32 {
+@entry
+    %slot = alloc i64 8 : i64
+    store i64 0, %slot
+    jnz %condition, @late, @join
+@join
+    store i64 7, %slot
+    ret i32 0 : i32
+@late
+    %scratch = add i64 1, i64 2 : i64
+    jmp @join
+}
+)");
+        parser::Parser parsed(input, parser::FileFormat::FYRA);
+        auto module = parsed.parseModule();
+        assert(module);
+        auto* function = module->getFunction("late_branch");
+        assert(function);
+        transforms::LivenessAnalysis liveness;
+        liveness.run(*function);
+        const ir::Instruction* slot = nullptr;
+        const ir::Instruction* scratch = nullptr;
+        int index = 0, scratch_index = -1;
+        for (auto& block : function->getBasicBlocks())
+            for (auto& instruction : block->getInstructions()) {
+                if (instruction->getName() == "slot") slot = instruction.get();
+                if (instruction->getName() == "scratch") {
+                    scratch = instruction.get(); scratch_index = index;
+                }
+                ++index;
+            }
+        assert(slot && scratch);
+        assert(liveness.isLiveBefore(scratch, slot));
+        assert(liveness.isLiveAfter(scratch, slot));
+        assert(liveness.getLiveRanges().at(slot).end >= scratch_index);
+    }
 
     // Focused tests for CFG-aware per-instruction liveness analysis using parsed IR
     {
@@ -759,6 +846,7 @@ function $test_liveness_precision(%n : i32, %inv : i32) : i32 {
         Function* f = l_module->getFunction("test_liveness_precision");
         assert(f != nullptr);
 
+        check_liveness_reference(*f);
         transforms::CFGBuilder::run(*f);
         transforms::LivenessAnalysis liveness;
         liveness.run(*f);
@@ -2178,6 +2266,45 @@ function $test_phi_swap_cycle(%a_init : i32, %b_init : i32, %n : i32) : i32 {
         assert(phiA->getPhysicalRegister() != phiB->getPhysicalRegister() && "Interfering parallel PHI swap registers must be distinct!");
 
         std::cout << "--- PHI Backedge Register Affinity Unit Tests Passed ---" << std::endl;
+    }
+
+    // Physical layout runs opposite to execution order, as can happen when
+    // worker-failure continuations are appended after their originating blocks.
+    {
+        std::ostringstream text;
+        constexpr int length = 1000;
+        text << "function $reverse_chain(%input : i64) : i64 {\n@entry\n"
+             << "%seed = add %input, 1 : i64\njmp @chain" << length << "\n";
+        for (int index = 1; index <= length; ++index) {
+            text << "@chain" << index << "\njmp @";
+            if (index == 1) text << "exit\n";
+            else text << "chain" << index - 1 << "\n";
+        }
+        text << "@exit\nret %seed : i64\n}\n";
+        std::istringstream input(text.str());
+        parser::Parser parser(input, parser::FileFormat::FYRA);
+        auto module = parser.parseModule();
+        assert(module);
+        auto* function = module->getFunction("reverse_chain");
+        transforms::CFGBuilder::run(*function);
+        transforms::DominatorTree dominators;
+        dominators.run(*function);
+        auto* entry = function->getBasicBlocks().front().get();
+        std::map<std::string, ir::BasicBlock*> blocks;
+        for (auto& block : function->getBasicBlocks()) blocks[block->getName()] = block.get();
+        assert(dominators.getImmediateDominator(blocks.at("chain1000")) == entry);
+        for (int index = 1; index < length; ++index)
+            assert(dominators.getImmediateDominator(blocks.at("chain" + std::to_string(index))) == blocks.at("chain" + std::to_string(index + 1)));
+        assert(dominators.getImmediateDominator(blocks.at("exit")) == blocks.at("chain1"));
+        transforms::LivenessAnalysis analysis;
+        analysis.run(*function);
+        auto* seed = function->getBasicBlocks().front()->getInstructions().front().get();
+        assert(analysis.isLiveAfter(seed, seed));
+        for (auto& block : function->getBasicBlocks()) {
+            if (block->getName().starts_with("chain"))
+                assert(analysis.isLiveBefore(block->getInstructions().front().get(), seed));
+        }
+        std::cout << "--- Reverse-Layout Liveness Worklist Tests Passed ---" << std::endl;
     }
 
     return 0;

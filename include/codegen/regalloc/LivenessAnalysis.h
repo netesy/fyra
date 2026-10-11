@@ -4,6 +4,8 @@
 #include "ir/Instruction.h"
 #include <map>
 #include <set>
+#include <vector>
+#include <cstdint>
 
 namespace transforms {
 
@@ -33,19 +35,17 @@ public:
     bool isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const;
 
 private:
-    void computeLiveSets(ir::Function& func);
     void computePerInstructionCFGLiveness(ir::Function& func);
 
     // Map from a virtual register (defined by an instruction) to its live range.
     std::map<const ir::Instruction*, LiveRange> liveRanges;
 
-    // Live-in and live-out sets for each basic block.
-    std::map<ir::BasicBlock*, std::set<ir::Instruction*>> liveIn;
-    std::map<ir::BasicBlock*, std::set<ir::Instruction*>> liveOut;
-
-    // CFG-aware per-instruction liveAfter sets
-    std::map<const ir::Instruction*, std::set<const ir::Value*>> liveAfterMap;
-    std::map<const ir::Instruction*, std::set<const ir::Value*>> liveBeforeMap;
+    // Exact CFG sets use dense indices instead of one allocation per member.
+    using LiveBits = std::vector<uint64_t>;
+    std::map<const ir::Value*, size_t> valueIndices;
+    std::vector<const ir::Value*> indexedValues;
+    std::map<const ir::Instruction*, LiveBits> liveAfterMap;
+    std::map<const ir::Instruction*, LiveBits> liveBeforeMap;
 };
 
 } // namespace transforms

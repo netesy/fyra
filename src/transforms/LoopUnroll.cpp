@@ -53,6 +53,35 @@ bool LoopUnroll::performTransformation(ir::Function& func) {
     return changed;
 }
 
+// Accept one linear iteration path, including an explicit empty latch.
+// The header owns the only conditional exit; merging an interior branch
+// into an unrolled body would silently change control flow.
+static std::vector<ir::BasicBlock*> iterationPath(const Loop& loop) {
+    std::vector<ir::BasicBlock*> path;
+    std::set<ir::BasicBlock*> seen;
+    auto* block = loop.header;
+    while (block && seen.insert(block).second) {
+        path.push_back(block);
+        ir::BasicBlock* next = nullptr;
+        for (auto* successor : block->getSuccessors()) {
+            if (!loop.blocks.count(successor)) {
+                if (block != loop.header) return {};
+                continue;
+            }
+            if (next && next != successor) return {};
+            next = successor;
+        }
+        if (!next) return {};
+        if (block != loop.header) {
+            for (auto& inst : block->getInstructions()) if (dynamic_cast<ir::PhiNode*>(inst.get())) return {};
+            if (block->getInstructions().back()->getOpcode() != ir::Instruction::Jmp) return {};
+        }
+        if (next == loop.header) return path.size() == loop.blocks.size() ? path : std::vector<ir::BasicBlock*>{};
+        block = next;
+    }
+    return {};
+}
+
 bool LoopUnroll::analyzeLoopLegality(Loop& loop, ir::Function& func, IndVarInfo& ivInfo) {
     if (!loop.header) return false;
 
@@ -66,8 +95,8 @@ bool LoopUnroll::analyzeLoopLegality(Loop& loop, ir::Function& func, IndVarInfo&
     // Single exit requirement
     if (loop.exits.size() != 1) return false;
 
-    // Conservative contract: single natural loop body (at most 2 blocks: header and latch)
-    if (loop.blocks.size() > 2) return false;
+    // Conservative contract: single natural loop body (one linear iteration path: header and latch)
+    if (iterationPath(loop).empty()) return false;
 
     // Check for nested child loops
     if (!loop.children.empty()) return false;
@@ -447,7 +476,7 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
 
         ValueCloner cloner(curMap);
 
-        for (ir::BasicBlock* bb : std::vector<ir::BasicBlock*>{header, latch}) {
+        for (ir::BasicBlock* bb : iterationPath(loop)) {
             if (!bb) continue;
             for (auto& instPtr : bb->getInstructions()) {
                 ir::Instruction* inst = instPtr.get();
@@ -460,7 +489,7 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
                 curMap[inst] = cloned.get();
                 curBB->addInstruction(std::move(cloned));
             }
-            if (header == latch) break;
+
         }
 
         ir::BasicBlock* nextBB = (k + 1 < UF) ? bodyPtrs[k + 1] : uHeaderPtr;
@@ -546,7 +575,7 @@ bool LoopUnroll::unrollLoop(Loop& loop, ir::Function& func, const IndVarInfo& iv
     }
     ValueCloner clonerEpi(mapEpi);
 
-    for (ir::BasicBlock* bb : std::vector<ir::BasicBlock*>{header, latch}) {
+    for (ir::BasicBlock* bb : iterationPath(loop)) {
         if (!bb) continue;
         for (auto& instPtr : bb->getInstructions()) {
             ir::Instruction* inst = instPtr.get();

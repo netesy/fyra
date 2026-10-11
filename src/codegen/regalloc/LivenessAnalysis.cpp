@@ -9,12 +9,14 @@
 #include <algorithm>
 #include <iostream>
 #include <climits>
+#include <deque>
+#include <bit>
 
 namespace transforms {
 
 void LivenessAnalysis::run(ir::Function& func) {
+    liveRanges.clear();
     CFGBuilder::run(func);
-    computeLiveSets(func);
 
     // Assign instruction numbers
     std::map<const ir::Instruction*, int> instrNumbering;
@@ -62,8 +64,22 @@ void LivenessAnalysis::run(ir::Function& func) {
 
     // Extend live ranges across loop latches for non-Phi loop-invariant variables defined outside the loop
     std::vector<std::unique_ptr<Loop>> loops;
-    LoopInvariantCodeMotion licm;
-    licm.findLoops(func, loops);
+    // Acyclic functions have no latch intervals to extend. Avoid constructing
+    // full dominator sets for long chains of checked-call continuations.
+    std::map<ir::BasicBlock*, size_t> remaining;
+    std::deque<ir::BasicBlock*> ready;
+    for (auto& block : func.getBasicBlocks()) remaining[block.get()] = block->getPredecessors().size();
+    for (auto& [block, incoming] : remaining) if (!incoming) ready.push_back(block);
+    size_t visited = 0;
+    while (!ready.empty()) {
+        auto* block = ready.front(); ready.pop_front(); ++visited;
+        for (auto* successor : block->getSuccessors())
+            if (--remaining.at(successor) == 0) ready.push_back(successor);
+    }
+    if (visited != func.getBasicBlocks().size()) {
+        LoopInvariantCodeMotion licm;
+        licm.findLoops(func, loops);
+    }
 
     for (const auto& loopPtr : loops) {
         if (!loopPtr) continue;
@@ -111,20 +127,44 @@ void LivenessAnalysis::run(ir::Function& func) {
 
     // Compute CFG-aware per-instruction liveness
     computePerInstructionCFGLiveness(func);
+
+    // Block layout is not execution order. A value can remain live through
+    // a late-emitted branch even when its last explicit use occurs earlier
+    // in the layout. Include the CFG solution in the bounding interval, so
+    // spill-slot reuse cannot overwrite values needed after that branch.
+    for (const auto& [instruction, number] : instrNumbering) {
+        auto extend = [&](const LiveBits& live) {
+            for (size_t word = 0; word < live.size(); ++word) {
+                auto members = live[word];
+                while (members) {
+                    auto bit = std::countr_zero(members); members &= members - 1;
+                    auto* definition = dynamic_cast<const ir::Instruction*>(indexedValues[word * 64 + bit]);
+                    auto range = liveRanges.find(definition);
+                    if (range == liveRanges.end()) continue;
+                    range->second.start = std::min(range->second.start, number);
+                    range->second.end = std::max(range->second.end, number);
+                }
+            }
+        };
+        extend(liveBeforeMap[instruction]);
+        extend(liveAfterMap[instruction]);
+    }
 }
 
 bool LivenessAnalysis::isLiveAfter(const ir::Instruction* instruction, const ir::Value* value) const {
     if (!instruction || !value) return false;
     auto it = liveAfterMap.find(instruction);
     if (it == liveAfterMap.end()) return false;
-    return it->second.count(value) > 0;
+    auto index = valueIndices.find(value);
+    return index != valueIndices.end() && (it->second[index->second / 64] & (uint64_t(1) << (index->second % 64)));
 }
 
 bool LivenessAnalysis::isLiveBefore(const ir::Instruction* instruction, const ir::Value* value) const {
     if (!instruction || !value) return false;
     auto it = liveBeforeMap.find(instruction);
     if (it == liveBeforeMap.end()) return false;
-    return it->second.count(value) > 0;
+    auto index = valueIndices.find(value);
+    return index != valueIndices.end() && (it->second[index->second / 64] & (uint64_t(1) << (index->second % 64)));
 }
 
 bool LivenessAnalysis::isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const {
@@ -135,140 +175,64 @@ bool LivenessAnalysis::isLastUseOfOperand(const ir::Instruction* user, const ir:
 }
 
 void LivenessAnalysis::computePerInstructionCFGLiveness(ir::Function& func) {
-    liveAfterMap.clear();
-    liveBeforeMap.clear();
-
-    bool changed = true;
-    while (changed) {
-        changed = false;
-
-        for (auto bb_it = func.getBasicBlocks().rbegin(); bb_it != func.getBasicBlocks().rend(); ++bb_it) {
-            ir::BasicBlock* bb = bb_it->get();
-            auto& instrs = bb->getInstructions();
-            if (instrs.empty()) continue;
-
-            // Compute liveAfter for the last instruction in the basic block
-            ir::Instruction* last_instr = instrs.back().get();
-            std::set<const ir::Value*> new_live_after_last;
-
-            for (ir::BasicBlock* succ : bb->getSuccessors()) {
-                if (succ->getInstructions().empty()) continue;
-                ir::Instruction* succ_first = succ->getInstructions().front().get();
-
-                // Start with liveBefore of the first instruction in the successor
-                std::set<const ir::Value*> succ_live_in = liveBeforeMap[succ_first];
-
-                // Remove Phi definitions in succ (they are defined in succ, not live across edge from pred)
-                for (auto& succ_inst : succ->getInstructions()) {
-                    if (auto* phi = dynamic_cast<const ir::PhiNode*>(succ_inst.get())) {
-                        succ_live_in.erase(phi);
-                        // Add the incoming value for edge bb -> succ
-                        ir::Value* incoming = const_cast<ir::PhiNode*>(phi)->getIncomingValueForBlock(bb);
-                        if (incoming && (dynamic_cast<const ir::Instruction*>(incoming) || dynamic_cast<const ir::Parameter*>(incoming))) {
-                            succ_live_in.insert(incoming);
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                new_live_after_last.insert(succ_live_in.begin(), succ_live_in.end());
+    liveAfterMap.clear(); liveBeforeMap.clear(); valueIndices.clear(); indexedValues.clear();
+    auto index = [&](const ir::Value* value) {
+        if (!value || !(dynamic_cast<const ir::Instruction*>(value) || dynamic_cast<const ir::Parameter*>(value))) return;
+        if (valueIndices.emplace(value, indexedValues.size()).second) indexedValues.push_back(value);
+    };
+    for (auto& parameter : func.getParameters()) index(parameter.get());
+    for (auto& block : func.getBasicBlocks()) for (auto& instruction : block->getInstructions()) {
+        index(instruction.get()); for (auto& operand : instruction->getOperands()) index(operand->get());
+    }
+    const size_t words = (indexedValues.size() + 63) / 64;
+    auto include = [&](LiveBits& bits, const ir::Value* value) {
+        auto found = valueIndices.find(value);
+        if (found != valueIndices.end()) bits[found->second / 64] |= uint64_t(1) << (found->second % 64);
+    };
+    auto exclude = [&](LiveBits& bits, const ir::Value* value) {
+        auto found = valueIndices.find(value);
+        if (found != valueIndices.end()) bits[found->second / 64] &= ~(uint64_t(1) << (found->second % 64));
+    };
+    auto transfer = [&](LiveBits& live, ir::Instruction* instruction) {
+        if (instruction->getType() && !instruction->getType()->isVoidTy()) exclude(live, instruction);
+        if (!dynamic_cast<ir::PhiNode*>(instruction))
+            for (auto& operand : instruction->getOperands()) include(live, operand->get());
+    };
+    std::map<ir::BasicBlock*, LiveBits> incoming, outgoing;
+    std::deque<ir::BasicBlock*> pending;
+    std::set<ir::BasicBlock*> queued;
+    for (auto it = func.getBasicBlocks().rbegin(); it != func.getBasicBlocks().rend(); ++it) {
+        auto* block = it->get(); incoming[block] = LiveBits(words); outgoing[block] = LiveBits(words);
+        pending.push_back(block); queued.insert(block);
+    }
+    while (!pending.empty()) {
+        auto* block = pending.front(); pending.pop_front(); queued.erase(block);
+        if (block->getInstructions().empty()) continue;
+        LiveBits after(words);
+        for (auto* successor : block->getSuccessors()) {
+            if (successor->getInstructions().empty()) continue;
+            auto edge = incoming.at(successor);
+            for (auto& instruction : successor->getInstructions()) {
+                auto* phi = dynamic_cast<ir::PhiNode*>(instruction.get());
+                if (!phi) break;
+                exclude(edge, phi); include(edge, phi->getIncomingValueForBlock(block));
             }
-
-            if (liveAfterMap[last_instr] != new_live_after_last) {
-                liveAfterMap[last_instr] = new_live_after_last;
-                changed = true;
-            }
-
-            // Propagate backward through instructions inside the basic block
-            for (auto inst_it = instrs.rbegin(); inst_it != instrs.rend(); ++inst_it) {
-                ir::Instruction* curr = inst_it->get();
-
-                if (inst_it != instrs.rbegin()) {
-                    ir::Instruction* next_instr = std::prev(inst_it)->get();
-                    if (liveAfterMap[curr] != liveBeforeMap[next_instr]) {
-                        liveAfterMap[curr] = liveBeforeMap[next_instr];
-                        changed = true;
-                    }
-                }
-
-                // Compute liveBefore(curr) = use(curr) U (liveAfter(curr) - def(curr))
-                std::set<const ir::Value*> new_live_before = liveAfterMap[curr];
-
-                // Remove def(curr) if non-void
-                if (curr->getType() && !curr->getType()->isVoidTy()) {
-                    new_live_before.erase(curr);
-                }
-
-                // Add uses of curr (non-Phi instructions only; Phi incoming uses are handled on pred -> succ edges)
-                if (!dynamic_cast<const ir::PhiNode*>(curr)) {
-                    for (auto& op_use : curr->getOperands()) {
-                        if (auto* val = op_use->get()) {
-                            if (dynamic_cast<const ir::Instruction*>(val) || dynamic_cast<const ir::Parameter*>(val)) {
-                                new_live_before.insert(val);
-                            }
-                        }
-                    }
-                }
-
-                if (liveBeforeMap[curr] != new_live_before) {
-                    liveBeforeMap[curr] = new_live_before;
-                    changed = true;
-                }
-            }
+            for (size_t word = 0; word < words; ++word) after[word] |= edge[word];
+        }
+        outgoing[block] = after;
+        for (auto it = block->getInstructions().rbegin(); it != block->getInstructions().rend(); ++it) transfer(after, it->get());
+        if (after != incoming[block]) {
+            incoming[block] = std::move(after);
+            for (auto* predecessor : block->getPredecessors())
+                if (queued.insert(predecessor).second) pending.push_back(predecessor);
         }
     }
-}
-
-void LivenessAnalysis::computeLiveSets(ir::Function& func) {
-    std::map<ir::BasicBlock*, std::set<ir::Instruction*>> use;
-    std::map<ir::BasicBlock*, std::set<ir::Instruction*>> def;
-
-    // Compute Use and Def sets for all blocks
-    for (auto& bb_ptr : func.getBasicBlocks()) {
-        ir::BasicBlock* bb = bb_ptr.get();
-        for (auto& instr_ptr : bb->getInstructions()) {
-            // Defs
-            if (instr_ptr->getType()->getTypeID() != ir::Type::VoidTyID) {
-                def[bb].insert(instr_ptr.get());
-            }
-            // Uses
-            for (auto& operand : instr_ptr->getOperands()) {
-                if (auto* op_instr = dynamic_cast<ir::Instruction*>(operand->get())) {
-                    use[bb].insert(op_instr);
-                }
-            }
-        }
-    }
-
-    // Iteratively compute live-in and live-out
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (auto it = func.getBasicBlocks().rbegin(); it != func.getBasicBlocks().rend(); ++it) {
-            ir::BasicBlock* bb = it->get();
-
-            std::set<ir::Instruction*> new_live_out;
-            for (ir::BasicBlock* succ : bb->getSuccessors()) {
-                new_live_out.insert(liveIn[succ].begin(), liveIn[succ].end());
-            }
-
-            if (new_live_out != liveOut[bb]) {
-                liveOut[bb] = new_live_out;
-                changed = true;
-            }
-
-            std::set<ir::Instruction*> new_live_in = use[bb];
-            std::set<ir::Instruction*> temp_out = liveOut[bb];
-            for (ir::Instruction* d : def[bb]) {
-                temp_out.erase(d);
-            }
-            new_live_in.insert(temp_out.begin(), temp_out.end());
-
-            if (new_live_in != liveIn[bb]) {
-                liveIn[bb] = new_live_in;
-                changed = true;
-            }
+    // Materialize each per-instruction set once, after the block fixed point.
+    for (auto& block : func.getBasicBlocks()) {
+        auto live = outgoing.at(block.get());
+        for (auto it = block->getInstructions().rbegin(); it != block->getInstructions().rend(); ++it) {
+            auto* instruction = it->get(); liveAfterMap[instruction] = live;
+            transfer(live, instruction); liveBeforeMap[instruction] = live;
         }
     }
 }

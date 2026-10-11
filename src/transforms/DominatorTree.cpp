@@ -4,6 +4,8 @@
 #include <unordered_set>
 #include <algorithm>
 #include <iterator>
+#include <bit>
+#include <cstdint>
 
 namespace transforms {
 
@@ -25,74 +27,60 @@ void DominatorTree::run(ir::Function& func) {
 
     ir::BasicBlock* entry = func.getBasicBlocks().front().get();
 
-    std::map<ir::BasicBlock*, std::set<ir::BasicBlock*>> domSets;
-
-    // Initialize dom sets
-    std::set<ir::BasicBlock*> allBlocks(blocks.begin(), blocks.end());
-    for (ir::BasicBlock* bb : blocks) {
-        if (bb == entry) {
-            domSets[bb] = {entry};
-        } else {
-            domSets[bb] = allBlocks;
-        }
-    }
-
-    // Iteratively compute dominators
+    // The original intersection equations, stored densely. Checked-call
+    // continuations can produce hundreds of blocks; tree nodes for every
+    // member of every dominator set made sanitizer builds allocation-heavy.
+    using Bits = std::vector<uint64_t>;
+    const size_t words = (blocks.size() + 63) / 64;
+    Bits all(words, ~uint64_t(0));
+    if (blocks.size() % 64) all.back() = (uint64_t(1) << (blocks.size() % 64)) - 1;
+    std::vector<Bits> domSets(blocks.size(), all);
+    domSets[0].assign(words, 0); domSets[0][0] = 1;
     bool changed = true;
     while (changed) {
         changed = false;
-        for (ir::BasicBlock* bb : blocks) {
-            if (bb == entry) continue;
-
-            std::set<ir::BasicBlock*> newDomSet;
-            if (!bb->getPredecessors().empty()) {
-                // Intersect dominators of all predecessors
-                newDomSet = domSets[bb->getPredecessors()[0]];
-                for (size_t i = 1; i < bb->getPredecessors().size(); ++i) {
-                    std::set<ir::BasicBlock*> temp;
-                    std::set_intersection(newDomSet.begin(), newDomSet.end(),
-                                          domSets[bb->getPredecessors()[i]].begin(), domSets[bb->getPredecessors()[i]].end(),
-                                          std::inserter(temp, temp.begin()));
-                    newDomSet = temp;
+        for (size_t index = 1; index < blocks.size(); ++index) {
+            auto* block = blocks[index];
+            Bits next(words, 0);
+            const auto& predecessors = block->getPredecessors();
+            if (!predecessors.empty()) {
+                next = domSets[blockToIndex.at(predecessors[0])];
+                for (size_t predecessor = 1; predecessor < predecessors.size(); ++predecessor) {
+                    const auto& incoming = domSets[blockToIndex.at(predecessors[predecessor])];
+                    for (size_t word = 0; word < words; ++word) next[word] &= incoming[word];
                 }
             }
-
-            // Add self to the set
-            newDomSet.insert(bb);
-
-            if (newDomSet != domSets[bb]) {
-                domSets[bb] = newDomSet;
-                changed = true;
-            }
+            next[index / 64] |= uint64_t(1) << (index % 64);
+            if (next != domSets[index]) { domSets[index] = std::move(next); changed = true; }
         }
     }
-
-    // Now, compute the immediate dominators from the dom sets
-    for (ir::BasicBlock* bb : blocks) {
-        if (bb == entry) {
-            iDomMap[bb] = nullptr; // Entry has no immediate dominator
-            continue;
+    auto cardinality = [](const Bits& bits) {
+        size_t count = 0; for (auto word : bits) count += std::popcount(word); return count;
+    };
+    // Keep the previous pointer ordering for ambiguous unreachable components.
+    std::set<ir::BasicBlock*> ordered(blocks.begin(), blocks.end());
+    for (size_t index = 0; index < blocks.size(); ++index) {
+        auto* block = blocks[index];
+        if (block == entry) { iDomMap[block] = nullptr; continue; }
+        auto strict = domSets[index]; strict[index / 64] &= ~(uint64_t(1) << (index % 64));
+        std::vector<ir::BasicBlock*> candidates;
+        ir::BasicBlock* deepest = nullptr; size_t depth = 0;
+        for (auto* candidate : ordered) {
+            auto position = blockToIndex.at(candidate);
+            if (!(strict[position / 64] & (uint64_t(1) << (position % 64)))) continue;
+            candidates.push_back(candidate);
+            auto count = cardinality(domSets[position]);
+            if (!deepest || count > depth) { deepest = candidate; depth = count; }
         }
-        // sdom(n) = {d in dom(n) | d != n}
-        std::set<ir::BasicBlock*> sdom = domSets[bb];
-        sdom.erase(bb);
-
-        for (ir::BasicBlock* d1 : sdom) {
-            bool is_idom = true;
-            for (ir::BasicBlock* d2 : sdom) {
-                if (d1 != d2) {
-                    // Immediate dominator d1 must be dominated by every other strict dominator d2
-                    if (!domSets[d1].count(d2)) {
-                        is_idom = false;
-                        break;
-                    }
-                }
-            }
-            if (is_idom) {
-                iDomMap[bb] = d1;
-                break;
-            }
-        }
+        auto qualifies = [&](ir::BasicBlock* candidate) {
+            const auto& dominators = domSets[blockToIndex.at(candidate)];
+            for (size_t word = 0; word < words; ++word)
+                if ((dominators[word] & strict[word]) != strict[word]) return false;
+            return true;
+        };
+        if (deepest && qualifies(deepest)) { iDomMap[block] = deepest; continue; }
+        for (auto* candidate : candidates)
+            if (qualifies(candidate)) { iDomMap[block] = candidate; break; }
     }
 
     // Build the children map from the idom map
