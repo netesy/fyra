@@ -69,6 +69,40 @@ static void check_liveness_reference(ir::Function& function) {
             }
         }
     }
+    // Independently check dominance against the original set equations on
+    // this reachable branch/loop/Phi fixture. Solver traversal order must not
+    // change the semantic relation used by optimization and register allocation.
+    using Blocks = std::set<ir::BasicBlock*>;
+    Blocks allBlocks;
+    for (auto& block : function.getBasicBlocks()) allBlocks.insert(block.get());
+    auto* entry = function.getBasicBlocks().front().get();
+    std::map<ir::BasicBlock*, Blocks> dominators;
+    for (auto* block : allBlocks) dominators[block] = block == entry ? Blocks{entry} : allBlocks;
+    bool dominanceChanged = true;
+    while (dominanceChanged) {
+        dominanceChanged = false;
+        for (auto& block : function.getBasicBlocks()) {
+            auto* current = block.get();
+            if (current == entry) continue;
+            Blocks next;
+            const auto& predecessors = current->getPredecessors();
+            if (!predecessors.empty()) {
+                next = dominators[predecessors[0]];
+                for (size_t index = 1; index < predecessors.size(); ++index) {
+                    Blocks intersection;
+                    std::set_intersection(next.begin(), next.end(),
+                        dominators[predecessors[index]].begin(), dominators[predecessors[index]].end(),
+                        std::inserter(intersection, intersection.begin()));
+                    next = std::move(intersection);
+                }
+            }
+            next.insert(current);
+            if (next != dominators[current]) { dominators[current] = std::move(next); dominanceChanged = true; }
+        }
+    }
+    transforms::DominatorTree dominance; dominance.run(function);
+    for (auto* block : allBlocks) for (auto* candidate : allBlocks)
+        assert(dominance.dominates(candidate, block) == dominators[block].count(candidate));
     transforms::LivenessAnalysis analysis; analysis.run(function);
     for (auto& block : function.getBasicBlocks()) for (auto& instruction : block->getInstructions())
         for (auto* value : values) {

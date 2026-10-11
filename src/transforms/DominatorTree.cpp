@@ -36,10 +36,38 @@ void DominatorTree::run(ir::Function& func) {
     if (blocks.size() % 64) all.back() = (uint64_t(1) << (blocks.size() % 64)) - 1;
     std::vector<Bits> domSets(blocks.size(), all);
     domSets[0].assign(words, 0); domSets[0][0] = 1;
+    // Solve in reverse postorder instead of physical layout order. Checked
+    // continuations and reverse-layout joins otherwise need one full sweep
+    // per edge. Include disconnected components: their existing equations and
+    // initial sets must also reach the same fixed point.
+    std::vector<size_t> solveOrder;
+    std::vector<bool> visited(blocks.size(), false);
+    for (size_t root = 0; root < blocks.size(); ++root) {
+        if (visited[root]) continue;
+        std::vector<std::pair<size_t, size_t>> stack{{root, 0}};
+        std::vector<size_t> postorder;
+        visited[root] = true;
+        while (!stack.empty()) {
+            auto& [position, edge] = stack.back();
+            const auto& successors = blocks[position]->getSuccessors();
+            if (edge < successors.size()) {
+                auto successor = blockToIndex.at(successors[edge++]);
+                if (!visited[successor]) {
+                    visited[successor] = true;
+                    stack.emplace_back(successor, 0);
+                }
+            } else {
+                postorder.push_back(position);
+                stack.pop_back();
+            }
+        }
+        solveOrder.insert(solveOrder.end(), postorder.rbegin(), postorder.rend());
+    }
     bool changed = true;
     while (changed) {
         changed = false;
-        for (size_t index = 1; index < blocks.size(); ++index) {
+        for (auto index : solveOrder) {
+            if (index == 0) continue;
             auto* block = blocks[index];
             Bits next(words, 0);
             const auto& predecessors = block->getPredecessors();
