@@ -59,28 +59,31 @@ void DominatorTree::run(ir::Function& func) {
     };
     // Keep the previous pointer ordering for ambiguous unreachable components.
     std::set<ir::BasicBlock*> ordered(blocks.begin(), blocks.end());
+    std::vector<size_t> orderedIndices;
+    for (auto* block : ordered) orderedIndices.push_back(blockToIndex.at(block));
+    std::vector<size_t> depths;
+    for (const auto& dominators : domSets) depths.push_back(cardinality(dominators));
     for (size_t index = 0; index < blocks.size(); ++index) {
         auto* block = blocks[index];
         if (block == entry) { iDomMap[block] = nullptr; continue; }
         auto strict = domSets[index]; strict[index / 64] &= ~(uint64_t(1) << (index % 64));
-        std::vector<ir::BasicBlock*> candidates;
-        ir::BasicBlock* deepest = nullptr; size_t depth = 0;
-        for (auto* candidate : ordered) {
-            auto position = blockToIndex.at(candidate);
+        std::vector<size_t> candidates;
+        size_t deepest = blocks.size(), depth = 0;
+        for (auto position : orderedIndices) {
             if (!(strict[position / 64] & (uint64_t(1) << (position % 64)))) continue;
-            candidates.push_back(candidate);
-            auto count = cardinality(domSets[position]);
-            if (!deepest || count > depth) { deepest = candidate; depth = count; }
+            candidates.push_back(position);
+            auto count = depths[position];
+            if (deepest == blocks.size() || count > depth) { deepest = position; depth = count; }
         }
-        auto qualifies = [&](ir::BasicBlock* candidate) {
-            const auto& dominators = domSets[blockToIndex.at(candidate)];
+        auto qualifies = [&](size_t candidate) {
+            const auto& dominators = domSets[candidate];
             for (size_t word = 0; word < words; ++word)
                 if ((dominators[word] & strict[word]) != strict[word]) return false;
             return true;
         };
-        if (deepest && qualifies(deepest)) { iDomMap[block] = deepest; continue; }
-        for (auto* candidate : candidates)
-            if (qualifies(candidate)) { iDomMap[block] = candidate; break; }
+        if (deepest != blocks.size() && qualifies(deepest)) { iDomMap[block] = blocks[deepest]; continue; }
+        for (auto candidate : candidates)
+            if (qualifies(candidate)) { iDomMap[block] = blocks[candidate]; break; }
     }
 
     // Build the children map from the idom map
