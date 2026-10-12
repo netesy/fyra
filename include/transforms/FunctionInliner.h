@@ -33,6 +33,7 @@ public:
     bool canInline(const ir::Function* callee, const ir::Function* caller) const;
     bool isLoopCallInlineLegal(const ir::Function* callee, const ir::Function* caller, ir::BasicBlock* callBlock, std::string& reason) const;
     bool shouldInline(const ir::Instruction* callInst, const ir::Function* callee, const ir::Function* caller, InlineCost& costOut) const;
+    // Direct callers must supply a canonical caller CFG (CFGBuilder::run).
     bool inlineCall(ir::Instruction* callInst, ir::Function* callee, ir::Function* caller);
 
 private:

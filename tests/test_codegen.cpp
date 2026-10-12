@@ -185,7 +185,125 @@ static void check_liveness_reference(ir::Function& function) {
         }
 }
 
+
+// Compare local inliner updates with the independent full rebuild. PHI
+// incoming identities must already agree with the locally maintained graph.
+static void check_inline_cfg_reference(ir::Function& function) {
+    using Edges = std::set<ir::BasicBlock*>;
+    std::map<ir::BasicBlock*, std::pair<Edges, Edges>> expected;
+    for (auto& block : function.getBasicBlocks()) {
+        Edges preds(block->getPredecessors().begin(), block->getPredecessors().end());
+        Edges succs(block->getSuccessors().begin(), block->getSuccessors().end());
+        assert(preds.size() == block->getPredecessors().size());
+        assert(succs.size() == block->getSuccessors().size());
+        expected[block.get()] = {preds, succs};
+        for (auto& instruction : block->getInstructions()) {
+            auto* phi = dynamic_cast<ir::PhiNode*>(instruction.get());
+            if (!phi) continue;
+            Edges incoming;
+            for (auto& operand : phi->getOperands())
+                if (auto* origin = dynamic_cast<ir::BasicBlock*>(operand->get())) incoming.insert(origin);
+            assert(incoming == preds);
+            assert(phi->getOperands().size() == 2 * preds.size());
+        }
+    }
+    transforms::CFGBuilder::run(function);
+    for (auto& block : function.getBasicBlocks()) {
+        const auto& [preds, succs] = expected.at(block.get());
+        assert(preds == Edges(block->getPredecessors().begin(), block->getPredecessors().end()));
+        assert(succs == Edges(block->getSuccessors().begin(), block->getSuccessors().end()));
+    }
+}
+
 int main() {
+    {
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("inline_local_edges", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* type = context->getIntegerType(64);
+        auto* zero = context->getConstantInt(type, 0);
+        auto* one = context->getConstantInt(type, 1);
+        auto* leaf = builder.createFunction("leaf", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", leaf)); builder.createRet(one);
+        transforms::FunctionInliner inliner;
+
+        // Splitting a loop twice must move the backedge PHI origin each time.
+        auto* caller = builder.createFunction("loop_caller", type, {type});
+        auto* entry = builder.createBasicBlock("entry", caller);
+        auto* loop = builder.createBasicBlock("loop", caller);
+        auto* exit = builder.createBasicBlock("exit", caller);
+        builder.setInsertPoint(entry); builder.createJmp(loop);
+        builder.setInsertPoint(loop);
+        auto* phi = builder.createPhi(type, 0, nullptr); phi->addIncoming(zero, entry);
+        auto* first = builder.createCall(leaf, {}, type);
+        auto* second = builder.createCall(leaf, {}, type);
+        auto* next = builder.createAdd(phi, second); phi->addIncoming(next, loop);
+        builder.createJnz(caller->getParameters().front().get(), loop, exit);
+        builder.setInsertPoint(exit); builder.createRet(next);
+        transforms::CFGBuilder::run(*caller);
+        assert(inliner.inlineCall(first, leaf, caller)); check_inline_cfg_reference(*caller);
+        assert(inliner.inlineCall(second, leaf, caller)); check_inline_cfg_reference(*caller);
+
+        // Multiple returns produce a continuation PHI with cloned origins.
+        auto* branch = builder.createFunction("branch", type, {type});
+        auto* branchEntry = builder.createBasicBlock("entry", branch);
+        auto* left = builder.createBasicBlock("left", branch);
+        auto* right = builder.createBasicBlock("right", branch);
+        builder.setInsertPoint(branchEntry); builder.createJnz(branch->getParameters().front().get(), left, right);
+        builder.setInsertPoint(left); builder.createRet(zero);
+        builder.setInsertPoint(right); builder.createRet(one);
+        auto* returning = builder.createFunction("returning", type, {type});
+        builder.setInsertPoint(builder.createBasicBlock("entry", returning));
+        auto* call = builder.createCall(branch, {returning->getParameters().front().get()}, type); builder.createRet(call);
+        transforms::CFGBuilder::run(*returning);
+        assert(inliner.inlineCall(call, branch, returning)); check_inline_cfg_reference(*returning);
+
+        // A callee loop carries its own cloned PHI and backedge identities.
+        auto* outer = builder.createFunction("outer", type, {type});
+        builder.setInsertPoint(builder.createBasicBlock("entry", outer));
+        call = builder.createCall(caller, {outer->getParameters().front().get()}, type); builder.createRet(call);
+        transforms::CFGBuilder::run(*outer);
+        assert(inliner.inlineCall(call, caller, outer)); check_inline_cfg_reference(*outer);
+
+        // Nonreturning callees leave the continuation unreachable, not erased.
+        auto* never = builder.createFunction("never", context->getVoidType());
+        auto* neverEntry = builder.createBasicBlock("entry", never);
+        auto* spin = builder.createBasicBlock("spin", never);
+        builder.setInsertPoint(neverEntry); builder.createJmp(spin);
+        builder.setInsertPoint(spin); builder.createJmp(spin);
+        auto* dead = builder.createFunction("dead_continuation", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", dead));
+        call = builder.createCall(never, {}, context->getVoidType()); builder.createRet(one);
+        transforms::CFGBuilder::run(*dead);
+        assert(inliner.inlineCall(call, never, dead)); check_inline_cfg_reference(*dead);
+        for (auto& block : dead->getBasicBlocks()) if (block->getName() == "entry_cont")
+            assert(block->getPredecessors().empty());
+
+        // Implicit/empty-block fallthrough and duplicate branch targets use
+        // the exact same terminator rules as the complete builder.
+        auto* falling = builder.createFunction("falling", context->getVoidType());
+        builder.createBasicBlock("empty", falling);
+        builder.setInsertPoint(builder.createBasicBlock("return", falling)); builder.createRet(nullptr);
+        auto* fallCaller = builder.createFunction("fall_caller", type);
+        auto* fallEntry = builder.createBasicBlock("entry", fallCaller);
+        auto* fallExit = builder.createBasicBlock("exit", fallCaller);
+        builder.setInsertPoint(fallEntry); call = builder.createCall(falling, {}, context->getVoidType());
+        builder.setInsertPoint(fallExit); builder.createRet(one);
+        transforms::CFGBuilder::run(*fallCaller);
+        assert(inliner.inlineCall(call, falling, fallCaller)); check_inline_cfg_reference(*fallCaller);
+        auto* duplicate = builder.createFunction("duplicate", type, {type});
+        auto* duplicateEntry = builder.createBasicBlock("entry", duplicate);
+        auto* duplicateExit = builder.createBasicBlock("exit", duplicate);
+        builder.setInsertPoint(duplicateEntry); builder.createJnz(duplicate->getParameters().front().get(), duplicateExit, duplicateExit);
+        builder.setInsertPoint(duplicateExit); builder.createRet(one);
+        auto* duplicateCaller = builder.createFunction("duplicate_caller", type, {type});
+        builder.setInsertPoint(builder.createBasicBlock("entry", duplicateCaller));
+        call = builder.createCall(duplicate, {duplicateCaller->getParameters().front().get()}, type); builder.createRet(call);
+        transforms::CFGBuilder::run(*duplicateCaller);
+        assert(inliner.inlineCall(call, duplicate, duplicateCaller)); check_inline_cfg_reference(*duplicateCaller);
+        std::cout << "--- Incremental Inline CFG Oracle Tests Passed ---" << std::endl;
+    }
+
     {
         // A rejected prefix call stays rejected when a later returning leaf
         // expands. Compare the result with a fresh, uncached cost query.

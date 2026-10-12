@@ -396,6 +396,9 @@ bool FunctionInliner::shouldInline(const ir::Instruction* callInst, const ir::Fu
 }
 
 bool FunctionInliner::runOnModule(ir::Module& module) {
+    // Establish canonical edges once; subsequent successful inlines refresh
+    // only the split block, continuation, and cloned callee blocks.
+    for (auto& function : module.getFunctions()) CFGBuilder::run(*function);
     std::unordered_map<ir::BasicBlock*, bool> knownCycles;
     struct CacheScope {
         std::unordered_map<ir::BasicBlock*, bool>*& slot;
@@ -545,9 +548,7 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
     }
 
     if (callerIt != callerBlocks.end()) {
-        auto contPtr = std::move(callerBlocks.back());
-        callerBlocks.pop_back();
-        callerBlocks.insert(std::next(callerIt), std::move(contPtr));
+        callerBlocks.splice(std::next(callerIt), callerBlocks, std::prev(callerBlocks.end()));
     }
 
     auto& callerInstrs = callerBB->getInstructions();
@@ -605,10 +606,12 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
     // 3. Clone callee basic blocks with unique names
     static size_t blockInlineCounter = 0;
     std::map<ir::BasicBlock*, ir::BasicBlock*> bbMap;
+    auto firstClonedIt = callerBlocks.end();
     for (const auto& cBB_ptr : callee->getBasicBlocks()) {
         ir::BasicBlock* cBB = cBB_ptr.get();
         std::string uniqueBBName = caller->getName() + "_" + cBB->getName() + "_inl_" + std::to_string(blockInlineCounter++);
         ir::BasicBlock* clonedBB = builder.createBasicBlock(uniqueBBName, caller);
+        if (firstClonedIt == callerBlocks.end()) firstClonedIt = std::prev(callerBlocks.end());
         bbMap[cBB] = clonedBB;
         valueMap[cBB] = clonedBB;
     }
@@ -622,22 +625,9 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
         }
     }
 
-    for (const auto& cBB_ptr : callee->getBasicBlocks()) {
-        ir::BasicBlock* clonedBB = bbMap[cBB_ptr.get()];
-        auto clonedIt = callerBlocks.end();
-        for (auto it = callerBlocks.begin(); it != callerBlocks.end(); ++it) {
-            if (it->get() == clonedBB) {
-                clonedIt = it;
-                break;
-            }
-        }
-        if (clonedIt != callerBlocks.end() && contIt != callerBlocks.end()) {
-            auto clonedPtr = std::move(*clonedIt);
-            callerBlocks.erase(clonedIt);
-            contIt = callerBlocks.insert(contIt, std::move(clonedPtr));
-            ++contIt;
-        }
-    }
+    // All clones were appended together. Move the range without searching
+    // for each block or allocating replacement list nodes.
+    callerBlocks.splice(contIt, callerBlocks, firstClonedIt, callerBlocks.end());
 
     // Connect callerBB to inlined entry block
     ir::BasicBlock* inlinedEntry = bbMap[callee->getBasicBlocks().front().get()];
@@ -738,7 +728,17 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
         }
     }
 
-    CFGBuilder::run(*caller);
+    {
+        CFGBuilder::updateOutgoingEdges(*callerBB, inlinedEntry);
+        auto nextOriginal = std::next(contIt);
+        CFGBuilder::updateOutgoingEdges(*continuationBB,
+            nextOriginal == callerBlocks.end() ? nullptr : nextOriginal->get());
+        for (auto it = callee->getBasicBlocks().begin(); it != callee->getBasicBlocks().end(); ++it) {
+            auto next = std::next(it);
+            CFGBuilder::updateOutgoingEdges(*bbMap.at(it->get()),
+                next == callee->getBasicBlocks().end() ? continuationBB : bbMap.at(next->get()));
+        }
+    }
     return true;
 }
 
