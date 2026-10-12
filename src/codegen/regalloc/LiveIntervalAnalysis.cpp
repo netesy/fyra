@@ -20,36 +20,24 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
     // 2. Clear out any old data
     intervals.clear();
 
-    // Keep the actual call instructions.  A bounding [first definition, last
-    // use] range may contain a call in a CFG-linearized hole; that does not
-    // make the value live across the call.
-    std::vector<const ir::Instruction*> callSites;
-    for (auto& bb : func.getBasicBlocks()) {
-        for (auto& instr : bb->getInstructions()) {
-            auto opc = instr->getOpcode();
-            if (opc == ir::Instruction::Call || opc == ir::Instruction::Syscall || opc == ir::Instruction::ExternCall) {
-                callSites.push_back(instr.get());
-            }
-        }
-    }
+    // Use the same exact before/after dataflow sets, intersected a word at a
+    // time. Scanning every call separately for every SSA value was quadratic.
+    const auto liveAcrossCalls = liveness.valuesLiveAcrossCalls();
 
     // Calculate loop depth for each basic block
     std::map<const ir::BasicBlock*, int> loopDepthMap;
+    std::map<const ir::BasicBlock*, size_t> layoutIndex;
     for (auto& bb : func.getBasicBlocks()) {
+        layoutIndex.emplace(bb.get(), layoutIndex.size());
         loopDepthMap[bb.get()] = 0;
     }
 
     for (auto& bb : func.getBasicBlocks()) {
         for (const auto* successor : bb->getSuccessors()) {
             if (!successor) continue;
-            bool isBackEdge = false;
-            for (auto& candidate : func.getBasicBlocks()) {
-                if (candidate.get() == successor) {
-                    isBackEdge = true;
-                    break;
-                }
-                if (candidate.get() == bb.get()) break;
-            }
+            // Preserve the existing layout-based spill-weight heuristic without
+            // rescanning the entire function for each successor edge.
+            const bool isBackEdge = layoutIndex.at(successor) <= layoutIndex.at(bb.get());
             if (isBackEdge) {
                 std::set<const ir::BasicBlock*> loopBlocks;
                 std::vector<const ir::BasicBlock*> worklist;
@@ -89,13 +77,7 @@ void LiveIntervalAnalysis::run(ir::Function& func) {
     for (const auto& pair : liveRanges) {
         const ir::Instruction* vreg = pair.first;
         const LiveRange& range = pair.second;
-        bool crossesCall = false;
-        for (const ir::Instruction* call : callSites) {
-            if (liveness.isLiveBefore(call, vreg) && liveness.isLiveAfter(call, vreg)) {
-                crossesCall = true;
-                break;
-            }
-        }
+        const bool crossesCall = liveAcrossCalls.count(vreg) != 0;
 
         double useWeight = 0.0;
         const ir::BasicBlock* defBB = vreg->getParent();

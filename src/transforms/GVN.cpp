@@ -219,7 +219,8 @@ static ir::ConstantInt* tryConstantFold(ir::Instruction* instr, ir::Function* fu
     ir::IntegerType* intTy = dynamic_cast<ir::IntegerType*>(instr->getType());
     if (!intTy) intTy = ctx->getIntegerType(32);
 
-    unsigned bitwidth = intTy->getBitwidth();
+    auto* operandTy = dynamic_cast<ir::IntegerType*>(c1->getType());
+    unsigned bitwidth = operandTy ? operandTy->getBitwidth() : intTy->getBitwidth();
     uint64_t v1 = c1->getValue();
     uint64_t v2 = c2->getValue();
     int64_t s1 = signExtendValue(v1, bitwidth);
@@ -258,6 +259,14 @@ static void processBlockGlobalGVN(ir::BasicBlock* bb, const DominatorTree& domTr
     if (!bb) return;
 
     std::vector<ir::Instruction*> to_remove;
+    // Restore this block's changes after visiting its dominator subtree.
+    // Siblings must see only their shared ancestors' expressions.
+    struct PreviousExpression {
+        std::string key;
+        ir::Instruction* value;
+        bool existed;
+    };
+    std::vector<PreviousExpression> previous;
 
     for (auto& instrPtr : bb->getInstructions()) {
         ir::Instruction* instr = instrPtr.get();
@@ -303,6 +312,9 @@ static void processBlockGlobalGVN(ir::BasicBlock* bb, const DominatorTree& domTr
             }
         }
 
+        auto prior = exprTable.find(key);
+        previous.push_back({key, prior == exprTable.end() ? nullptr : prior->second,
+                            prior != exprTable.end()});
         exprTable[key] = instr;
     }
 
@@ -311,8 +323,11 @@ static void processBlockGlobalGVN(ir::BasicBlock* bb, const DominatorTree& domTr
     }
 
     for (ir::BasicBlock* child : domTree.getChildren(bb)) {
-        std::map<std::string, ir::Instruction*> childScope = exprTable;
-        processBlockGlobalGVN(child, domTree, childScope, changed);
+        processBlockGlobalGVN(child, domTree, exprTable, changed);
+    }
+    for (auto it = previous.rbegin(); it != previous.rend(); ++it) {
+        if (it->existed) exprTable[it->key] = it->value;
+        else exprTable.erase(it->key);
     }
 }
 

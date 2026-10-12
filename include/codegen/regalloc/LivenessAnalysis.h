@@ -19,6 +19,8 @@ struct LiveRange {
 class LivenessAnalysis {
 public:
     void run(ir::Function& func);
+    // Code emission needs exact operand liveness, not allocation intervals.
+    void runForOperandLiveness(ir::Function& func);
 
     const std::map<const ir::Instruction*, LiveRange>& getLiveRanges() const {
         return liveRanges;
@@ -30,6 +32,8 @@ public:
     // Returns true if value is live immediately before instruction according
     // to the same CFG-aware dataflow solution as isLiveAfter().
     bool isLiveBefore(const ir::Instruction* instruction, const ir::Value* value) const;
+
+    std::set<const ir::Value*> valuesLiveAcrossCalls() const;
 
     // Returns true if use represents the final live use of its original pre-spill SSA value
     bool isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const;
@@ -44,8 +48,16 @@ private:
     using LiveBits = std::vector<uint64_t>;
     std::map<const ir::Value*, size_t> valueIndices;
     std::vector<const ir::Value*> indexedValues;
-    std::map<const ir::Instruction*, LiveBits> liveAfterMap;
-    std::map<const ir::Instruction*, LiveBits> liveBeforeMap;
+    // Instruction snapshots keep only nonzero words. The block equations
+    // remain dense and exact; this changes storage, never the live set.
+    struct LiveSnapshot {
+        std::vector<std::pair<size_t, uint64_t>> chunks;
+        LiveSnapshot() = default;
+        explicit LiveSnapshot(const LiveBits& bits);
+        bool contains(size_t index) const;
+    };
+    std::map<const ir::Instruction*, LiveSnapshot> liveAfterMap;
+    std::map<const ir::Instruction*, LiveSnapshot> liveBeforeMap;
 };
 
 } // namespace transforms

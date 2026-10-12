@@ -1,3 +1,4 @@
+#include <set>
 #include "fyra/BackendBuilder.h"
 #include "codegen/CodeGen.h"
 #include "target/core/TargetResolver.h"
@@ -307,10 +308,15 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
         artifact.addSymbol(out);
     }
 
+    // Index names without changing the canonical symbol vector's order.
+    // Relocation-heavy objects must not scan all symbols per reference.
+    std::set<std::string> symbolNames;
+    for (const auto& symbol : artifact.symbols) symbolNames.insert(symbol.name);
+
     for (auto& func : preparedModule_->getFunctions()) {
         if (func->getBasicBlocks().empty()) continue;
         std::string fnName = func->getName();
-        if (!artifact.findSymbol(fnName)) {
+        if (symbolNames.insert(fnName).second) {
             target::artifact::object::ObjectSymbol s;
             s.name = fnName;
             s.value = 0;
@@ -324,7 +330,7 @@ target::artifact::object::ObjectArtifact BackendBuilder::buildModuleObjectArtifa
     }
 
     for (const auto& reloc : codeGenerator.getRelocations()) {
-        if (!reloc.symbolName.empty() && !artifact.findSymbol(reloc.symbolName)) {
+        if (!reloc.symbolName.empty() && symbolNames.insert(reloc.symbolName).second) {
             target::artifact::object::ObjectSymbol s;
             s.name = reloc.symbolName;
             s.value = 0;
@@ -441,7 +447,7 @@ BuildResult BackendBuilder::emitObject(const std::string& path) {
     }
 
     codegen::CodeGen codeGen(*preparedModule_, std::move(targetInfo));
-    auto cRes = codeGen.compileToObject(path, config_.validate, true, false);
+    auto cRes = codeGen.compileToObject(path, config_.validate, true, false, false);
     if (cRes.success) {
         result.success = true;
     } else {

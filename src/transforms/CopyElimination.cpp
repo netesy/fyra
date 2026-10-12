@@ -13,7 +13,7 @@ namespace transforms {
 bool CopyElimination::run(ir::Function& func) {
     bool changed = false;
     std::map<ir::Value*, ir::Value*> copy_map;
-    std::vector<ir::Instruction*> to_remove;
+    std::map<ir::BasicBlock*, std::vector<ir::Instruction*>> to_remove;
 
     for (auto& bb : func.getBasicBlocks()) {
         for (auto& instr_ptr : bb->getInstructions()) {
@@ -23,7 +23,7 @@ bool CopyElimination::run(ir::Function& func) {
                 ir::Value* src = instr_ptr->getOperands()[0]->get();
                 if (dest && src && dest != src) {
                     copy_map[dest] = src;
-                    to_remove.push_back(instr_ptr.get());
+                    to_remove[bb.get()].push_back(instr_ptr.get());
                 }
             }
         }
@@ -51,7 +51,8 @@ bool CopyElimination::run(ir::Function& func) {
     }
 
     for (auto& bb : func.getBasicBlocks()) {
-        bb->removeInstructions(to_remove);
+        auto found = to_remove.find(bb.get());
+        if (found != to_remove.end()) bb->removeInstructions(found->second);
     }
 
     return changed;

@@ -9,6 +9,8 @@
 #include <set>
 #include <vector>
 #include <iostream>
+#include <unordered_map>
+#include <algorithm>
 
 namespace transforms {
 
@@ -21,11 +23,41 @@ static bool reachesBlock(ir::BasicBlock* current, ir::BasicBlock* target,
     return false;
 }
 
-static bool blockIsInCycle(ir::BasicBlock* block) {
+bool FunctionInliner::blockIsInCycle(ir::BasicBlock* block) const {
     if (!block) return false;
+    if (cycleCache) {
+        auto known = cycleCache->find(block);
+        if (known != cycleCache->end()) return known->second;
+    }
     std::set<ir::BasicBlock*> visited;
-    for (auto* successor : block->getSuccessors())
-        if (successor == block || reachesBlock(successor, block, visited)) return true;
+    bool result = false;
+    for (auto* successor : block->getSuccessors()) {
+        if (successor == block || reachesBlock(successor, block, visited)) {
+            result = true;
+            break;
+        }
+    }
+    if (cycleCache) cycleCache->emplace(block, result);
+    return result;
+}
+
+// A reachable return preserves the original call-to-continuation edge when
+// inlining expands it. All new internal cycles are confined to cloned blocks;
+// cycles through existing caller blocks are therefore unchanged.
+static bool hasReturningPath(const ir::Function& function) {
+    if (function.getBasicBlocks().empty()) return false;
+    for (auto& block : function.getBasicBlocks())
+        for (auto* next : block->getSuccessors())
+            if (!next || next->getParent() != &function) return false;
+    std::vector<const ir::BasicBlock*> pending{function.getBasicBlocks().front().get()};
+    std::set<const ir::BasicBlock*> visited;
+    while (!pending.empty()) {
+        auto* block = pending.back(); pending.pop_back();
+        if (!visited.insert(block).second) continue;
+        for (auto& instruction : block->getInstructions())
+            if (instruction->getOpcode() == ir::Instruction::Ret) return true;
+        for (auto* next : block->getSuccessors()) pending.push_back(next);
+    }
     return false;
 }
 
@@ -364,6 +396,13 @@ bool FunctionInliner::shouldInline(const ir::Instruction* callInst, const ir::Fu
 }
 
 bool FunctionInliner::runOnModule(ir::Module& module) {
+    std::unordered_map<ir::BasicBlock*, bool> knownCycles;
+    struct CacheScope {
+        std::unordered_map<ir::BasicBlock*, bool>*& slot;
+        std::unordered_map<ir::BasicBlock*, bool>* prior;
+        ~CacheScope() { slot = prior; }
+    } cacheScope{cycleCache, cycleCache};
+    cycleCache = &knownCycles;
     const char* diagEnv = std::getenv("FYRA_INLINER_DIAG");
     bool enableDiag = (diagEnv != nullptr && std::string(diagEnv) != "0");
 
@@ -376,6 +415,27 @@ bool FunctionInliner::runOnModule(ir::Module& module) {
         for (auto& caller : module.getFunctions()) {
             if (!caller || caller->getBasicBlocks().empty()) continue;
 
+            // Only caller is mutated inside this local fixed point. Other
+            // callees' sizes and call edges remain unchanged. Reachability TO
+            // caller does not depend on caller's outgoing edges, so eligibility
+            // stays stable until moving to the next caller/module iteration.
+            std::unordered_map<const ir::Function*, bool> eligibleCallees;
+            struct RejectedCall {
+                const ir::BasicBlock* parent;
+                size_t phis;
+                std::vector<ir::Value*> operands;
+            };
+            std::unordered_map<ir::Instruction*, RejectedCall> rejectedCalls;
+            std::unordered_map<const ir::BasicBlock*, size_t> phiCounts;
+            auto phiCount = [&](const ir::BasicBlock* block) {
+                auto known = phiCounts.find(block);
+                if (known != phiCounts.end()) return known->second;
+                size_t count = 0;
+                for (auto& instruction : block->getInstructions())
+                    count += dynamic_cast<const ir::PhiNode*>(instruction.get()) != nullptr;
+                phiCounts.emplace(block, count);
+                return count;
+            };
             bool localChanged = true;
             while (localChanged) {
                 localChanged = false;
@@ -385,13 +445,28 @@ bool FunctionInliner::runOnModule(ir::Module& module) {
                         ir::Instruction* instr = it->get();
                         if (instr->getOpcode() == ir::Instruction::Call && !instr->getOperands().empty()) {
                             auto* callee = dynamic_cast<ir::Function*>(instr->getOperands()[0]->get());
-                            if (callee && canInline(callee, caller.get())) {
+                            bool eligible = false;
+                            if (callee) {
+                                auto known = eligibleCallees.find(callee);
+                                if (known == eligibleCallees.end())
+                                    known = eligibleCallees.emplace(callee, canInline(callee, caller.get())).first;
+                                eligible = known->second;
+                            }
+                            if (eligible) {
+                                std::vector<ir::Value*> operands;
+                                for (auto& operand : instr->getOperands()) operands.push_back(operand->get());
+                                auto rejected = rejectedCalls.find(instr);
+                                const size_t phis = phiCount(bb.get());
+                                if (!enableDiag && rejected != rejectedCalls.end() && rejected->second.parent == bb.get() &&
+                                    rejected->second.phis == phis && rejected->second.operands == operands)
+                                    continue;
                                 bool inLoop = blockIsInCycle(bb.get());
                                 std::string rejectReason;
                                 bool legal = isLoopCallInlineLegal(callee, caller.get(), bb.get(), rejectReason);
 
                                 InlineCost cost;
                                 bool profitable = legal && shouldInline(instr, callee, caller.get(), cost);
+                                if (!profitable) rejectedCalls.insert_or_assign(instr, RejectedCall{bb.get(), phis, std::move(operands)});
 
                                 if (enableDiag) {
                                     std::cout << "[INLINER_DIAG] call: " << callee->getName()
@@ -416,7 +491,15 @@ bool FunctionInliner::runOnModule(ir::Module& module) {
                                 }
 
                                 if (profitable) {
+                                    const bool returning = hasReturningPath(*callee);
+                                    auto* splitBlock = instr->getParent();
                                     if (inlineCall(instr, callee, caller.get())) {
+                                        // Parent/arguments/PHI count are the call-site inputs to the
+                                        // unchanged cost model. Callees stay immutable locally.
+                                        // Non-returning expansion can change existing cycle facts.
+                                        rejectedCalls.erase(instr);
+                                        if (!returning) rejectedCalls.clear();
+                                        phiCounts.erase(splitBlock);
                                         localChanged = true;
                                         moduleChanged = true;
                                         changed = true;
@@ -442,6 +525,12 @@ bool FunctionInliner::inlineCall(ir::Instruction* callInst, ir::Function* callee
     auto ctx = caller->getParent() ? caller->getParent()->getContextShared() : std::make_shared<ir::IRContext>();
     ir::IRBuilder builder(ctx);
     builder.setModule(caller->getParent());
+
+    // Preserve existing-block cycle facts only when call expansion retains
+    // a returning path. New blocks have no cached entries and use fresh DFS.
+    // Non-returning/foreign CFGs conservatively invalidate caller facts.
+    if (cycleCache && !hasReturningPath(*callee))
+        for (auto& block : caller->getBasicBlocks()) cycleCache->erase(block.get());
 
     // 1. Split callerBB at callInst
     ir::BasicBlock* continuationBB = builder.createBasicBlock(callerBB->getName() + "_cont", caller);

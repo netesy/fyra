@@ -44,6 +44,7 @@ public:
     void setExported(bool e) { exported = e; }
     bool isExported() const { return exported; }
     void setReturnType(Type* ty) { type = ty; }
+    Type* getReturnType() const;
 
 private:
     bool exported = false;

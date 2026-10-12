@@ -239,7 +239,8 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
         uint32_t typeCode = 0;
         if (artCopy.arch == target::Arch::AArch64) {
             typeCode = R_AARCH64_CALL26;
-            if (reloc.type == "R_AARCH64_JUMP26") typeCode = R_AARCH64_JUMP26;
+            if (reloc.type == "R_AARCH64_CALL26") typeCode = R_AARCH64_CALL26;
+            else if (reloc.type == "R_AARCH64_JUMP26") typeCode = R_AARCH64_JUMP26;
             else if (reloc.type == "R_AARCH64_CONDBR19") typeCode = R_AARCH64_CONDBR19;
             else if (reloc.type == "R_AARCH64_ADR_PREL_PG_HI21") typeCode = R_AARCH64_ADR_PREL_PG_HI21;
             else if (reloc.type == "R_AARCH64_ADD_ABS_LO12_NC") typeCode = R_AARCH64_ADD_ABS_LO12_NC;
@@ -249,7 +250,8 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
             }
         } else if (artCopy.arch == target::Arch::RISCV64) {
             typeCode = R_RISCV_CALL;
-            if (reloc.type == "R_RISCV_BRANCH") typeCode = R_RISCV_BRANCH;
+            if (reloc.type == "R_RISCV_CALL") typeCode = R_RISCV_CALL;
+            else if (reloc.type == "R_RISCV_BRANCH") typeCode = R_RISCV_BRANCH;
             else if (reloc.type == "R_RISCV_JAL") typeCode = R_RISCV_JAL;
             else if (reloc.type == "R_RISCV_CALL_PLT") typeCode = R_RISCV_CALL_PLT;
             else if (reloc.type == "R_RISCV_64") typeCode = R_RISCV_64;
@@ -258,7 +260,8 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
             }
         } else if (artCopy.arch == target::Arch::LoongArch64) {
             typeCode = R_LARCH_CALL;
-            if (reloc.type == "R_LARCH_B16") typeCode = R_LARCH_B16;
+            if (reloc.type == "R_LARCH_CALL") typeCode = R_LARCH_CALL;
+            else if (reloc.type == "R_LARCH_B16") typeCode = R_LARCH_B16;
             else if (reloc.type == "R_LARCH_B21") typeCode = R_LARCH_B21;
             else if (reloc.type == "R_LARCH_B26") typeCode = R_LARCH_B26;
             else if (reloc.type == "R_LARCH_64") typeCode = R_LARCH_64;
@@ -267,7 +270,9 @@ std::vector<uint8_t> ElfObjectWriter::serialize(const ObjectArtifact& artifact) 
             }
         } else {
             typeCode = R_X86_64_PC32;
-            if (reloc.type == "R_X86_64_64") typeCode = R_X86_64_64;
+            // Named default relocations are valid, not failed integer parses.
+            if (reloc.type == "R_X86_64_PC32") typeCode = R_X86_64_PC32;
+            else if (reloc.type == "R_X86_64_64") typeCode = R_X86_64_64;
             else if (reloc.type == "R_X86_64_PLT32") typeCode = R_X86_64_PLT32;
             else {
                 try { typeCode = std::stoul(reloc.type); } catch(...) {}

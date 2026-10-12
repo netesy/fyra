@@ -1,3 +1,4 @@
+#include <set>
 #include "codegen/CodeGen.h"
 #include "codegen/asm/Assembler.h"
 #include "codegen/objectgen/PlatformGenerators.h"
@@ -111,7 +112,7 @@ void CodeGen::emitFunction(ir::Function& func) {
     currentFunction = &func;
     stackOffsets.clear();
     lastStoreOp = "";
-    liveness.run(func);
+    liveness.runForOperandLiveness(func);
     if (debugInfoManager->isDebugEnabled() && os) {
         debugInfoManager->beforeFunctionEmission(*this, *os, func);
     }
@@ -428,17 +429,22 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
 
 int32_t CodeGen::getStackOffset(ir::Value* val) const { return targetInfo->getStackOffset(*this, val); }
 
-CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPrefix, bool validateASM, bool generateObject, bool) {
+CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPrefix, bool validateASM, bool generateObject, bool, bool generateAssembly) {
     CompilationTimer timer; CompilationResult result; result.targetName = targetInfo->getName();
-    std::stringstream ss; std::ostream* old_os = os; os = &ss; emit(false); os = old_os;
-    std::string assembly = ss.str();
-    std::string assemblyPath = outputPrefix;
-    std::string asmExt = targetInfo->getAssemblyFileExtension();
-    if (assemblyPath.size() < asmExt.size() || assemblyPath.compare(assemblyPath.size() - asmExt.size(), asmExt.size(), asmExt) != 0) {
-        assemblyPath += asmExt;
+    std::ostream* old_os = os;
+    // Object-only clients need no second lowering into an unused assembly
+    // file. Validation still always receives the complete assembly text.
+    if (generateAssembly || validateASM || !generateObject) {
+        std::stringstream ss; os = &ss; emit(false); os = old_os;
+        std::string assembly = ss.str();
+        std::string assemblyPath = outputPrefix;
+        std::string asmExt = targetInfo->getAssemblyFileExtension();
+        if (assemblyPath.size() < asmExt.size() || assemblyPath.compare(assemblyPath.size() - asmExt.size(), asmExt.size(), asmExt) != 0) {
+            assemblyPath += asmExt;
+        }
+        result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
+        if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     }
-    result.assemblyPath = writeAssemblyToFile(assembly, assemblyPath);
-    if (validateASM && validator_) result.validation = validator_->validateAssembly(assembly, targetInfo->getName());
     if (generateObject && !result.hasValidationErrors()) {
         // Emit in binary mode (os = nullptr) to populate assembler, symbols, and relocations
         assembler = std::make_unique<asm_::Assembler>();
@@ -495,11 +501,16 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
             artifact.symbols.push_back(s);
         }
 
+        // Index names without changing the canonical symbol vector's order.
+        // Relocation-heavy objects must not scan all symbols per reference.
+        std::set<std::string> symbolNames;
+        for (const auto& symbol : artifact.symbols) symbolNames.insert(symbol.name);
+
         // Add defined module functions if missing from in-memory symbol table
         for (auto& func : module.getFunctions()) {
             if (func->getBasicBlocks().empty()) continue;
             std::string fnName = func->getName();
-            if (!artifact.findSymbol(fnName)) {
+            if (symbolNames.insert(fnName).second) {
                 ::target::artifact::object::ObjectSymbol s;
                 s.name = fnName;
                 s.value = 0;
@@ -522,7 +533,7 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
             r.addend = rel.addend;
             artifact.relocations.push_back(r);
 
-            if (!rel.symbolName.empty() && !artifact.findSymbol(rel.symbolName)) {
+            if (!rel.symbolName.empty() && symbolNames.insert(rel.symbolName).second) {
                 ::target::artifact::object::ObjectSymbol s;
                 s.name = rel.symbolName;
                 s.value = 0;

@@ -248,8 +248,36 @@ bool ControlFlowSimplification::mergeBlocks(ir::Function& func) {
             if (!succ || succ == bb) continue;
             if (!canMergeBlocks(bb, succ, func)) continue;
 
+            // Explicitly terminated successors retain the same outgoing edges
+            // after their instructions move. Update just those edges, rather
+            // than rebuilding every block after every merge. Fallthrough and
+            // malformed blocks still use the full builder.
+            ir::Instruction* firstTerminator = nullptr;
+            for (auto& instruction : succ->getInstructions()) {
+                auto op = instruction->getOpcode();
+                if (op == ir::Instruction::Ret || op == ir::Instruction::Jmp ||
+                    op == ir::Instruction::Br || op == ir::Instruction::Jnz) {
+                    firstTerminator = instruction.get();
+                    break;
+                }
+            }
+            bool explicitExit = firstTerminator &&
+                firstTerminator == succ->getInstructions().back().get();
+            auto outgoing = succ->getSuccessors();
+            if (explicitExit) {
+                bb->clearSuccessors();
+                for (auto* target : outgoing) target->removePredecessor(succ);
+            }
             mergeBlocksImpl(bb, succ, func);
-            CFGBuilder::run(func);
+            if (explicitExit) {
+                for (auto* target : outgoing) {
+                    if (target == succ) target = bb;
+                    bb->addSuccessor(target);
+                    target->addPredecessor(bb);
+                }
+            } else {
+                CFGBuilder::run(func);
+            }
             changed = true;
             block_changed = true;
             blocks_merged_++;

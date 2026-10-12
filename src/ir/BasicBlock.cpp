@@ -5,6 +5,7 @@
 #include "ir/Type.h"
 #include "ir/Use.h"
 #include <algorithm>
+#include <unordered_set>
 #include <iostream>
 
 namespace ir {
@@ -43,16 +44,20 @@ void BasicBlock::removeSuccessor(BasicBlock* succ) {
 }
 
 void BasicBlock::removeInstructions(const std::vector<Instruction*>& to_remove) {
+    if (to_remove.empty()) return;
+    // Membership only: preserve removal order and never dereference candidates
+    // that another block may already have destroyed.
+    const std::unordered_set<const Instruction*> removed(to_remove.begin(), to_remove.end());
     // A bulk removal list may be shared across blocks. Earlier blocks can
     // already have destroyed some candidates, so inspect owned live nodes
     // instead of dereferencing every raw pointer in the shared list.
     for (auto& instr : instructions) {
-        if (std::find(to_remove.begin(), to_remove.end(), instr.get()) != to_remove.end()) {
+        if (removed.count(instr.get()) != 0) {
             for (auto& op : instr->getOperands()) op->set(nullptr);
         }
     }
     instructions.remove_if([&](const std::unique_ptr<Instruction>& instr) {
-        return std::find(to_remove.begin(), to_remove.end(), instr.get()) != to_remove.end();
+        return removed.count(instr.get()) != 0;
     });
 }
 

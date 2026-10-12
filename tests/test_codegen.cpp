@@ -1,4 +1,10 @@
+#include "fyra/CompilerPipeline.h"
 #include "transforms/LoopUnroll.h"
+#include "transforms/SCCP.h"
+#include "transforms/GVN.h"
+#include "transforms/FunctionInliner.h"
+#include "transforms/ControlFlowSimplification.h"
+#include "transforms/InstructionScheduler.h"
 #include "parser/Parser.h"
 #include "ir/Module.h"
 #include "ir/PhiNode.h"
@@ -32,7 +38,7 @@
 #endif
 #endif
 
-// Independent set-based oracle for the dense liveness representation.
+// Independent set-based oracle for exact liveness, regardless of storage.
 static void check_liveness_reference(ir::Function& function) {
     using Values = std::set<const ir::Value*>;
     std::map<const ir::Instruction*, Values> before, after;
@@ -103,15 +109,550 @@ static void check_liveness_reference(ir::Function& function) {
     transforms::DominatorTree dominance; dominance.run(function);
     for (auto* block : allBlocks) for (auto* candidate : allBlocks)
         assert(dominance.dominates(candidate, block) == dominators[block].count(candidate));
+    // Cloning must preserve SSA identities and forward/backedge operands.
+    // Use an independent ordered mapping to check the production lookup index.
+    auto cloned = fyra::cloneModule(*function.getParent());
+    std::map<const ir::Value*, const ir::Value*> replacements;
+    const auto& originals = function.getParent()->getFunctions();
+    const auto& copies = cloned->getFunctions();
+    assert(originals.size() == copies.size());
+    auto sourceFunction = originals.begin();
+    auto targetFunction = copies.begin();
+    for (; sourceFunction != originals.end(); ++sourceFunction, ++targetFunction) {
+        const auto& original = *sourceFunction;
+        const auto& copy = *targetFunction;
+        replacements[original.get()] = copy.get();
+        assert(original->getParameters().size() == copy->getParameters().size());
+        auto parameter = original->getParameters().begin();
+        auto copiedParameter = copy->getParameters().begin();
+        for (; parameter != original->getParameters().end(); ++parameter, ++copiedParameter)
+            replacements[parameter->get()] = copiedParameter->get();
+        assert(original->getBasicBlocks().size() == copy->getBasicBlocks().size());
+        auto source = original->getBasicBlocks().begin();
+        auto target = copy->getBasicBlocks().begin();
+        for (; source != original->getBasicBlocks().end(); ++source, ++target) {
+            replacements[source->get()] = target->get();
+            assert((*source)->getInstructions().size() == (*target)->getInstructions().size());
+            auto instruction = (*source)->getInstructions().begin();
+            auto replacement = (*target)->getInstructions().begin();
+            for (; instruction != (*source)->getInstructions().end(); ++instruction, ++replacement)
+                replacements[instruction->get()] = replacement->get();
+        }
+    }
+    const auto mapped = [&](const ir::Value* value) {
+        auto found = replacements.find(value);
+        return found == replacements.end() ? value : found->second;
+    };
+    for (const auto& source : originals) for (const auto& block : source->getBasicBlocks())
+        for (const auto& instruction : block->getInstructions()) {
+            auto* replacement = dynamic_cast<const ir::Instruction*>(mapped(instruction.get()));
+            assert(replacement && replacement->getOpcode() == instruction->getOpcode());
+            assert(replacement->getOperands().size() == instruction->getOperands().size());
+            for (size_t operand = 0; operand < instruction->getOperands().size(); ++operand)
+                assert(replacement->getOperands()[operand]->get() == mapped(instruction->getOperands()[operand]->get()));
+        }
     transforms::LivenessAnalysis analysis; analysis.run(function);
+    transforms::LivenessAnalysis emission; emission.runForOperandLiveness(function);
+    Values expectedAcross;
+    for (auto& block : function.getBasicBlocks()) for (auto& instruction : block->getInstructions()) {
+        auto opcode = instruction->getOpcode();
+        if (opcode != ir::Instruction::Call && opcode != ir::Instruction::ExternCall && opcode != ir::Instruction::Syscall) continue;
+        for (auto* value : values)
+            if (before[instruction.get()].count(value) && after[instruction.get()].count(value)) expectedAcross.insert(value);
+    }
+    assert(analysis.valuesLiveAcrossCalls() == expectedAcross);
+    // Every point in the independent CFG solution must be covered by the
+    // allocator's bounding interval, including late-layout branch uses.
+    int position = 0;
+    for (auto& block : function.getBasicBlocks()) for (auto& instruction : block->getInstructions()) {
+        Values live = before[instruction.get()];
+        live.insert(after[instruction.get()].begin(), after[instruction.get()].end());
+        for (auto* value : live) {
+            auto* definition = dynamic_cast<const ir::Instruction*>(value);
+            auto found = analysis.getLiveRanges().find(definition);
+            if (found == analysis.getLiveRanges().end()) continue;
+            assert(found->second.start <= position && found->second.end >= position);
+        }
+        ++position;
+    }
+
     for (auto& block : function.getBasicBlocks()) for (auto& instruction : block->getInstructions())
         for (auto* value : values) {
             assert(analysis.isLiveBefore(instruction.get(), value) == before[instruction.get()].count(value));
             assert(analysis.isLiveAfter(instruction.get(), value) == after[instruction.get()].count(value));
+            assert(emission.isLiveBefore(instruction.get(), value) == before[instruction.get()].count(value));
+            assert(emission.isLiveAfter(instruction.get(), value) == after[instruction.get()].count(value));
         }
 }
 
 int main() {
+    {
+        // A rejected prefix call stays rejected when a later returning leaf
+        // expands. Compare the result with a fresh, uncached cost query.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("inline_rejections", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* type = context->getIntegerType(64);
+        auto* leaf = builder.createFunction("leaf", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", leaf));
+        builder.createRet(context->getConstantInt(type, 42));
+        auto* costly = builder.createFunction("costly", type, {type});
+        builder.setInsertPoint(builder.createBasicBlock("entry", costly));
+        ir::Value* value = costly->getParameters().front().get();
+        for (int i = 1; i <= 14; ++i) value = builder.createAdd(value, context->getConstantInt(type, i));
+        builder.createRet(value);
+        auto* caller = builder.createFunction("caller", type, {type});
+        builder.setInsertPoint(builder.createBasicBlock("entry", caller));
+        auto* rejected = builder.createCall(costly, {caller->getParameters().front().get()}, type);
+        builder.createCall(leaf, {}, type); builder.createRet(rejected);
+        transforms::CFGBuilder::run(*caller);
+        transforms::FunctionInliner inliner;
+        transforms::InlineCost before;
+        assert(inliner.canInline(costly, caller));
+        assert(!inliner.shouldInline(rejected, costly, caller, before));
+        inliner.runOnModule(module);
+        size_t remaining = 0;
+        for (auto& block : caller->getBasicBlocks())
+            for (auto& instruction : block->getInstructions())
+                if (instruction->getOpcode() == ir::Instruction::Call) {
+                    assert(instruction.get() == rejected); ++remaining;
+                }
+        transforms::InlineCost after;
+        assert(remaining == 1 && !inliner.shouldInline(rejected, costly, caller, after));
+        assert(before.calculateCost() == after.calculateCost());
+        assert(before.calculateBenefit() == after.calculateBenefit());
+    }
+    {
+        // Successive returning inlines subdivide a caller cycle. Existing
+        // blocks keep their cycle membership; both leaf calls remain legal.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("inline_cycle_expansion", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* type = context->getIntegerType(64);
+        auto* leaf = builder.createFunction("leaf", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", leaf));
+        builder.createRet(context->getConstantInt(type, 42));
+        auto* caller = builder.createFunction("caller", type);
+        auto* entry = builder.createBasicBlock("entry", caller);
+        auto* loop = builder.createBasicBlock("loop", caller);
+        auto* exit = builder.createBasicBlock("exit", caller);
+        builder.setInsertPoint(entry);
+        auto* condition = builder.createLoadl(builder.createAlloc(context->getConstantInt(type, 8), type));
+        builder.createJmp(loop);
+        builder.setInsertPoint(loop);
+        auto* first = builder.createCall(leaf, {}, type);
+        auto* second = builder.createCall(leaf, {}, type);
+        auto* result = builder.createAdd(first, second);
+        builder.createJnz(condition, loop, exit);
+        builder.setInsertPoint(exit); builder.createRet(result);
+        transforms::CFGBuilder::run(*caller);
+        transforms::FunctionInliner inliner;
+        transforms::InlineCost originalCost;
+        assert(inliner.shouldInline(first, leaf, caller, originalCost));
+        assert(originalCost.callerLoopDepth == 1);
+        inliner.runOnModule(module);
+        size_t calls = 0;
+        for (auto& block : caller->getBasicBlocks())
+            for (auto& instruction : block->getInstructions())
+                calls += instruction->getOpcode() == ir::Instruction::Call;
+        assert(calls == 0);
+        // Independently walk the resulting graph to the original loop block.
+        std::set<ir::BasicBlock*> visited;
+        std::vector<ir::BasicBlock*> pending(loop->getSuccessors().begin(), loop->getSuccessors().end());
+        bool reachesOriginal = false;
+        while (!pending.empty()) {
+            auto* block = pending.back(); pending.pop_back();
+            if (block == loop) { reachesOriginal = true; break; }
+            if (!visited.insert(block).second) continue;
+            for (auto* next : block->getSuccessors()) pending.push_back(next);
+        }
+        assert(reachesOriginal);
+        check_liveness_reference(*caller);
+    }
+    {
+        // Exercise several bitmap words, holes, dense live sets, and a call
+        // whose clobber set must retain every live scalar.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("snapshot_words", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* type = context->getIntegerType(64);
+        auto* function = builder.createFunction("snapshots", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", function));
+        auto* address = builder.createAlloc(context->getConstantInt(type, 8), type);
+        std::vector<ir::Instruction*> values;
+        for (int i = 0; i < 160; ++i) {
+            values.push_back(builder.createLoadl(address));
+            builder.createAdd(values.back(), context->getConstantInt(type, 1)); // Dead index creates holes.
+        }
+        builder.createExternCall("opaque", {}, context->getVoidType());
+        ir::Value* sum = context->getConstantInt(type, 0);
+        for (auto* value : values) sum = builder.createAdd(sum, value);
+        builder.createRet(sum);
+        check_liveness_reference(*function);
+        transforms::LivenessAnalysis analysis; analysis.run(*function);
+        auto across = analysis.valuesLiveAcrossCalls();
+        for (auto* value : values) assert(across.count(value));
+    }
+    {
+        // Inlining a leaf mutates caller, but must not make a recursive
+        // candidate eligible or carry cached eligibility into another pass.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("inline_eligibility", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* type = context->getIntegerType(64);
+        auto* leaf = builder.createFunction("leaf", type);
+        auto* caller = builder.createFunction("caller", type);
+        auto* recursive = builder.createFunction("recursive", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", leaf));
+        builder.createRet(context->getConstantInt(type, 42));
+        builder.setInsertPoint(builder.createBasicBlock("entry", caller));
+        builder.createCall(leaf, {}, type);
+        auto* cycleCall = builder.createCall(recursive, {}, type);
+        builder.createRet(cycleCall);
+        builder.setInsertPoint(builder.createBasicBlock("entry", recursive));
+        builder.createRet(builder.createCall(caller, {}, type));
+        transforms::FunctionInliner inliner;
+        assert(inliner.canInline(leaf, caller));
+        assert(!inliner.canInline(recursive, caller));
+        inliner.runOnModule(module);
+        assert(!inliner.canInline(recursive, caller));
+        size_t calls = 0;
+        for (auto& block : caller->getBasicBlocks())
+            for (auto& instruction : block->getInstructions())
+                if (instruction->getOpcode() == ir::Instruction::Call) {
+                    ++calls;
+                    assert(instruction->getOperands()[0]->get() == recursive);
+                }
+        assert(calls == 1);
+        inliner.runOnModule(module);
+        assert(!inliner.canInline(recursive, caller));
+    }
+    {
+        // Large joins and duplicate conditional targets must retain the exact
+        // predecessor order, without duplicates across repeated rebuilding.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("cfg_join", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("join", context->getIntegerType(64));
+        std::vector<ir::BasicBlock*> branches;
+        for (int i = 0; i < 2048; ++i)
+            branches.push_back(builder.createBasicBlock("branch" + std::to_string(i), function));
+        auto* exit = builder.createBasicBlock("exit", function);
+        builder.setInsertPoint(branches.front());
+        auto* condition = builder.createLoadl(builder.createAlloc(context->getConstantInt(context->getIntegerType(64), 8), context->getIntegerType(64)));
+        for (size_t i = 0; i < branches.size(); ++i) {
+            builder.setInsertPoint(branches[i]);
+            builder.createJnz(condition, i + 1 < branches.size() ? branches[i + 1] : exit, exit);
+        }
+        builder.setInsertPoint(exit); builder.createRet(condition);
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            transforms::CFGBuilder::run(*function);
+            assert(exit->getPredecessors() == branches);
+            for (size_t i = 0; i < branches.size(); ++i) {
+                std::vector<ir::BasicBlock*> incoming;
+                if (i) incoming.push_back(branches[i - 1]);
+                assert(branches[i]->getPredecessors() == incoming);
+                std::vector<ir::BasicBlock*> outgoing;
+                if (i + 1 < branches.size()) outgoing.push_back(branches[i + 1]);
+                outgoing.push_back(exit);
+                assert(branches[i]->getSuccessors() == outgoing);
+            }
+        }
+    }
+    {
+        // Object-only emission must retain machine code and the default API's
+        // assembly deliverable must remain available.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("object_only", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("answer", context->getIntegerType(64));
+        builder.setInsertPoint(builder.createBasicBlock("entry", function));
+        builder.createRet(context->getConstantInt(context->getIntegerType(64), 42));
+        const std::string normalPath = "build/tests/object_with_assembly.o";
+        const std::string directPath = "build/tests/object_without_assembly.o";
+        std::remove((directPath + ".s").c_str());
+        codegen::CodeGen normal(module, target::TargetResolver::resolve(target::TargetDescriptor{target::Arch::X64, target::OS::Linux}));
+        codegen::CodeGen direct(module, target::TargetResolver::resolve(target::TargetDescriptor{target::Arch::X64, target::OS::Linux}));
+        auto withAssembly = normal.compileToObject(normalPath, false, true, false);
+        auto withoutAssembly = direct.compileToObject(directPath, false, true, false, false);
+        assert(withAssembly.success && withoutAssembly.success);
+        assert(!withAssembly.assemblyPath.empty() && withoutAssembly.assemblyPath.empty());
+        std::ifstream first(normalPath, std::ios::binary), second(directPath, std::ios::binary);
+        std::string firstBytes((std::istreambuf_iterator<char>(first)), {});
+        std::string secondBytes((std::istreambuf_iterator<char>(second)), {});
+        assert(!firstBytes.empty() && firstBytes == secondBytes);
+        std::ifstream unexpected(directPath + ".s"); assert(!unexpected.good());
+        codegen::CodeGen checked(module, target::TargetResolver::resolve(target::TargetDescriptor{target::Arch::X64, target::OS::Linux}));
+        const std::string checkedPath = "build/tests/object_checked.o";
+        auto validationRequested = checked.compileToObject(checkedPath, true, true, false, false);
+        assert(!validationRequested.assemblyPath.empty());
+        std::ifstream validationAssembly(validationRequested.assemblyPath);
+        assert(validationAssembly.good());
+        std::remove(checkedPath.c_str());
+        std::remove(validationRequested.assemblyPath.c_str());
+        std::remove(normalPath.c_str()); std::remove(directPath.c_str());
+        std::remove(withAssembly.assemblyPath.c_str());
+    }
+    {
+        // Compare cached cycle decisions with the original fresh DFS
+        // queries, including self loops, disconnected cycles, and diamonds.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("inline_cycles", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* type = context->getIntegerType(64);
+        auto* zero = context->getConstantInt(type, 0);
+        auto* eight = context->getConstantInt(type, 8);
+        auto* leaf = builder.createFunction("effectful_leaf", type);
+        builder.setInsertPoint(builder.createBasicBlock("entry", leaf));
+        auto* storage = builder.createAlloc(eight, type);
+        builder.createStore(zero, storage); builder.createRet(zero);
+        transforms::FunctionInliner inliner;
+        std::map<ir::Function*, size_t> expectedCalls;
+        for (int shape = 0; shape < 4; ++shape) {
+            auto* function = builder.createFunction("caller" + std::to_string(shape), type);
+            auto* entry = builder.createBasicBlock("entry", function);
+            auto* callBlock = builder.createBasicBlock("call", function);
+            auto* other = builder.createBasicBlock("other", function);
+            auto* exit = builder.createBasicBlock("exit", function);
+            builder.setInsertPoint(entry);
+            auto* condition = builder.createLoadl(builder.createAlloc(eight, type));
+            if (shape == 2) builder.createJmp(exit); // Disconnected cycle.
+            else if (shape == 3) builder.createJnz(condition, callBlock, other);
+            else builder.createJmp(callBlock);
+            builder.setInsertPoint(callBlock);
+            auto* call = builder.createCall(leaf, {}, type);
+            if (shape == 0 || shape == 2) builder.createJnz(condition, callBlock, exit);
+            else if (shape == 1) builder.createJmp(other);
+            else builder.createJmp(exit);
+            builder.setInsertPoint(other);
+            builder.createJmp(shape == 1 ? callBlock : exit);
+            builder.setInsertPoint(exit); builder.createRet(zero);
+            transforms::CFGBuilder::run(*function);
+            std::string reason;
+            transforms::InlineCost cost;
+            bool legal = inliner.isLoopCallInlineLegal(leaf, function, callBlock, reason);
+            assert(legal == (shape == 3));
+            expectedCalls[function] = legal && inliner.shouldInline(call, leaf, function, cost) ? 0 : 1;
+        }
+        inliner.runOnModule(module);
+        for (auto [function, expected] : expectedCalls) {
+            size_t actual = 0;
+            for (auto& block : function->getBasicBlocks())
+                for (auto& instruction : block->getInstructions())
+                    if (instruction->getOpcode() == ir::Instruction::Call) ++actual;
+            assert(actual == expected);
+        }
+        // Reusing the pass must not retain identities from a prior run.
+        inliner.runOnModule(module);
+    }
+    {
+        // A merged loop backedge must update both CFG edges and PHI origins.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("merge_loop", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("loop", context->getIntegerType(64));
+        auto* entry = builder.createBasicBlock("entry", function);
+        auto* head = builder.createBasicBlock("head", function);
+        auto* body = builder.createBasicBlock("body", function);
+        auto* back = builder.createBasicBlock("back", function);
+        auto* exit = builder.createBasicBlock("exit", function);
+        auto* zero = context->getConstantInt(context->getIntegerType(64), 0);
+        auto* one = context->getConstantInt(context->getIntegerType(64), 1);
+        builder.setInsertPoint(entry); builder.createJmp(head);
+        builder.setInsertPoint(head);
+        auto* phi = builder.createPhi(context->getIntegerType(64), 2, nullptr);
+        phi->addIncoming(zero, entry);
+        builder.createJnz(phi, body, exit);
+        builder.setInsertPoint(body); auto* next = builder.createAdd(phi, one);
+        builder.createJmp(back);
+        builder.setInsertPoint(back); builder.createJmp(head);
+        phi->addIncoming(next, back);
+        builder.setInsertPoint(exit); builder.createRet(phi);
+        transforms::ControlFlowSimplification pass; pass.run(*function);
+        assert(function->getBasicBlocks().size() == 4);
+        assert(phi->getIncomingValueForBlock(body) == next);
+        std::map<ir::BasicBlock*, std::pair<std::set<ir::BasicBlock*>, std::set<ir::BasicBlock*>>> edges;
+        for (auto& block : function->getBasicBlocks()) {
+            edges[block.get()] = {
+                {block->getPredecessors().begin(), block->getPredecessors().end()},
+                {block->getSuccessors().begin(), block->getSuccessors().end()}};
+        }
+        transforms::CFGBuilder::run(*function);
+        for (auto& block : function->getBasicBlocks()) {
+            assert(edges.at(block.get()).first == std::set<ir::BasicBlock*>(block->getPredecessors().begin(), block->getPredecessors().end()));
+            assert(edges.at(block.get()).second == std::set<ir::BasicBlock*>(block->getSuccessors().begin(), block->getSuccessors().end()));
+        }
+    }
+    {
+        // Merging a long chain must preserve its return operand and CFG.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("merge_chain", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("chain", context->getIntegerType(64));
+        std::vector<ir::BasicBlock*> blocks;
+        for (int i = 0; i < 1024; ++i)
+            blocks.push_back(builder.createBasicBlock("block" + std::to_string(i), function));
+        auto* result = context->getConstantInt(context->getIntegerType(64), 42);
+        for (size_t i = 0; i < blocks.size(); ++i) {
+            builder.setInsertPoint(blocks[i]);
+            if (i + 1 < blocks.size()) builder.createJmp(blocks[i + 1]);
+            else builder.createRet(result);
+        }
+        transforms::ControlFlowSimplification pass; pass.run(*function);
+        assert(function->getBasicBlocks().size() == 1);
+        auto* entry = function->getBasicBlocks().front().get();
+        assert(entry->getInstructions().size() == 1);
+        assert(entry->getInstructions().front()->getOpcode() == ir::Instruction::Ret);
+        assert(entry->getInstructions().front()->getOperands()[0]->get() == result);
+        assert(entry->getSuccessors().empty() && entry->getPredecessors().empty());
+        transforms::CFGBuilder::run(*function);
+        assert(entry->getSuccessors().empty() && entry->getPredecessors().empty());
+    }
+    {
+        // GVN may reuse ancestors, but never a sibling's non-dominating value.
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("gvn_scope", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("gvn_scope", context->getIntegerType(64));
+        auto* entry = builder.createBasicBlock("entry", function);
+        auto* left = builder.createBasicBlock("left", function);
+        auto* right = builder.createBasicBlock("right", function);
+        builder.setInsertPoint(entry);
+        auto* address = builder.createAlloc(context->getConstantInt(context->getIntegerType(64), 8), context->getIntegerType(64));
+        auto* input = builder.createLoadl(address);
+        auto* seven = context->getConstantInt(context->getIntegerType(64), 7);
+        auto* nine = context->getConstantInt(context->getIntegerType(64), 9);
+        auto* shared = builder.createAdd(input, seven); shared->setName("common");
+        builder.createJnz(input, left, right);
+        for (auto* block : {left, right}) {
+            builder.setInsertPoint(block);
+            auto* local = builder.createMul(input, nine);
+            local->setName(block == left ? "left_only" : "right_only");
+            auto* duplicate = builder.createAdd(input, seven);
+            duplicate->setName(block == left ? "left_common" : "right_common");
+            auto* result = builder.createAdd(local, duplicate);
+            result->setName(block == left ? "left_result" : "right_result");
+            builder.createRet(result);
+        }
+        transforms::GVN pass; pass.run(*function);
+        ir::Instruction* common = nullptr;
+        int siblingExpressions = 0, ancestorDuplicates = 0;
+        for (auto& block : function->getBasicBlocks())
+            for (auto& instruction : block->getInstructions()) {
+                const auto& name = instruction->getName();
+                if (name == "common") common = instruction.get();
+                if (name == "left_only" || name == "right_only") ++siblingExpressions;
+                if (name == "left_common" || name == "right_common") ++ancestorDuplicates;
+                if (name == "left_result" || name == "right_result") {
+                    assert(common);
+                    assert(instruction->getOperands()[1]->get() == common);
+                    auto* local = dynamic_cast<ir::Instruction*>(instruction->getOperands()[0]->get());
+                    assert(local && local->getParent() == block.get());
+                }
+            }
+        assert(siblingExpressions == 2 && ancestorDuplicates == 0);
+    }
+    {
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("bulk_removal", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("remove", context->getIntegerType(64));
+        auto* first = builder.createBasicBlock("first", function);
+        auto* second = builder.createBasicBlock("second", function);
+        auto* value = context->getConstantInt(context->getIntegerType(64), 7);
+        std::vector<ir::Instruction*> removed;
+        for (auto* block : {first, second}) {
+            builder.setInsertPoint(block);
+            for (int i = 0; i < 1024; ++i) removed.push_back(builder.createCopy(value));
+            builder.createRet(value);
+        }
+        first->removeInstructions(removed);
+        second->removeInstructions(removed); // Includes expired first-block identities.
+        for (auto* block : {first, second}) {
+            assert(block->getInstructions().size() == 1);
+            assert(block->getInstructions().front()->getOpcode() == ir::Instruction::Ret);
+        }
+        assert(value->getUseList().size() == 2);
+    }
+    {
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("memory_schedule", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("ordered", context->getIntegerType(64));
+        auto* entry = builder.createBasicBlock("entry", function);
+        builder.setInsertPoint(entry);
+        auto* address = builder.createAlloc(context->getConstantInt(context->getIntegerType(64), 8), context->getIntegerType(64));
+        std::vector<ir::Instruction*> memory;
+        memory.push_back(address);
+        for (int i = 0; i < 4096; ++i) {
+            auto* value = builder.createLoadl(address);
+            memory.push_back(value);
+            auto* increment = builder.createAdd(value, context->getConstantInt(context->getIntegerType(64), 1));
+            memory.push_back(builder.createStore(increment, address));
+        }
+        builder.createRet(context->getConstantInt(context->getIntegerType(64), 0));
+        transforms::InstructionScheduler::run(*function);
+        size_t next = 0;
+        for (auto& instruction : entry->getInstructions()) {
+            if (next < memory.size() && instruction.get() == memory[next]) ++next;
+        }
+        assert(next == memory.size());
+        assert(entry->getInstructions().back()->getOpcode() == ir::Instruction::Ret);
+    }
+    // Comparison results are i32; signed operands must keep their i64 width.
+    for (bool useSccp : {false, true}) {
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("comparison_width", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* function = builder.createFunction("compare", context->getIntegerType(32));
+        auto* entry = builder.createBasicBlock("entry", function);
+        builder.setInsertPoint(entry);
+        auto* comparison = builder.createCsgt(
+            context->getConstantInt(context->getIntegerType(64), 9223372036854775807LL),
+            context->getConstantInt(context->getIntegerType(64), 123456789));
+        auto* result = builder.createRet(comparison);
+        if (useSccp) { transforms::SCCP pass; pass.run(*function); }
+        else { transforms::GVN pass; pass.run(*function); }
+        auto* folded = dynamic_cast<ir::ConstantInt*>(result->getOperands().front()->get());
+        assert(folded && folded->getValue() == 1);
+    }
+    {
+        // Removing a use must unlink its exact node, even with repeated users.
+        auto context = std::make_shared<ir::IRContext>();
+        auto* first = context->getConstantInt(context->getIntegerType(64), 901);
+        auto* second = context->getConstantInt(context->getIntegerType(64), 902);
+        std::vector<std::unique_ptr<ir::Use>> uses;
+        for (int i = 0; i < 4096; ++i) uses.push_back(std::make_unique<ir::Use>(nullptr, first));
+        assert(first->getUseList().size() == 4096);
+        uses[2048]->set(second);
+        uses[2048]->set(second);
+        assert(first->getUseList().size() == 4095);
+        assert(second->getUseList().size() == 1);
+        first->replaceAllUsesWith(second);
+        assert(first->use_empty());
+        assert(second->getUseList().size() == 4096);
+        uses.erase(uses.begin() + 1024);
+        assert(second->getUseList().size() == 4095);
+        uses.clear();
+        assert(second->use_empty());
+    }
+    {
+        auto context = std::make_shared<ir::IRContext>();
+        ir::Module module("call_result_types", context);
+        ir::IRBuilder builder(context); builder.setModule(&module);
+        auto* caller = builder.createFunction("caller", context->getIntegerType(64));
+        builder.setInsertPoint(builder.createBasicBlock("entry", caller));
+        auto* floating = builder.createFunction("floating", context->getDoubleType(), {context->getDoubleType()});
+        auto* integer = builder.createFunction("integer", context->getIntegerType(64));
+        auto* procedure = builder.createFunction("procedure", context->getVoidType());
+        assert(floating->getReturnType() == context->getDoubleType());
+        assert(builder.createCall(floating, {context->getConstantFP(context->getDoubleType(), 2.5)})->getType() == context->getDoubleType());
+        assert(builder.createCall(integer, {})->getType() == context->getIntegerType(64));
+        assert(builder.createCall(procedure, {})->getType() == context->getVoidType());
+        ir::Function scalarDeclaration(context->getIntegerType(64), "external", &module);
+        assert(builder.createCall(&scalarDeclaration, {})->getType() == context->getIntegerType(64));
+        builder.createRet(context->getConstantInt(context->getIntegerType(64), 0));
+    }
     {
         auto context = std::make_shared<ir::IRContext>();
         ir::Module module("unreachable_dominance", context);

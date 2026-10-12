@@ -2,6 +2,7 @@
 #include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
 #include "ir/Use.h"
+#include <algorithm>
 
 namespace transforms {
 
@@ -11,6 +12,15 @@ void CFGBuilder::run(ir::Function& func) {
         bb->clearPredecessors();
         bb->clearSuccessors();
     }
+    // The graph starts empty. Deduplicate each source's (at most two)
+    // outgoing edges, then append its predecessor exactly once. Searching
+    // an ever-growing incoming list makes large joins quadratic.
+    auto connect = [](ir::BasicBlock* source, ir::BasicBlock* target) {
+        const auto& outgoing = source->getSuccessors();
+        if (std::find(outgoing.begin(), outgoing.end(), target) != outgoing.end()) return;
+        source->addSuccessor(target);
+        target->predecessors.push_back(source);
+    };
     for (auto it = blocks.begin(); it != blocks.end(); ++it) {
         ir::BasicBlock* current_bb = it->get();
         auto next_it = std::next(it);
@@ -18,8 +28,7 @@ void CFGBuilder::run(ir::Function& func) {
 
         if (current_bb->getInstructions().empty()) {
             if (next_bb) {
-                current_bb->addSuccessor(next_bb);
-                next_bb->addPredecessor(current_bb);
+                connect(current_bb, next_bb);
             }
             continue;
         }
@@ -45,40 +54,34 @@ void CFGBuilder::run(ir::Function& func) {
             if (op == ir::Instruction::Jmp) {
                 if (!terminator->getOperands().empty() && terminator->getOperands()[0]) {
                     if (auto* target = dynamic_cast<ir::BasicBlock*>(terminator->getOperands()[0]->get())) {
-                        current_bb->addSuccessor(target);
-                        target->addPredecessor(current_bb);
+                        connect(current_bb, target);
                     }
                 }
             } else if (op == ir::Instruction::Jnz) {
                 if (terminator->getOperands().size() > 1 && terminator->getOperands()[1]) {
                     if (auto* targetTrue = dynamic_cast<ir::BasicBlock*>(terminator->getOperands()[1]->get())) {
-                        current_bb->addSuccessor(targetTrue);
-                        targetTrue->addPredecessor(current_bb);
+                        connect(current_bb, targetTrue);
                     }
                 }
                 if (terminator->getOperands().size() > 2 && terminator->getOperands()[2]) {
                     if (auto* targetFalse = dynamic_cast<ir::BasicBlock*>(terminator->getOperands()[2]->get())) {
-                        current_bb->addSuccessor(targetFalse);
-                        targetFalse->addPredecessor(current_bb);
+                        connect(current_bb, targetFalse);
                     }
                 }
             } else if (op == ir::Instruction::Br) {
                 if (terminator->getOperands().size() == 1 && terminator->getOperands()[0]) {
                     if (auto* target = dynamic_cast<ir::BasicBlock*>(terminator->getOperands()[0]->get())) {
-                        current_bb->addSuccessor(target);
-                        target->addPredecessor(current_bb);
+                        connect(current_bb, target);
                     }
                 } else if (terminator->getOperands().size() >= 3) {
                     if (terminator->getOperands()[1]) {
                         if (auto* targetTrue = dynamic_cast<ir::BasicBlock*>(terminator->getOperands()[1]->get())) {
-                            current_bb->addSuccessor(targetTrue);
-                            targetTrue->addPredecessor(current_bb);
+                            connect(current_bb, targetTrue);
                         }
                     }
                     if (terminator->getOperands()[2]) {
                         if (auto* targetFalse = dynamic_cast<ir::BasicBlock*>(terminator->getOperands()[2]->get())) {
-                            current_bb->addSuccessor(targetFalse);
-                            targetFalse->addPredecessor(current_bb);
+                            connect(current_bb, targetFalse);
                         }
                     }
                 }
@@ -86,8 +89,7 @@ void CFGBuilder::run(ir::Function& func) {
         }
 
         if (!has_explicit_terminator && next_bb) {
-            current_bb->addSuccessor(next_bb);
-            next_bb->addPredecessor(current_bb);
+            connect(current_bb, next_bb);
         }
     }
 }

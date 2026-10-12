@@ -13,6 +13,48 @@
 
 namespace transforms {
 
+LivenessAnalysis::LiveSnapshot::LiveSnapshot(const LiveBits& bits) {
+    chunks.reserve(std::count_if(bits.begin(), bits.end(), [](uint64_t word) { return word != 0; }));
+    for (size_t word = 0; word < bits.size(); ++word)
+        if (bits[word]) chunks.emplace_back(word, bits[word]);
+}
+
+bool LivenessAnalysis::LiveSnapshot::contains(size_t index) const {
+    const size_t word = index / 64;
+    auto found = std::lower_bound(chunks.begin(), chunks.end(), word,
+        [](const auto& chunk, size_t wanted) { return chunk.first < wanted; });
+    return found != chunks.end() && found->first == word &&
+        (found->second & (uint64_t(1) << (index % 64)));
+}
+
+
+void LivenessAnalysis::runForOperandLiveness(ir::Function& func) {
+    liveRanges.clear();
+    CFGBuilder::run(func);
+    computePerInstructionCFGLiveness(func);
+}
+
+std::set<const ir::Value*> LivenessAnalysis::valuesLiveAcrossCalls() const {
+    LiveBits across((indexedValues.size() + 63) / 64, 0);
+    for (const auto& [instruction, before] : liveBeforeMap) {
+        const auto opcode = instruction->getOpcode();
+        if (opcode != ir::Instruction::Call && opcode != ir::Instruction::ExternCall &&
+            opcode != ir::Instruction::Syscall) continue;
+        const auto& after = liveAfterMap.at(instruction);
+        size_t left = 0, right = 0;
+        while (left < before.chunks.size() && right < after.chunks.size()) {
+            const auto& a = before.chunks[left]; const auto& b = after.chunks[right];
+            if (a.first < b.first) ++left;
+            else if (b.first < a.first) ++right;
+            else { across[a.first] |= a.second & b.second; ++left; ++right; }
+        }
+    }
+    std::set<const ir::Value*> values;
+    for (size_t index = 0; index < indexedValues.size(); ++index)
+        if (across[index / 64] & (uint64_t(1) << (index % 64))) values.insert(indexedValues[index]);
+    return values;
+}
+
 void LivenessAnalysis::run(ir::Function& func) {
     liveRanges.clear();
     CFGBuilder::run(func);
@@ -131,30 +173,44 @@ void LivenessAnalysis::run(ir::Function& func) {
     // a late-emitted branch even when its last explicit use occurs earlier
     // in the layout. Include the CFG solution in the bounding interval, so
     // spill-slot reuse cannot overwrite values needed after that branch.
+    // Resolve SSA identities once, then accumulate exact layout bounds in
+    // indexed storage. Repeated map lookups and RTTI for every live member
+    // are unnecessary; the CFG liveness solution remains unchanged.
+    std::vector<int> firstLive(indexedValues.size(), INT_MAX);
+    std::vector<int> lastLive(indexedValues.size(), -1);
     for (const auto& [instruction, number] : instrNumbering) {
-        auto extend = [&](const LiveBits& live) {
-            for (size_t word = 0; word < live.size(); ++word) {
-                auto members = live[word];
-                while (members) {
-                    // Fyra's standalone build remains C++17. The word is nonzero.
-                    unsigned bit = 0;
+        const auto& before = liveBeforeMap.at(instruction);
+        const auto& after = liveAfterMap.at(instruction);
+        size_t left = 0, right = 0;
+        while (left < before.chunks.size() || right < after.chunks.size()) {
+            const size_t beforeWord = left < before.chunks.size() ? before.chunks[left].first : SIZE_MAX;
+            const size_t afterWord = right < after.chunks.size() ? after.chunks[right].first : SIZE_MAX;
+            const size_t word = std::min(beforeWord, afterWord);
+            uint64_t members = 0;
+            if (beforeWord == word) members |= before.chunks[left++].second;
+            if (afterWord == word) members |= after.chunks[right++].second;
+            while (members) {
+                unsigned bit = 0;
 #if defined(__GNUC__) || defined(__clang__)
-                    bit = static_cast<unsigned>(__builtin_ctzll(members));
+                bit = static_cast<unsigned>(__builtin_ctzll(members));
 #else
-                    auto shifted = members;
-                    while ((shifted & 1) == 0) { ++bit; shifted >>= 1; }
+                auto shifted = members;
+                while ((shifted & 1) == 0) { ++bit; shifted >>= 1; }
 #endif
-                    members &= members - 1;
-                    auto* definition = dynamic_cast<const ir::Instruction*>(indexedValues[word * 64 + bit]);
-                    auto range = liveRanges.find(definition);
-                    if (range == liveRanges.end()) continue;
-                    range->second.start = std::min(range->second.start, number);
-                    range->second.end = std::max(range->second.end, number);
-                }
+                members &= members - 1;
+                const size_t index = word * 64 + bit;
+                firstLive[index] = std::min(firstLive[index], number);
+                lastLive[index] = std::max(lastLive[index], number);
             }
-        };
-        extend(liveBeforeMap[instruction]);
-        extend(liveAfterMap[instruction]);
+        }
+    }
+    for (size_t index = 0; index < indexedValues.size(); ++index) {
+        if (lastLive[index] < 0) continue;
+        auto* definition = dynamic_cast<const ir::Instruction*>(indexedValues[index]);
+        auto range = liveRanges.find(definition);
+        if (range == liveRanges.end()) continue;
+        range->second.start = std::min(range->second.start, firstLive[index]);
+        range->second.end = std::max(range->second.end, lastLive[index]);
     }
 }
 
@@ -163,7 +219,7 @@ bool LivenessAnalysis::isLiveAfter(const ir::Instruction* instruction, const ir:
     auto it = liveAfterMap.find(instruction);
     if (it == liveAfterMap.end()) return false;
     auto index = valueIndices.find(value);
-    return index != valueIndices.end() && (it->second[index->second / 64] & (uint64_t(1) << (index->second % 64)));
+    return index != valueIndices.end() && it->second.contains(index->second);
 }
 
 bool LivenessAnalysis::isLiveBefore(const ir::Instruction* instruction, const ir::Value* value) const {
@@ -171,7 +227,7 @@ bool LivenessAnalysis::isLiveBefore(const ir::Instruction* instruction, const ir
     auto it = liveBeforeMap.find(instruction);
     if (it == liveBeforeMap.end()) return false;
     auto index = valueIndices.find(value);
-    return index != valueIndices.end() && (it->second[index->second / 64] & (uint64_t(1) << (index->second % 64)));
+    return index != valueIndices.end() && it->second.contains(index->second);
 }
 
 bool LivenessAnalysis::isLastUseOfOperand(const ir::Instruction* user, const ir::Use* use) const {
@@ -262,8 +318,8 @@ void LivenessAnalysis::computePerInstructionCFGLiveness(ir::Function& func) {
     for (auto& block : func.getBasicBlocks()) {
         auto live = outgoing.at(block.get());
         for (auto it = block->getInstructions().rbegin(); it != block->getInstructions().rend(); ++it) {
-            auto* instruction = it->get(); liveAfterMap[instruction] = live;
-            transfer(live, instruction); liveBeforeMap[instruction] = live;
+            auto* instruction = it->get(); liveAfterMap[instruction] = LiveSnapshot(live);
+            transfer(live, instruction); liveBeforeMap[instruction] = LiveSnapshot(live);
         }
     }
 }

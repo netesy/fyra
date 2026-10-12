@@ -78,7 +78,7 @@ public:
     };
 
     // Main compilation interface
-    CompilationResult compileToObject(const std::string& outputPrefix, bool validateASM = true, bool generateObject = true, bool generateExecutable = false);
+    CompilationResult compileToObject(const std::string& outputPrefix, bool validateASM = true, bool generateObject = true, bool generateExecutable = false, bool generateAssembly = true);
     CompilationResult compileToAssembly(const std::string& outputPath, bool validateASM = true);
 
     // Access to assembler and output stream

@@ -5,6 +5,7 @@
 #include "ir/Function.h"
 #include "ir/Instruction.h"
 #include "ir/BasicBlock.h"
+#include <unordered_map>
 
 namespace transforms {
 
@@ -36,6 +37,9 @@ public:
 
 private:
     size_t threshold;
+    // A run-local cache, valid only until the next CFG mutation.
+    std::unordered_map<ir::BasicBlock*, bool>* cycleCache = nullptr;
+    bool blockIsInCycle(ir::BasicBlock* block) const;
     bool exposesScalarEvolutionOpportunity(const ir::Instruction* callInst, const ir::Function* callee) const;
     bool exposesVectorizationOpportunity(const ir::Instruction* callInst, const ir::Function* callee) const;
 };

@@ -60,8 +60,10 @@ static ir::Constant* foldScalarInstruction(
     uint64_t width = getBitWidth(resTy);
     uint64_t u1 = opCIs[0]->getValue();
     uint64_t u2 = (opCIs.size() > 1 && opCIs[1]) ? opCIs[1]->getValue() : 0;
-    int64_t s1 = signExtend(u1, width);
-    int64_t s2 = signExtend(u2, width);
+    // Comparisons produce a boolean but interpret their operands at operand width.
+    const uint64_t operandWidth = getBitWidth(opCIs[0]->getType());
+    int64_t s1 = signExtend(u1, operandWidth);
+    int64_t s2 = signExtend(u2, operandWidth);
     uint64_t resU = 0;
     bool evalSuccess = true;
 
@@ -141,8 +143,10 @@ static bool computeScalarOpValueFast(
 
     uint64_t u1 = opCIs[0]->getValue();
     uint64_t u2 = (opCIs.size() > 1 && opCIs[1]) ? opCIs[1]->getValue() : 0;
-    int64_t s1 = signExtend(u1, width);
-    int64_t s2 = signExtend(u2, width);
+    // Comparisons produce a boolean but interpret their operands at operand width.
+    const uint64_t operandWidth = getBitWidth(opCIs[0]->getType());
+    int64_t s1 = signExtend(u1, operandWidth);
+    int64_t s2 = signExtend(u2, operandWidth);
     bool evalSuccess = true;
 
     switch (op) {

@@ -35,6 +35,7 @@
 #include "target/core/TargetInfo.h"
 #include <iostream>
 #include <map>
+#include <unordered_map>
 
 namespace fyra {
 
@@ -46,7 +47,15 @@ std::unique_ptr<ir::Module> cloneModule(const ir::Module& srcModule) {
         newModule->addExternDecl(pair.first, pair.second);
     }
 
-    std::map<const ir::Value*, ir::Value*> valueMap;
+    // Identity lookup has no traversal-order semantics. Reserve for all
+    // cloned definitions so large modules avoid tree walks and rehashing.
+    std::unordered_map<const ir::Value*, ir::Value*> valueMap;
+    size_t definitionCount = srcModule.getGlobalVariables().size();
+    for (const auto& function : srcModule.getFunctions()) {
+        definitionCount += 1 + function->getParameters().size() + function->getBasicBlocks().size();
+        for (const auto& block : function->getBasicBlocks()) definitionCount += block->getInstructions().size();
+    }
+    valueMap.reserve(definitionCount);
 
     // 1. Clone Global Variables
     for (const auto& gv : srcModule.getGlobalVariables()) {
@@ -79,7 +88,7 @@ std::unique_ptr<ir::Module> cloneModule(const ir::Module& srcModule) {
 
     // 3. Second Pass: clone instructions and populate initial operands
     for (const auto& fn : srcModule.getFunctions()) {
-        ir::Function* newFn = newModule->getFunction(fn->getName());
+        ir::Function* newFn = static_cast<ir::Function*>(valueMap.at(fn.get()));
         if (!newFn) continue;
 
         auto oldBbIt = fn->getBasicBlocks().begin();
@@ -99,15 +108,15 @@ std::unique_ptr<ir::Module> cloneModule(const ir::Module& srcModule) {
                         continue;
                     }
                     ir::Value* oldVal = opUse->get();
-                    ir::Value* newVal = (oldVal && valueMap.count(oldVal)) ? valueMap[oldVal] : oldVal;
+                    const auto mapped = valueMap.find(oldVal);
+                    ir::Value* newVal = mapped != valueMap.end() ? mapped->second : oldVal;
                     newOps.push_back(newVal);
                 }
 
                 if (auto* oldPhi = dynamic_cast<const ir::PhiNode*>(oldInst)) {
                     ir::Instruction* allocVar = nullptr;
-                    if (oldPhi->getVariable() && valueMap.count(oldPhi->getVariable())) {
-                        allocVar = dynamic_cast<ir::Instruction*>(valueMap[oldPhi->getVariable()]);
-                    }
+                    if (auto mapped = valueMap.find(oldPhi->getVariable()); mapped != valueMap.end())
+                        allocVar = dynamic_cast<ir::Instruction*>(mapped->second);
                     auto phiOwner = std::make_unique<ir::PhiNode>(oldPhi->getType(), static_cast<unsigned>(newOps.size()), allocVar, newBb);
                     for (size_t i = 0; i + 1 < newOps.size(); i += 2) {
                         auto* predBb = dynamic_cast<ir::BasicBlock*>(newOps[i]);
@@ -144,7 +153,7 @@ std::unique_ptr<ir::Module> cloneModule(const ir::Module& srcModule) {
 
     // 4. Third Pass: resolve any forward references in operands
     for (const auto& fn : srcModule.getFunctions()) {
-        ir::Function* newFn = newModule->getFunction(fn->getName());
+        ir::Function* newFn = static_cast<ir::Function*>(valueMap.at(fn.get()));
         if (!newFn) continue;
 
         auto oldBbIt = fn->getBasicBlocks().begin();
@@ -164,10 +173,9 @@ std::unique_ptr<ir::Module> cloneModule(const ir::Module& srcModule) {
                 for (size_t i = 0; i < oldInst->getOperands().size(); ++i) {
                     if (!oldInst->getOperands()[i]) continue;
                     ir::Value* oldVal = oldInst->getOperands()[i]->get();
-                    if (oldVal && valueMap.count(oldVal)) {
-                        if (i < newInst->getOperands().size() && newInst->getOperands()[i]) {
-                            newInst->getOperands()[i]->set(valueMap[oldVal]);
-                        }
+                    if (auto mapped = valueMap.find(oldVal); mapped != valueMap.end()) {
+                        if (i < newInst->getOperands().size() && newInst->getOperands()[i])
+                            newInst->getOperands()[i]->set(mapped->second);
                     }
                 }
             }

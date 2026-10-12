@@ -13,11 +13,11 @@ Value::~Value() {
 }
 
 void Value::addUse(Use& u) {
-    use_list.push_back(&u);
+    u.position = use_list.insert(use_list.end(), &u);
 }
 
 void Value::removeUse(Use& u) {
-    use_list.remove(&u);
+    use_list.erase(u.position);
 }
 
 void Value::replaceAllUsesWith(Value* newVal) {

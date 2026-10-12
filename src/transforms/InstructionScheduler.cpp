@@ -91,7 +91,7 @@ bool InstructionScheduler::scheduleBasicBlock(ir::BasicBlock& bb) {
     }
 
     // Build Def-Use & Memory dependency edges
-    std::vector<SchedNode*> memoryOps;
+    SchedNode* previousMemoryOp = nullptr;
 
     for (size_t i = 0; i < nodes.size(); ++i) {
         SchedNode* curr = nodes[i].get();
@@ -141,18 +141,15 @@ bool InstructionScheduler::scheduleBasicBlock(ir::BasicBlock& bb) {
                       opc == ir::Instruction::Opcode::VGather ||
                       opc == ir::Instruction::Opcode::VScatter);
         if (isMem) {
-            for (auto* prevMem : memoryOps) {
-                bool alreadyDep = false;
-                for (auto* p : curr->preds) {
-                    if (p == prevMem) { alreadyDep = true; break; }
-                }
-                if (!alreadyDep) {
-                    prevMem->succs.push_back(curr);
-                    curr->preds.push_back(prevMem);
-                    curr->unscheduledPreds++;
-                }
+            // Consecutive edges preserve the same total memory order through
+            // transitivity. Linking every preceding operation created a
+            // quadratic DAG and cubic predecessor searches in large blocks.
+            if (previousMemoryOp && visitedPreds.insert(previousMemoryOp).second) {
+                previousMemoryOp->succs.push_back(curr);
+                curr->preds.push_back(previousMemoryOp);
+                curr->unscheduledPreds++;
             }
-            memoryOps.push_back(curr);
+            previousMemoryOp = curr;
         }
     }
 

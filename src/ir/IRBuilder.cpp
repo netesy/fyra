@@ -787,7 +787,7 @@ Instruction* IRBuilder::createCall(Value* callee, const std::vector<Value*>& arg
     Type* returnType = retType;
     if (!returnType) {
         if (auto* fn = dynamic_cast<Function*>(callee)) {
-            returnType = fn->getType();
+            returnType = fn->getReturnType();
         } else if (auto* ft = dynamic_cast<FunctionType*>(callee->getType())) {
             returnType = ft->getReturnType();
         } else {

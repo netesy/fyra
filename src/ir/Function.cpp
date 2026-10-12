@@ -1,6 +1,7 @@
 #include "ir/Function.h"
 #include "ir/Module.h"
 #include "ir/BasicBlock.h"
+#include "ir/FunctionType.h"
 #include <iostream>
 
 namespace ir {
@@ -8,6 +9,11 @@ namespace ir {
 Function::Function(Type* ty, const std::string& name, Module* parent)
     : Value(ty), parent(parent) {
     setName(name);
+}
+
+Type* Function::getReturnType() const {
+    if (auto* signature = dynamic_cast<FunctionType*>(getType())) return signature->getReturnType();
+    return getType();
 }
 
 void Function::addBasicBlock(std::unique_ptr<BasicBlock> bb) {

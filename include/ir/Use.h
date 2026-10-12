@@ -1,6 +1,7 @@
 #pragma once
 
 #include "User.h"
+#include <list>
 
 namespace ir {
 
@@ -19,6 +20,8 @@ public:
     void setOriginalValue(Value* orig) { originalValue = orig; }
 
 private:
+    friend class Value;
+    std::list<Use*>::iterator position;
     User* user;
     Value* v;
     Value* originalValue = nullptr;

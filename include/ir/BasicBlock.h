@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 
+namespace transforms { class CFGBuilder; }
+
 namespace ir {
 
 class Function; // Forward declaration
@@ -38,6 +40,7 @@ public:
     void print(std::ostream& os) const override;
 
 private:
+    friend class transforms::CFGBuilder;
     std::list<std::unique_ptr<Instruction>> instructions;
     Function* parent;
     std::vector<BasicBlock*> predecessors;
