@@ -27,6 +27,7 @@ struct LinkedSymbol {
     uint64_t size = 0;
     bool isFunction = false;
     bool isGlobal = true;
+    bool isWeak = false;
     std::string sectionName;
 };
 

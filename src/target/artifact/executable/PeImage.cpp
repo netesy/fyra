@@ -229,15 +229,13 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
         // Evaluate relocations targeting imported data IAT slots directly
         for (const auto& fixup : image.dataImportFixups) {
             auto iatIt = symbolIatVma.find(fixup.symbolName);
-            if (iatIt != symbolIatVma.end()) {
-                uint64_t iatVma = iatIt->second;
-                auto secIt = std::find_if(image.sections.begin(), image.sections.end(), [&](const PeSection& s) { return s.name == fixup.sectionName; });
-                if (secIt != image.sections.end()) {
-                    linker::RelocationKind kind = linker::TargetRelocationEvaluator::normalizeType(fixup.relocType);
-                    std::string evalErr;
-                    linker::TargetRelocationEvaluator::evaluate(kind, iatVma, fixup.placeAddress, fixup.addend, secIt->data, fixup.sectionOffset, evalErr);
-                }
-            }
+            if (iatIt == symbolIatVma.end()) continue;
+            uint64_t iatVma = iatIt->second;
+            auto secIt = std::find_if(image.sections.begin(), image.sections.end(), [&](const PeSection& s) { return s.name == fixup.sectionName; });
+            if (secIt == image.sections.end()) continue;
+            linker::RelocationKind kind = linker::TargetRelocationEvaluator::normalizeType(fixup.relocType);
+            std::string evalErr;
+            linker::TargetRelocationEvaluator::evaluate(kind, iatVma, fixup.placeAddress, fixup.addend, secIt->data, fixup.sectionOffset, evalErr);
         }
 
         image.dataDirectories[1] = {idataRva, static_cast<uint32_t>(descTableSize)}; // IMAGE_DIRECTORY_ENTRY_IMPORT

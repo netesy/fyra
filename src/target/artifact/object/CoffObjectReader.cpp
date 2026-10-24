@@ -2,6 +2,7 @@
 #include "target/core/TargetInfo.h"
 #include <fstream>
 #include <cstring>
+#include <cstdlib>
 
 namespace target {
 namespace artifact {
@@ -104,15 +105,34 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
 
     const auto* secHdrs = reinterpret_cast<const CoffSectionHeader*>(bytes.data() + secHdrOffset);
 
+    // COFF stores section names longer than 8 bytes as "/<decimal offset>" into
+    // the string table (which begins right after the symbol table). MinGW objects
+    // rely on this heavily (.text.startup, .text$..., .rdata$..., .pdata$...);
+    // resolving them is required for the linker to fold fragments by class.
+    uint64_t strTableOffset = ch->PointerToSymbolTable
+        ? static_cast<uint64_t>(ch->PointerToSymbolTable) + static_cast<uint64_t>(ch->NumberOfSymbols) * sizeof(CoffSymbol)
+        : 0;
+    auto resolveSectionName = [&](const char* raw) -> std::string {
+        char nameBuf[9] = {0};
+        std::memcpy(nameBuf, raw, 8);
+        std::string s(nameBuf);
+        if (!s.empty() && s[0] == '/' && strTableOffset != 0) {
+            unsigned long off = std::strtoul(s.c_str() + 1, nullptr, 10);
+            if (strTableOffset + off < bytes.size()) {
+                s = reinterpret_cast<const char*>(bytes.data() + strTableOffset + off);
+            }
+        }
+        return s;
+    };
+
     std::vector<std::string> sectionNames(ch->NumberOfSections);
     for (uint16_t i = 0; i < ch->NumberOfSections; ++i) {
         const auto& sh = secHdrs[i];
-        char nameBuf[9] = {0};
-        std::memcpy(nameBuf, sh.Name, 8);
-        sectionNames[i] = nameBuf;
+        std::string resolvedName = resolveSectionName(sh.Name);
+        sectionNames[i] = resolvedName;
 
         ObjectSection sec;
-        sec.name = nameBuf;
+        sec.name = resolvedName;
         sec.virtualSize = sh.VirtualSize ? sh.VirtualSize : sh.SizeOfRawData;
         sec.virtualAddress = sh.VirtualAddress;
         sec.flags = sh.Characteristics;
@@ -124,8 +144,7 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
         outArtifact.addSection(sec);
     }
 
-    // String table starts after symbol table
-    uint64_t strTableOffset = ch->PointerToSymbolTable + static_cast<uint64_t>(ch->NumberOfSymbols) * sizeof(CoffSymbol);
+    // String table starts after symbol table (strTableOffset computed above).
 
     std::vector<std::string> symbolNames(ch->NumberOfSymbols);
 
@@ -202,11 +221,30 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                     else if (rel.Type == 0x0002) orel.type = "R_LARCH_64";
                     else orel.type = "R_TYPE_" + std::to_string(rel.Type);
                 } else {
+                    // x86-64 COFF encodes relocation addends *implicitly* in the raw
+                    // bytes of the section being relocated (a COFF relocation record
+                    // has no explicit addend field). The object's offset-within-fragment
+                    // for section-relative references - e.g. a RIP-relative access that
+                    // MinGW emits against the `.bss`/`.data` section symbol - lives ONLY
+                    // in those bytes. Recover it so each distinct static resolves to a
+                    // unique address instead of collapsing onto the fragment base. For
+                    // references against a named symbol the assembler leaves these bytes
+                    // zero, so this is a no-op for the already-correct cases.
+                    int64_t implicitAddend = 0;
+                    if (sh.PointerToRawData != 0) {
+                        uint64_t site = static_cast<uint64_t>(sh.PointerToRawData) + rel.VirtualAddress;
+                        if (rel.Type == 0x0004 && site + 4 <= bytes.size()) {
+                            int32_t raw = 0; std::memcpy(&raw, bytes.data() + site, 4); implicitAddend = raw;
+                        } else if (rel.Type == 0x0001 && site + 8 <= bytes.size()) {
+                            int64_t raw = 0; std::memcpy(&raw, bytes.data() + site, 8); implicitAddend = raw;
+                        }
+                    }
                     if (rel.Type == 0x0004) {
                         orel.type = "R_X86_64_PC32";
-                        orel.addend = -4;
+                        orel.addend = implicitAddend - 4;
                     } else if (rel.Type == 0x0001) {
                         orel.type = "R_X86_64_64";
+                        orel.addend = implicitAddend;
                     } else {
                         orel.type = "R_TYPE_" + std::to_string(rel.Type);
                     }

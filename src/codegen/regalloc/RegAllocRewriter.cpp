@@ -15,6 +15,14 @@
 
 namespace transforms {
 
+namespace {
+bool usesWindowsStackMachineLowering(const ::target::TargetInfo* targetInfo) {
+    if (!targetInfo) return false;
+    if (targetInfo->getArch() != ::target::Arch::X64) return false;
+    return targetInfo->getName().find("windows") != std::string::npos;
+}
+} // namespace
+
 bool RegAllocRewriter::run(ir::Function& func) {
     return run(func, nullptr);
 }
@@ -56,6 +64,15 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     LinearScanAllocator allocator;
     allocator.run(func, targetInfo);
     const auto& location_map = allocator.getRegisterMap();
+
+    if (usesWindowsStackMachineLowering(targetInfo)) {
+        // Under the Microsoft-x64 stack-machine lowering the backend assigns a
+        // unique frame slot to every parameter and instruction during code
+        // generation.  Skip Function-level spill-slot assignment and the
+        // spill/reload rewrite: the allocator already produced no locations, and
+        // binding slots here would overlap the prologue's callee-save pushes.
+        return true;
+    }
 
     // 2. Update the function's stack frame information
     // Stack slots are addressed from %rbp and must start below registers saved

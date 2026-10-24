@@ -15,6 +15,27 @@ namespace transforms {
 // but we'll reserve some for ABI and scratch purposes.
 const unsigned int NUM_PHYSICAL_REGISTERS = 13;
 
+namespace {
+// The Microsoft-x64 backend lowers every materialized value through a
+// stack-machine frame layout (X64Architecture::computeFrameLayout, the
+// non-SystemV branch): each parameter and each instruction owns a distinct
+// frame slot addressed below an unconditional callee-save block, and the
+// allocatable integer pool exposed by the target contains only callee-saved
+// registers.  This allocator is built around the SystemV model -- it assigns
+// physical registers by index into a 13-entry caller/callee scratch pool and
+// homes the remainder in Function-level spill slots.  Running it against a
+// Windows target makes the physical indices alias the shorter 7-entry pool and
+// makes the spill slots collide with the prologue's register pushes (observed
+// as reads of the saved %r15 slot at -0x38).  When a Windows target is
+// detected, allocation therefore defers entirely to the backend's stack-machine
+// lowering, which already gives every value a coherent, non-overlapping home.
+bool usesWindowsStackMachineLowering(const ::target::TargetInfo* targetInfo) {
+    if (!targetInfo) return false;
+    if (targetInfo->getArch() != ::target::Arch::X64) return false;
+    return targetInfo->getName().find("windows") != std::string::npos;
+}
+} // namespace
+
 void LinearScanAllocator::run(ir::Function& func) {
     run(func, nullptr);
 }
@@ -29,6 +50,15 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
     const auto& intervals = interval_analysis.getIntervals();
 
     stats.numVregs = intervals.size();
+
+    if (usesWindowsStackMachineLowering(targetInfo)) {
+        // Defer to the Microsoft-x64 stack-machine lowering: assign no physical
+        // registers and no Function spill slots so that code generation binds
+        // every value to its backend frame slot.  See the helper comment above.
+        stats.numPhysicalRegsUsed = 0;
+        return;
+    }
+
     std::set<unsigned int> used_regs;
 
     if (std::getenv("FYRA_REGALLOC_DIAG")) {

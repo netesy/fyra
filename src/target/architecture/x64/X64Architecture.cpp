@@ -509,8 +509,20 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
-                    uint8_t r = getArchRegIndex(integerArgRegs[j]);
-                    emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]);
+                    // Microsoft x64 assigns each of the first four argument slots
+                    // to a GPR or an XMM register depending on the parameter's
+                    // type: position k is rcx/rdx/r8/r9 for scalars but xmm0-3 for
+                    // floats. Spill a floating parameter's bits from xmm k through
+                    // rax into its local slot so the callee sees the caller's value.
+                    bool paramFloat = param->getType() && param->getType()->isFloatingPoint();
+                    if (paramFloat) {
+                        as.emitBytes({0x66, 0x48, 0x0F, 0x7E});           // movq rax, xmm k
+                        as.emitByte(0xC0 | (j << 3));
+                        emitRegMem(as, 0x48, 0x89, 0, cg.getStackOffsets()[param.get()]); // mov [local], rax
+                    } else {
+                        uint8_t r = getArchRegIndex(integerArgRegs[j]);
+                        emitRegMem(as, (r >= 8 ? 0x4C : 0x48), 0x89, r & 7, cg.getStackOffsets()[param.get()]);
+                    }
                 } else {
                     uint8_t paramStackOff = (uint8_t)(16 + j * 8);
                     emitRegMem(as, 0x48, 0x8B, 0, paramStackOff);
@@ -1576,7 +1588,18 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
 
     if (auto* os = cg.getTextStream()) {
         size_t systemVStackBytes = 0;
+        size_t windowsShadowBytes = 0;
         if (abi == X64ABI::Windows) {
+            // Microsoft x64 requires the caller to reserve 32 bytes of shadow
+            // space for the incoming register arguments (rcx/rdx/r8/r9), plus an
+            // eight-byte slot for each argument beyond the fourth. The total must
+            // stay 16-byte aligned at the call site. Stack arguments are then
+            // written at [rsp + paramIdx*8], which lands just past the shadow area.
+            size_t numArgs = i.getOperands().size() - 1;
+            size_t numStack = numArgs > 4 ? numArgs - 4 : 0;
+            windowsShadowBytes = 32 + numStack * 8;
+            if (windowsShadowBytes % 16) windowsShadowBytes += 8;
+            if (windowsShadowBytes) *os << "  sub rsp, " << windowsShadowBytes << "\n";
             for (size_t j = 1; j < i.getOperands().size(); ++j) {
                 ir::Value* argVal = i.getOperands()[j]->get();
                 size_t paramIdx = j - 1;
@@ -1685,6 +1708,8 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         }
         if (systemVStackBytes != 0)
             *os << "  addq $" << systemVStackBytes << ", %rsp\n";
+        if (windowsShadowBytes != 0)
+            *os << "  add rsp, " << windowsShadowBytes << "\n";
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
             if (i.getType()->isFloatingPoint()) {
                 const char* move = i.getType()->isFloatTy() ? "movss" : "movsd";
@@ -1746,10 +1771,36 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
             return;
         }
         size_t maxArgs = (abi == X64ABI::SystemV) ? 6 : 4;
+        // Microsoft x64 caller-side shadow space (32 bytes for rcx/rdx/r8/r9)
+        // plus an 8-byte slot per argument beyond the fourth, padded to keep the
+        // stack 16-byte aligned at the call. Stack arguments are written at
+        // [rsp + paramIdx*8], which already lands past the 32-byte shadow area.
+        auto& asWin = cg.getAssembler();
+        size_t windowsShadowBytes = 0;
+        if (abi == X64ABI::Windows) {
+            size_t numArgs = i.getOperands().size() - 1;
+            size_t numStack = numArgs > 4 ? numArgs - 4 : 0;
+            windowsShadowBytes = 32 + numStack * 8;
+            if (windowsShadowBytes % 16) windowsShadowBytes += 8;
+            if (windowsShadowBytes <= 127) asWin.emitBytes({0x48, 0x83, 0xEC, (uint8_t)windowsShadowBytes});
+            else { asWin.emitBytes({0x48, 0x81, 0xEC}); asWin.emitDWord(windowsShadowBytes); }
+        }
         for (size_t j = 1; j < i.getOperands().size(); ++j) {
             if (j <= maxArgs) {
-                uint8_t r = getArchRegIndex(integerArgRegs[j-1]);
-                emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), r);
+                auto* argument = i.getOperands()[j]->get();
+                size_t paramIdx = j - 1;
+                bool argFloat = argument->getType() && argument->getType()->isFloatingPoint();
+                if (argFloat) {
+                    // Microsoft x64: a floating argument at register position k
+                    // travels in xmm k (not the integer reg k). Load the value's
+                    // bits into rax, then movq xmm k, rax.
+                    emitLoadValue(cg, cg.getAssembler(), argument, 0); // Load to RAX
+                    asWin.emitBytes({0x66, 0x48, 0x0F, 0x6E});         // movq xmm k, rax
+                    asWin.emitByte(0xC0 | (paramIdx << 3));
+                } else {
+                    uint8_t r = getArchRegIndex(integerArgRegs[paramIdx]);
+                    emitLoadValue(cg, cg.getAssembler(), argument, r);
+                }
             } else if (abi == X64ABI::Windows) {
                 emitLoadValue(cg, cg.getAssembler(), i.getOperands()[j]->get(), 0); // Load to RAX
                 uint8_t offset = (uint8_t)((j - 1) * 8);
@@ -1764,6 +1815,10 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
         } else {
             emitLoadValue(cg, cg.getAssembler(), calleeVal, 0); // RAX
             cg.getAssembler().emitBytes({0xFF, 0xD0});         // call rax
+        }
+        if (windowsShadowBytes) {
+            if (windowsShadowBytes <= 127) asWin.emitBytes({0x48, 0x83, 0xC4, (uint8_t)windowsShadowBytes});
+            else { asWin.emitBytes({0x48, 0x81, 0xC4}); asWin.emitDWord(windowsShadowBytes); }
         }
         if (i.getType()->getTypeID() != ir::Type::VoidTyID) emitStoreResult(cg, i, 0);
     }
@@ -3348,13 +3403,24 @@ void X64Architecture::emitExternCall(CodeGen& cg, ir::Instruction& i, const Oper
     }
     cg.getTargetInfo()->emitDomainCapability(cg, i, *spec);
 
+    bool isFP = i.getType() && i.getType()->isFloatingPoint();
     if (i.getType() && i.getType()->getTypeID() != ir::Type::VoidTyID) {
         if (auto* os = cg.getTextStream()) {
+            // A native function returning float/double delivers it in XMM0;
+            // transfer the low 64 bits into RAX so the boxed int64 result slot
+            // is filled from the correct source register.
+            if (isFP) {
+                if (abi == X64ABI::SystemV)
+                    *os << "  movq %xmm0, %rax\n";
+                else
+                    *os << "  movq rax, xmm0\n";
+            }
             if (abi == X64ABI::SystemV)
                 *os << "  movq %rax, " << formatStackOperand(cg.getStackOffsets()[&i]) << "\n";
             else
                 *os << "  mov " << formatStackOperand(cg.getStackOffsets()[&i]) << ", rax\n";
         } else {
+            if (isFP) cg.getAssembler().emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
             emitStoreResult(cg, i, 0);
         }
     }
@@ -3392,51 +3458,145 @@ void X64Architecture::emitNativeSyscall(CodeGen& cg, uint64_t syscallNum, const 
 }
 
 void X64Architecture::emitNativeLibraryCall(CodeGen& cg, const std::string& name, const std::vector<ir::Value*>& args) {
+    // Faithful native ABI marshaling.  A native library call is an extern call
+    // into a real platform function, so it must follow the target's calling
+    // convention exactly: floating arguments travel in XMM registers, integer
+    // arguments in the integer argument registers, and every argument beyond
+    // the register budget is placed on the stack.  On Microsoft x64 the caller
+    // must also reserve 32 bytes of shadow space for the four register-home
+    // slots before writing the stack arguments.  Dropping arguments past the
+    // register budget (as a naive min(args, registerCount) loop does) silently
+    // corrupts calls such as CreateFileA (7 args) or CreateProcessA (10 args).
+    auto argIsFloat = [](ir::Value* a) {
+        return a && a->getType() && a->getType()->isFloatingPoint();
+    };
+    auto argIsGlobal = [](ir::Value* a) {
+        return dynamic_cast<ir::GlobalVariable*>(a) != nullptr ||
+               (dynamic_cast<ir::GlobalValue*>(a) != nullptr && !dynamic_cast<ir::Function*>(a));
+    };
+
     if (auto* os = cg.getTextStream()) {
-        auto emitArg = [&](ir::Value* arg, const std::string& reg) {
-            bool isGlobal = dynamic_cast<ir::GlobalVariable*>(arg) != nullptr;
-            std::string op = cg.getValueAsOperand(arg);
-            if (isGlobal) {
-                if (abi == X64ABI::Windows)
-                    *os << "  lea " << reg << ", " << op << "\n";
-                else
-                    *os << "  leaq " << op << ", " << reg << "\n";
+        if (abi == X64ABI::Windows) {
+            size_t numStack = args.size() > 4 ? args.size() - 4 : 0;
+            size_t shadow = 32 + numStack * 8;
+            if (shadow % 16) shadow += 8;
+            *os << "  sub rsp, " << shadow << "\n";
+            for (size_t j = 0; j < args.size(); ++j) {
+                ir::Value* arg = args[j];
+                std::string op = cg.getValueAsOperand(arg);
+                if (j < 4) {
+                    if (argIsFloat(arg)) {
+                        *os << "  movsd " << floatArgRegs[j] << ", " << op << "\n";
+                    } else {
+                        std::string reg = getRegisterName(integerArgRegs[j], arg ? arg->getType() : nullptr);
+                        *os << "  " << (argIsGlobal(arg) ? "lea " : "mov ") << reg << ", " << op << "\n";
+                    }
+                } else {
+                    *os << "  mov rax, " << op << "\n";
+                    *os << "  mov [rsp + " << (j * 8) << "], rax\n";
+                }
+            }
+            *os << "  call " << name << "\n";
+            *os << "  add rsp, " << shadow << "\n";
+        } else {
+            size_t int_idx = 0, float_idx = 0, stackBytes = 0;
+            std::vector<std::string> stackOps;
+            for (size_t j = 0; j < args.size(); ++j) {
+                ir::Value* arg = args[j];
+                std::string op = cg.getValueAsOperand(arg);
+                if (argIsFloat(arg)) {
+                    if (float_idx < floatArgRegs.size())
+                        *os << "  movsd " << op << ", %" << floatArgRegs[float_idx++] << "\n";
+                    else { stackOps.push_back(op); stackBytes += 8; }
+                } else if (int_idx < integerArgRegs.size()) {
+                    std::string reg = getRegisterName(integerArgRegs[int_idx++], arg ? arg->getType() : nullptr);
+                    *os << "  " << (argIsGlobal(arg) ? "leaq " : "movq ") << op << ", " << reg << "\n";
+                } else { stackOps.push_back(op); stackBytes += 8; }
+            }
+            if (stackBytes % 16 != 0) { *os << "  subq $8, %rsp\n"; stackBytes += 8; }
+            for (auto it = stackOps.rbegin(); it != stackOps.rend(); ++it)
+                *os << "  pushq " << *it << "\n";
+            *os << "  call " << name << "\n";
+            if (stackBytes) *os << "  addq $" << stackBytes << ", %rsp\n";
+        }
+        return;
+    }
+
+    auto& as = cg.getAssembler();
+    auto emitSubRsp = [&](size_t bytes) {
+        if (!bytes) return;
+        if (bytes <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)bytes});
+        else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord((uint32_t)bytes); }
+    };
+    auto emitAddRsp = [&](size_t bytes) {
+        if (!bytes) return;
+        if (bytes <= 127) as.emitBytes({0x48, 0x83, 0xC4, (uint8_t)bytes});
+        else { as.emitBytes({0x48, 0x81, 0xC4}); as.emitDWord((uint32_t)bytes); }
+    };
+    auto emitStackStoreRsp = [&](size_t offset) {
+        // mov [rsp + offset], rax  (offset < 128 for realistic native calls)
+        as.emitBytes({0x48, 0x89, 0x44, 0x24, (uint8_t)offset});
+    };
+    auto emitCallTarget = [&]() {
+        as.emitByte(0xE8);
+        uint64_t off = as.getCodeSize();
+        as.emitDWord(0);
+        cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, name, ".text"});
+    };
+
+    if (abi == X64ABI::Windows) {
+        size_t numStack = args.size() > 4 ? args.size() - 4 : 0;
+        size_t shadow = 32 + numStack * 8;
+        if (shadow % 16) shadow += 8;
+        emitSubRsp(shadow);
+        for (size_t j = 0; j < args.size(); ++j) {
+            ir::Value* arg = args[j];
+            if (j < 4) {
+                if (argIsFloat(arg)) {
+                    emitLoadValue(cg, as, arg, 0);              // float bits into RAX
+                    as.emitBytes({0x66, 0x48, 0x0F, 0x6E});     // movq xmm j, rax
+                    as.emitByte(0xC0 | (j << 3));
+                } else {
+                    emitLoadValue(cg, as, arg, getArchRegIndex(integerArgRegs[j]));
+                }
             } else {
-                *os << "  movq " << op << ", " << reg << "\n";
+                emitLoadValue(cg, as, arg, 0);                  // value/global-address/float bits into RAX
+                emitStackStoreRsp(j * 8);                        // stack arg at [rsp + j*8]
             }
-        };
-        if (abi == X64ABI::Windows) {
-            *os << "  sub rsp, 32\n";
-            static const char* winRegs[] = {"rcx", "rdx", "r8", "r9"};
-            for (size_t i = 0; i < std::min(args.size(), (size_t)4); ++i)
-                emitArg(args[i], getRegisterName(winRegs[i], args[i]->getType()));
-            *os << "  call " << name << "\n";
-            *os << "  add rsp, 32\n";
-        } else {
-            static const char* sysvRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
-            for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i)
-                emitArg(args[i], getRegisterName(sysvRegs[i], args[i]->getType()));
-            *os << "  call " << name << "\n";
         }
+        emitCallTarget();
+        emitAddRsp(shadow);
     } else {
-        auto& as = cg.getAssembler();
-        if (abi == X64ABI::Windows) {
-            as.emitBytes({0x48, 0x83, 0xEC, 0x20});
-            static const char* winRegs[] = {"rcx", "rdx", "r8", "r9"};
-            for (size_t i = 0; i < std::min(args.size(), (size_t)4); ++i) {
-                emitLoadValue(cg, as, args[i], getArchRegIndex(winRegs[i]));
-            }
-            as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0);
-            cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, name, ".text"});
-            as.emitBytes({0x48, 0x83, 0xC4, 0x20});
-        } else {
-            static const char* sysvRegs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
-            for (size_t i = 0; i < std::min(args.size(), (size_t)6); ++i) {
-                emitLoadValue(cg, as, args[i], getArchRegIndex(sysvRegs[i]));
-            }
-            as.emitByte(0xE8); uint64_t off = as.getCodeSize(); as.emitDWord(0);
-            cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, name, ".text"});
+        size_t int_idx = 0, float_idx = 0, stackBytes = 0;
+        for (size_t j = 0; j < args.size(); ++j) {
+            if (argIsFloat(args[j])) { if (float_idx < floatArgRegs.size()) ++float_idx; else stackBytes += 8; }
+            else { if (int_idx < integerArgRegs.size()) ++int_idx; else stackBytes += 8; }
         }
+        size_t pad = (stackBytes % 16 != 0) ? 8 : 0;
+        size_t totalSub = stackBytes + pad;
+        emitSubRsp(totalSub);
+        int_idx = float_idx = 0;
+        size_t stackOff = 0;
+        for (size_t j = 0; j < args.size(); ++j) {
+            ir::Value* arg = args[j];
+            bool fits = argIsFloat(arg) ? (float_idx < floatArgRegs.size())
+                                        : (int_idx < integerArgRegs.size());
+            if (fits) {
+                if (argIsFloat(arg)) {
+                    emitLoadValue(cg, as, arg, 0);              // float bits into RAX
+                    as.emitBytes({0x66, 0x48, 0x0F, 0x6E});     // movq xmm k, rax
+                    as.emitByte(0xC0 | ((float_idx++) << 3));
+                } else {
+                    emitLoadValue(cg, as, arg, getArchRegIndex(integerArgRegs[int_idx++]));
+                }
+            } else {
+                emitLoadValue(cg, as, arg, 0);
+                emitStackStoreRsp(pad + stackOff);
+                stackOff += 8;
+            }
+        }
+        emitCallTarget();
+        emitAddRsp(totalSub);
     }
 }
 
