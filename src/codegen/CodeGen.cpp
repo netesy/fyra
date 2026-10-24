@@ -155,10 +155,10 @@ void CodeGen::emitFunction(ir::Function& func) {
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
     lastStoreOp = "";
     if (os) {
-        *os << bb.getParent()->getName() << "_" << bb.getName() << ":\n";
+        *os << (targetInfo ? targetInfo->getBBLabel(&bb) : (bb.getParent()->getName() + "_" + bb.getName())) << ":\n";
     } else if (assembler) {
         SymbolInfo bb_sym;
-        bb_sym.name = bb.getParent()->getName() + "_" + bb.getName();
+        bb_sym.name = targetInfo ? targetInfo->getBBLabel(&bb) : (bb.getParent()->getName() + "_" + bb.getName());
         bb_sym.sectionName = ".text";
         bb_sym.value = assembler->getCodeSize();
         bb_sym.type = 0; // STT_NOTYPE
@@ -419,7 +419,7 @@ std::string CodeGen::getValueAsOperand(const ir::Value* value) {
             return targetInfo->formatStackOperand(16 + (classIdx - registerCount) * 8);
         }
     }
-    if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return bb->getParent()->getName() + "_" + bb->getName();
+    if (auto* bb = dynamic_cast<const ir::BasicBlock*>(value)) return targetInfo ? targetInfo->getBBLabel(bb) : (bb->getParent()->getName() + "_" + bb->getName());
     if (auto* gv = dynamic_cast<const ir::GlobalVariable*>(value)) return targetInfo->formatGlobalOperand(gv->getName());
     if (auto* f = dynamic_cast<const ir::Function*>(value)) return f->getName();
 
@@ -702,7 +702,6 @@ void CodeGen::emitDataSection() {
                 rodataAssembler->emitByte(0);
                 offset = rodataAssembler->getCodeSize();
             }
-            symbols.push_back({gv->getName(), offset, gv->getType()->getSize(), 0, 1, ".data"});
             if (auto* init = gv->getInitializer()) {
                 if (auto* ci = dynamic_cast<ir::ConstantInt*>(init)) {
                     if (ci->getType()->getSize() == 1) rodataAssembler->emitByte(ci->getValue());
@@ -743,6 +742,15 @@ void CodeGen::emitDataSection() {
             } else {
                 for (size_t i = 0; i < gv->getType()->getSize(); ++i) rodataAssembler->emitByte(0);
             }
+            // Record the symbol using the number of bytes ACTUALLY emitted for the
+            // initializer rather than the declared type size. A global may be
+            // declared as a pointer to an inlined aggregate (e.g. a string header
+            // laid out as a byte array of length != 8). The .data image is sized as
+            // max(sym.value + sym.size), so an under-reported size truncates the
+            // trailing bytes of the final global and corrupts its contents.
+            uint64_t emittedSize = rodataAssembler->getCodeSize() - offset;
+            if (emittedSize < gv->getType()->getSize()) emittedSize = gv->getType()->getSize();
+            symbols.push_back({gv->getName(), offset, emittedSize, 0, 1, ".data"});
         }
     }
 }

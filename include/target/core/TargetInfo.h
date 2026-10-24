@@ -183,7 +183,25 @@ public:
     virtual int32_t getStackOffset(const codegen::CodeGen&, ir::Value*) const;
     virtual void resetStackOffset() { currentStackOffset = 0; }
     virtual std::string getFunctionEpilogueLabel(const ir::Function& func) const { return func.getName() + "_epilogue"; }
-    virtual std::string getBBLabel(const ir::BasicBlock* bb) const { if (!bb) return "null_bb"; return bb->getParent()->getName() + "_" + bb->getName(); }
+    // Emits a unique assembly label for a basic block.  The label is keyed by
+    // the block's layout position within its function in addition to its name,
+    // because structural loop passes can leave two distinct blocks sharing the
+    // same name (e.g. a loop header and an auto-created "<header>.preheader").
+    // A name-only label then collapses into a duplicate assembly symbol; the
+    // assembler binds a jump to the first definition, turning a loop back-edge
+    // into a self-loop (observed as an O2 hang on `continue`).  Block layout
+    // order is fixed for the whole codegen pass, so this index is stable for
+    // every definition and every reference (jmp/br/relocation/operand).
+    virtual std::string getBBLabel(const ir::BasicBlock* bb) const {
+        if (!bb || !bb->getParent()) return "null_bb";
+        ir::Function* fn = bb->getParent();
+        std::size_t index = 0;
+        for (const auto& owned : fn->getBasicBlocks()) {
+            if (owned.get() == bb) break;
+            ++index;
+        }
+        return fn->getName() + "_" + bb->getName() + "_" + std::to_string(index);
+    }
     
     // Binary format metadata methods for multi-architecture support (static helpers)
     static uint16_t getElfMachine(Arch arch);

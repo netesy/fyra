@@ -20,8 +20,9 @@ void PhiInsertion::run(ir::Function& func, const DominanceFrontier& df) {
     }
 
     // 2. For each variable, find its definition sites and insert phis
+    ir::IRBuilder builder(func.getParent()->getContextShared());
     for (ir::Instruction* alloc : allocs) {
-        std::vector<ir::BasicBlock*> def_sites;
+        std::set<ir::BasicBlock*> def_sites;
         // Find all stores to this alloc
         for (auto& bb_ptr : func.getBasicBlocks()) {
             for (auto& instr_ptr : bb_ptr->getInstructions()) {
@@ -34,25 +35,36 @@ void PhiInsertion::run(ir::Function& func, const DominanceFrontier& df) {
                     // This is a simplification. A real compiler would do alias analysis.
                     // We just check if the pointer operand is the alloc instruction.
                     if (instr_ptr->getOperands()[1]->get() == alloc) {
-                        def_sites.push_back(bb_ptr.get());
+                        def_sites.insert(bb_ptr.get());
                     }
                 }
             }
         }
 
-        // 3. Compute dominance frontiers for these sites
-        std::set<ir::BasicBlock*> phi_blocks;
-        for (ir::BasicBlock* def_site : def_sites) {
+        // 3. Iterative dominance-frontier placement (Cytron et al.).  A block
+        //    that receives a phi becomes a new definition site for the same
+        //    variable, so it must itself be reprocessed and its dominance
+        //    frontier scanned.  Without this worklist the loop-header phi of a
+        //    variable first assigned inside a loop body is never inserted: the
+        //    phi only lands at the inner join, so the loop-carried value cannot
+        //    reach the header and downstream renaming forwards the entry
+        //    initializer to every in-loop read (a loop that accumulates into a
+        //    local never observes its own updates).
+        std::vector<ir::BasicBlock*> worklist(def_sites.begin(), def_sites.end());
+        std::set<ir::BasicBlock*> phi_placed;
+        while (!worklist.empty()) {
+            ir::BasicBlock* def_site = worklist.back();
+            worklist.pop_back();
             const auto& frontier = df.getFrontier(def_site);
-            phi_blocks.insert(frontier.begin(), frontier.end());
-        }
-
-        // 4. Insert phi nodes
-        ir::IRBuilder builder(func.getParent()->getContextShared());
-        for (ir::BasicBlock* bb : phi_blocks) {
-            builder.setInsertPoint(bb);
-            unsigned num_preds = bb->getPredecessors().size();
-            builder.createPhi(static_cast<ir::PointerType*>(alloc->getType())->getElementType(), 2 * num_preds, alloc);
+            for (ir::BasicBlock* bb : frontier) {
+                if (phi_placed.count(bb)) continue; // Already has a phi for this variable.
+                phi_placed.insert(bb);
+                builder.setInsertPoint(bb);
+                unsigned num_preds = bb->getPredecessors().size();
+                builder.createPhi(static_cast<ir::PointerType*>(alloc->getType())->getElementType(),
+                                  2 * num_preds, alloc);
+                worklist.push_back(bb); // A phi is itself a definition: reprocess.
+            }
         }
     }
 }
