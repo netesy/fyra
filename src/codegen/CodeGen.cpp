@@ -488,6 +488,21 @@ CodeGen::CompilationResult CodeGen::compileToObject(const std::string& outputPre
             artifact.sections[dataSec.name] = dataSec;
         }
 
+        uint64_t bssSize = 0;
+        for (const auto& sym : symbols) {
+            if (sym.sectionName == ".bss") {
+                bssSize = std::max(bssSize, sym.value + sym.size);
+            }
+        }
+        if (bssSize > 0) {
+            ::target::artifact::object::ObjectSection bssSec;
+            bssSec.name = ".bss";
+            bssSec.virtualSize = bssSize;
+            bssSec.alignment = 16;
+            bssSec.flags = 0x3;
+            artifact.sections[bssSec.name] = bssSec;
+        }
+
         // Symbols
         for (const auto& sym : symbols) {
             ::target::artifact::object::ObjectSymbol s;

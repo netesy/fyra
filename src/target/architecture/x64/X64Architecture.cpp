@@ -491,7 +491,30 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             as.emitBytes({0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57});
         }
         if (auto* os = cg.getTextStream()) {
-            if (layout.stackAlloc > 0) *os << "  sub rsp, " << layout.stackAlloc << "\n";
+            // Microsoft-x64 stack probing: Windows commits stack pages lazily via a
+            // single guard page. A single `sub rsp, N` with N >= PAGE_SIZE skips
+            // over every intermediate guard page in one step, so the pages between
+            // old rsp and new rsp stay uncommitted; the next `call` then AVs when it
+            // writes the return address below the committed limit. Emit one sub +
+            // page-touch per 4096-byte step (equivalent to GCC's
+            // -fstack-clash-protection / MSVC __alloca_probe without a runtime helper).
+            if (layout.stackAlloc > 0) {
+                constexpr uint32_t PAGE = 4096u;
+                uint32_t remaining = layout.stackAlloc;
+                if (remaining <= PAGE) {
+                    *os << "  sub rsp, " << remaining << "\n";
+                } else {
+                    while (remaining >= PAGE) {
+                        *os << "  sub rsp, " << PAGE << "\n";
+                        *os << "  mov qword ptr [rsp], 0\n";
+                        remaining -= PAGE;
+                    }
+                    if (remaining > 0) {
+                        *os << "  sub rsp, " << remaining << "\n";
+                        *os << "  mov qword ptr [rsp], 0\n";
+                    }
+                }
+            }
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
@@ -505,7 +528,35 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
             }
         } else {
             auto& as = cg.getAssembler();
-            if (layout.stackAlloc > 0) { if (layout.stackAlloc <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)layout.stackAlloc}); else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(layout.stackAlloc); } }
+            // Microsoft-x64 stack probing (binary path). See the text-stream
+            // comment for the rationale: a single `sub rsp, N` with N >= PAGE_SIZE
+            // skips the guard page, leaving intermediate stack pages uncommitted
+            // and causing the following call to AV. Emit sub + touch per 4 KB step.
+            if (layout.stackAlloc > 0) {
+                constexpr uint32_t PAGE = 4096u;
+                uint32_t remaining = layout.stackAlloc;
+                auto emitSub = [&](uint32_t bytes) {
+                    if (bytes <= 127) as.emitBytes({0x48, 0x83, 0xEC, (uint8_t)bytes});
+                    else { as.emitBytes({0x48, 0x81, 0xEC}); as.emitDWord(bytes); }
+                };
+                auto emitTouchRsp = [&]() {
+                    // mov qword ptr [rsp], 0   ->   48 C7 04 24 00 00 00 00
+                    as.emitBytes({0x48, 0xC7, 0x04, 0x24, 0x00, 0x00, 0x00, 0x00});
+                };
+                if (remaining <= PAGE) {
+                    emitSub(remaining);
+                } else {
+                    while (remaining >= PAGE) {
+                        emitSub(PAGE);
+                        emitTouchRsp();
+                        remaining -= PAGE;
+                    }
+                    if (remaining > 0) {
+                        emitSub(remaining);
+                        emitTouchRsp();
+                    }
+                }
+            }
             int j = 0;
             for (auto& param : func.getParameters()) {
                 if (j < 4) {
@@ -1820,7 +1871,22 @@ void X64Architecture::emitCall(CodeGen& cg, ir::Instruction& i) {
             if (windowsShadowBytes <= 127) asWin.emitBytes({0x48, 0x83, 0xC4, (uint8_t)windowsShadowBytes});
             else { asWin.emitBytes({0x48, 0x81, 0xC4}); asWin.emitDWord(windowsShadowBytes); }
         }
-        if (i.getType()->getTypeID() != ir::Type::VoidTyID) emitStoreResult(cg, i, 0);
+        if (i.getType()->getTypeID() != ir::Type::VoidTyID) {
+            // A native (extern / FFI) call that returns a floating value delivers
+            // it in xmm0 per the Microsoft x64 ABI, while emitStoreResult persists
+            // the result from rax. Move xmm0's low 64 bits into rax for those
+            // calls only (mirrors the System V binary path). A fyra-compiled
+            // Lymar function always leaves its return value in rax (see emitRet)
+            // and may return a boxed value that merely carries a floating IR
+            // type, so clobbering rax there would corrupt the result.
+            if (i.getType()->isFloatingPoint()) {
+                auto* calleeFn = dynamic_cast<ir::Function*>(calleeVal);
+                bool externCallee = !calleeFn || calleeFn->getBasicBlocks().empty();
+                if (externCallee)
+                    asWin.emitBytes({0x66, 0x48, 0x0F, 0x7E, 0xC0}); // movq rax, xmm0
+            }
+            emitStoreResult(cg, i, 0);
+        }
     }
 }
 

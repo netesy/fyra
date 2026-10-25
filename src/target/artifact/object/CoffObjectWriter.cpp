@@ -99,11 +99,14 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
     std::vector<SecInfo> secs;
 
     for (const auto& kv : artifact.sections) {
-        if (kv.second.data.empty()) continue;
+        if (kv.second.data.empty() && kv.second.virtualSize == 0) continue;
         SecInfo s;
         s.name = kv.first;
         s.data = kv.second.data;
-        if (s.name == ".text" || s.name == "CODE") {
+        if (s.name == ".bss") {
+            s.data.resize(kv.second.virtualSize, 0);
+            s.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_16BYTES;
+        } else if (s.name == ".text" || s.name == "CODE") {
             s.characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_ALIGN_16BYTES;
         } else {
             s.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_8BYTES;
