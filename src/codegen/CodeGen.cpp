@@ -89,7 +89,7 @@ void CodeGen::emit(bool forExecutable) {
                 // arena; windows-x64 carves cells from heap_ptr (rewound per
                 // invocation by the frame prologue/epilogue), so it reserves it.
                 // (Optional pass-through) Spawning `lldb-dap` for AOT-compiled binaries with preloaded pretty-printer scripts.                    
-                if (instr->getOpcode() == ir::Instruction::Alloc && s!(targetInfo->getArch() == target::Arch::X64 && targetInfo->getName().find("windows") == std::string::npos))
+                if (instr->getOpcode() == ir::Instruction::Alloc && !(targetInfo->getArch() == target::Arch::X64 && targetInfo->getName().find("windows") == std::string::npos))
                     usesHeap = true;
                 if (instr->getOpcode() == ir::Instruction::Neg && instr->getType() && instr->getType()->isFloatingPoint()) usesFPNeg = true;
             }
