@@ -12,8 +12,24 @@
 #include <iostream>
 #include <ostream>
 #include <cstring>
+#include <map>
 
 namespace target {
+
+// Windows x64: IR alloc carves cells from the module-local bump arena. Cells
+// must die with the invocation that created them, so each function containing
+// an Alloc saves heap_ptr in its frame at entry and restores it at the
+// epilogue. Without the rewind the cursor leaked one cell per dynamic store
+// and overran the 64MB arena into adjacent .data in long-running programs.
+static bool functionHasAlloc(ir::Function& func) {
+    for (auto& bb : func.getBasicBlocks())
+        for (auto& instr : bb->getInstructions()) {
+            auto op = instr->getOpcode();
+            if (op == ir::Instruction::Alloc || op == ir::Instruction::Alloc4 || op == ir::Instruction::Alloc16) return true;
+        }
+    return false;
+}
+static std::map<ir::Function*, int32_t> allocCursorSlots_;
 
 static std::string to8BitReg(const std::string& reg) {
     if (reg == "%rax" || reg == "rax" || reg == "%eax" || reg == "eax") return "%al";
@@ -402,6 +418,7 @@ X64FrameLayout X64Architecture::computeFrameLayout(CodeGen& cg, ir::Function& fu
         int current_offset = -64;
         for (auto& param : func.getParameters()) { cg.getStackOffsets()[param.get()] = current_offset; current_offset -= 8; }
         for (auto& bb : func.getBasicBlocks()) { for (auto& instr : bb->getInstructions()) { cg.getStackOffsets()[instr.get()] = current_offset; current_offset -= 8; } }
+        if (functionHasAlloc(func)) { allocCursorSlots_[&func] = current_offset; current_offset -= 8; }
         layout.stackAlloc = std::abs(current_offset + 56) + 32; // Shadow space
         if ((layout.stackAlloc + 64 + 8) % 16 != 0) layout.stackAlloc += 16 - ((layout.stackAlloc + 64 + 8) % 16);
         layout.isZeroFrame = false;
@@ -582,6 +599,19 @@ void X64Architecture::emitFunctionPrologue(CodeGen& cg, ir::Function& func) {
                 j++;
             }
         }
+        // Save the bump cursor so the epilogue can release this invocation's cells.
+        if (functionHasAlloc(func)) {
+            int32_t slot = allocCursorSlots_[&func];
+            if (auto* os = cg.getTextStream()) {
+                *os << "  mov rax, [rip + heap_ptr]\n";
+                *os << "  mov " << formatStackOperand(slot) << ", rax\n";
+            } else {
+                auto& as = cg.getAssembler();
+                ir::GlobalValue hp_val(cg.module.getContext()->getVoidType(), "heap_ptr");
+                emitLoadValue(cg, as, &hp_val, 0);
+                emitRegMem(as, 0x48, 0x89, 0, slot);
+            }
+        }
     }
 }
 
@@ -628,8 +658,15 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             as.emitByte(0xC3); // ret
         }
     } else {
+        // Release this invocation's arena cells before unwinding the frame.
+        bool rewind = functionHasAlloc(func);
+        int32_t slot = rewind ? allocCursorSlots_[&func] : 0;
         if (auto* os = cg.getTextStream()) {
             *os << func.getName() << "_epilogue" << ":\n";
+            if (rewind) {
+                *os << "  mov rax, " << formatStackOperand(slot) << "\n";
+                *os << "  mov [rip + heap_ptr], rax\n";
+            }
             *os << "  lea rsp, [rbp - 56]\n";
             *os << "  pop r15\n  pop r14\n  pop r13\n  pop r12\n  pop rdi\n  pop rsi\n  pop rbx\n";
             *os << "  leave\n  ret\n";
@@ -643,6 +680,12 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             epilogue_sym.binding = 0; // STB_LOCAL
             cg.addSymbol(epilogue_sym);
 
+            if (rewind) {
+                emitRegMem(as, 0x48, 0x8B, 0, slot);
+                as.emitBytes({0x48, 0x89, 0x05});
+                uint64_t hp_off = as.getCodeSize(); as.emitDWord(0);
+                cg.addRelocation(CodeGen::RelocationInfo{hp_off, "R_X86_64_PC32", -4, "heap_ptr", ".text"});
+            }
             as.emitBytes({0x48, 0x8D, 0x65, 0xC8});
             as.emitBytes({0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C});
             as.emitByte(0x5F); as.emitByte(0x5E); as.emitByte(0x5B);
@@ -2895,7 +2938,6 @@ void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
         }
         return;
     }
-    int32_t pointerOffset = cg.getStackOffset(&i);
     uint64_t size = 8;
     if (i.getOpcode() == ir::Instruction::Alloc4) size = 4;
     else if (i.getOpcode() == ir::Instruction::Alloc16) size = 16;
@@ -2905,20 +2947,13 @@ void X64Architecture::emitAlloc(CodeGen& cg, ir::Instruction& i) {
     std::string dstOp = cg.getValueAsOperand(&i);
     if (auto* os = cg.getTextStream()) {
         *os << "  # Bump Allocation: " << size << " bytes\n";
-        if (abi == X64ABI::SystemV) {
-            *os << "  movq heap_ptr(%rip), " << rax << "\n";
-            *os << "  movq " << rax << ", " << dstOp << "\n";
-            *os << "  addq $" << alignedSize << ", " << rax << "\n";
-            *os << "  movq " << rax << ", heap_ptr(%rip)\n";
-        } else {
-            *os << "  mov rax, [rip + heap_ptr]\n";
-            *os << "  mov " << dstOp << ", rax\n";
-            *os << "  add rax, " << alignedSize << "\n";
-            *os << "  mov [rip + heap_ptr], rax\n";
-        }
+        *os << "  mov rax, [rip + heap_ptr]\n";
+        *os << "  mov " << dstOp << ", rax\n";
+        *os << "  add rax, " << alignedSize << "\n";
+        *os << "  mov [rip + heap_ptr], rax\n";
     } else {
         auto& as = cg.getAssembler(); ir::GlobalValue hp_val(cg.module.getContext()->getVoidType(), "heap_ptr"); emitLoadValue(cg, as, &hp_val, 0);
-        emitRegMem(as, 0x48, 0x89, 0, pointerOffset); as.emitBytes({0x48, 0x05}); as.emitDWord(alignedSize);
+        emitRegMem(as, 0x48, 0x89, 0, cg.getStackOffset(&i)); as.emitBytes({0x48, 0x05}); as.emitDWord(alignedSize);
         as.emitBytes({0x48, 0x89, 0x05}); uint64_t off = as.getCodeSize(); as.emitDWord(0); cg.addRelocation(CodeGen::RelocationInfo{off, "R_X86_64_PC32", -4, "heap_ptr", ".text"});
     }
 }
