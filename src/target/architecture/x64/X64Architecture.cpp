@@ -664,8 +664,8 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
         if (auto* os = cg.getTextStream()) {
             *os << func.getName() << "_epilogue" << ":\n";
             if (rewind) {
-                *os << "  mov rax, " << formatStackOperand(slot) << "\n";
-                *os << "  mov [rip + heap_ptr], rax\n";
+                *os << "  mov r11, " << formatStackOperand(slot) << "\n";
+                *os << "  mov [rip + heap_ptr], r11\n";
             }
             *os << "  lea rsp, [rbp - 56]\n";
             *os << "  pop r15\n  pop r14\n  pop r13\n  pop r12\n  pop rdi\n  pop rsi\n  pop rbx\n";
@@ -681,8 +681,8 @@ void X64Architecture::emitFunctionEpilogue(CodeGen& cg, ir::Function& func) {
             cg.addSymbol(epilogue_sym);
 
             if (rewind) {
-                emitRegMem(as, 0x48, 0x8B, 0, slot);
-                as.emitBytes({0x48, 0x89, 0x05});
+                emitRegMem(as, 0x4C, 0x8B, 3, slot);
+                as.emitBytes({0x4C, 0x89, 0x1D});
                 uint64_t hp_off = as.getCodeSize(); as.emitDWord(0);
                 cg.addRelocation(CodeGen::RelocationInfo{hp_off, "R_X86_64_PC32", -4, "heap_ptr", ".text"});
             }
@@ -2857,6 +2857,23 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
             return;
         }
 
+        std::string op;
+        if (dynamic_cast<ir::Instruction*>(ptrVal) && !ptrVal->hasPhysicalRegister() && (!cg.currentFunction || !cg.currentFunction->hasStackSlot(ptrVal))) {
+            auto* ptrInst = dynamic_cast<ir::Instruction*>(ptrVal);
+            cg.emitInstruction(*ptrInst);
+            op = cg.getValueAsOperand(ptrInst);
+        } else {
+            op = cg.getValueAsOperand(ptrVal);
+        }
+        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
+        if (!isGlobal) {
+            // op = stack operand holding the pointer address — load it into r11 before loading val into rax
+            if (abi == X64ABI::Windows)
+                *os << "  mov r11, " << op << "\n";
+            else
+                *os << "  movq " << op << ", %r11\n";
+        }
+
         // Load value-to-store into rax
         bool isGlobalVal = dynamic_cast<ir::GlobalVariable*>(i.getOperands()[0]->get()) != nullptr || 
                            (dynamic_cast<ir::GlobalValue*>(i.getOperands()[0]->get()) != nullptr && !dynamic_cast<ir::Function*>(i.getOperands()[0]->get()));
@@ -2868,15 +2885,7 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
             if (isGlobalVal) *os << "  leaq " << cg.getValueAsOperand(i.getOperands()[0]->get()) << ", " << rax << "\n";
             else emitMov(cg, os, cg.getValueAsOperand(i.getOperands()[0]->get()), rax, is32Val);
         }
-        std::string op;
-        if (dynamic_cast<ir::Instruction*>(ptrVal) && !ptrVal->hasPhysicalRegister() && (!cg.currentFunction || !cg.currentFunction->hasStackSlot(ptrVal))) {
-            auto* ptrInst = dynamic_cast<ir::Instruction*>(ptrVal);
-            cg.emitInstruction(*ptrInst);
-            op = cg.getValueAsOperand(ptrInst);
-        } else {
-            op = cg.getValueAsOperand(ptrVal);
-        }
-        bool isGlobal = dynamic_cast<ir::GlobalValue*>(i.getOperands()[1]->get()) != nullptr;
+
         if (isGlobal) {
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << "  movb " << al << ", " << op << "\n";
@@ -2890,11 +2899,6 @@ void X64Architecture::emitStore(CodeGen& cg, ir::Instruction& i) {
                 else *os << "  mov " << op << ", rax\n";
             }
         } else {
-            // op = stack operand holding the pointer address — load it into r11
-            if (abi == X64ABI::Windows)
-                *os << "  mov r11, " << op << "\n";
-            else
-                *os << "  movq " << op << ", %r11\n";
             if (abi == X64ABI::SystemV) {
                 if (size == 1) *os << "  movb " << al << ", (%r11)\n";
                 else if (size == 2) *os << "  movw " << ax << ", (%r11)\n";
