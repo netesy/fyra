@@ -15,27 +15,6 @@ namespace transforms {
 // but we'll reserve some for ABI and scratch purposes.
 const unsigned int NUM_PHYSICAL_REGISTERS = 13;
 
-namespace {
-// The Microsoft-x64 backend lowers every materialized value through a
-// stack-machine frame layout (X64Architecture::computeFrameLayout, the
-// non-SystemV branch): each parameter and each instruction owns a distinct
-// frame slot addressed below an unconditional callee-save block, and the
-// allocatable integer pool exposed by the target contains only callee-saved
-// registers.  This allocator is built around the SystemV model -- it assigns
-// physical registers by index into a 13-entry caller/callee scratch pool and
-// homes the remainder in Function-level spill slots.  Running it against a
-// Windows target makes the physical indices alias the shorter 7-entry pool and
-// makes the spill slots collide with the prologue's register pushes (observed
-// as reads of the saved %r15 slot at -0x38).  When a Windows target is
-// detected, allocation therefore defers entirely to the backend's stack-machine
-// lowering, which already gives every value a coherent, non-overlapping home.
-bool usesWindowsStackMachineLowering(const ::target::TargetInfo* targetInfo) {
-    if (!targetInfo) return false;
-    if (targetInfo->getArch() != ::target::Arch::X64) return false;
-    return targetInfo->getName().find("windows") != std::string::npos;
-}
-} // namespace
-
 void LinearScanAllocator::run(ir::Function& func) {
     run(func, nullptr);
 }
@@ -45,19 +24,12 @@ void LinearScanAllocator::run(ir::Function& func, const ::target::TargetInfo* ta
 }
 
 void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetInfo* targetInfo) {
+    current_target_info = targetInfo;
     LiveIntervalAnalysis interval_analysis;
     interval_analysis.run(func);
     const auto& intervals = interval_analysis.getIntervals();
 
     stats.numVregs = intervals.size();
-
-    if (usesWindowsStackMachineLowering(targetInfo)) {
-        // Defer to the Microsoft-x64 stack-machine lowering: assign no physical
-        // registers and no Function spill slots so that code generation binds
-        // every value to its backend frame slot.  See the helper comment above.
-        stats.numPhysicalRegsUsed = 0;
-        return;
-    }
 
     std::set<unsigned int> used_regs;
 
@@ -75,14 +47,28 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
     std::vector<PhysicalReg> free_callee_regs;
     std::vector<PhysicalReg> free_xmm_regs;
 
-    // Caller-saved registers: pure scratch (0:r10, 2:rcx, 3:rdx, 6:r8, 7:r9, 5:rdi, 4:rsi)
-    // Index 1 (%r11) is reserved for backend codegen scratch usage (e.g. pointer dereferences, two-memory-operand instructions).
-    static const std::vector<unsigned int> caller_indices = {0, 2, 3, 6, 7, 5, 4};
-    for (auto it = caller_indices.rbegin(); it != caller_indices.rend(); ++it) {
-        free_caller_regs.push_back({*it});
+    if (targetInfo) {
+        const auto& int_regs = targetInfo->getRegisters(::target::RegisterClass::Integer);
+        for (size_t i = 0; i < int_regs.size(); ++i) {
+            const std::string& r = int_regs[i];
+            if (targetInfo->isReserved(r)) continue;
+            if (targetInfo->isCallerSaved(r)) {
+                free_caller_regs.push_back({(unsigned int)i});
+            } else if (targetInfo->isCalleeSaved(r)) {
+                free_callee_regs.push_back({(unsigned int)i});
+            }
+        }
+        std::reverse(free_caller_regs.begin(), free_caller_regs.end());
+        std::reverse(free_callee_regs.begin(), free_callee_regs.end());
+    } else {
+        // Fallback SystemV registers
+        static const std::vector<unsigned int> caller_indices = {0, 2, 3, 6, 7, 5, 4};
+        for (auto it = caller_indices.rbegin(); it != caller_indices.rend(); ++it) {
+            free_caller_regs.push_back({*it});
+        }
+        for (int i = 12; i >= 8; --i) free_callee_regs.push_back({(unsigned int)i});
     }
-    // Callee-saved registers: indices 8..12 (rbx, r12, r13, r14, r15)
-    for (int i = 12; i >= 8; --i) free_callee_regs.push_back({(unsigned int)i});
+
     // XMM registers: indices 100..115 (xmm0..xmm15)
     // Exclude reserved scratch XMM register if target specifies one
     unsigned int reserved_xmm_idx = 0;
@@ -193,13 +179,31 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                 }
             } else if (auto* param = dynamic_cast<ir::Parameter*>(op0Val)) {
                 size_t pIdx = 0;
-                for (const auto& paramOwner : func.getParameters()) {
-                    if (paramOwner.get() == param && pIdx < 6) {
-                        static const int sysVParamRegs[6] = {5, 4, 3, 2, 6, 7}; // rdi, rsi, rdx, rcx, r8, r9
-                        preferredRegIdx = sysVParamRegs[pIdx];
-                        break;
+                if (targetInfo) {
+                    const auto& argRegs = targetInfo->getIntegerArgumentRegisters();
+                    const auto& allRegs = targetInfo->getRegisters(::target::RegisterClass::Integer);
+                    for (const auto& paramOwner : func.getParameters()) {
+                        if (paramOwner.get() == param && pIdx < argRegs.size()) {
+                            const std::string& argRegName = argRegs[pIdx];
+                            for (size_t ri = 0; ri < allRegs.size(); ++ri) {
+                                if (allRegs[ri] == argRegName) {
+                                    preferredRegIdx = (int)ri;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                        pIdx++;
                     }
-                    pIdx++;
+                } else {
+                    for (const auto& paramOwner : func.getParameters()) {
+                        if (paramOwner.get() == param && pIdx < 6) {
+                            static const int sysVParamRegs[6] = {5, 4, 3, 2, 6, 7}; // rdi, rsi, rdx, rcx, r8, r9
+                            preferredRegIdx = sysVParamRegs[pIdx];
+                            break;
+                        }
+                        pIdx++;
+                    }
                 }
             }
         }
@@ -237,12 +241,17 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                 assigned = false;
             }
         } else {
-            // First try pure scratch (r10, index 0)
-            auto r10It = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
-                [](const PhysicalReg& pr) { return pr.index == 0; });
-            if (r10It != free_caller_regs.end()) {
-                reg = *r10It;
-                free_caller_regs.erase(r10It);
+            // Prefer caller-saved registers for values that do NOT live across calls
+            if (!free_caller_regs.empty()) {
+                auto prefIt = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
+                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
+                if (prefIt != free_caller_regs.end()) {
+                    reg = *prefIt;
+                    free_caller_regs.erase(prefIt);
+                } else {
+                    reg = free_caller_regs.back();
+                    free_caller_regs.pop_back();
+                }
                 assigned = true;
                 stats.callerSavedUsed++;
             } else if (!free_callee_regs.empty()) {
@@ -256,18 +265,6 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
                     free_callee_regs.pop_back();
                 }
                 assigned = true;
-            } else if (!free_caller_regs.empty()) {
-                auto prefIt = std::find_if(free_caller_regs.begin(), free_caller_regs.end(),
-                    [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
-                if (prefIt != free_caller_regs.end()) {
-                    reg = *prefIt;
-                    free_caller_regs.erase(prefIt);
-                } else {
-                    reg = free_caller_regs.back();
-                    free_caller_regs.pop_back();
-                }
-                assigned = true;
-                stats.callerSavedUsed++;
             }
         }
 
@@ -280,7 +277,11 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
             assert((!isVector || reserved_xmm_idx == 0 || reg.index != reserved_xmm_idx) &&
                    "reserved XMM scratch register was allocated");
             used_regs.insert(reg.index);
-            if (reg.index >= 8) stats.calleeSavedUsed++;
+            const auto& intRegs = current_target_info ? current_target_info->getRegisters(::target::RegisterClass::Integer) : std::vector<std::string>{};
+            bool is_callee = (current_target_info && reg.index < intRegs.size())
+                ? current_target_info->isCalleeSaved(intRegs[reg.index])
+                : (reg.index >= 8);
+            if (is_callee) stats.calleeSavedUsed++;
             current_interval.getVreg()->setPhysicalRegister(reg.index);
             vreg_to_location_map[current_interval.getVreg()] = reg;
             if (instr && instr->getOpcode() == ir::Instruction::Copy && preferredRegIdx >= 0 && (int)reg.index == preferredRegIdx) {
@@ -313,10 +314,16 @@ void LinearScanAllocator::expireOldIntervals(int current_start_point, std::vecto
             PhysicalReg reg = std::get<PhysicalReg>(loc);
             if (reg.index >= 100 && reg.index <= 115) {
                 free_xmm.push_back(reg);
-            } else if (reg.index >= 8) {
-                free_callee.push_back(reg);
             } else {
-                free_caller.push_back(reg);
+                const auto& intRegs = current_target_info ? current_target_info->getRegisters(::target::RegisterClass::Integer) : std::vector<std::string>{};
+                bool is_callee = (current_target_info && reg.index < intRegs.size())
+                    ? current_target_info->isCalleeSaved(intRegs[reg.index])
+                    : (reg.index >= 8);
+                if (is_callee) {
+                    free_callee.push_back(reg);
+                } else {
+                    free_caller.push_back(reg);
+                }
             }
         }
 
@@ -406,7 +413,11 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval,
             if ((currentIsFP && (reg.index < 100 || reg.index == reserved_xmm_idx)) ||
                 (!currentIsFP && reg.index >= 100))
                 goto allocate_current_slot;
-            if (!current_interval.isLiveAcrossCall() || reg.index >= 8) {
+            const auto& intRegs = current_target_info ? current_target_info->getRegisters(::target::RegisterClass::Integer) : std::vector<std::string>{};
+            bool is_callee = (current_target_info && reg.index < intRegs.size())
+                ? current_target_info->isCalleeSaved(intRegs[reg.index])
+                : (reg.index >= 8);
+            if (!current_interval.isLiveAcrossCall() || is_callee) {
                 current_interval.getVreg()->setPhysicalRegister(reg.index);
                 vreg_to_location_map[current_interval.getVreg()] = reg;
 

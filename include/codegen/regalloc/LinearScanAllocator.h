@@ -71,6 +71,7 @@ private:
     std::map<ir::Instruction*, RegLocation> vreg_to_location_map;
     RegAllocStats stats;
     size_t next_spill_id = 0;
+    const ::target::TargetInfo* current_target_info = nullptr;
 };
 
 } // namespace transforms

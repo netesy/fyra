@@ -18,10 +18,12 @@ inline bool isPromotableAlloca(ir::Instruction* allocation) {
         auto op = user->getOpcode();
         if ((op == I::Load || op == I::Loadl || op == I::Loadd || op == I::Loads) &&
             user->getOperands().size() == 1 && user->getOperands()[0]->get() == allocation &&
-            user->getType() == element) continue;
+            (user->getType() == element || (user->getType() && element && user->getType()->getSize() == element->getSize()))) continue;
         if ((op == I::Store || op == I::Storel || op == I::Stored || op == I::Stores) &&
             user->getOperands().size() == 2 && user->getOperands()[1]->get() == allocation &&
-            user->getOperands()[0]->get() != allocation && user->getOperands()[0]->get()->getType() == element) continue;
+            user->getOperands()[0]->get() != allocation &&
+            (user->getOperands()[0]->get()->getType() == element ||
+             (user->getOperands()[0]->get()->getType() && element && user->getOperands()[0]->get()->getType()->getSize() == element->getSize()))) continue;
         return false;
     }
     return true;

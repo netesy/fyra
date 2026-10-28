@@ -15,13 +15,7 @@
 
 namespace transforms {
 
-namespace {
-bool usesWindowsStackMachineLowering(const ::target::TargetInfo* targetInfo) {
-    if (!targetInfo) return false;
-    if (targetInfo->getArch() != ::target::Arch::X64) return false;
-    return targetInfo->getName().find("windows") != std::string::npos;
-}
-} // namespace
+
 
 bool RegAllocRewriter::run(ir::Function& func) {
     return run(func, nullptr);
@@ -65,33 +59,26 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
     allocator.run(func, targetInfo);
     const auto& location_map = allocator.getRegisterMap();
 
-    if (usesWindowsStackMachineLowering(targetInfo)) {
-        // Under the Microsoft-x64 stack-machine lowering the backend assigns a
-        // unique frame slot to every parameter and instruction during code
-        // generation.  Skip Function-level spill-slot assignment and the
-        // spill/reload rewrite: the allocator already produced no locations, and
-        // binding slots here would overlap the prologue's callee-save pushes.
-        return true;
-    }
-
     // 2. Update the function's stack frame information
     // Stack slots are addressed from %rbp and must start below registers saved
-    // by the prologue.  The old formula unconditionally reserved 64 bytes and
-    // described it as parameter space, although register parameters never
-    // consumed it.  Size the x64 prefix from the callee-saved registers that
-    // allocation actually selected; retain the conservative legacy prefix on
-    // targets whose prologue layout is not represented by x64 register IDs.
+    // by the prologue.  On Windows x64, 7 callee-saved registers (56 bytes) are pushed,
+    // so baseSpillOffset starts safely at 64 bytes.
     int baseSpillOffset = 64;
     if (targetInfo && targetInfo->getArch() == ::target::Arch::X64) {
-        std::set<unsigned> usedCalleeRegisters;
-        for (const auto& [vreg, location] : location_map) {
-            if (std::holds_alternative<PhysicalReg>(location)) {
-                unsigned reg = std::get<PhysicalReg>(location).index;
-                if (reg >= 8 && reg <= 12) usedCalleeRegisters.insert(reg);
+        if (targetInfo->getName().find("windows") != std::string::npos) {
+            baseSpillOffset = 64;
+        } else {
+            std::set<unsigned> usedCalleeRegisters;
+            for (const auto& [vreg, location] : location_map) {
+                if (std::holds_alternative<PhysicalReg>(location)) {
+                    unsigned reg = std::get<PhysicalReg>(location).index;
+                    if (targetInfo->isCalleeSaved(targetInfo->getRegisters(::target::RegisterClass::Integer)[reg]))
+                        usedCalleeRegisters.insert(reg);
+                }
             }
+            const int savedRegisterBytes = static_cast<int>(usedCalleeRegisters.size()) * 8;
+            baseSpillOffset = std::max(8, (savedRegisterBytes + 15) & ~15);
         }
-        const int savedRegisterBytes = static_cast<int>(usedCalleeRegisters.size()) * 8;
-        baseSpillOffset = std::max(8, (savedRegisterBytes + 15) & ~15);
         size_t maxAlign = 16;
         for (const auto& [vreg, location] : location_map) {
             if (vreg && vreg->getType()) {
@@ -200,9 +187,14 @@ bool RegAllocRewriter::run(ir::Function& func, const ::target::TargetInfo* targe
                     spilledOperands.insert(operand);
                 }
             }
+            const bool isStore = instr->getOpcode() == ir::Instruction::Store ||
+                                 instr->getOpcode() == ir::Instruction::Storeb ||
+                                 instr->getOpcode() == ir::Instruction::Storeh ||
+                                 instr->getOpcode() == ir::Instruction::Storel;
             const bool useX64ScratchReload = targetInfo &&
                 targetInfo->getArch() == ::target::Arch::X64 &&
                 spilledOperands.size() == 1 &&
+                !isStore &&
                 !(*spilledOperands.begin())->getType()->isFloatingPoint() &&
                 !(*spilledOperands.begin())->getType()->isVectorTy() &&
                 !(*spilledOperands.begin())->getType()->isSIMDType();
