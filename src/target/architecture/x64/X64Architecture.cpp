@@ -3307,7 +3307,13 @@ void X64Architecture::emitPhiCopies(CodeGen& cg, ir::BasicBlock* source, ir::Bas
             ir::PhiNode* phi = move.second;
             std::string srcOp = cg.getValueAsOperand(incomingVal);
             std::string destOp = cg.getValueAsOperand(phi);
-            if (srcOp == destOp) continue;
+            // Only the text path can answer "is this a self-copy?" from operand spelling: there a
+            // value's operand is the physical register it was allocated.  The object path keeps every
+            // value in a lazily-allocated frame slot (emitStoreResult always stores to getStackOffset),
+            // so two unrelated values can share a register spelling while sitting in different slots --
+            // treating that as a self-copy drops a move the merge still needs.  The object path therefore
+            // emits the copy; a genuine self-copy is a harmless slot-to-itself load/store.
+            if (cg.getTextStream() && srcOp == destOp) continue;
 
             bool is32 = is32BitType(phi->getType());
             auto* vecType = dynamic_cast<const ir::VectorType*>(phi->getType());
