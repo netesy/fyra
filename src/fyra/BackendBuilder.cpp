@@ -505,7 +505,40 @@ BuildResult BackendBuilder::emitStaticLibrary(const std::string& path) {
         }
     }
 
-    if (writer->write({member}, path)) {
+    std::vector<target::artifact::archive::ArchiveMember> members{member};
+
+    // Input objects join the archive as their own members so a later link
+    // against this library resolves references to them. They are copied
+    // verbatim - the bytes are already a target object file on disk.
+    for (const auto& inputObjPath : inputObjectPaths_) {
+        std::ifstream f(inputObjPath, std::ios::binary);
+        if (!f.is_open()) {
+            result.errors.push_back("Cannot open input object file: " + inputObjPath);
+            return result;
+        }
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        f.close();
+
+        auto objReader = target::artifact::object::ObjectReader::detectAndCreate(bytes);
+        target::artifact::object::ObjectArtifact inputArt;
+        if (!objReader || !objReader->parse(bytes, inputArt)) {
+            result.errors.push_back("Failed to parse input object file: " + inputObjPath);
+            return result;
+        }
+
+        target::artifact::archive::ArchiveMember inputMember;
+        inputMember.name = std::filesystem::path(inputObjPath).filename().string();
+        inputMember.artifact = std::move(inputArt);
+        inputMember.bytes = std::move(bytes);
+        for (const auto& sym : inputMember.artifact.symbols) {
+            if (sym.isDefined && sym.binding == target::artifact::object::SymbolBinding::Global) {
+                inputMember.exportedSymbols.push_back(sym.name);
+            }
+        }
+        members.push_back(std::move(inputMember));
+    }
+
+    if (writer->write(members, path)) {
         result.success = true;
     } else {
         result.errors.push_back("ArchiveWriter failed: " + writer->getLastError());
