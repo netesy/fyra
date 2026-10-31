@@ -107,6 +107,19 @@ bool LoopRotate::rotateLoop(Loop& loop, ir::Function& func) {
     // Reject loops where header == latchBlock or bodyBlock == latchBlock or header == bodyBlock
     if (header == latchBlock || bodyBlock == latchBlock || header == bodyBlock) return false;
 
+    // Multi-exit safety: the exit-phi machinery below (STEP 4) only ever gives
+    // exitBlock phis incoming pairs {init <- preheader, latch <- latchBlock}.
+    // If exitBlock has any other predecessor (e.g. an early-exit `break` edge
+    // from a nested block - note such a block is NOT part of the natural loop,
+    // so membership in loop.blocks cannot be used to classify it), rotation
+    // would leave that edge without a phi incoming and codegen silently drops
+    // the copy, producing uninitialized values at the join. Refuse rotation.
+    for (ir::BasicBlock* pred : exitBlock->getPredecessors()) {
+        if (!pred) continue;
+        if (pred == header || pred == latchBlock) continue;
+        return false;
+    }
+
     // Safety check on non-PHI instructions in header
     std::vector<ir::Instruction*> headerNonPhis;
     for (auto& instPtr : header->getInstructions()) {
@@ -392,7 +405,6 @@ bool LoopRotate::rotateLoop(Loop& loop, ir::Function& func) {
     }
     loop.blocks.erase(header);
     loop.header = bodyBlock;
-
     return true;
 }
 
