@@ -194,9 +194,19 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
     // Relocations
     for (uint16_t i = 0; i < ch->NumberOfSections; ++i) {
         const auto& sh = secHdrs[i];
-        if (sh.PointerToRelocations > 0 && sh.PointerToRelocations + static_cast<uint64_t>(sh.NumberOfRelocations) * sizeof(CoffRelocation) <= bytes.size()) {
-            const auto* relocs = reinterpret_cast<const CoffRelocation*>(bytes.data() + sh.PointerToRelocations);
-            for (uint16_t r = 0; r < sh.NumberOfRelocations; ++r) {
+        if (sh.PointerToRelocations > 0) {
+            uint32_t numRelocs = sh.NumberOfRelocations;
+            uint32_t startReloc = 0;
+            if ((sh.Characteristics & 0x01000000) && numRelocs == 0xffff) {
+                if (sh.PointerToRelocations + sizeof(CoffRelocation) <= bytes.size()) {
+                    const auto* ovfl = reinterpret_cast<const CoffRelocation*>(bytes.data() + sh.PointerToRelocations);
+                    numRelocs = ovfl->VirtualAddress > 0 ? ovfl->VirtualAddress - 1 : 0;
+                    startReloc = 1;
+                }
+            }
+            if (sh.PointerToRelocations + static_cast<uint64_t>(startReloc + numRelocs) * sizeof(CoffRelocation) <= bytes.size()) {
+                const auto* relocs = reinterpret_cast<const CoffRelocation*>(bytes.data() + sh.PointerToRelocations + startReloc * sizeof(CoffRelocation));
+                for (uint32_t r = 0; r < numRelocs; ++r) {
                 const auto& rel = relocs[r];
                 ObjectRelocation orel;
                 orel.offset = rel.VirtualAddress;
@@ -251,6 +261,7 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                 }
                 outArtifact.addRelocation(orel);
             }
+        }
         }
     }
 

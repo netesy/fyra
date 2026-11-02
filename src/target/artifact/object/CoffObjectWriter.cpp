@@ -22,6 +22,7 @@ constexpr uint32_t IMAGE_SCN_MEM_READ = 0x40000000;
 constexpr uint32_t IMAGE_SCN_MEM_WRITE = 0x80000000;
 constexpr uint32_t IMAGE_SCN_ALIGN_16BYTES = 0x00500000;
 constexpr uint32_t IMAGE_SCN_ALIGN_8BYTES = 0x00400000;
+constexpr uint32_t IMAGE_SCN_LNK_NRELOC_OVFL = 0x01000000;
 constexpr uint8_t IMAGE_SYM_CLASS_EXTERNAL = 2;
 constexpr uint8_t IMAGE_SYM_CLASS_STATIC = 3;
 
@@ -229,16 +230,23 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
 
         if (!s.relocs.empty()) {
             csh.PointerToRelocations = currentOffset;
-            csh.NumberOfRelocations = static_cast<uint16_t>(s.relocs.size());
-            currentOffset += static_cast<uint32_t>(s.relocs.size() * sizeof(CoffRelocation));
+            if (s.relocs.size() >= 0xffff) {
+                csh.Characteristics = s.characteristics | IMAGE_SCN_LNK_NRELOC_OVFL;
+                csh.NumberOfRelocations = 0xffff;
+                currentOffset += static_cast<uint32_t>((s.relocs.size() + 1) * sizeof(CoffRelocation));
+            } else {
+                csh.Characteristics = s.characteristics;
+                csh.NumberOfRelocations = static_cast<uint16_t>(s.relocs.size());
+                currentOffset += static_cast<uint32_t>(s.relocs.size() * sizeof(CoffRelocation));
+            }
         } else {
             csh.PointerToRelocations = 0;
             csh.NumberOfRelocations = 0;
+            csh.Characteristics = s.characteristics;
         }
 
         csh.PointerToLinenumbers = 0;
         csh.NumberOfLinenumbers = 0;
-        csh.Characteristics = s.characteristics;
         cHeaders.push_back(csh);
     }
 
@@ -266,7 +274,18 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
             std::memcpy(buffer.data() + cHeaders[i].PointerToRawData, secs[i].data.data(), secs[i].data.size());
         }
         if (!secs[i].relocs.empty()) {
-            std::memcpy(buffer.data() + cHeaders[i].PointerToRelocations, secs[i].relocs.data(), secs[i].relocs.size() * sizeof(CoffRelocation));
+            if (secs[i].relocs.size() >= 0xffff) {
+                CoffRelocation ovfl = {};
+                ovfl.VirtualAddress = static_cast<uint32_t>(secs[i].relocs.size() + 1);
+                ovfl.SymbolTableIndex = 0;
+                ovfl.Type = 0;
+                std::memcpy(buffer.data() + cHeaders[i].PointerToRelocations, &ovfl, sizeof(CoffRelocation));
+                std::memcpy(buffer.data() + cHeaders[i].PointerToRelocations + sizeof(CoffRelocation),
+                            secs[i].relocs.data(), secs[i].relocs.size() * sizeof(CoffRelocation));
+            } else {
+                std::memcpy(buffer.data() + cHeaders[i].PointerToRelocations,
+                            secs[i].relocs.data(), secs[i].relocs.size() * sizeof(CoffRelocation));
+            }
         }
     }
 
