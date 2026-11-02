@@ -104,6 +104,13 @@ const std::unordered_map<std::string, std::string>& windows_dll_exports() {
         {"EnterCriticalSection","kernel32.dll"},{"LeaveCriticalSection","kernel32.dll"},{"InterlockedExchangeAdd","kernel32.dll"},{"InterlockedCompareExchange","kernel32.dll"},
         {"GetProcessHeap","kernel32.dll"},{"HeapAlloc","kernel32.dll"},{"HeapFree","kernel32.dll"},{"HeapReAlloc","kernel32.dll"},{"HeapCreate","kernel32.dll"},{"HeapDestroy","kernel32.dll"},
         {"FormatMessageA","kernel32.dll"},{"GetUserDefaultLangID","kernel32.dll"},{"GlobalAlloc","kernel32.dll"},{"GlobalFree","kernel32.dll"},
+        {"AddVectoredExceptionHandler","kernel32.dll"},{"ContinueDebugEvent","kernel32.dll"},{"CreateToolhelp32Snapshot","kernel32.dll"},
+        {"DebugActiveProcess","kernel32.dll"},{"DebugSetProcessKillOnExit","kernel32.dll"},{"GetComputerNameW","kernel32.dll"},
+        {"GetCurrentDirectoryW","kernel32.dll"},{"GetModuleFileNameA","kernel32.dll"},{"GetModuleFileNameW","kernel32.dll"},
+        {"GetModuleHandleExA","kernel32.dll"},{"GetModuleHandleExW","kernel32.dll"},{"OpenThread","kernel32.dll"},
+        {"ReadProcessMemory","kernel32.dll"},{"SetCurrentDirectoryW","kernel32.dll"},{"SetEnvironmentVariableW","kernel32.dll"},
+        {"SetHandleInformation","kernel32.dll"},{"Thread32First","kernel32.dll"},{"Thread32Next","kernel32.dll"},
+        {"WaitForDebugEvent","kernel32.dll"},{"lstrlenA","kernel32.dll"},
         // ---- bcrypt / random ----
         {"BCryptGenRandom","bcrypt.dll"},
         // ---- user32 ----
@@ -241,7 +248,7 @@ const std::unordered_map<std::string, std::string>& windows_dll_exports() {
         {"wcscmp","ucrtbase.dll"},{"wcscoll","ucrtbase.dll"},{"wcscpy","ucrtbase.dll"},{"wcscspn","ucrtbase.dll"},{"wcsftime","ucrtbase.dll"},
         {"wcslen","ucrtbase.dll"},{"wcsnlen","ucrtbase.dll"},{"wcsspn","ucrtbase.dll"},{"wcstol","ucrtbase.dll"},{"wcstoll","ucrtbase.dll"},
         {"wcstombs","ucrtbase.dll"},{"wcstoul","ucrtbase.dll"},{"wcstoull","ucrtbase.dll"},{"wcsxfrm","ucrtbase.dll"},{"wctob","ucrtbase.dll"},
-        {"wctype","ucrtbase.dll"},{"write","ucrtbase.dll"},
+        {"wctype","ucrtbase.dll"},{"write","ucrtbase.dll"},{"_spawnvp","ucrtbase.dll"},
     };
     return exports;
 }
