@@ -37,27 +37,34 @@ void SSARenamer::run(ir::Function& func, DominatorTree& dt) {
     // 2. Start the recursive renaming process
     renameBlock(func.getBasicBlocks().front().get());
 
-    // 3. Update Phi node types if all incoming values have a uniform floating-point type
-    for (auto& bb : func.getBasicBlocks()) {
-        for (auto& instr : bb->getInstructions()) {
-            if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
-                ir::Type* common_type = nullptr;
-                bool uniform = true;
-                for (size_t i = 1; i < phi->getOperands().size(); i += 2) {
-                    if (!phi->getOperands()[i]) continue;
-                    ir::Value* val = phi->getOperands()[i]->get();
-                    if (!val || !val->getType()) continue;
-                    // Ignore integer constant 0 default initializer if other operands exist
-                    if (dynamic_cast<ir::ConstantInt*>(val) && phi->getOperands().size() > 2) continue;
-                    if (!common_type) {
-                        common_type = val->getType();
-                    } else if (common_type != val->getType()) {
-                        uniform = false;
-                        break;
+    // 3. Update Phi node types iteratively until fixed point
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (auto& bb : func.getBasicBlocks()) {
+            for (auto& instr : bb->getInstructions()) {
+                if (auto* phi = dynamic_cast<ir::PhiNode*>(instr.get())) {
+                    if (phi->getType() && (phi->getType()->isFloatTy() || phi->getType()->isDoubleTy()))
+                        continue;
+                    ir::Type* common_type = nullptr;
+                    bool uniform = true;
+                    for (size_t i = 1; i < phi->getOperands().size(); i += 2) {
+                        if (!phi->getOperands()[i]) continue;
+                        ir::Value* val = phi->getOperands()[i]->get();
+                        if (!val || !val->getType()) continue;
+                        // Ignore integer constant 0 default initializer if other operands exist
+                        if (dynamic_cast<ir::ConstantInt*>(val) && phi->getOperands().size() > 2) continue;
+                        if (!common_type) {
+                            common_type = val->getType();
+                        } else if (common_type != val->getType()) {
+                            uniform = false;
+                            break;
+                        }
                     }
-                }
-                if (uniform && common_type && (common_type->isFloatTy() || common_type->isDoubleTy())) {
-                    phi->setType(common_type);
+                    if (uniform && common_type && (common_type->isFloatTy() || common_type->isDoubleTy())) {
+                        phi->setType(common_type);
+                        changed = true;
+                    }
                 }
             }
         }
