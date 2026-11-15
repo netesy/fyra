@@ -61,6 +61,7 @@ public:
     virtual void emitPassArgument(codegen::CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
     virtual void emitGetArgument(codegen::CodeGen&, size_t, const std::string&, const ir::Type*) = 0;
     virtual void emitRet(codegen::CodeGen&, ir::Instruction&) = 0;
+    virtual void emitPhi(codegen::CodeGen&, ir::Instruction&) {}
     virtual void emitAdd(codegen::CodeGen&, ir::Instruction&) = 0;
     virtual void emitSMin(codegen::CodeGen&, ir::Instruction&) {}
     virtual void emitSMax(codegen::CodeGen&, ir::Instruction&) {}

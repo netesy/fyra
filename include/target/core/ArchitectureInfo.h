@@ -38,6 +38,7 @@ public:
     virtual void emitGetArgument(CodeGen& cg, size_t argIndex, const std::string& dest, const ir::Type* type) = 0;
 
     virtual void emitRet(CodeGen& cg, ir::Instruction& i) = 0;
+    virtual void emitPhi(CodeGen& cg, ir::Instruction& i) {}
     virtual void emitAdd(CodeGen& cg, ir::Instruction& i) = 0;
     virtual void emitSMin(CodeGen&, ir::Instruction&) {}
     virtual void emitSMax(CodeGen&, ir::Instruction&) {}

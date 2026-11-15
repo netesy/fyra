@@ -40,6 +40,7 @@ public:
     void emitGetArgument(codegen::CodeGen& cg, size_t idx, const std::string& dest, const ir::Type* type) override;
 
     void emitRet(codegen::CodeGen& cg, ir::Instruction& i) override;
+    void emitPhi(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitAdd(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitSMin(codegen::CodeGen& cg, ir::Instruction& i) override;
     void emitSMax(codegen::CodeGen& cg, ir::Instruction& i) override;

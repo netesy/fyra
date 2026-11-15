@@ -157,6 +157,7 @@ void CodeGen::emitFunction(ir::Function& func) {
 
 void CodeGen::emitBasicBlock(ir::BasicBlock& bb) {
     lastStoreOp = "";
+    if (targetInfo) targetInfo->emitBasicBlockStart(*this, bb);
     if (os) {
         *os << (targetInfo ? targetInfo->getBBLabel(&bb) : (bb.getParent()->getName() + "_" + bb.getName())) << ":\n";
     } else if (assembler) {
@@ -245,6 +246,7 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
     }
     switch (instr.getOpcode()) {
         case ir::Instruction::Ret: targetInfo->emitRet(*this, instr); break;
+        case ir::Instruction::Phi: targetInfo->emitPhi(*this, instr); break;
         case ir::Instruction::Add: targetInfo->emitAdd(*this, instr); break;
         case ir::Instruction::SMin: targetInfo->emitSMin(*this, instr); break;
         case ir::Instruction::SMax: targetInfo->emitSMax(*this, instr); break;
@@ -269,7 +271,7 @@ void CodeGen::emitInstruction(ir::Instruction& instr) {
         case ir::Instruction::ExternCall: targetInfo->emitExternCall(*this, instr); break;
         case ir::Instruction::Call: targetInfo->emitCall(*this, instr); break;
         case ir::Instruction::Jmp: targetInfo->emitJmp(*this, instr); break;
-        case ir::Instruction::Br: case ir::Instruction::Jnz: targetInfo->emitBr(*this, instr); break;
+        case ir::Instruction::Br: case ir::Instruction::Jnz: case ir::Instruction::Jz: targetInfo->emitBr(*this, instr); break;
         case ir::Instruction::Load: case ir::Instruction::Loadd: case ir::Instruction::Loads: case ir::Instruction::Loadl: case ir::Instruction::Loaduw: case ir::Instruction::Loadsh: case ir::Instruction::Loaduh: case ir::Instruction::Loadsb: case ir::Instruction::Loadub: targetInfo->emitLoad(*this, instr); break;
         case ir::Instruction::Store: case ir::Instruction::Stored: case ir::Instruction::Stores: case ir::Instruction::Storel: case ir::Instruction::Storeh: case ir::Instruction::Storeb: targetInfo->emitStore(*this, instr); break;
         case ir::Instruction::Alloc: case ir::Instruction::Alloc4: case ir::Instruction::Alloc16: targetInfo->emitAlloc(*this, instr); break;

@@ -1,0 +1,11 @@
+extern lymar_aot_gpu_thread_id() : i64
+extern lymar_aot_gpu_sync() : i64
+
+global $__lymar_gpu_stages = "cs_main|task|8,8,1|0,0\n"
+
+export function $cs_main() : i64 {
+@start
+    %tid = extern lymar_aot_gpu_thread_id() : i64
+    extern lymar_aot_gpu_sync()
+    ret %tid : i64
+}

@@ -50,6 +50,7 @@ void CompositeTargetInfo::emitPassArgument(codegen::CodeGen& cg, size_t idx, con
 void CompositeTargetInfo::emitGetArgument(codegen::CodeGen& cg, size_t idx, const std::string& dest, const ir::Type* type) { architecture->emitGetArgument(cg, idx, dest, type); }
 
 void CompositeTargetInfo::emitRet(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitRet(cg, i); }
+void CompositeTargetInfo::emitPhi(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitPhi(cg, i); }
 void CompositeTargetInfo::emitAdd(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitAdd(cg, i); }
 void CompositeTargetInfo::emitSMin(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSMin(cg, i); }
 void CompositeTargetInfo::emitSMax(codegen::CodeGen& cg, ir::Instruction& i) { architecture->emitSMax(cg, i); }

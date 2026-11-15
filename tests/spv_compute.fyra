@@ -1,0 +1,24 @@
+function $square(%x : i64) : i64 {
+@start
+    %t0 = mul %x, %x : i64
+    ret %t0 : i64
+}
+
+export function $cs_main(%tid : i64) : i64 {
+@start
+    %a = call $square(i64 %tid) : i64
+    %b = add %a, 7 : i64
+    %c = copy 0 : i64
+    jmp @cond
+@cond
+    %cmp = slt %c, %b : i64
+    jnz %cmp, @body, @done
+@body
+    %c = add %c, 1 : i64
+    
+    %x = xor %c, 3 : i64
+    %y = and %x, 15 : i64
+    jmp @cond
+@done
+    ret %b : i64
+}

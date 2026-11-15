@@ -85,7 +85,21 @@ static const std::vector<CapabilitySpec> specs = {
     {CapabilityId::SECURITY_GETUID, "security.getuid", CapabilityDomain::SECURITY, 0, 0, true, false},
     {CapabilityId::GPU_COMPUTE, "gpu.compute", CapabilityDomain::GPU, 2, 2, false, true},
     {CapabilityId::GPU_MALLOC, "gpu.malloc", CapabilityDomain::GPU, 1, 1, false, true},
-    {CapabilityId::GPU_MEMCPY, "gpu.memcpy", CapabilityDomain::GPU, 3, 3, false, true}
+    {CapabilityId::GPU_MEMCPY, "gpu.memcpy", CapabilityDomain::GPU, 3, 3, false, true},
+    {CapabilityId::GPU_THREAD_ID, "gpu.thread.id", CapabilityDomain::GPU, 0, 0, true, false},
+    {CapabilityId::GPU_LOCAL_ID, "gpu.local.id", CapabilityDomain::GPU, 0, 0, true, false},
+    {CapabilityId::GPU_GROUP_ID, "gpu.group.id", CapabilityDomain::GPU, 0, 0, true, false},
+    {CapabilityId::GPU_NUM_GROUPS, "gpu.num.groups", CapabilityDomain::GPU, 0, 0, true, false},
+    {CapabilityId::GPU_SYNC, "gpu.sync", CapabilityDomain::GPU, 0, 0, false, false},
+    {CapabilityId::GPU_SET_MESH_COUNTS, "gpu.set.mesh.counts", CapabilityDomain::GPU, 2, 2, false, false},
+    // Stage markers: void extern calls that declare the enclosing function's
+    // shader stage / execution parameters. They emit no code.
+    {CapabilityId::GPU_TASK, "gpu.task", CapabilityDomain::GPU, 0, 0, false, false},
+    {CapabilityId::GPU_VERTEX, "gpu.vertex", CapabilityDomain::GPU, 0, 0, false, false},
+    {CapabilityId::GPU_PIXEL, "gpu.pixel", CapabilityDomain::GPU, 0, 0, false, false},
+    {CapabilityId::GPU_MESH, "gpu.mesh", CapabilityDomain::GPU, 0, 0, false, false},
+    {CapabilityId::GPU_LOCAL_SIZE, "gpu.local.size", CapabilityDomain::GPU, 3, 3, false, false},
+    {CapabilityId::GPU_MESH_LIMITS, "gpu.mesh.limits", CapabilityDomain::GPU, 2, 2, false, false}
 };
 
 const CapabilitySpec* CapabilityRegistry::find(std::string_view name) {

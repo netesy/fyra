@@ -1,0 +1,9 @@
+extern lymar_aot_gpu_thread_id() : i64
+extern lymar_aot_gpu_sync() : i64
+
+export function $cs_main() : i64 {
+@start
+    %tid = extern lymar_aot_gpu_thread_id() : i64
+    extern lymar_aot_gpu_sync()
+    ret %tid : i64
+}
