@@ -132,6 +132,8 @@ const std::unordered_map<std::string, std::string>& windows_dll_exports() {
         // ---- opengl32 ----
         {"wglChoosePixelFormatARB","opengl32.dll"},{"wglCreateContext","opengl32.dll"},{"wglDeleteContext","opengl32.dll"},{"wglMakeCurrent","opengl32.dll"},
         {"wglGetCurrentContext","opengl32.dll"},{"wglGetProcAddress","opengl32.dll"},{"glGetIntegerv","opengl32.dll"},{"glViewport","opengl32.dll"},
+        // ---- d3d11 (native D3D11 device + sokol d3d11 backend) ----
+        {"D3D11CreateDevice","d3d11.dll"},{"D3D11CreateDeviceAndSwapChain","d3d11.dll"},
         // ---- shell32 ----
         {"ShellExecuteA","shell32.dll"},{"ShellExecuteW","shell32.dll"},{"SHGetKnownFolderPath","shell32.dll"},
         // ---- ole32 ----
