@@ -457,6 +457,7 @@ bool PeExecutableImageBuilder::build(const linker::LinkedImage& image, const std
     pe.kind = PeImageKind::Executable;
     pe.arch = image.arch;
     pe.machine = target::TargetInfo::getCoffMachine(image.arch);
+    if (subsystem != 0) pe.subsystem = subsystem;
     pe.relocationFixupVmas = image.relocationFixupVmas;
     pe.importThunkVmas = image.importThunkVmas;
     pe.dataImportFixups = image.dataImportFixups;
@@ -485,6 +486,7 @@ bool PeExecutableImageBuilder::buildWithPlan(const linker::DynamicLinkPlan& plan
     pe.kind = PeImageKind::Executable;
     pe.arch = plan.arch;
     pe.machine = target::TargetInfo::getCoffMachine(plan.arch);
+    if (subsystem != 0) pe.subsystem = subsystem;
     pe.relocationFixupVmas = plan.relocationFixupVmas;
     pe.importThunkVmas = plan.importThunkVmas;
     pe.dataImportFixups = plan.dataImportFixups;

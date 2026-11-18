@@ -54,7 +54,8 @@ struct PeImage {
     uint32_t sectionAlignment = 0x1000;
     uint32_t fileAlignment = 0x200;
     uint32_t entryRva = 0;
-    uint16_t subsystem = 3; // Windows GUI = 3, EFI Application = 10
+    // PE subsystem: 2 = Windows GUI, 3 = Windows CUI (console), 10+ = EFI.
+    uint16_t subsystem = 3; // default: console
     uint16_t dllCharacteristics = 0;
     std::string imageName;
     std::vector<PeSection> sections;
@@ -77,6 +78,9 @@ private:
 
 class PeExecutableImageBuilder {
 public:
+    // Override the PE subsystem written into the optional header
+    // (2 = GUI, 3 = console). 0 keeps the PeImage default.
+    uint16_t subsystem = 0;
     bool build(const linker::LinkedImage& image, const std::string& outputPath);
     bool buildWithPlan(const linker::DynamicLinkPlan& plan, const std::string& outputPath);
     const std::string& getLastError() const { return lastError_; }

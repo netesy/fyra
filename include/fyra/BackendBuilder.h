@@ -63,6 +63,10 @@ public:
     BuildResult emitAPK(const std::string& path);
     BuildResult emitFlatBinary(const std::string& path);
 
+    // Override the PE subsystem for Windows executables
+    // (2 = GUI, 3 = console; 0 keeps the default).
+    BackendBuilder& peSubsystem(uint16_t subsystem) { peSubsystem_ = subsystem; return *this; }
+
 private:
     ir::Module& srcModule_;
     CompilerPipeline pipeline_;
@@ -75,6 +79,7 @@ private:
     std::vector<std::string> inputObjectPaths_;
     std::vector<std::string> inputStaticLibPaths_;
     std::vector<target::artifact::linker::DynamicImport> dynamicImports_;
+    uint16_t peSubsystem_{0};
 
     std::unique_ptr<ir::Module> preparedModule_;
     bool isPrepared_{false};

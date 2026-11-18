@@ -618,6 +618,7 @@ BuildResult BackendBuilder::emitExecutable(const std::string& path) {
 
     if (desc->os == target::OS::Windows) {
         target::artifact::executable::PeExecutableImageBuilder builder;
+        builder.subsystem = peSubsystem_;
         bool ok = false;
         if (!dynamicImports_.empty()) {
             auto plan = target::artifact::linker::DynamicLinkPlan::createFromLinkedImage(image, dynamicImports_);
