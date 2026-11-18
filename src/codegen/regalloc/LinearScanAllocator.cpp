@@ -209,7 +209,11 @@ void LinearScanAllocator::linearScan(ir::Function& func, const ::target::TargetI
         }
 
         if (isVector) {
-            if (!free_xmm_regs.empty()) {
+            // Every x64 XMM register is caller-saved on both the Windows and
+            // System V ABIs, so a floating-point or vector value whose live
+            // range crosses a call must be spilled: the callee (Lymar or a
+            // runtime/extern function) may clobber any xmm register.
+            if (!current_interval.isLiveAcrossCall() && !free_xmm_regs.empty()) {
                 auto prefIt = std::find_if(free_xmm_regs.begin(), free_xmm_regs.end(),
                     [preferredRegIdx](const PhysicalReg& pr) { return (int)pr.index == preferredRegIdx; });
                 if (prefIt != free_xmm_regs.end()) {
@@ -414,9 +418,12 @@ void LinearScanAllocator::spillAtInterval(const LiveInterval& current_interval,
                 (!currentIsFP && reg.index >= 100))
                 goto allocate_current_slot;
             const auto& intRegs = current_target_info ? current_target_info->getRegisters(::target::RegisterClass::Integer) : std::vector<std::string>{};
-            bool is_callee = (current_target_info && reg.index < intRegs.size())
-                ? current_target_info->isCalleeSaved(intRegs[reg.index])
-                : (reg.index >= 8);
+            // XMM physical ids (>=100) are never callee-saved on x64; the
+            // reg.index >= 8 fallback below only applies to GPR indices.
+            bool is_callee = (reg.index >= 100) ? false :
+                ((current_target_info && reg.index < intRegs.size())
+                    ? current_target_info->isCalleeSaved(intRegs[reg.index])
+                    : (reg.index >= 8));
             if (!current_interval.isLiveAcrossCall() || is_callee) {
                 current_interval.getVreg()->setPhysicalRegister(reg.index);
                 vreg_to_location_map[current_interval.getVreg()] = reg;
