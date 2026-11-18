@@ -445,6 +445,100 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         return std::string();
     };
 
+    // The PE image writer repacks sections sequentially from the section
+    // alignment using each section's final data size, while every symbol and
+    // section VMA assigned below is fixed at placement time. Import thunks and
+    // the synthesized _start stub are appended to .text only afterwards; when
+    // that growth crosses a page boundary the writer slides every later
+    // section up by a page while baked addresses keep the stale VMAs, so the
+    // .ctors walk calls into .data and faults (layout-sensitive segfault).
+    // Reserve the append budget inside .text's layout size up front so the
+    // placement VMAs already cover the final .text extent. The budget must be
+    // exact: the relocation pass rewrites .text's virtualSize to the real data
+    // size, so any overshoot reintroduces the same one-page skew.
+    uint64_t textAppendReserve = 0;
+    {
+        const bool winTarget = (outImage.os == target::OS::Windows || outImage.os == target::OS::UEFI);
+        const bool elfTarget = (outImage.os == target::OS::Linux || outImage.os == target::OS::BareMetal);
+        if (winTarget || elfTarget || !dynamicImports.empty()) {
+            // Mirror the relocation pass's binding decisions: every defined
+            // symbol lands in outImage.symbols (locals included), and only
+            // relocs whose fragment folded into an emitted section are seen.
+            std::unordered_set<std::string> definedGlobals;
+            std::unordered_set<std::string> emittedSections;
+            bool hasStart = false, hasMain = false, hasEpThunk = false;
+            for (const auto& art : artifacts) {
+                for (const auto& sym : art.symbols) {
+                    if (!sym.isDefined) continue;
+                    definedGlobals.insert(sym.name);
+                    if (sym.name == "_start") hasStart = true;
+                    else if (sym.name == "main" || sym.name == "$main") hasMain = true;
+                    else if (sym.name == "__imp_thunk_ExitProcess") hasEpThunk = true;
+                }
+                for (const auto& frag : art.sections) {
+                    const std::string canon = canonicalSection(frag.first);
+                    if (!canon.empty() && !(frag.second.data.empty() && frag.second.virtualSize == 0))
+                        emittedSections.insert(canon);
+                }
+            }
+            const uint64_t thunkSize = TargetRelocationEvaluator::getImportThunkBytes(outImage.arch, outImage.os).size();
+            std::unordered_set<std::string> thunkKeys;
+            for (const auto& art : artifacts) {
+                for (const auto& reloc : art.relocations) {
+                    const std::string canon = canonicalSection(reloc.sectionName);
+                    if (canon.empty() || !emittedSections.count(canon)) continue;
+                    const std::string& name = reloc.symbolName;
+                    // Explicit dynamic imports win over local definitions.
+                    const DynamicImport* matchedImp = nullptr;
+                    for (const auto& imp : dynamicImports) {
+                        if (imp.symbol == name) { matchedImp = &imp; break; }
+                    }
+                    if (matchedImp) {
+                        if (matchedImp->kind == DynamicImportKind::Function) thunkKeys.insert(matchedImp->symbol);
+                        continue;
+                    }
+                    // __imp_ references bind through the import table even when
+                    // a local stub defines the name (mirrors forceWindowsImp).
+                    if (outImage.os == target::OS::Windows && name.rfind("__imp_", 0) == 0) {
+                        WindowsImportInfo info;
+                        if (classifyWindowsImport(name, info)) {
+                            if (!info.data) thunkKeys.insert(info.name);
+                            continue;
+                        }
+                    }
+                    // Defined symbols and section symbols bind locally: no thunk.
+                    if (definedGlobals.count(name)) continue;
+                    const std::string symCanon = canonicalSection(name);
+                    if (!symCanon.empty() && emittedSections.count(symCanon)) continue;
+                    // Unresolved references fall back to the Windows import DB.
+                    if (outImage.os == target::OS::Windows) {
+                        WindowsImportInfo info;
+                        if (classifyWindowsImport(name, info) && !info.data) thunkKeys.insert(info.name);
+                    }
+                }
+            }
+            uint64_t appends = thunkKeys.size() * thunkSize;
+            // Synthesized entry stubs appended after relocation evaluation.
+            if (outImage.outputKind == LinkOutputKind::Executable && !hasStart && hasMain) {
+                if (outImage.os == target::OS::Windows && outImage.arch == target::Arch::X64) {
+                    appends += 80; // _start stub (ctors walk + main + ExitProcess)
+                    // The ExitProcess thunk is emitted before reloc eval, so an
+                    // ExitProcess import reuses it instead of adding another.
+                    if (!hasEpThunk && !thunkKeys.count("ExitProcess")) appends += thunkSize;
+                } else if (elfTarget) {
+                    switch (outImage.arch) {
+                        case target::Arch::X64: appends += 30; break;
+                        case target::Arch::AArch64:
+                        case target::Arch::RISCV64: appends += 28; break;
+                        case target::Arch::LoongArch64: appends += 24; break;
+                        default: break;
+                    }
+                }
+            }
+            textAppendReserve = appends;
+        }
+    }
+
     for (const auto& secName : ordered_sections) {
         LinkedSection lsec;
         lsec.name = secName;
@@ -484,6 +578,11 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                 currentOffset += p.size;
             }
         }
+
+        // Fold the post-placement .text append budget (import thunks + _start
+        // stub) into the layout size so later section VMAs match what the PE
+        // writer will compute from the final .text data size.
+        if (secName == ".text") currentOffset += textAppendReserve;
 
         if (currentOffset > 0) {
             lsec.virtualSize = currentOffset;
