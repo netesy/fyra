@@ -115,6 +115,14 @@ void TargetInfo::emitUnsupportedCapability(codegen::CodeGen& cg, ir::Instruction
         if (instr.getType() && instr.getType()->getTypeID() != ir::Type::VoidTyID) {
             *os << "  movq " << rax << ", " << cg.getValueAsOperand(&instr) << "\n";
         }
+    } else {
+        // Binary mode: leave the encoded error in rax so callers observe a
+        // deterministic nonzero failure instead of whatever the last syscall
+        // or call happened to return. emitExternCall stores rax into the
+        // result slot after the domain emitter returns.
+        auto& as = cg.getAssembler();
+        as.emitBytes({0x48, 0xB8}); // movabs rax, imm64
+        for (int b = 0; b < 8; ++b) as.emitByte(static_cast<uint8_t>((error >> (b * 8)) & 0xFF));
     }
 }
 

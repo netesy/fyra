@@ -7,6 +7,7 @@
 #include <iostream>
 #include <cstring>
 #include <algorithm>
+#include <array>
 
 namespace target {
 namespace artifact {
@@ -96,6 +97,7 @@ const std::unordered_map<std::string, std::string>& windows_dll_exports() {
         {"LoadLibraryA","kernel32.dll"},{"LoadLibraryW","kernel32.dll"},{"FreeLibrary","kernel32.dll"},{"GetProcAddress","kernel32.dll"},
         {"MapViewOfFile","kernel32.dll"},{"CreateFileMappingA","kernel32.dll"},{"UnmapViewOfFile","kernel32.dll"},
         {"CreateProcessA","kernel32.dll"},{"GetEnvironmentVariableA","kernel32.dll"},{"SetEnvironmentVariableA","kernel32.dll"},
+        {"GetEnvironmentStringsA","kernel32.dll"},{"FreeEnvironmentStringsA","kernel32.dll"},
         {"GetEnvironmentStringsW","kernel32.dll"},{"FreeEnvironmentStringsW","kernel32.dll"},{"GetSystemInfo","kernel32.dll"},{"GetNativeSystemInfo","kernel32.dll"},
         {"CreateEventA","kernel32.dll"},{"SetEvent","kernel32.dll"},{"ResetEvent","kernel32.dll"},{"CreateMutexA","kernel32.dll"},
         {"ReleaseMutex","kernel32.dll"},{"CreateSemaphoreA","kernel32.dll"},{"ReleaseSemaphore","kernel32.dll"},
@@ -329,10 +331,13 @@ bool InternalLinker::extractLazyArchiveMembers(
         progress = false;
 
         std::unordered_set<std::string> definedGlobals;
+        std::unordered_set<std::string> weakUndefined;
         for (const auto& art : inOutArtifacts) {
             for (const auto& sym : art.symbols) {
                 if (sym.isDefined && sym.binding != target::artifact::object::SymbolBinding::Local) {
                     definedGlobals.insert(sym.name);
+                } else if (!sym.isDefined && sym.binding == target::artifact::object::SymbolBinding::Weak) {
+                    weakUndefined.insert(sym.name);
                 }
             }
         }
@@ -340,12 +345,15 @@ bool InternalLinker::extractLazyArchiveMembers(
         std::unordered_set<std::string> unresolvedGlobals;
         for (const auto& art : inOutArtifacts) {
             for (const auto& reloc : art.relocations) {
-                if (!definedGlobals.count(reloc.symbolName)) {
+                // Weak-undefined references resolve to zero when no archive
+                // member defines them, so they must not force extraction.
+                if (!definedGlobals.count(reloc.symbolName) && !weakUndefined.count(reloc.symbolName)) {
                     unresolvedGlobals.insert(reloc.symbolName);
                 }
             }
             for (const auto& sym : art.symbols) {
-                if (!sym.isDefined && !definedGlobals.count(sym.name)) {
+                if (!sym.isDefined && sym.binding != target::artifact::object::SymbolBinding::Weak &&
+                    !definedGlobals.count(sym.name)) {
                     unresolvedGlobals.insert(sym.name);
                 }
             }
@@ -418,7 +426,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
     std::vector<SectionPlacement> placements;
 
     std::vector<std::string> ordered_sections = {
-        ".text", ".rodata", ".data", ".ctors", ".bss"
+        ".text", ".rodata", ".pdata", ".xdata", ".data", ".ctors", ".bss"
     };
 
     uint64_t currentVma = baseVma + pageAlign;
@@ -437,6 +445,11 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         if (n == ".data" || pfx(".data")) return ".data";
         if (n == ".bss" || pfx(".bss")) return ".bss";
         if (n == ".ctors" || pfx(".ctors") || pfx(".init_array") || pfx(".CRT$")) return ".ctors";
+        // x64 Windows SEH unwind metadata: RUNTIME_FUNCTION records (.pdata)
+        // and UNWIND_INFO blobs (.xdata). Without these the OS cannot dispatch
+        // or unwind a C++ exception and the process is terminated outright.
+        if (n == ".pdata" || pfx(".pdata")) return ".pdata";
+        if (n == ".xdata" || pfx(".xdata")) return ".xdata";
         // Debug/EH-frame fragments are intentionally not folded: they are
         // unreferenced at runtime on x64 Windows (SEH lives in .pdata/.xdata)
         // and their COFF relocations use section/relative types the evaluator
@@ -546,7 +559,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         lsec.virtualAddress = currentVma;
 
         if (secName == ".text") { lsec.isExecutable = true; lsec.isWritable = false; }
-        else if (secName == ".rodata") { lsec.isExecutable = false; lsec.isWritable = false; }
+        else if (secName == ".rodata" || secName == ".pdata" || secName == ".xdata") { lsec.isExecutable = false; lsec.isWritable = false; }
         else if (secName == ".data" || secName == ".bss" || secName == ".ctors") { lsec.isExecutable = false; lsec.isWritable = true; }
         else { lsec.isExecutable = false; lsec.isWritable = false; lsec.isReadable = false; }
 
@@ -558,7 +571,13 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                 const auto* sec = &frag.second;
                 if (sec->data.empty() && sec->virtualSize == 0) continue;
 
+                // .pdata is a flat RUNTIME_FUNCTION table: the OS indexes it as
+                // size/12 contiguous 12-byte records, so fragments must pack
+                // with NO alignment padding (each is already a multiple of 12).
+                // Any gap corrupts every subsequent entry and crashes SEH
+                // dispatch. .xdata blobs are RVA-referenced and tolerate pads.
                 uint64_t align = sec->alignment ? sec->alignment : 16;
+                if (secName == ".pdata") align = 4;
                 currentOffset = alignUp(currentOffset, align);
 
                 SectionPlacement p;
@@ -587,7 +606,7 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
         if (currentOffset > 0) {
             lsec.virtualSize = currentOffset;
             outImage.sections[secName] = lsec;
-            if (secName == ".text" || secName == ".rodata" || secName == ".data" || secName == ".ctors" || secName == ".bss") {
+            if (secName == ".text" || secName == ".rodata" || secName == ".pdata" || secName == ".xdata" || secName == ".data" || secName == ".ctors" || secName == ".bss") {
                 currentVma = alignUp(currentVma + currentOffset, pageAlign);
             }
         }
@@ -598,6 +617,18 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
     // binding must consult the referencing artifact's own copy rather than the
     // global by-name map (which collapses same-named statics across TUs).
     std::vector<std::unordered_map<std::string, uint64_t>> localSymbolAddr(artifacts.size());
+
+    // Weak-undefined symbols (e.g. optional runtime services referenced via
+    // #pragma weak/__attribute__((weak))) resolve to address zero when no
+    // archive member defines them — matching GNU ld, which neither extracts
+    // archive members for them nor errors on the leftover references.
+    std::unordered_set<std::string> weakUndefined;
+    for (const auto& art : artifacts) {
+        for (const auto& sym : art.symbols) {
+            if (!sym.isDefined && sym.binding == target::artifact::object::SymbolBinding::Weak)
+                weakUndefined.insert(sym.name);
+        }
+    }
 
     // Symbol resolution and rebasing (both global and local symbols)
     for (size_t aIdx = 0; aIdx < artifacts.size(); ++aIdx) {
@@ -1112,7 +1143,8 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
                     }
                     targetSymAddr = outImage.symbols[thunkSymName].virtualAddress;
                 }
-            } else if (!outImage.symbols.count(reloc.symbolName) && !outImage.findSection(canonicalSection(reloc.symbolName))) {
+            } else if (!outImage.symbols.count(reloc.symbolName) && !outImage.findSection(canonicalSection(reloc.symbolName)) &&
+                       !weakUndefined.count(reloc.symbolName)) {
                 std::string msg = "Unresolved undefined symbol reference: '" + reloc.symbolName + "'";
                 if (isStaticRuntimeSymbol(reloc.symbolName))
                     msg += " (C++/GCC runtime symbol; a static archive such as libstdc++/libgcc was not contributed)";
@@ -1122,6 +1154,26 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
 
             uint64_t placeAddress = lsec->virtualAddress + outputOffset + reloc.offset;
             uint64_t sectionDataOffset = outputOffset + reloc.offset;
+
+            // IMAGE_REL_AMD64_ADDR32NB stores a 32-bit image offset (RVA), not a
+            // VA: .pdata RUNTIME_FUNCTION begin/end/unwind addresses and .xdata
+            // personality/chained-info pointers all use it. It needs no base
+            // relocation fixup because the stored value is already
+            // position-independent.
+            if (reloc.type == "IMAGE_REL_AMD64_ADDR32NB") {
+                if (sectionDataOffset + 4 > lsec->data.size()) {
+                    lastError_ = "Relocation offset out of bounds for ADDR32NB in section '" + reloc.sectionName + "'";
+                    return false;
+                }
+                uint64_t rva64 = targetSymAddr + static_cast<uint64_t>(reloc.addend) - baseVma;
+                if (rva64 > 0xFFFFFFFFULL) {
+                    lastError_ = "ADDR32NB relocation target out of 32-bit RVA range for symbol '" + reloc.symbolName + "'";
+                    return false;
+                }
+                uint32_t rva32 = static_cast<uint32_t>(rva64);
+                std::memcpy(lsec->data.data() + sectionDataOffset, &rva32, 4);
+                continue;
+            }
 
             RelocationKind kind = TargetRelocationEvaluator::normalizeType(reloc.type);
             if (kind == RelocationKind::Unknown) {
@@ -1137,6 +1189,28 @@ bool InternalLinker::link(const std::vector<target::artifact::object::ObjectArti
             if (kind == RelocationKind::Absolute) {
                 outImage.relocationFixupVmas.push_back(placeAddress);
             }
+        }
+    }
+
+    // RtlLookupFunctionEntry binary-searches .pdata, so RUNTIME_FUNCTION
+    // records (12 bytes each: BeginAddress, EndAddress, UnwindInfoAddress RVA)
+    // must be sorted by BeginAddress. Object fragments are internally sorted
+    // but concatenation is not, so sort the merged table now that all
+    // ADDR32NB relocations have written final RVAs.
+    if (auto* pdata = outImage.findSection(".pdata")) {
+        auto& d = pdata->data;
+        if (d.size() % 12 == 0) {
+            std::vector<std::array<uint8_t, 12>> records(d.size() / 12);
+            for (size_t i = 0; i < records.size(); ++i)
+                std::memcpy(records[i].data(), d.data() + i * 12, 12);
+            std::sort(records.begin(), records.end(), [](const auto& a, const auto& b) {
+                uint32_t ba, bb;
+                std::memcpy(&ba, a.data(), 4);
+                std::memcpy(&bb, b.data(), 4);
+                return ba < bb;
+            });
+            for (size_t i = 0; i < records.size(); ++i)
+                std::memcpy(d.data() + i * 12, records[i].data(), 12);
         }
     }
 

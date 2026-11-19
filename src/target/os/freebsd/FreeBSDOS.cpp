@@ -36,6 +36,7 @@ std::string FreeBSDOS::formatFunctionSizeDirective(const std::string& name) cons
 void FreeBSDOS::emitHeader(CodeGen& cg) {
     if (auto* os = cg.getTextStream()) {
         *os << "  # FreeBSD OS Target Header\n";
+        *os << "  .text\n";
     }
 }
 
@@ -67,6 +68,35 @@ void FreeBSDOS::emitFSCapability(CodeGen& cg, ir::Instruction& i, const Capabili
         if (op) args.push_back(op->get());
     }
 
+    if (spec.id == CapabilityId::FS_GET_ATTRS) {
+        // fs.getattrs(path) — access(path, F_OK): 0 on success; on failure the
+        // BSD convention returns errno in rax with CF set. Normalize to the
+        // cross-target 0xFFFFFFFF failure sentinel.
+        auto* zero = ir::ConstantInt::get(ir::IntegerType::get(64), 0);
+        const_cast<ArchitectureInfo&>(arch).emitNativeSyscall(cg, 33, {args[0], zero});
+        if (auto* os = cg.getTextStream()) {
+            *os << "  pushfq\n  popq %rcx\n  andq $1, %rcx\n  negq %rcx\n"
+                   "  orq %rcx, %rax\n  shlq $32, %rax\n  shrq $32, %rax\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitByte(0x9C);                            // pushfq
+            as.emitByte(0x59);                            // pop rcx
+            as.emitBytes({0x83, 0xE1, 0x01});             // and ecx, 1
+            as.emitBytes({0x48, 0xF7, 0xD9});             // neg rcx
+            as.emitBytes({0x48, 0x09, 0xC8});             // or rax, rcx
+            as.emitBytes({0x48, 0xC1, 0xE0, 0x20});       // shl rax, 32
+            as.emitBytes({0x48, 0xC1, 0xE8, 0x20});       // shr rax, 32
+        }
+        return;
+    }
+    if (spec.id == CapabilityId::FS_MKDIR_P) {
+        // Recursive creation is composed by the module-level `fyra_mkdir_p`
+        // IR helper (emitted by the Lymar builder on demand) using
+        // fs.mkdir/fs.getattrs — works in text and binary modes.
+        const_cast<ArchitectureInfo&>(arch).emitNativeLibraryCall(cg, "fyra_mkdir_p", {args[0]});
+        return;
+    }
+
     uint64_t sysNum = 5; // sys_open
     if (spec.id == CapabilityId::FS_OPEN) sysNum = 5;
     else if (spec.id == CapabilityId::FS_CREATE) sysNum = 5;
@@ -75,8 +105,27 @@ void FreeBSDOS::emitFSCapability(CodeGen& cg, ir::Instruction& i, const Capabili
     else if (spec.id == CapabilityId::FS_RENAME) sysNum = 128; // sys_rename
     else if (spec.id == CapabilityId::FS_MKDIR) sysNum = 136;  // sys_mkdir
     else if (spec.id == CapabilityId::FS_RMDIR) sysNum = 137;  // sys_rmdir
+    else { cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &spec); return; }
 
     const_cast<ArchitectureInfo&>(arch).emitNativeSyscall(cg, sysNum, args);
+    // fs.remove/fs.rmdir/fs.rename return the cross-target boolean contract
+    // (exactly 1 on success, 0 on failure). BSD syscalls signal errors with CF
+    // set and errno in rax, so normalize: rax = 1 - CF. fs.mkdir stays raw —
+    // the mkdir -p composer distinguishes EEXIST through fs.getattrs.
+    if (spec.id == CapabilityId::FS_REMOVE || spec.id == CapabilityId::FS_RMDIR ||
+        spec.id == CapabilityId::FS_RENAME) {
+        if (auto* os = cg.getTextStream()) {
+            *os << "  pushfq\n  popq %rcx\n  andl $1, %ecx\n"
+                   "  movl $1, %eax\n  subl %ecx, %eax\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitByte(0x9C);                            // pushfq
+            as.emitByte(0x59);                            // pop rcx
+            as.emitBytes({0x83, 0xE1, 0x01});             // and ecx, 1
+            as.emitBytes({0xB8, 0x01, 0x00, 0x00, 0x00}); // mov eax, 1
+            as.emitBytes({0x29, 0xC8});                   // sub eax, ecx
+        }
+    }
 }
 
 void FreeBSDOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const {

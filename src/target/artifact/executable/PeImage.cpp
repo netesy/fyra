@@ -377,6 +377,16 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
         sections.push_back(std::move(out));
     }
 
+    // x64 Windows SEH: the exception directory (index 3) must point at the
+    // sorted .pdata RUNTIME_FUNCTION table or RtlDispatchException cannot
+    // unwind C++ exceptions and the process is terminated on first throw.
+    for (const auto& section : sections) {
+        if (section.section.name == ".pdata" && !section.section.data.empty()) {
+            image.dataDirectories[3] = {section.rva, static_cast<uint32_t>(section.section.data.size())};
+            break;
+        }
+    }
+
     DosHeader dos{};
     dos.magic = 0x5a4d;
     dos.peOffset = 128;
@@ -397,7 +407,11 @@ bool PeImageWriter::write(PeImage image, const std::string& outputPath) {
     optional.headersSize = headersSize;
     optional.subsystem = image.subsystem;
     optional.dllCharacteristics = image.dllCharacteristics;
-    optional.stackReserve = optional.heapReserve = 0x100000;
+    // Match the toolchain default stack reserve used by the driver link path
+    // (and lymar.exe's own -Wl,--stack,16777216): deeply recursive UI layout/
+    // paint and runtime call chains overflow the old 1MB reserve.
+    optional.stackReserve = 0x1000000;
+    optional.heapReserve = 0x100000;
     optional.stackCommit = optional.heapCommit = 0x1000;
     optional.directoryCount = 16;
     for (size_t i = 0; i < 16; ++i)

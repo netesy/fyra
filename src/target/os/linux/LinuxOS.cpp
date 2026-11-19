@@ -45,6 +45,8 @@ bool LinuxOS::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::FS_RENAME:
         case CapabilityId::FS_MKDIR:
         case CapabilityId::FS_RMDIR:
+        case CapabilityId::FS_GET_ATTRS:
+        case CapabilityId::FS_MKDIR_P:
         case CapabilityId::MEMORY_ALLOC:
         case CapabilityId::MEMORY_FREE:
         case CapabilityId::MEMORY_MAP:
@@ -135,6 +137,33 @@ void LinuxOS::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Capabi
 }
 
 void LinuxOS::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    if (spec.id == CapabilityId::FS_GET_ATTRS) {
+        // fs.getattrs(path) — access(path, F_OK): 0 on success, -errno on
+        // failure. Normalize any negative result to the cross-target
+        // 0xFFFFFFFF failure sentinel the AOT builder compares against.
+        auto* zero = ir::ConstantInt::get(ir::IntegerType::get(64), 0);
+        arch.emitNativeSyscall(cg, 21, {instr.getOperands()[0]->get(), zero});
+        if (auto* os = cg.getTextStream()) {
+            *os << "  movq $0xFFFFFFFF, %rcx\n";
+            *os << "  testq %rax, %rax\n";
+            *os << "  cmovs %rcx, %rax\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitBytes({0x48, 0xC7, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF}); // mov rcx, 0xFFFFFFFF
+            as.emitBytes({0x48, 0x85, 0xC0});                         // test rax, rax
+            as.emitBytes({0x48, 0x0F, 0x48, 0xC1});                   // cmovs rax, rcx
+        }
+        return;
+    }
+    if (spec.id == CapabilityId::FS_MKDIR_P) {
+        // No mkdir -p syscall exists; recursive creation is composed by the
+        // module-level `fyra_mkdir_p` IR helper (emitted by the Lymar builder
+        // on demand), which walks components using fs.mkdir/fs.getattrs. The
+        // call works in both text and binary modes since it is an ordinary
+        // function symbol.
+        arch.emitNativeLibraryCall(cg, "fyra_mkdir_p", {instr.getOperands()[0]->get()});
+        return;
+    }
     uint64_t num = 0;
     switch (spec.id) {
         case CapabilityId::FS_OPEN:
@@ -147,6 +176,21 @@ void LinuxOS::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const Capabi
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
     arch.emitNativeSyscall(cg, num, getArgValues(instr));
+    // fs.remove/fs.rmdir/fs.rename return the cross-target boolean contract
+    // (exactly 1 on success, 0 on failure). Linux syscalls return 0/-errno, so
+    // normalize: rax = (rax == 0). fs.mkdir stays raw — the mkdir -p composer
+    // distinguishes EEXIST through fs.getattrs rather than errno.
+    if (spec.id == CapabilityId::FS_REMOVE || spec.id == CapabilityId::FS_RMDIR ||
+        spec.id == CapabilityId::FS_RENAME) {
+        if (auto* os = cg.getTextStream()) {
+            *os << "  testq %rax, %rax\n  sete %al\n  movzbl %al, %eax\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitBytes({0x48, 0x85, 0xC0});       // test rax, rax
+            as.emitBytes({0x0F, 0x94, 0xC0});       // sete al
+            as.emitBytes({0x0F, 0xB6, 0xC0});       // movzbl eax, al
+        }
+    }
 }
 
 void LinuxOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {

@@ -17,6 +17,7 @@ constexpr uint16_t IMAGE_FILE_MACHINE_RISCV64 = 0x5064;
 
 constexpr uint32_t IMAGE_SCN_CNT_CODE = 0x00000020;
 constexpr uint32_t IMAGE_SCN_CNT_INITIALIZED_DATA = 0x00000040;
+constexpr uint32_t IMAGE_SCN_CNT_UNINITIALIZED_DATA = 0x00000080;
 constexpr uint32_t IMAGE_SCN_MEM_EXECUTE = 0x20000000;
 constexpr uint32_t IMAGE_SCN_MEM_READ = 0x40000000;
 constexpr uint32_t IMAGE_SCN_MEM_WRITE = 0x80000000;
@@ -94,7 +95,8 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
     struct SecInfo {
         std::string name;
         std::vector<uint8_t> data;
-        uint32_t characteristics;
+        uint32_t rawSize = 0;
+        uint32_t characteristics = 0;
         std::vector<CoffRelocation> relocs;
     };
     std::vector<SecInfo> secs;
@@ -104,9 +106,11 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
         SecInfo s;
         s.name = kv.first;
         s.data = kv.second.data;
+        s.rawSize = static_cast<uint32_t>(s.data.size());
         if (s.name == ".bss") {
-            s.data.resize(kv.second.virtualSize, 0);
-            s.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_16BYTES;
+            s.data.clear();
+            s.rawSize = static_cast<uint32_t>(kv.second.virtualSize);
+            s.characteristics = IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_16BYTES;
         } else if (s.name == ".text" || s.name == "CODE") {
             s.characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_ALIGN_16BYTES;
         } else {
@@ -224,9 +228,14 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
         std::strncpy(csh.Name, s.name.c_str(), 8);
         csh.VirtualSize = 0;
         csh.VirtualAddress = 0;
-        csh.SizeOfRawData = static_cast<uint32_t>(s.data.size());
-        csh.PointerToRawData = currentOffset;
-        currentOffset += csh.SizeOfRawData;
+        csh.SizeOfRawData = s.rawSize;
+
+        if (s.characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
+            csh.PointerToRawData = 0;
+        } else {
+            csh.PointerToRawData = currentOffset;
+            currentOffset += csh.SizeOfRawData;
+        }
 
         if (!s.relocs.empty()) {
             csh.PointerToRelocations = currentOffset;
@@ -270,7 +279,7 @@ std::vector<uint8_t> CoffObjectWriter::serialize(const ObjectArtifact& artifact)
     std::memcpy(buffer.data() + sizeof(ch), cHeaders.data(), cHeaders.size() * sizeof(CoffSectionHeader));
 
     for (size_t i = 0; i < secs.size(); ++i) {
-        if (!secs[i].data.empty()) {
+        if (!secs[i].data.empty() && cHeaders[i].PointerToRawData != 0) {
             std::memcpy(buffer.data() + cHeaders[i].PointerToRawData, secs[i].data.data(), secs[i].data.size());
         }
         if (!secs[i].relocs.empty()) {

@@ -40,15 +40,65 @@ void MacOSOS::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Capabi
 }
 
 void MacOSOS::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    auto args = getArgValues(instr);
+    if (spec.id == CapabilityId::FS_GET_ATTRS) {
+        // fs.getattrs(path) — access(path, F_OK): 0 on success; BSD convention
+        // returns errno in rax with CF set on failure. Normalize to the
+        // cross-target 0xFFFFFFFF failure sentinel.
+        auto* zero = ir::ConstantInt::get(ir::IntegerType::get(64), 0);
+        arch.emitNativeSyscall(cg, 0x02000021, {args[0], zero});
+        if (auto* os = cg.getTextStream()) {
+            *os << "  pushfq\n  popq %rcx\n  andq $1, %rcx\n  negq %rcx\n"
+                   "  orq %rcx, %rax\n  shlq $32, %rax\n  shrq $32, %rax\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitByte(0x9C);                            // pushfq
+            as.emitByte(0x59);                            // pop rcx
+            as.emitBytes({0x83, 0xE1, 0x01});             // and ecx, 1
+            as.emitBytes({0x48, 0xF7, 0xD9});             // neg rcx
+            as.emitBytes({0x48, 0x09, 0xC8});             // or rax, rcx
+            as.emitBytes({0x48, 0xC1, 0xE0, 0x20});       // shl rax, 32
+            as.emitBytes({0x48, 0xC1, 0xE8, 0x20});       // shr rax, 32
+        }
+        return;
+    }
+    if (spec.id == CapabilityId::FS_MKDIR_P) {
+        // Recursive creation is composed by the module-level `fyra_mkdir_p`
+        // IR helper (emitted by the Lymar builder on demand) using
+        // fs.mkdir/fs.getattrs — works in text and binary modes.
+        arch.emitNativeLibraryCall(cg, "fyra_mkdir_p", {args[0]});
+        return;
+    }
     uint64_t num = 0;
     switch (spec.id) {
         case CapabilityId::FS_OPEN:
         case CapabilityId::FS_CREATE: num = 0x02000005; break;
         case CapabilityId::FS_STAT: num = 0x020000bc; break;
         case CapabilityId::FS_REMOVE: num = 0x0200000a; break;
+        case CapabilityId::FS_RENAME: num = 0x02000080; break;  // rename(128)
+        case CapabilityId::FS_MKDIR: num = 0x02000088; break;   // mkdir(136)
+        case CapabilityId::FS_RMDIR: num = 0x02000089; break;   // rmdir(137)
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
-    arch.emitNativeSyscall(cg, num, getArgValues(instr));
+    arch.emitNativeSyscall(cg, num, args);
+    // fs.remove/fs.rmdir/fs.rename return the cross-target boolean contract
+    // (exactly 1 on success, 0 on failure). BSD syscalls signal errors with CF
+    // set and errno in rax, so normalize: rax = 1 - CF. fs.mkdir stays raw —
+    // the mkdir -p composer distinguishes EEXIST through fs.getattrs.
+    if (spec.id == CapabilityId::FS_REMOVE || spec.id == CapabilityId::FS_RMDIR ||
+        spec.id == CapabilityId::FS_RENAME) {
+        if (auto* os = cg.getTextStream()) {
+            *os << "  pushfq\n  popq %rcx\n  andl $1, %ecx\n"
+                   "  movl $1, %eax\n  subl %ecx, %eax\n";
+        } else {
+            auto& as = cg.getAssembler();
+            as.emitByte(0x9C);                            // pushfq
+            as.emitByte(0x59);                            // pop rcx
+            as.emitBytes({0x83, 0xE1, 0x01});             // and ecx, 1
+            as.emitBytes({0xB8, 0x01, 0x00, 0x00, 0x00}); // mov eax, 1
+            as.emitBytes({0x29, 0xC8});                   // sub eax, ecx
+        }
+    }
 }
 
 void MacOSOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
@@ -221,6 +271,12 @@ void MacOSOS::emitSecurityCapability(CodeGen& cg, ir::Instruction& i, const Capa
 
 void MacOSOS::emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& s, ArchitectureInfo& a) const {
      cg.getTargetInfo()->emitUnsupportedCapability(cg, i, &s);
+}
+
+void MacOSOS::emitHeader(CodeGen& cg) {
+    if (auto* os = cg.getTextStream()) {
+        *os << "  .text\n";
+    }
 }
 
 void MacOSOS::emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) {

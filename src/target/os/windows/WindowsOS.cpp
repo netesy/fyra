@@ -32,6 +32,8 @@ bool WindowsOS::supportsCapability(const CapabilitySpec& spec) const {
         case CapabilityId::FS_RENAME:
         case CapabilityId::FS_MKDIR:
         case CapabilityId::FS_RMDIR:
+        case CapabilityId::FS_GET_ATTRS:
+        case CapabilityId::FS_MKDIR_P:
         case CapabilityId::MEMORY_ALLOC:
         case CapabilityId::MEMORY_FREE:
         case CapabilityId::MEMORY_MAP:
@@ -204,6 +206,15 @@ void WindowsOS::emitIOCapability(CodeGen& cg, ir::Instruction& instr, const Capa
 }
 
 void WindowsOS::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
+    auto args = getArgValues(instr);
+    if (spec.id == CapabilityId::FS_MKDIR_P) {
+        // SHCreateDirectoryExA rejects relative paths (ERROR_BAD_PATHNAME), so
+        // recursive creation is composed by the module-level `fyra_mkdir_p` IR
+        // helper — a component walk over fs.mkdir/fs.getattrs, which lower to
+        // CreateDirectoryA/GetFileAttributesA and handle relative paths.
+        arch.emitNativeLibraryCall(cg, "fyra_mkdir_p", {args[0]});
+        return;
+    }
     std::string func;
     switch (spec.id) {
         case CapabilityId::FS_OPEN:
@@ -211,11 +222,27 @@ void WindowsOS::emitFSCapability(CodeGen& cg, ir::Instruction& instr, const Capa
         case CapabilityId::FS_STAT: func = "GetFileAttributesExA"; break;
         case CapabilityId::FS_REMOVE: func = "DeleteFileA"; break;
         case CapabilityId::FS_RENAME: func = "MoveFileA"; break;
-        case CapabilityId::FS_MKDIR: func = "CreateDirectoryA"; break;
+        case CapabilityId::FS_MKDIR:
+            // Spec args are (path, mode); CreateDirectoryA wants (path, psa) —
+            // substitute a NULL security descriptor for the mode operand.
+            arch.emitNativeLibraryCall(cg, "CreateDirectoryA",
+                {args[0], ir::ConstantInt::get(ir::IntegerType::get(64), 0)});
+            return;
         case CapabilityId::FS_RMDIR: func = "RemoveDirectoryA"; break;
+        case CapabilityId::FS_GET_ATTRS:
+            // DWORD return: the upper 32 bits of rax are undefined, so
+            // zero-extend before callers compare against the 0xFFFFFFFF
+            // failure sentinel.
+            arch.emitNativeLibraryCall(cg, "GetFileAttributesA", args);
+            if (auto* os = cg.getTextStream()) {
+                *os << "  movl %eax, %eax\n";
+            } else {
+                cg.getAssembler().emitBytes({0x89, 0xC0}); // mov eax, eax
+            }
+            return;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
-    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
+    arch.emitNativeLibraryCall(cg, func, args);
 }
 
 void WindowsOS::emitMemoryCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
@@ -323,14 +350,25 @@ void WindowsOS::emitSyncCapability(CodeGen& cg, ir::Instruction& instr, const Ca
 }
 
 void WindowsOS::emitTimeCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    std::string func;
     switch (spec.id) {
-        case CapabilityId::TIME_NOW: func = "GetSystemTimeAsFileTime"; break;
-        case CapabilityId::TIME_MONOTONIC: func = "QueryPerformanceCounter"; break;
-        case CapabilityId::TIME_SLEEP: func = "Sleep"; break;
+        case CapabilityId::TIME_NOW: {
+            auto args = getArgValues(instr);
+            if (args.empty()) {
+                args.push_back(ir::ConstantInt::get(ir::IntegerType::get(64), 0));
+            }
+            arch.emitNativeLibraryCall(cg, "time", args);
+            return;
+        }
+        case CapabilityId::TIME_MONOTONIC: {
+            arch.emitNativeLibraryCall(cg, "GetTickCount64", getArgValues(instr));
+            return;
+        }
+        case CapabilityId::TIME_SLEEP: {
+            arch.emitNativeLibraryCall(cg, "Sleep", getArgValues(instr));
+            return;
+        }
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
-    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitEventCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
@@ -376,14 +414,29 @@ void WindowsOS::emitIPCCapability(CodeGen& cg, ir::Instruction& instr, const Cap
 }
 
 void WindowsOS::emitEnvCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {
-    std::string func;
+    auto args = getArgValues(instr);
     switch (spec.id) {
-        case CapabilityId::ENV_GET: func = "GetEnvironmentVariableA"; break;
-        case CapabilityId::ENV_LIST: func = "GetEnvironmentStringsA"; break;
-        case CapabilityId::ENV_SET: func = "SetEnvironmentVariableA"; break;
+        case CapabilityId::ENV_GET:
+            arch.emitNativeLibraryCall(cg, "GetEnvironmentVariableA", args);
+            if (auto* os = cg.getTextStream()) {
+                *os << "  movl %eax, %eax\n";
+            } else {
+                cg.getAssembler().emitBytes({0x89, 0xC0}); // mov eax, eax
+            }
+            return;
+        case CapabilityId::ENV_LIST:
+            arch.emitNativeLibraryCall(cg, "GetEnvironmentStringsA", args);
+            return;
+        case CapabilityId::ENV_SET:
+            arch.emitNativeLibraryCall(cg, "SetEnvironmentVariableA", args);
+            if (auto* os = cg.getTextStream()) {
+                *os << "  movl %eax, %eax\n";
+            } else {
+                cg.getAssembler().emitBytes({0x89, 0xC0}); // mov eax, eax
+            }
+            return;
         default: cg.getTargetInfo()->emitUnsupportedCapability(cg, instr, &spec); return;
     }
-    arch.emitNativeLibraryCall(cg, func, getArgValues(instr));
 }
 
 void WindowsOS::emitSystemCapability(CodeGen& cg, ir::Instruction& instr, const CapabilitySpec& spec, ArchitectureInfo& arch) const {

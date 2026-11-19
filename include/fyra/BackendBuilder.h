@@ -67,6 +67,16 @@ public:
     // (2 = GUI, 3 = console; 0 keeps the default).
     BackendBuilder& peSubsystem(uint16_t subsystem) { peSubsystem_ = subsystem; return *this; }
 
+    // Treat the named symbols as strong undefined references during archive
+    // extraction, forcing the archive member that defines each one to be
+    // pulled in. Used for lazily-linked runtime services (e.g. the AOT
+    // graphics resource) that generated code only reaches through weak
+    // references.
+    BackendBuilder& addUndefinedSymbol(const std::string& symbol) {
+        extraUndefinedSymbols_.push_back(symbol);
+        return *this;
+    }
+
 private:
     ir::Module& srcModule_;
     CompilerPipeline pipeline_;
@@ -79,6 +89,7 @@ private:
     std::vector<std::string> inputObjectPaths_;
     std::vector<std::string> inputStaticLibPaths_;
     std::vector<target::artifact::linker::DynamicImport> dynamicImports_;
+    std::vector<std::string> extraUndefinedSymbols_;
     uint16_t peSubsystem_{0};
 
     std::unique_ptr<ir::Module> preparedModule_;

@@ -601,6 +601,21 @@ BuildResult BackendBuilder::emitExecutable(const std::string& path) {
         }
     }
 
+    if (!extraUndefinedSymbols_.empty() && !artifacts.empty()) {
+        target::artifact::object::ObjectArtifact seed;
+        seed.format = artifacts.front().format;
+        seed.arch = artifacts.front().arch;
+        seed.os = artifacts.front().os;
+        for (const auto& name : extraUndefinedSymbols_) {
+            target::artifact::object::ObjectSymbol sym;
+            sym.name = name;
+            sym.isDefined = false;
+            sym.binding = target::artifact::object::SymbolBinding::Global;
+            seed.addSymbol(sym);
+        }
+        artifacts.push_back(seed);
+    }
+
     target::artifact::linker::InternalLinker linker;
     linker.extractLazyArchiveMembers(artifacts, archives);
 
@@ -681,6 +696,21 @@ BuildResult BackendBuilder::emitFlatBinary(const std::string& path) {
             result.errors.push_back("Failed to parse input object file: " + inputObjPath);
             return result;
         }
+    }
+
+    if (!extraUndefinedSymbols_.empty() && !artifacts.empty()) {
+        target::artifact::object::ObjectArtifact seed;
+        seed.format = artifacts.front().format;
+        seed.arch = artifacts.front().arch;
+        seed.os = artifacts.front().os;
+        for (const auto& name : extraUndefinedSymbols_) {
+            target::artifact::object::ObjectSymbol sym;
+            sym.name = name;
+            sym.isDefined = false;
+            sym.binding = target::artifact::object::SymbolBinding::Global;
+            seed.addSymbol(sym);
+        }
+        artifacts.push_back(seed);
     }
 
     target::artifact::linker::InternalLinker linker;
@@ -798,6 +828,21 @@ BuildResult BackendBuilder::emitSharedLibrary(const std::string& path) {
             result.errors.push_back("Failed to parse static archive file: " + libPath + ": " + arReader.getLastError());
             return result;
         }
+    }
+
+    if (!extraUndefinedSymbols_.empty() && !artifacts.empty()) {
+        target::artifact::object::ObjectArtifact seed;
+        seed.format = artifacts.front().format;
+        seed.arch = artifacts.front().arch;
+        seed.os = artifacts.front().os;
+        for (const auto& name : extraUndefinedSymbols_) {
+            target::artifact::object::ObjectSymbol sym;
+            sym.name = name;
+            sym.isDefined = false;
+            sym.binding = target::artifact::object::SymbolBinding::Global;
+            seed.addSymbol(sym);
+        }
+        artifacts.push_back(seed);
     }
 
     target::artifact::linker::InternalLinker linker;

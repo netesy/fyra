@@ -18,6 +18,12 @@ static const std::vector<CapabilitySpec> specs = {
     {CapabilityId::FS_RENAME, "fs.rename", CapabilityDomain::FS, 2, 2, true, true},
     {CapabilityId::FS_MKDIR, "fs.mkdir", CapabilityDomain::FS, 2, 2, true, true},
     {CapabilityId::FS_RMDIR, "fs.rmdir", CapabilityDomain::FS, 1, 1, true, true},
+    // Lymar std.fs lowering primitives. fs.getattrs returns 0xFFFFFFFF on
+    // failure (normalized from each target's native error convention) and any
+    // other value on success; fs.mkdirp(path, parent) creates directories
+    // recursively — parent is a Win32 HWND on Windows, ignored elsewhere.
+    {CapabilityId::FS_GET_ATTRS, "fs.getattrs", CapabilityDomain::FS, 1, 1, true, true},
+    {CapabilityId::FS_MKDIR_P, "fs.mkdirp", CapabilityDomain::FS, 2, 2, true, true},
     {CapabilityId::MEMORY_ALLOC, "memory.alloc", CapabilityDomain::MEMORY, 1, 1, true, true},
     {CapabilityId::MEMORY_FREE, "memory.free", CapabilityDomain::MEMORY, 2, 2, false, false},
     {CapabilityId::MEMORY_MAP, "memory.map", CapabilityDomain::MEMORY, 6, 6, true, true},
@@ -65,7 +71,7 @@ static const std::vector<CapabilitySpec> specs = {
     {CapabilityId::IPC_RECV, "ipc.recv", CapabilityDomain::IPC, 3, 3, true, true},
     {CapabilityId::IPC_CONNECT, "ipc.connect", CapabilityDomain::IPC, 1, 1, true, true},
     {CapabilityId::IPC_LISTEN, "ipc.listen", CapabilityDomain::IPC, 1, 1, true, true},
-    {CapabilityId::ENV_GET, "env.get", CapabilityDomain::ENV, 1, 2, true, true},
+    {CapabilityId::ENV_GET, "env.get", CapabilityDomain::ENV, 1, 3, true, true},
     {CapabilityId::ENV_SET, "env.set", CapabilityDomain::ENV, 2, 2, true, true},
     {CapabilityId::ENV_LIST, "env.list", CapabilityDomain::ENV, 0, 1, true, true},
     {CapabilityId::SYSTEM_INFO, "system.info", CapabilityDomain::SYSTEM, 1, 1, true, true},

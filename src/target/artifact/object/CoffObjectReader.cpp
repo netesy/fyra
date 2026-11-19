@@ -13,6 +13,7 @@ namespace {
 constexpr uint16_t IMAGE_FILE_MACHINE_AMD64 = 0x8664;
 constexpr uint8_t IMAGE_SYM_CLASS_EXTERNAL = 2;
 constexpr uint8_t IMAGE_SYM_CLASS_STATIC = 3;
+constexpr uint8_t IMAGE_SYM_CLASS_WEAK_EXTERNAL = 105;
 
 #pragma pack(push, 1)
 struct CoffHeader {
@@ -168,12 +169,16 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
             symbolNames[i] = symName;
 
             if (!symName.empty() && (s.StorageClass == IMAGE_SYM_CLASS_EXTERNAL ||
-                                     s.StorageClass == IMAGE_SYM_CLASS_STATIC)) {
+                                     s.StorageClass == IMAGE_SYM_CLASS_STATIC ||
+                                     s.StorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL)) {
                 ObjectSymbol osym;
                 osym.name = symName;
                 osym.value = s.Value;
-                osym.binding = s.StorageClass == IMAGE_SYM_CLASS_EXTERNAL
-                                   ? SymbolBinding::Global : SymbolBinding::Local;
+                osym.binding = s.StorageClass == IMAGE_SYM_CLASS_STATIC
+                                   ? SymbolBinding::Local
+                                   : (s.StorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL
+                                          ? SymbolBinding::Weak
+                                          : SymbolBinding::Global);
                 osym.type = (s.Type == 0x20) ? SymbolType::Function : SymbolType::NoType;
 
                 if (s.SectionNumber > 0 && static_cast<size_t>(s.SectionNumber) <= sectionNames.size()) {
@@ -247,6 +252,8 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                             int32_t raw = 0; std::memcpy(&raw, bytes.data() + site, 4); implicitAddend = raw;
                         } else if (rel.Type == 0x0001 && site + 8 <= bytes.size()) {
                             int64_t raw = 0; std::memcpy(&raw, bytes.data() + site, 8); implicitAddend = raw;
+                        } else if (rel.Type == 0x0003 && site + 4 <= bytes.size()) {
+                            int32_t raw = 0; std::memcpy(&raw, bytes.data() + site, 4); implicitAddend = raw;
                         }
                     }
                     if (rel.Type == 0x0004) {
@@ -254,6 +261,11 @@ bool CoffObjectReader::parse(const std::vector<uint8_t>& bytes, ObjectArtifact& 
                         orel.addend = implicitAddend - 4;
                     } else if (rel.Type == 0x0001) {
                         orel.type = "R_X86_64_64";
+                        orel.addend = implicitAddend;
+                    } else if (rel.Type == 0x0003) {
+                        // IMAGE_REL_AMD64_ADDR32NB: 32-bit image offset (RVA)
+                        // used by .pdata/.xdata SEH unwind metadata.
+                        orel.type = "IMAGE_REL_AMD64_ADDR32NB";
                         orel.addend = implicitAddend;
                     } else {
                         orel.type = "R_TYPE_" + std::to_string(rel.Type);

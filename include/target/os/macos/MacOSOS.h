@@ -30,6 +30,7 @@ public:
     void emitSecurityCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
     void emitGPUCapability(CodeGen& cg, ir::Instruction& i, const CapabilitySpec& spec, class ArchitectureInfo& arch) const override;
 
+    void emitHeader(CodeGen& cg) override;
     void emitStartFunction(CodeGen& cg, const ArchitectureInfo& arch) override;
 };
 
