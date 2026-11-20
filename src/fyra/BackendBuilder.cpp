@@ -22,6 +22,7 @@
 #include "ir/IRLinker.h"
 #include <fstream>
 #include <iostream>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 
@@ -190,6 +191,7 @@ void BackendBuilder::ensurePrepared(BuildResult& result) {
         result.errors = pRes.errors;
         return;
     }
+    if (std::getenv("LYMAR_DUMP_FYRA_FINAL")) preparedModule_->print(std::cerr);
     isPrepared_ = true;
 }
 

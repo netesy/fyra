@@ -12,6 +12,7 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
+#include <cstdlib>
 
 namespace transforms {
 
@@ -183,10 +184,12 @@ bool LoopInvariantCodeMotion::isLoopInvariant(ir::Instruction* instr, const Loop
             if (loop.blocks.find(opInst->getParent()) == loop.blocks.end()) {
                 continue; // Defined outside loop
             }
-            if (hoistedInstructions_.find(opInst) != hoistedInstructions_.end()) {
-                continue; // Already hoisted to preheader
-            }
-            return false; // Operand is defined inside loop and not hoisted
+            // An operand whose definition sits inside this loop is variant,
+            // even if an inner loop already hoisted it to its own preheader:
+            // that preheader may itself be inside this (outer) loop, so the
+            // value is recomputed on every outer iteration.  Treating it as
+            // invariant here would move uses above their definitions.
+            return false;
         }
     }
 
@@ -359,7 +362,6 @@ void LoopInvariantCodeMotion::hoistInvariantInstructions(Loop& loop) {
                     ir::BasicBlock* preheader = getOrCreatePreheader(loop, *bb->getParent());
                     if (preheader) {
                         moveInstruction(instr, preheader);
-                        hoistedInstructions_.insert(instr);
                         instructions_hoisted_++;
                         changed = true;
                     }
@@ -372,7 +374,6 @@ void LoopInvariantCodeMotion::hoistInvariantInstructions(Loop& loop) {
 bool LoopInvariantCodeMotion::performTransformation(ir::Function& func) {
     instructions_hoisted_ = 0;
     loops_processed_ = 0;
-    hoistedInstructions_.clear();
 
     std::vector<std::unique_ptr<Loop>> loops;
     findLoops(func, loops);

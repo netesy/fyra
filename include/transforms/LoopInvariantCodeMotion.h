@@ -86,8 +86,6 @@ private:
     // Helper data structures
     std::map<ir::BasicBlock*, ir::BasicBlock*> dominators_;
     std::map<ir::BasicBlock*, std::set<ir::BasicBlock*>> dominatorTree_;
-    std::set<ir::Instruction*> hoistedInstructions_;
-    
     // Statistics
     size_t instructions_hoisted_ = 0;
     size_t loops_processed_ = 0;

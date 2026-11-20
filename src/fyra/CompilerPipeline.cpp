@@ -34,6 +34,7 @@
 #include "target/core/TargetDescriptor.h"
 #include "target/core/TargetInfo.h"
 #include <iostream>
+#include <cstdlib>
 #include <map>
 #include <unordered_map>
 
