@@ -48,12 +48,22 @@ void SSARenamer::run(ir::Function& func, DominatorTree& dt) {
                         continue;
                     ir::Type* common_type = nullptr;
                     bool uniform = true;
+                    bool saw_concrete = false;
                     for (size_t i = 1; i < phi->getOperands().size(); i += 2) {
                         if (!phi->getOperands()[i]) continue;
                         ir::Value* val = phi->getOperands()[i]->get();
                         if (!val || !val->getType()) continue;
                         // Ignore integer constant 0 default initializer if other operands exist
                         if (dynamic_cast<ir::ConstantInt*>(val) && phi->getOperands().size() > 2) continue;
+                        // An operand that is itself an unresolved integer phi is a wildcard:
+                        // allocas are created with i64 element type regardless of the stored
+                        // value domain, so float phis start as i64 and phi cycles (e.g. a
+                        // loop-carried float merged through an if-join) would otherwise never
+                        // converge to f64.
+                        if (auto* opPhi = dynamic_cast<ir::PhiNode*>(val)) {
+                            if (opPhi != phi && opPhi->getType() && opPhi->getType()->isInteger()) continue;
+                        }
+                        saw_concrete = true;
                         if (!common_type) {
                             common_type = val->getType();
                         } else if (common_type != val->getType()) {
@@ -61,7 +71,7 @@ void SSARenamer::run(ir::Function& func, DominatorTree& dt) {
                             break;
                         }
                     }
-                    if (uniform && common_type && (common_type->isFloatTy() || common_type->isDoubleTy())) {
+                    if (saw_concrete && uniform && common_type && (common_type->isFloatTy() || common_type->isDoubleTy())) {
                         phi->setType(common_type);
                         changed = true;
                     }
