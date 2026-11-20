@@ -330,7 +330,10 @@ ir::Value* EGraph::extractBest(EClassId root, ir::IRBuilder& builder, ir::BasicB
         childVals.push_back(v);
     }
 
-    builder.setInsertPoint(bb);
+    // Keep the caller's insertion point: EGraphPass positions it before the
+    // original instruction so extracted rewrites stay ahead of the block
+    // terminator. Resetting to the block end would append them after the
+    // terminator, leaving dead code.
     ir::Value* result = nullptr;
     if (bestNode->op == ir::Instruction::Shr && childVals.size() >= 2) {
         result = builder.createShr(childVals[0], childVals[1]);
